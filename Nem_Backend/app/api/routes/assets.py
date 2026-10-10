@@ -1,0 +1,189 @@
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.db.session import get_db
+from app.models import Asset, MonitoringRule, Reading, Variable
+from app.schemas.asset import AssetCreate, AssetRead, AssetTree, AssetUpdate
+
+
+router = APIRouter(prefix="/assets", tags=["assets"])
+
+
+def asset_or_404(session: Session, asset_id: int) -> Asset:
+    asset = session.get(Asset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+    return asset
+
+
+def validate_parent(session: Session, parent_id: int | None, asset_id: int | None = None) -> None:
+    if parent_id is None:
+        return
+    parent = session.get(Asset, parent_id)
+    if parent is None:
+        raise HTTPException(status_code=404, detail=f"Parent asset {parent_id} was not found")
+    if asset_id is None:
+        return
+    if parent_id == asset_id:
+        raise HTTPException(status_code=409, detail="An asset cannot be its own parent")
+    ancestor = parent
+    visited: set[int] = set()
+    while ancestor is not None:
+        if ancestor.id == asset_id:
+            raise HTTPException(status_code=409, detail="Move would create a circular asset hierarchy")
+        if ancestor.id in visited:
+            raise HTTPException(status_code=409, detail="Existing parent hierarchy contains a cycle")
+        visited.add(ancestor.id)
+        ancestor = session.get(Asset, ancestor.parent_asset_id) if ancestor.parent_asset_id else None
+
+
+def to_tree(session: Session, asset: Asset, ancestors: frozenset[int] = frozenset()) -> AssetTree:
+    if asset.id in ancestors:
+        raise HTTPException(status_code=409, detail="Existing asset hierarchy contains a cycle")
+    next_ancestors = ancestors | {asset.id}
+    children = session.scalars(
+        select(Asset).where(Asset.parent_asset_id == asset.id).order_by(Asset.id)
+    ).all()
+    return AssetTree(
+        **AssetRead.model_validate(asset).model_dump(),
+        children=[to_tree(session, child, next_ancestors) for child in children],
+    )
+
+
+@router.post("", response_model=AssetRead, status_code=status.HTTP_201_CREATED)
+def create_asset(payload: AssetCreate, session: Session = Depends(get_db)) -> Asset:
+    validate_parent(session, payload.parent_asset_id)
+    asset = Asset(**payload.model_dump())
+    session.add(asset)
+    session.commit()
+    session.refresh(asset)
+    return asset
+
+
+@router.get("")
+def list_assets(
+    parent_asset_id: int | None = Query(default=None, gt=0),
+    asset_type: str | None = None,
+    is_active: bool | None = None,
+    root_only: bool = False,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_db),
+) -> dict[str, object]:
+    query = select(Asset)
+    count_query = select(func.count()).select_from(Asset)
+    if parent_asset_id is not None:
+        query = query.where(Asset.parent_asset_id == parent_asset_id)
+        count_query = count_query.where(Asset.parent_asset_id == parent_asset_id)
+    if root_only:
+        query = query.where(Asset.parent_asset_id.is_(None))
+        count_query = count_query.where(Asset.parent_asset_id.is_(None))
+    if asset_type is not None:
+        query = query.where(Asset.asset_type == asset_type)
+        count_query = count_query.where(Asset.asset_type == asset_type)
+    if is_active is not None:
+        query = query.where(Asset.is_active == is_active)
+        count_query = count_query.where(Asset.is_active == is_active)
+    rows = session.scalars(query.order_by(Asset.id).offset(offset).limit(limit)).all()
+    return {
+        "items": [AssetRead.model_validate(row) for row in rows],
+        "total": session.scalar(count_query) or 0,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/{asset_id}", response_model=AssetRead)
+def get_asset(asset_id: int, session: Session = Depends(get_db)) -> Asset:
+    return asset_or_404(session, asset_id)
+
+
+@router.patch("/{asset_id}", response_model=AssetRead)
+def update_asset(
+    asset_id: int, payload: AssetUpdate, session: Session = Depends(get_db)
+) -> Asset:
+    asset = asset_or_404(session, asset_id)
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=422, detail="Provide at least one field to update")
+    for required in ("name", "asset_type", "is_active"):
+        if required in changes and changes[required] is None:
+            raise HTTPException(status_code=422, detail=f"Asset {required} cannot be null")
+    if "parent_asset_id" in changes:
+        validate_parent(session, changes["parent_asset_id"], asset.id)
+    for field, value in changes.items():
+        setattr(asset, field, value)
+    session.commit()
+    session.refresh(asset)
+    return asset
+
+
+@router.get("/{asset_id}/children")
+def list_children(
+    asset_id: int,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_db),
+) -> dict[str, object]:
+    asset_or_404(session, asset_id)
+    query = select(Asset).where(Asset.parent_asset_id == asset_id)
+    total = session.scalar(select(func.count()).select_from(Asset).where(Asset.parent_asset_id == asset_id)) or 0
+    items = session.scalars(query.order_by(Asset.id).offset(offset).limit(limit)).all()
+    return {
+        "items": [AssetRead.model_validate(item) for item in items],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/{asset_id}/hierarchy", response_model=AssetTree)
+def asset_hierarchy(asset_id: int, session: Session = Depends(get_db)) -> AssetTree:
+    asset = asset_or_404(session, asset_id)
+    seen: set[int] = set()
+    while asset.parent_asset_id is not None:
+        if asset.id in seen:
+            raise HTTPException(status_code=409, detail="Existing asset hierarchy contains a cycle")
+        seen.add(asset.id)
+        asset = asset_or_404(session, asset.parent_asset_id)
+    if asset.id in seen:
+        raise HTTPException(status_code=409, detail="Existing asset hierarchy contains a cycle")
+    return to_tree(session, asset)
+
+
+@router.post("/{asset_id}/move", response_model=AssetRead)
+def move_asset(
+    asset_id: int,
+    parent_asset_id: int | None = None,
+    session: Session = Depends(get_db),
+) -> Asset:
+    asset = asset_or_404(session, asset_id)
+    validate_parent(session, parent_asset_id, asset.id)
+    asset.parent_asset_id = parent_asset_id
+    session.commit()
+    session.refresh(asset)
+    return asset
+
+
+@router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_asset(asset_id: int, session: Session = Depends(get_db)) -> Response:
+    asset = asset_or_404(session, asset_id)
+    has_children = session.scalar(
+        select(Asset.id).where(Asset.parent_asset_id == asset.id).limit(1)
+    )
+    has_variables = session.scalar(
+        select(Variable.id).where(Variable.asset_id == asset.id).limit(1)
+    )
+    has_readings = session.scalar(select(Reading.id).where(Reading.asset_id == asset.id).limit(1))
+    has_rules = session.scalar(
+        select(MonitoringRule.id).where(MonitoringRule.target_asset_id == asset.id).limit(1)
+    )
+    if has_children or has_variables or has_readings or has_rules:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete an asset with children, variables, readings, or rules; deactivate it instead",
+        )
+    session.delete(asset)
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -1,0 +1,152 @@
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any
+
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, JSON, Numeric, String, Text, text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db.base import Base
+from app.db.session import UTCDateTime
+
+
+class MonitoringRule(Base):
+    __tablename__ = "monitoring_rules"
+    __table_args__ = (
+        CheckConstraint(
+            "severity IN ('warning', 'alert')", name="ck_monitoring_rules_severity"
+        ),
+        CheckConstraint(
+            "rule_type IN ('parameter_threshold', 'runtime_duration', 'duration', 'generic')",
+            name="ck_monitoring_rules_type",
+        ),
+        Index("ix_monitoring_rules_target_enabled", "target_asset_id", "is_enabled"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    rule_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    target_asset_id: Mapped[int | None] = mapped_column(
+        ForeignKey("assets.id", ondelete="RESTRICT"), index=True
+    )
+    variable_id: Mapped[int | None] = mapped_column(
+        ForeignKey("variables.id", ondelete="RESTRICT"), index=True
+    )
+    operator: Mapped[str | None] = mapped_column(String(10))
+    threshold: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    parameters: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    evaluation_interval_seconds: Mapped[int | None] = mapped_column()
+    stale_after_seconds: Mapped[int | None] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class RuleState(Base):
+    __tablename__ = "rule_states"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('normal', 'warning', 'alert', 'unknown')",
+            name="ck_rule_states_status",
+        ),
+        Index("ix_rule_states_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    rule_id: Mapped[int] = mapped_column(
+        ForeignKey("monitoring_rules.id", ondelete="RESTRICT"), nullable=False, unique=True
+    )
+    target_asset_id: Mapped[int] = mapped_column(
+        ForeignKey("assets.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    target_variable_id: Mapped[int | None] = mapped_column(
+        ForeignKey("variables.id", ondelete="RESTRICT"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")
+    latest_value: Mapped[Any | None] = mapped_column(JSON)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    last_evaluated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    condition_started_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    last_transition_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+
+class Alert(Base):
+    __tablename__ = "alerts"
+    __table_args__ = (
+        CheckConstraint("severity IN ('warning', 'alert')", name="ck_alerts_severity"),
+        CheckConstraint("status IN ('active', 'resolved')", name="ck_alerts_status"),
+        Index("ix_alerts_active_asset_severity", "status", "target_asset_id", "severity"),
+        Index("ix_alerts_rule_status", "rule_id", "status"),
+        Index(
+            "uq_alerts_active_rule_asset",
+            "rule_id",
+            "target_asset_id",
+            unique=True,
+            sqlite_where=text("status = 'active'"),
+            postgresql_where=text("status = 'active'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    rule_id: Mapped[int] = mapped_column(
+        ForeignKey("monitoring_rules.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    target_asset_id: Mapped[int] = mapped_column(
+        ForeignKey("assets.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    target_variable_id: Mapped[int | None] = mapped_column(
+        ForeignKey("variables.id", ondelete="RESTRICT"), index=True
+    )
+    severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    title: Mapped[str] = mapped_column(String(250), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    trigger_value: Mapped[Any | None] = mapped_column(JSON)
+    threshold: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    last_updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    acknowledged_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    acknowledged_by: Mapped[str | None] = mapped_column(String(200))
+
+
+class MonitoringEvent(Base):
+    __tablename__ = "monitoring_events"
+    __table_args__ = (
+        Index("ix_monitoring_events_asset_timestamp", "asset_id", "occurred_at"),
+        Index("ix_monitoring_events_type_timestamp", "event_type", "occurred_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    severity: Mapped[str | None] = mapped_column(String(20))
+    asset_id: Mapped[int | None] = mapped_column(
+        ForeignKey("assets.id", ondelete="RESTRICT"), index=True
+    )
+    rule_id: Mapped[int | None] = mapped_column(
+        ForeignKey("monitoring_rules.id", ondelete="RESTRICT"), index=True
+    )
+    alert_id: Mapped[int | None] = mapped_column(
+        ForeignKey("alerts.id", ondelete="RESTRICT"), index=True
+    )
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    event_metadata: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSON)
+
+
+class SchedulerLease(Base):
+    __tablename__ = "scheduler_leases"
+
+    name: Mapped[str] = mapped_column(String(100), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    lease_until: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, index=True)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
