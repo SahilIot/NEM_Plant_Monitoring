@@ -74,6 +74,26 @@ def test_threshold_normal_warning_alert_recovery_and_deduplication(client):
     assert client.get(f"/api/v1/events?rule_id={warning_rule}&limit=1").json()["total"] >= 3
 
 
+def test_manual_monitoring_evaluation_uses_application_settings(client):
+    asset_id = create_asset(client)
+    variable_id = create_variable(client, asset_id)
+    rule_id = make_threshold_rule(
+        client, asset_id, variable_id, name="Manual evaluation", threshold=80, severity="warning"
+    )
+    create_reading(client, asset_id, variable_id, 70)
+
+    response = client.post(f"/api/v1/monitoring/evaluate?rule_id={rule_id}")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "evaluated": 1,
+        "unknown": 0,
+        "normal": 1,
+        "warning": 0,
+        "alert": 0,
+    }
+
+
 def test_acknowledgement_does_not_resolve_and_preserves_optional_identity(client):
     asset_id = create_asset(client)
     variable_id = create_variable(client, asset_id)
