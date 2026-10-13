@@ -17,6 +17,7 @@ const TITLES = {
   analytics: "Analytics extensions",
   usage: "Usage information",
   backup: "Backup and restore",
+  plc: "PLC / OPC UA",
 };
 
 function crumbs(path, assets) {
@@ -25,10 +26,11 @@ function crumbs(path, assets) {
   if ((m = matchPath("/rules/:kind", path)))
     return [{ label: "Home", to: "/" }, { label: `Rules with ${m.params.kind} status` }];
   if ((m = matchPath("/assets/:id", path))) {
-    const a = assets.find((x) => x.id === m.params.id);
+    const a = assets.find((x) => x.id === Number(m.params.id));
     return [{ label: a ? a.name : m.params.id, to: path }, { label: "Current status" }];
   }
   if (path === "/assets") return [{ label: "Assets" }];
+  if (path === "/plc") return [{ label: "PLC / OPC UA" }];
   if ((m = matchPath("/configuration/:sub", path)))
     return [{ label: "Configuration", to: "/configuration" }, { label: TITLES[m.params.sub] || m.params.sub }];
   if ((m = matchPath("/settings/:sub", path)))
@@ -41,6 +43,7 @@ function crumbs(path, assets) {
 export default function Layout() {
   const { pathname } = useLocation();
   const [assets, setAssets] = useState([]);
+  const [assetError, setAssetError] = useState("");
   const [railOpen, setRailOpen] = useState(false);
   const [treeOpen, setTreeOpen] = useState(true);
   const [theme, setTheme] = useState(
@@ -51,11 +54,21 @@ export default function Layout() {
     localStorage.setItem("nem-theme", theme);
   }, [theme]);
 
-  const load = useCallback(() => api.get("/assets").then(setAssets).catch(() => {}), []);
-  useEffect(() => { load(); }, [load]);
+  const load = useCallback(() => api.get("/assets?limit=200").then((items) => {
+    setAssetError("");
+    setAssets(items.map((asset) => ({
+      ...asset,
+      parent: asset.parent_asset_id,
+      status: asset.is_active ? "online" : "offline",
+    })));
+  }).catch((error) => {
+    setAssetError(error.message);
+    throw error;
+  }), []);
+  useEffect(() => { load().catch(() => {}); }, [load]);
 
   const showTree = pathname === "/" || pathname.startsWith("/rules") || pathname.startsWith("/assets");
-  const sel = matchPath("/assets/:id", pathname)?.params.id;
+  const sel = Number(matchPath("/assets/:id", pathname)?.params.id);
   const cs = crumbs(pathname, assets);
 
   const link = (to, Icon, label, end) => (
@@ -84,6 +97,7 @@ export default function Layout() {
             {link("/", HomeIcon, "Home", true)}
             {link("/assets", TreeIcon, "Assets")}
             {link("/configuration", ShapesIcon, "Configuration")}
+            {link("/plc", PlugIcon, "PLC / OPC UA")}
             {link("/settings", GearIcon, "Settings")}
           </div>
           <button className="rail-item" onClick={() => setRailOpen(!railOpen)} title="Expand"><DoubleChevron size={20} /></button>
@@ -102,7 +116,10 @@ export default function Layout() {
           </div>
           <div className="content-row">
             {showTree && treeOpen && <AssetTree assets={assets} selectedId={sel} onRefresh={load} />}
-            <main className="content"><Outlet context={{ assets, reload: load }} /></main>
+            <main className="content">
+              {assetError && <div className="notice error">Could not load assets: {assetError}</div>}
+              <Outlet context={{ assets, reload: load }} />
+            </main>
           </div>
         </div>
       </div>

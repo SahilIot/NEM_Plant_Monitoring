@@ -5,7 +5,6 @@ import { api } from "../api.js";
 import { CreateModal, EmptyState } from "../components/UI.jsx";
 import { BackIcon, PlusCircle } from "../components/Icons.jsx";
 
-const SEVERITY = [["warning", "Warning"], ["alert", "Alert"]];
 const DOC_TYPES = [["Instruction", "Instruction"], ["Manual", "Manual"], ["Checklist", "Checklist"], ["Other", "Other"]];
 
 
@@ -25,13 +24,18 @@ const CRUD = {
 };
 
 
-function fieldsFor(sub, assets) {
+function fieldsFor(sub, variables) {
   if (sub === "rules")
     return [
       { key: "name", label: "Rule name", required: true, placeholder: "e.g. Motor temperature limit" },
       { key: "description", label: "Description", type: "textarea", placeholder: "What should this rule watch?" },
-      { key: "asset_id", label: "Machine", type: "select", options: [["", "- No machine yet -"], ...assets.map((a) => [a.id, a.name])] },
-      { key: "severity", label: "Severity", type: "select", options: SEVERITY, default: "warning" },
+      { key: "variable_id", label: "Numeric variable", type: "select", required: true,
+        options: variables.map((variable) => [variable.id, `${variable.asset_name} · ${variable.name}`]) },
+      { key: "operator", label: "Condition", type: "select",
+        options: [[">=", "Greater than or equal"], [">", "Greater than"], ["<=", "Less than or equal"], ["<", "Less than"], ["==", "Equal"], ["!=", "Not equal"]], default: ">=" },
+      { key: "threshold", label: "Threshold", type: "number", required: true },
+      { key: "severity", label: "Severity", type: "select",
+        options: [["warning", "Warning"], ["alert", "Alert"]], default: "warning" },
     ];
   if (sub === "collections")
     return [
@@ -61,8 +65,8 @@ function ImportPage() {
       const data = JSON.parse(await f.text());
       const res = await api.post("/import", data);
       setMsg(`Imported ${res.rules} rule(s) and ${res.collections} collection(s).`);
-    } catch {
-      setMsg("Import failed. Use a JSON file like {\"rules\":[{\"name\":\"...\"}],\"collections\":[]}");
+    } catch (error) {
+      setMsg(`Import failed: ${error.message || "Check the JSON structure and rule targets."}`);
     }
   };
   return (
@@ -79,24 +83,66 @@ export default function ConfigSub() {
   const nav = useNavigate();
   const cfg = CRUD[sub];
   const [rows, setRows] = useState([]);
-  const [assets, setAssets] = useState([]);
+  const [variables, setVariables] = useState([]);
   const [open, setOpen] = useState(false);
   const [msg, setMsg] = useState("");
 
-  const load = useCallback(() => {
-    if (cfg) api.get(`/${cfg.endpoint}`).then(setRows).catch(() => setRows([]));
-  }, [cfg]);
+  const load = useCallback(async () => {
+    if (!cfg) return;
+    if (sub === "rules") {
+      const [rules, currentAssets, statuses] = await Promise.all([
+        api.get("/rules?limit=200"),
+        api.get("/assets?limit=200"),
+        api.get("/monitoring/status?limit=500"),
+      ]);
+      const assetNames = new Map(currentAssets.map((asset) => [asset.id, asset.name]));
+      const stateByRule = new Map(statuses.map((state) => [state.rule_id, state.status]));
+      setRows(rules.map((rule) => ({
+        ...rule,
+        asset_name: assetNames.get(rule.target_asset_id) || "—",
+        state: rule.is_enabled ? "activated" : "not_activated",
+        status: stateByRule.get(rule.id) === "normal" ? "ok" : stateByRule.get(rule.id) || "unknown",
+      })));
+      return;
+    }
+    setRows(await api.get(`/${cfg.endpoint}`));
+  }, [cfg, sub]);
 
   useEffect(() => {
     setOpen(false); setMsg(""); setRows([]);
-    load();
-    if (sub === "rules") api.get("/assets").then(setAssets).catch(() => {});
+    load().catch((error) => setMsg(error.message));
+    if (sub === "rules") {
+      api.get("/assets?limit=200").then(async (items) => {
+        const perAsset = await Promise.all(items.map((asset) => api.get(`/assets/${asset.id}/variables?is_active=true&limit=200`)));
+        setVariables(perAsset.flat().filter((variable) => ["integer", "number"].includes(variable.data_type))
+          .map((variable) => ({ ...variable, asset_name: items.find((asset) => asset.id === variable.asset_id)?.name || `Asset ${variable.asset_id}` })));
+      }).catch((error) => setMsg(error.message));
+    }
   }, [sub, load]);
 
- const create = async (values) => {
-  const b = await api.post("/backups", values);
-  setOpen(false); setMsg(`Backup ${b.name} created.`); load();
-};
+  const create = async (values) => {
+    if (sub === "rules") {
+      const variable = variables.find((item) => item.id === Number(values.variable_id));
+      if (!variable) throw new Error("Select an active numeric variable.");
+      const threshold = Number(values.threshold);
+      if (!Number.isFinite(threshold)) throw new Error("Enter a valid numeric threshold.");
+      await api.post("/rules", {
+        name: values.name,
+        description: values.description || null,
+        target_asset_id: variable.asset_id,
+        variable_id: variable.id,
+        rule_type: "parameter_threshold",
+        operator: values.operator,
+        threshold,
+        severity: values.severity,
+      });
+    } else {
+      await api.post(`/${cfg.endpoint}`, values);
+    }
+    setOpen(false);
+    setMsg(`${cfg.noun} created.`);
+    await load();
+  };
 
   const remove = async (r) => {
     if (!window.confirm("Delete this item?")) return;
@@ -133,7 +179,7 @@ export default function ConfigSub() {
       )}
 
       {open && cfg && (
-        <CreateModal title={cfg.button} submitLabel={cfg.button} fields={fieldsFor(sub, assets)} onSubmit={create} onClose={() => setOpen(false)} />
+        <CreateModal title={cfg.button} submitLabel={cfg.button} fields={fieldsFor(sub, variables)} onSubmit={create} onClose={() => setOpen(false)} />
       )}
     </div>
   );

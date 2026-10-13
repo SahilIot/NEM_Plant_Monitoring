@@ -9,10 +9,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from starlette.middleware.cors import CORSMiddleware
 from starlette.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.routes import (
     assets,
     dashboard,
+    frontend_compat,
     maintenance,
     monitoring,
     plc,
@@ -25,6 +27,17 @@ from app.db.init_db import initialize_database
 from app.db.session import create_database_engine, create_session_factory
 
 LOGGER = logging.getLogger("nem_backend")
+
+
+class FrontendStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as error:
+            if error.status_code == 404 and not Path(path).suffix:
+                return await super().get_response("index.html", scope)
+            raise
+
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     selected_settings = settings or get_settings()
@@ -56,7 +69,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             CORSMiddleware,
             allow_origins=selected_settings.allowed_origins,
             allow_credentials=True,
-            allow_methods=["GET", "POST", "PATCH", "DELETE"],
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
             allow_headers=["Authorization", "Content-Type"],
         )
 
@@ -94,6 +107,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content={"status": "ok", "database": "connected"}
         )
 
+    application.include_router(frontend_compat.router, prefix="/api/v1")
     application.include_router(assets.router, prefix="/api/v1")
     application.include_router(variables.router, prefix="/api/v1")
     application.include_router(readings.router, prefix="/api/v1")
@@ -102,12 +116,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(plc.router, prefix="/api/v1")
     application.include_router(maintenance.router, prefix="/api/v1")
     application.include_router(dashboard.router, prefix="/api/v1")
-    frontend_directory = Path(__file__).resolve().parent.parent / "frontend"
-    application.mount(
-        "/ui",
-        StaticFiles(directory=str(frontend_directory), html=True),
-        name="dashboard-ui",
-    )
+    frontend_directory = Path(__file__).resolve().parents[2] / "Nem_Frontend" / "dist"
+    if frontend_directory.is_dir():
+        application.mount(
+            "/ui",
+            FrontendStaticFiles(directory=str(frontend_directory), html=True),
+            name="dashboard-ui",
+        )
     application.add_api_route(
         "/plc/test",
         plc.plc_connection_test_compat,
@@ -118,7 +133,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.get("/", include_in_schema=False)
     def dashboard_home() -> RedirectResponse:
-        return RedirectResponse(url="/ui/")
+        destination = "/ui/" if frontend_directory.is_dir() else "/docs"
+        return RedirectResponse(url=destination)
 
     return application
 

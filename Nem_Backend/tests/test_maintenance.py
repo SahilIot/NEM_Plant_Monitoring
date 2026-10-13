@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import re
 
 from tests.test_api import create_asset, create_reading, create_variable
 
@@ -101,14 +103,18 @@ def test_maintenance_rejects_unrelated_alert_and_invalid_dates(client):
 
 
 def test_dashboard_serves_ui_and_redirects_root(client):
-    assert client.get("/").status_code == 200
-    assert client.get("/").url.path == "/ui/"
+    root = client.get("/")
+    assert root.status_code == 200
+    frontend_build = Path(__file__).resolve().parents[2] / "Nem_Frontend" / "dist"
+    if not frontend_build.is_dir():
+        assert root.url.path == "/docs"
+        return
+    assert root.url.path == "/ui/"
     page = client.get("/ui/")
     assert page.status_code == 200
-    assert "Plant Monitor" in page.text
-    assert 'data-view="plc"' in page.text
-    assert 'id="plc-read-form"' in page.text
-    script = client.get("/ui/app.js")
+    assert "NEM Monitor" in page.text
+    script_path = re.search(r'src="([^"]+\.js)"', page.text).group(1)
+    script = client.get(script_path)
     assert script.status_code == 200
-    assert 'api("/plc/test")' in script.text
-    assert 'api("/plc/read"' in script.text
+    assert "assets" in script.text
+    assert client.get("/ui/plc").status_code == 200

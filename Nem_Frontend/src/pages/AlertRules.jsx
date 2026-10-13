@@ -9,7 +9,7 @@ export default function AlertRules() {
   const { kind } = useParams();
   const nav = useNavigate();
   const [rules, setRules] = useState(null);
-  useEffect(() => { setRules(null); api.get(`/rules/status/${kind}`).then(setRules).catch(() => setRules([])); }, [kind]);
+  useEffect(() => { setRules(null); api.get(`/rules/status/${kind}`).then(setRules).catch((error) => setRules({ error: error.message })); }, [kind]);
 
   return (
     <div>
@@ -17,6 +17,7 @@ export default function AlertRules() {
       <h1>Rules with {kind} status</h1>
       <div className="panel-gray">
         {!rules ? <div className="loading">Loading…</div> :
+          !Array.isArray(rules) ? <div className="notice error">{rules.error}</div> :
           rules.length === 0 ? <EmptyState title={`There are no rules in ${kind} state`} /> :
           <table className="table">
             <thead><tr><th>Rule</th><th>Asset</th><th>Status</th></tr></thead>

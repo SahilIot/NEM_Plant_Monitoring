@@ -7,6 +7,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "NEM Machine Monitoring API"
     database_url: str = "sqlite:///./machine_monitor.db"
+    backup_directory: str = "backups"
+    settings_encryption_key: SecretStr = SecretStr("")
     cors_origins: str = ""
     monitoring_evaluation_interval_seconds: int = Field(default=15, ge=1, le=3600)
     monitoring_scheduler_enabled: bool = True

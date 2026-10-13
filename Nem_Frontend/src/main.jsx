@@ -17,7 +17,7 @@ class ErrorBoundary extends React.Component {
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <ErrorBoundary>
-    <BrowserRouter>
+    <BrowserRouter basename="/ui">
       <App />
     </BrowserRouter>
   </ErrorBoundary>

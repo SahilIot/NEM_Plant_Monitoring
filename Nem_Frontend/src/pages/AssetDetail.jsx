@@ -7,9 +7,13 @@ import { GearIcon, AssetIcon, ExternalIcon, FilterIcon, RefreshIcon, PlusCircle,
 
 const ORDER = { alert: 0, warning: 1, ok: 2 };
 
-const RULE_FIELDS = [
+const ruleFields = (variables) => [
   { key: "name", label: "Rule name", required: true, placeholder: "e.g. Motor temperature limit" },
   { key: "description", label: "Description", type: "textarea", placeholder: "What should this rule watch?" },
+  { key: "variable_id", label: "Numeric variable", type: "select", required: true,
+    options: variables.map((variable) => [variable.id, `${variable.name}${variable.unit ? ` (${variable.unit})` : ""}`]) },
+  { key: "operator", label: "Condition", type: "select", options: [[">=", "Greater than or equal"], [">", "Greater than"], ["<=", "Less than or equal"], ["<", "Less than"], ["==", "Equal"], ["!=", "Not equal"]], default: ">=" },
+  { key: "threshold", label: "Threshold", type: "number", required: true, placeholder: "e.g. 900" },
   { key: "severity", label: "Severity", type: "select", options: [["warning", "Warning"], ["alert", "Alert"]], default: "warning" },
 ];
 const LOG_FIELDS = [{ key: "text", label: "Entry", type: "textarea", required: true, placeholder: "What was done or noticed?" }];
@@ -17,10 +21,11 @@ const LOG_FIELDS = [{ key: "text", label: "Entry", type: "textarea", required: t
 export default function AssetDetail() {
   const { id } = useParams();
   const { assets, reload } = useOutletContext();
-  const asset = assets.find((a) => a.id === id);
+  const asset = assets.find((a) => a.id === Number(id));
   const [tab, setTab] = useState("status");
   const [list, setList] = useState("activated");
   const [rules, setRules] = useState([]);
+  const [variables, setVariables] = useState([]);
   const [children, setChildren] = useState(false);
   const [sort, setSort] = useState("severity");
   const [filter, setFilter] = useState("");
@@ -28,18 +33,30 @@ export default function AssetDetail() {
   const [menu, setMenu] = useState(false);
   const [sortMenu, setSortMenu] = useState(false);
   const [modal, setModal] = useState(null);
-  const [name, setName] = useState("");
   const [logs, setLogs] = useState([]);
-  const [text, setText] = useState("");
 
   const load = useCallback(() => {
-    api.get(`/assets/${id}/rules?include_children=${children}`).then(setRules).catch(() => setRules([]));
-    api.get(`/assets/${id}/logbook`).then(setLogs).catch(() => {});
+    api.get(`/assets/${id}/rules?include_children=${children}`).then((items) => {
+      setRules(items);
+      setLoadError("");
+    }).catch((error) => {
+      setRules([]);
+      setLoadError(error.message);
+    });
+    api.get(`/assets/${id}/logbook`).then(setLogs).catch((error) => setLoadError(error.message));
+    api.get(`/assets/${id}/variables?is_active=true&limit=200`).then((items) =>
+      setVariables(items.filter((item) => ["integer", "number"].includes(item.data_type))),
+    ).catch(() => setVariables([]));
   }, [id, children]);
   useEffect(load, [load]);
 
   const [events, setEvents] = useState([]);
-  useEffect(() => { if (tab === "events") api.get(`/assets/${id}/events`).then(setEvents); }, [tab, id]);
+  const [loadError, setLoadError] = useState("");
+  useEffect(() => {
+    if (tab === "events") {
+      api.get(`/assets/${id}/events`).then(setEvents).catch((error) => setLoadError(error.message));
+    }
+  }, [tab, id]);
 
   const isAct = (r) => r.state === "activated";
   const nAct = rules.filter(isAct).length;
@@ -48,20 +65,40 @@ export default function AssetDetail() {
     .filter((r) => r.name.toLowerCase().includes(filter.toLowerCase()));
   shown = [...shown].sort((a, b) => sort === "name" ? a.name.localeCompare(b.name) : ORDER[a.status] - ORDER[b.status]);
 
-  const setState = async (r, state) => { await api.patch(`/rules/${r.id}`, { state }); load(); };
+  const setState = async (r, state) => {
+    await api.patch(`/rules/${r.id}`, { is_enabled: state === "activated" });
+    load();
+  };
   const remove = async (r) => { await api.del(`/rules/${r.id}`); load(); };
-  const addRule = async () => {
-    if (!name.trim()) return;
-    await api.post(`/assets/${id}/rules`, { name });
-    setName(""); setModal(null); setList("not_activated"); load();
+  const addRule = async (values) => {
+    if (!variables.length) throw new Error("Add an active numeric variable to this asset before creating a threshold rule.");
+    const threshold = Number(values.threshold);
+    if (!Number.isFinite(threshold)) throw new Error("Enter a valid numeric threshold.");
+    await api.post(`/assets/${id}/rules`, {
+      name: values.name,
+      description: values.description || null,
+      target_asset_id: Number(id),
+      variable_id: Number(values.variable_id),
+      rule_type: "parameter_threshold",
+      operator: values.operator,
+      threshold,
+      severity: values.severity,
+    });
+    setModal(null); setList("not_activated"); load();
   };
   const bulk = async (state) => { await api.post(`/assets/${id}/rules/bulk`, { state }); setMenu(false); load(); reload(); };
-  const addLog = async () => { if (!text.trim()) return; await api.post(`/assets/${id}/logbook`, { text }); setText(""); load(); };
+  const addLog = async (values) => {
+    if (!values.text.trim()) return;
+    await api.post(`/assets/${id}/logbook`, { text: values.text });
+    setModal(null);
+    load();
+  };
 
   if (!asset) return <div className="loading">Loading…</div>;
 
   return (
     <div>
+      {loadError && <div className="notice error">Could not load asset monitoring data: {loadError}</div>}
       <div className="asset-head">
         <h1>{asset.name}</h1>
         <div className="asset-links">
@@ -164,7 +201,10 @@ export default function AssetDetail() {
 
       {(modal === "settings" || modal === "variables") && (
         <Modal title={modal === "settings" ? "Asset settings" : "Variables"} onClose={() => setModal(null)}>
-          <p className="muted">{modal === "settings" ? `Settings for "${asset.name}" will be connected to your backend.` : "Asset variables will be listed here once connected to your data source."}</p>
+          {modal === "settings" ? <p className="muted">{asset.name} · {asset.asset_type}{asset.description ? ` · ${asset.description}` : ""}</p> :
+            variables.length ? <table className="table"><thead><tr><th>Variable</th><th>Type</th><th>Unit</th></tr></thead><tbody>
+              {variables.map((variable) => <tr key={variable.id}><td>{variable.name}</td><td>{variable.data_type}</td><td>{variable.unit || "—"}</td></tr>)}
+            </tbody></table> : <p className="muted">No active numeric variables are configured for threshold rules.</p>}
           <div className="modal-actions"><button className="btn-primary" onClick={() => setModal(null)}>Close</button></div>
         </Modal>
       )}

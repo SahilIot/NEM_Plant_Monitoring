@@ -49,6 +49,19 @@ python seed.py
 python -m uvicorn app.main:app --reload
 ```
 
+In a separate PowerShell window, start the React frontend during development:
+
+```powershell
+cd C:\Users\Sahil\Downloads\NEM_Plant_Monitoring\Nem_Frontend
+npm ci
+npm run dev
+```
+
+Open `http://127.0.0.1:5173/ui/`. Vite proxies `/api/v1` requests to the FastAPI
+server at `http://127.0.0.1:8000`. For serving the built frontend from FastAPI,
+run `npm run build` in `Nem_Frontend` first; then `http://127.0.0.1:8000/`
+redirects to the React dashboard at `/ui/`.
+
 If PowerShell blocks activation, use the virtual-environment executable
 directly instead:
 
@@ -109,11 +122,26 @@ URL is used by Alembic, the API, and the seed script.
 - `OPCUA_USERNAME`, `OPCUA_PASSWORD` — optional credentials; configure both or
   leave both empty. Keep credentials and private keys out of Git.
 - `OPCUA_TIMEOUT_SECONDS` — connection/read timeout, default `10`.
+- `SETTINGS_ENCRYPTION_KEY` — Fernet key used to encrypt the SMTP password
+  saved by the dashboard. Generate one with
+  `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
+  and keep it secret and stable; changing it prevents decrypting the stored
+  password.
+- `BACKUP_DIRECTORY` — location for database backup snapshot files; defaults
+  to `Nem_Backend/backups`.
 
 No credentials or secrets belong in source control. PostgreSQL requires the
 appropriate SQLAlchemy driver to be installed. Authentication and role-based
 authorization are not implemented; do not expose this API to a factory network
 or the public internet until access control and deployment hardening are added.
+The dashboard profile is a single local profile, not an authenticated user
+account. Backup restore replaces the current monitoring data with the selected
+snapshot; keep backup files in a protected location and confirm the restore
+prompt before proceeding.
+The React dashboard is built from `Nem_Frontend`; its PLC page exposes the
+read-only connection test and one-shot read endpoint. SMTP settings are stored
+by the dashboard with the password encrypted, but configuring SMTP does not by
+itself send alert email notifications.
 
 ### OPC UA read-only PLC connection
 

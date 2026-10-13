@@ -9,6 +9,7 @@ import Configuration from "./pages/Configuration.jsx";
 import ConfigSub from "./pages/ConfigSub.jsx";
 import Settings from "./pages/Settings.jsx";
 import SettingsSub from "./pages/SettingsSub.jsx";
+import Plc from "./pages/Plc.jsx";
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
         <Route path="/configuration/:sub" element={<ConfigSub />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/settings/:sub" element={<SettingsSub />} />
+        <Route path="/plc" element={<Plc />} />
         <Route path="*" element={<Home />} />
       </Route>
     </Routes>

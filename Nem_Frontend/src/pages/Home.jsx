@@ -9,7 +9,8 @@ export default function Home() {
   const nav = useNavigate();
   const { assets } = useOutletContext();
   const [s, setS] = useState(null);
-  useEffect(() => { api.get("/summary").then(setS).catch(() => {}); }, []);
+  useEffect(() => { api.get("/summary").then(setS).catch((error) => setS({ error: error.message })); }, []);
+  if (s?.error) return <div className="panel-gray">Backend error: {s.error}</div>;
   if (!s) return <div className="loading">Loading…</div>;
 
   const Stat = ({ title, sub, icon: Icon, value, to, link }) => (

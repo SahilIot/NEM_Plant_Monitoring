@@ -64,7 +64,7 @@ export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "C
                 {f.options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             ) : (
-              <input id={"f-" + f.key} autoFocus={i === 0} placeholder={f.placeholder} value={values[f.key]} onChange={(e) => set(f.key, e.target.value)} />
+              <input id={"f-" + f.key} type={f.type || "text"} autoFocus={i === 0} placeholder={f.placeholder} value={values[f.key]} onChange={(e) => set(f.key, e.target.value)} />
             )}
           </div>
         ))}

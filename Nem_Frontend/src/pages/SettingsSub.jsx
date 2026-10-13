@@ -94,14 +94,29 @@ function UserInfo() {
 function SettingsForm({ section }) {
   const [v, setV] = useState(null);
   const [msg, setMsg] = useState("");
-  useEffect(() => { setMsg(""); api.get(`/settings/${section}`).then(setV); }, [section]);
-  if (!v) return <div className="loading">Loading…</div>;
-  const save = async () => { await api.put(`/settings/${section}`, v); setMsg("Settings saved."); };
+  useEffect(() => {
+    setMsg(""); setV(null);
+    api.get(`/settings/${section}`).then(setV).catch((error) => setMsg(`Could not load settings: ${error.message}`));
+  }, [section]);
+  if (!v) return msg ? <div className="notice error">{msg}</div> : <div className="loading">Loading…</div>;
+  const save = async () => {
+    try {
+      const saved = await api.put(`/settings/${section}`, v);
+      setV(saved);
+      setMsg("Settings saved.");
+    } catch (error) {
+      setMsg(`Could not save settings: ${error.message}`);
+    }
+  };
   return (
     <div className="panel-white form">
+      {section === "email" && <p className="hint">{v.has_password
+        ? "An SMTP password is stored securely. Leave the password field empty to keep it, or enter a replacement."
+        : "The SMTP password is encrypted before it is saved."}</p>}
       {FORMS[section].map(([k, label, type]) => (
         <label key={k}>{label}
-          <input type={type || "text"} value={v[k] || ""} onChange={(e) => setV({ ...v, [k]: e.target.value })} />
+          <input type={type || "text"} autoComplete={type === "password" ? "new-password" : undefined}
+            value={v[k] || ""} onChange={(e) => setV({ ...v, [k]: e.target.value })} />
         </label>
       ))}
       <div><button className="btn-primary" onClick={save}>Save</button></div>
@@ -112,7 +127,9 @@ function SettingsForm({ section }) {
 
 function Usage() {
   const [u, setU] = useState(null);
-  useEffect(() => { api.get("/usage").then(setU); }, []);
+  const [error, setError] = useState("");
+  useEffect(() => { api.get("/usage").then(setU).catch((e) => setError(e.message)); }, []);
+  if (error) return <div className="notice error">Could not load usage: {error}</div>;
   if (!u) return <div className="loading">Loading…</div>;
   return (
     <div className="usage-grid">
@@ -127,13 +144,21 @@ function Backup() {
   const [list, setList] = useState([]);
   const [msg, setMsg] = useState("");
   const [open, setOpen] = useState(false);
-  const load = () => api.get("/backups").then(setList);
+  const load = () => api.get("/backups").then(setList).catch((error) => setMsg(`Could not load backups: ${error.message}`));
   useEffect(() => { load(); }, []);
   const create = async (values) => {
     const b = await api.post("/backups", values);
     setOpen(false); setMsg(`Backup ${b.name} created.`); load();
   };
-  const restore = async (b) => { await api.post(`/backups/${b.id}/restore`); setMsg(`Backup ${b.name} restored.`); };
+  const restore = async (b) => {
+    if (!window.confirm(`Restore "${b.name}"? This replaces all current monitoring data.`)) return;
+    try {
+      await api.post(`/backups/${b.id}/restore`);
+      setMsg(`Backup ${b.name} restored.`);
+    } catch (error) {
+      setMsg(`Could not restore backup: ${error.message}`);
+    }
+  };
   return (
     <>
       <div className="panel-white">

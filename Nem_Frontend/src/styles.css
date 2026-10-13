@@ -292,6 +292,9 @@ h1 { line-height: 1.2; }
 .profile-actions { display: flex; gap: 10px; margin-top: 18px; }
 .hint { color: var(--muted); margin: 12px 0 0; font-size: 13px; }
 .notice.error { color: var(--alert); }
+.plc-panel { max-width: 760px; }
+.plc-panel h2 { font-size: 18px; margin: 0 0 10px; }
+.plc-panel .form { margin-top: 18px; }
 
 
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: var(--maxw); }
