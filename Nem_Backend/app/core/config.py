@@ -1,7 +1,7 @@
 from functools import lru_cache
 
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
 
 
 class Settings(BaseSettings):
@@ -11,6 +11,13 @@ class Settings(BaseSettings):
     monitoring_evaluation_interval_seconds: int = Field(default=15, ge=1, le=3600)
     monitoring_scheduler_enabled: bool = True
     monitoring_default_stale_after_seconds: int = Field(default=300, ge=1, le=31_536_000)
+    opcua_endpoint: str = ""
+    opcua_client_cert: str = ""
+    opcua_client_key: str = ""
+    opcua_server_cert: str = ""
+    opcua_username: str = ""
+    opcua_password: SecretStr = SecretStr("")
+    opcua_timeout_seconds: int = Field(default=10, ge=1, le=120)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

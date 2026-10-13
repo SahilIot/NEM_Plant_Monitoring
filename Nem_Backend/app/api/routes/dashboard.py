@@ -1,32 +1,43 @@
-from fastapi import APIRouter, Depends
+# Groups related API endpoints together-> APIRouter , Depends-> Lets FastAPI automatically provide dependencies 
+from fastapi import APIRouter, Depends 
+# func -> Provides SQL functions such as Count(),MAX(),DISTINCT(), select-> Builds SQL SELECT queries using Python
 from sqlalchemy import func, select
+#Represents a connection/session for interacting with the database
 from sqlalchemy.orm import Session
-
+ #get_db-> Supplies the database session to an endpoint
 from app.db.session import get_db
+# SQLAlchemy models representing database tables
 from app.models import Alert, Asset, MonitoringRule, Reading, RuleState, Variable
+# Defines the structure of the response returned by the endpoint
 from app.schemas.dashboard import DashboardSummary
 
-
+#Creating an API endpoint
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
 @router.get("/summary", response_model=DashboardSummary)
 def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
+    # total assets
     total = session.scalar(select(func.count()).select_from(Asset)) or 0
+    #active assest
     active = session.scalar(
         select(func.count()).select_from(Asset).where(Asset.is_active.is_(True))
     ) or 0
+    #Counting Monitoring Rules
     rule_total = session.scalar(select(func.count()).select_from(MonitoringRule)) or 0
     enabled = session.scalar(
         select(func.count()).select_from(MonitoringRule).where(MonitoringRule.is_enabled.is_(True))
     ) or 0
     disabled = rule_total - enabled
+    # Counting monitored assests 
     monitored = session.scalar(
         select(func.count(func.distinct(Variable.asset_id)))
         .join(Asset, Asset.id == Variable.asset_id)
         .where(Variable.is_active.is_(True), Asset.is_active.is_(True))
     ) or 0
+    # Getting the latest reading timestamp
     latest = session.scalar(select(func.max(Reading.recorded_at)))
+    #Counting rules by their current status (normal, warning, alert, unknown) for enabled rules. If there are any enabled rules that do not have a corresponding RuleState entry, they are counted as "unknown".
     state_counts = {
         status: session.scalar(
             select(func.count())
@@ -43,11 +54,13 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
             Alert.status == "active", Alert.severity == "alert"
         )
     ) or 0
+    #Counting assets currenly in alert and warning state
     asset_warning_count = session.scalar(
         select(func.count(func.distinct(Alert.target_asset_id))).where(
             Alert.status == "active", Alert.severity == "warning"
         )
     ) or 0
+    #Counting total active alerts and unacknowledged active alerts
     active_alert_count = session.scalar(
         select(func.count()).select_from(Alert).where(Alert.status == "active")
     ) or 0

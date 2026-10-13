@@ -1,4 +1,5 @@
 .env
+certificates/
 .venv/
 venv/
 __pycache__/

@@ -1,17 +1,20 @@
-from datetime import datetime, timezone
-
+# Lets user evaluate monitoring rules,inspect machine status,view active alerts,acknowledge alerts and review the event history
+from datetime import datetime, timezone # work with timestamps and UTC
+# Groups API Endpoints
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+#func -> SQL Function, or_ -> Combines SQL Condition using OR, select -> constructs SQL queries
 from sqlalchemy import func, or_, select
+#Represents the SQLAlchemy database session
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models import (
-    Alert,
+    Alert, 
     Asset,
     MonitoringEvent,
     MonitoringRule,
-    RuleState,
-    Variable,
+    RuleState, # stores the current state associated with a rule and target
+    Variable, # represents a monitored variable belonging to an asset
 )
 from app.schemas.monitoring import (
     AcknowledgeRequest,
@@ -22,16 +25,16 @@ from app.schemas.monitoring import (
 )
 from app.services.monitoring_engine import emit_event, evaluate_rules, utc_now
 
-
 router = APIRouter(tags=["monitoring", "alerts", "events"])
 
-
+# normalized -> Ensures that a datetime value is in UTC format, converting it if necessary. If the input is None, it returns None. This is useful for consistent timestamp handling across the application.
 def normalized(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
-
+#  state_for_rule -> Retrieves the current state of a given monitoring rule. It checks if the rule is associated with an asset or variable, fetches the corresponding RuleState from the database, and returns it in a structured format. If no state is found, it returns a default "unknown" state indicating that the rule has not yet been evaluated.
+# reads the stored state
 def state_for_rule(session: Session, rule: MonitoringRule) -> RuleStateRead:
     asset_id = rule.target_asset_id
     if asset_id is None and rule.variable_id is not None:
@@ -53,7 +56,7 @@ def state_for_rule(session: Session, rule: MonitoringRule) -> RuleStateRead:
         )
     return RuleStateRead.model_validate(state)
 
-
+# Manually evaluating monitoring rules
 @router.post("/monitoring/evaluate", response_model=EvaluationResult)
 def manually_evaluate(
     request: Request,
@@ -61,12 +64,16 @@ def manually_evaluate(
     rule_id: int | None = Query(default=None, gt=0),
     session: Session = Depends(get_db),
 ) -> dict[str, int]:
+    #Validate the asset
     if asset_id is not None and session.get(Asset, asset_id) is None:
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+    #Validate the rule
     if rule_id is not None and session.get(MonitoringRule, rule_id) is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id} was not found")
+    #Call the monitoring engine
     counts = evaluate_rules(
         session,
+        #configure threshold for treating data as stale
         stale_after_seconds=request.app.state.settings.monitoring_default_stale_after_seconds,
         asset_id=asset_id,
         rule_id=rule_id,
@@ -74,7 +81,7 @@ def manually_evaluate(
     session.commit()
     return counts
 
-
+# Getting the status of monitoring rules
 @router.get("/monitoring/status")
 def monitoring_status(
     status: str | None = Query(default=None, pattern="^(normal|warning|alert|unknown)$"),
@@ -90,7 +97,7 @@ def monitoring_status(
     rules = session.scalars(query.order_by(MonitoringRule.id)).all()
     rows: list[RuleStateRead] = []
     for rule in rules:
-        current = state_for_rule(session, rule)
+        current = state_for_rule(session, rule) # to obtain the current state of the rule or unknown fallback
         if asset_id is not None and current.target_asset_id != asset_id:
             continue
         if status is not None and current.status != status:
@@ -103,7 +110,7 @@ def monitoring_status(
         "offset": offset,
     }
 
-
+#Getting monitoring status for a specific asset
 @router.get("/assets/{asset_id}/monitoring-status")
 def asset_monitoring_status(
     asset_id: int,
@@ -111,8 +118,10 @@ def asset_monitoring_status(
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
+    # Verify the asset exists
     if session.get(Asset, asset_id) is None:
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+    # fine rules associated with that asset
     rules = session.scalars(
         select(MonitoringRule)
         .where(
@@ -129,7 +138,7 @@ def asset_monitoring_status(
     items = [state_for_rule(session, rule) for rule in rules]
     return {"items": items[offset : offset + limit], "total": len(items), "limit": limit, "offset": offset}
 
-
+# Getting the status of a specific rule 
 @router.get("/rules/{rule_id}/status", response_model=RuleStateRead)
 def rule_status(rule_id: int, session: Session = Depends(get_db)) -> RuleStateRead:
     rule = session.get(MonitoringRule, rule_id)
@@ -176,6 +185,7 @@ def alert_query(
     return query, count_query
 
 
+#Listing active alerts 
 @router.get("/alerts/active")
 def active_alerts(
     asset_id: int | None = Query(default=None, gt=0),
@@ -203,7 +213,7 @@ def active_alerts(
         "offset": offset,
     }
 
-
+# Listing all alerts (active and resolved)
 @router.get("/alerts")
 def list_alerts(
     asset_id: int | None = Query(default=None, gt=0),
@@ -232,7 +242,7 @@ def list_alerts(
         "offset": offset,
     }
 
-
+# Retrieving a specific alert by its ID
 @router.get("/alerts/{alert_id}", response_model=AlertRead)
 def get_alert(alert_id: int, session: Session = Depends(get_db)) -> Alert:
     alert = session.get(Alert, alert_id)
@@ -240,22 +250,26 @@ def get_alert(alert_id: int, session: Session = Depends(get_db)) -> Alert:
         raise HTTPException(status_code=404, detail=f"Alert {alert_id} was not found")
     return alert
 
-
+# Acknowledging an active alert
 @router.post("/alerts/{alert_id}/acknowledge", response_model=AlertRead)
 def acknowledge_alert(
     alert_id: int,
     payload: AcknowledgeRequest | None = None,
     session: Session = Depends(get_db),
 ) -> Alert:
+    # find the alert
     alert = session.get(Alert, alert_id)
     if alert is None:
         raise HTTPException(status_code=404, detail=f"Alert {alert_id} was not found")
+    #Prevent acknowledging resolved alerts
     if alert.status != "active":
         raise HTTPException(status_code=409, detail="Resolved alerts cannot be acknowledged")
+    # Check whether it has already been acknowledged
     if alert.acknowledged_at is None:
         now = utc_now()
         alert.acknowledged_at = now
         alert.acknowledged_by = payload.acknowledged_by if payload else None
+        #Emit an acknowledgment event 
         emit_event(
             session,
             event_type="alert_acknowledged",
@@ -271,7 +285,7 @@ def acknowledge_alert(
         session.refresh(alert)
     return alert
 
-
+#Listing monitoring events
 @router.get("/events")
 def list_events(
     asset_id: int | None = Query(default=None, gt=0),
@@ -319,10 +333,12 @@ def list_events(
         "offset": offset,
     }
 
-
+#Retrieving one event 
 @router.get("/events/{event_id}", response_model=EventRead)
 def get_event(event_id: int, session: Session = Depends(get_db)) -> MonitoringEvent:
     event = session.get(MonitoringEvent, event_id)
     if event is None:
         raise HTTPException(status_code=404, detail=f"Event {event_id} was not found")
     return event
+
+# A reading arrives -> the monitoring engine evaluates the rules -> dashboard request the status -> dashboard display the alert -> an operator acknowledge the alert -> the dashboard displays the history

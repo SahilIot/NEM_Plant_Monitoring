@@ -2,10 +2,10 @@
 
 Standalone Python/FastAPI backend for a configurable industrial asset hierarchy,
 typed time-series readings, evaluated monitoring rules, persisted rule states,
-alerts, event history, and a dashboard summary. There is no frontend and no
-PLC/CNC or other industrial protocol connection: readings currently arrive
-through the REST API (a Node-RED gateway can be integrated later). Demo readings
-are explicitly marked with `source_id` and metadata.
+alerts, event history, maintenance records, and a browser dashboard. There is no
+continuous PLC/Node-RED connection: readings can arrive through the REST API or
+a secure one-shot OPC UA read request. Demo readings are explicitly marked with
+`source_id` and metadata.
 
 ## Architecture and database
 
@@ -16,11 +16,13 @@ are explicitly marked with `source_id` and metadata.
 - `app/core/`: environment-driven settings.
 - `alembic/`: versioned schema migrations.
 
-SQLite is the default development database. Set `DATABASE_URL` for another
-SQLAlchemy database URL when its driver is installed. The generic schema stores
-assets with optional self-referential parent links, variables with keys unique
-per asset, typed JSON reading values with asset/variable/time indexes, and
-monitoring rules with optional asset/variable targets and JSON parameters.
+PostgreSQL is the recommended database for deployment and Node-RED ingestion.
+The backend uses SQLAlchemy, so all assets, variables, readings, monitoring
+rules, alerts, and maintenance records are stored in the configured database.
+SQLite remains available for local development and tests. The generic schema
+stores assets with optional self-referential parent links, variables with keys
+unique per asset, typed JSON reading values with asset/variable/time indexes,
+and monitoring rules with optional asset/variable targets and JSON parameters.
 Rule evaluations persist their current state, alert lifecycle, and event
 history. Timestamps are normalized to UTC.
 
@@ -32,12 +34,16 @@ asset API does not use those tables.
 
 Prerequisite: Python 3.12 or newer. Open PowerShell and run:
 
+First create the PostgreSQL database and application user, then configure
+`DATABASE_URL` in `.env` as described below. If `.env` does not exist, create it
+from `.env.postgres.example`; if it already exists, preserve it and update only
+`DATABASE_URL` so OPC UA settings are not overwritten.
+
 ```powershell
 cd C:\Users\Sahil\Downloads\NEM_Plant_Monitoring\Nem_Backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-Copy-Item .env.example .env
 python -m alembic upgrade head
 python seed.py
 python -m uvicorn app.main:app --reload
@@ -53,20 +59,38 @@ directly instead:
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
+Create the `nem_plant_monitoring` database and a dedicated application user in
+PostgreSQL (for example, using pgAdmin), then set this value in `.env` with the
+actual user and password:
+
+```dotenv
+DATABASE_URL=postgresql+psycopg://nem_user:YOUR_PASSWORD@127.0.0.1:5432/nem_plant_monitoring
+```
+
+If the username or password contains URL-reserved characters, percent-encode
+them in the connection URL. Keep the real `.env` out of source control.
+
 The API is at `http://127.0.0.1:8000`, Swagger UI at
 `http://127.0.0.1:8000/docs`, and OpenAPI JSON at
-`http://127.0.0.1:8000/openapi.json`. Keep the server terminal open and press
+`http://127.0.0.1:8000/openapi.json`. The dashboard is at
+`http://127.0.0.1:8000/` (or `/ui/`). Keep the server terminal open and press
 Ctrl+C to stop the server.
 
-The default database is `machine_monitor.db` in the current working directory.
-Apply Alembic migrations before starting the server or running the demo seed;
-the application does not silently create or change the schema at startup.
+Without a `DATABASE_URL` setting, the fallback database is
+`machine_monitor.db` in the current working directory (SQLite). For normal
+Node-RED operation, configure PostgreSQL explicitly in `.env`. Apply Alembic
+migrations before starting the server or running the demo seed.
 
 ## Environment configuration
 
-Copy `.env.example` to `.env` and configure:
+Configure `.env` using `.env.postgres.example` as a reference; do not overwrite
+an existing `.env` because it may contain OPC UA settings. Apply migrations
+against the configured PostgreSQL database before starting the API; the same
+URL is used by Alembic, the API, and the seed script.
 
-- `DATABASE_URL` — defaults to `sqlite:///./machine_monitor.db`.
+- `DATABASE_URL` — set to
+  `postgresql+psycopg://user:password@host:5432/database` for PostgreSQL.
+  The default `sqlite:///./machine_monitor.db` is for local development only.
 - `CORS_ORIGINS` — comma-separated origins allowed to call the API from a
   browser. It is empty by default (CORS disabled); never enable unrestricted
   origins in production.
@@ -77,11 +101,101 @@ Copy `.env.example` to `.env` and configure:
   default `15` seconds.
 - `MONITORING_DEFAULT_STALE_AFTER_SECONDS` — default reading freshness window,
   default `300` seconds; a rule may override it with `stale_after_seconds`.
+- `OPCUA_ENDPOINT` — the PLC engineer-provided `opc.tcp://host:port/...`
+  endpoint. Leave empty until the actual endpoint is known.
+- `OPCUA_CLIENT_CERT`, `OPCUA_CLIENT_KEY`, `OPCUA_SERVER_CERT` — paths to the
+  approved client certificate, private key, and trusted PLC server certificate.
+  Relative paths are resolved from `Nem_Backend/`.
+- `OPCUA_USERNAME`, `OPCUA_PASSWORD` — optional credentials; configure both or
+  leave both empty. Keep credentials and private keys out of Git.
+- `OPCUA_TIMEOUT_SECONDS` — connection/read timeout, default `10`.
 
 No credentials or secrets belong in source control. PostgreSQL requires the
 appropriate SQLAlchemy driver to be installed. Authentication and role-based
 authorization are not implemented; do not expose this API to a factory network
 or the public internet until access control and deployment hardening are added.
+
+### OPC UA read-only PLC connection
+
+Install the new dependency after updating the environment:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+Merge the non-secret placeholders in `.env.opcua.example` into the local,
+git-ignored `.env`, then set the real endpoint and certificate paths provided
+through your organization's approved process. The client requires a client
+certificate and private key plus the PLC server certificate. It always uses
+`Basic256Sha256` with `SignAndEncrypt`; the server certificate is pinned for
+validation. The PLC must offer a compatible endpoint and trust the client
+certificate. If the endpoint uses a different security policy, coordinate that
+securely with the PLC engineer; do not disable validation or downgrade to an
+unencrypted connection.
+
+Endpoints:
+
+- `POST /api/v1/readings` accepts one reading; `POST /api/v1/readings/batch`
+  accepts up to 100 readings. Node-RED should send readings to these API
+  endpoints, not write directly to database tables. The API validates the
+  asset/variable mapping, writes each reading to PostgreSQL, and evaluates
+  matching rules so warnings and alerts remain consistent.
+- `GET /plc/test` (also available as `GET /api/v1/plc/test`) securely reads the
+  standard OPC UA `ServerStatus.CurrentTime` node (`i=2258`).
+- `POST /api/v1/plc/read` reads one configured NodeId and stores the value as a
+  normal backend reading, so matching monitoring rules run immediately. The
+  asset and variable IDs must already exist and the value must match the
+  variable's declared type.
+
+Example read request:
+
+```json
+{
+  "node_id": "ns=3;s=Machine1.Motor.RotationCount",
+  "asset_id": 8,
+  "variable_id": 12
+}
+```
+
+Example Node-RED HTTP Request node payload for a single reading:
+
+```json
+{
+  "asset_id": 8,
+  "variable_id": 12,
+  "value": 900,
+  "recorded_at": "2026-10-12T06:30:00Z",
+  "source_id": "node-red",
+  "metadata": {
+    "machine": "Machine 1",
+    "signal": "Motor.RotationCount"
+  }
+}
+```
+
+Configure the Node-RED HTTP Request node to `POST` this JSON to
+`http://<backend-host>:8000/api/v1/readings` with `Content-Type: application/json`.
+Create the asset and variable in the monitoring API first, and ensure that the
+variable's data type matches the incoming value. Batch ingestion is available
+at `/api/v1/readings/batch` when sending multiple readings.
+
+This integration only issues OPC UA read requests; it has no write or control
+operations and does not poll continuously. Call `/api/v1/plc/read` from an
+approved polling/orchestration process as needed. Errors do not include
+credential values. The REST API has no authentication yet, so do not expose
+PLC read endpoints beyond a trusted network until access control is added.
+
+### Checking OPC UA from the dashboard
+
+Start the backend and open `http://127.0.0.1:8000/`, then choose **PLC / OPC UA**
+in the navigation. **Test secure connection** reads the standard server-time
+node and reports the configured connection result. To read a machine signal,
+enter the NodeId supplied by the PLC engineer, select an active asset and its
+existing variable, and choose **Read node and ingest**. Each click performs one
+read; it does not start polling. A successful value is saved as a reading and
+matching monitoring rules are evaluated. A real connection requires the
+engineer-provided endpoint and approved certificates in the backend `.env`;
+the dashboard does not configure or expose secrets.
 
 ## Database migrations
 
@@ -239,6 +353,25 @@ Alerts and events are persisted in the same database as readings and rule
 states. This phase does **not** send email or other outbound notifications;
 alert delivery and recipient management remain future work.
 
+### Maintenance records
+
+- `POST /api/v1/maintenance` — save a completed service record; supports an
+  optional linked alert, notes, completion timestamp, and next due date.
+- `GET /api/v1/maintenance` — list records with optional `asset_id`, `alert_id`,
+  `start_time`, and `end_time` filters.
+- `GET /api/v1/maintenance/{record_id}` — retrieve a record.
+
+The browser dashboard at `/` brings together the overview, asset directory and
+latest signals, threshold/duration rule creation, alert review and
+acknowledgement, and maintenance history. Select an asset to add variables,
+create a rule for one of its signals, or log work against an active alert.
+Maintenance due dates are entered by the operator on each service record; the
+dashboard highlights upcoming and overdue dates. Logging work does not
+automatically acknowledge or resolve an alert; alert recovery still depends on
+the rule condition and subsequent readings. The dashboard is served by FastAPI
+from `frontend/`, so no separate JavaScript build or development server is
+required.
+
 ### Dashboard
 
 - `GET /api/v1/dashboard/summary` reports asset counts and the evaluated state
@@ -362,10 +495,12 @@ python -m pytest -q
 Implemented: generic nested assets, hierarchy reads and moves, variables,
 single and batch reading ingestion, time-series queries, threshold and duration
 rule evaluation, periodic scheduling, rule state, alert lifecycle and
-acknowledgement, event history, dashboard state counts, health/readiness,
-SQLite migrations, and repeatable demo data.
+acknowledgement, event history, persistent maintenance records with next-due
+dates, a browser dashboard, dashboard state counts, health checks, SQLite
+migrations, and repeatable demo data.
 
-Not implemented: real PLC/CNC or Node-RED connectivity, email/SMS delivery,
-maintenance work orders, authentication/authorization, analytics integrations,
-backup/restore, or a frontend. Validate against simulated inputs before
-connecting any real PLC/Node-RED gateway.
+Not implemented: PLC/Node-RED continuous polling, email/SMS delivery,
+automatic calendar-trigger rules, maintenance task templates, authentication/
+authorization, analytics integrations, or backup/restore. Validate the
+read-only one-shot OPC UA path with simulated inputs and PLC-engineer-approved
+credentials before connecting live equipment.

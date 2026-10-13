@@ -19,7 +19,6 @@ from app.models import (
     Variable,
 )
 
-
 LOGGER = logging.getLogger("nem_backend.monitoring")
 
 OPERATORS: dict[str, Callable[[Any, Any], bool]] = {
@@ -37,10 +36,8 @@ OPERATORS: dict[str, Callable[[Any, Any], bool]] = {
     "ne": operator.ne,
 }
 
-
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
-
 
 def emit_event(
     session: Session,
@@ -67,13 +64,11 @@ def emit_event(
     session.add(event)
     return event
 
-
 def get_rule_asset(session: Session, rule: MonitoringRule) -> tuple[Asset | None, Variable | None]:
     variable = session.get(Variable, rule.variable_id) if rule.variable_id is not None else None
     asset_id = rule.target_asset_id or (variable.asset_id if variable else None)
     asset = session.get(Asset, asset_id) if asset_id is not None else None
     return asset, variable
-
 
 def current_state(session: Session, rule: MonitoringRule, asset: Asset) -> RuleState | None:
     return session.scalar(
@@ -82,7 +77,6 @@ def current_state(session: Session, rule: MonitoringRule, asset: Asset) -> RuleS
             RuleState.target_asset_id == asset.id,
         )
     )
-
 
 def _condition_holds(rule: MonitoringRule, value: Any) -> bool:
     if rule.rule_type == "parameter_threshold":
@@ -105,7 +99,6 @@ def _condition_holds(rule: MonitoringRule, value: Any) -> bool:
         raise ValueError("Rule requires a numeric reading")
     return OPERATORS[comparison](value, threshold)
 
-
 def _valid_value(variable: Variable, value: Any) -> bool:
     return (
         (variable.data_type == "number" and isinstance(value, (int, float)) and not isinstance(value, bool))
@@ -114,12 +107,7 @@ def _valid_value(variable: Variable, value: Any) -> bool:
         or (variable.data_type == "boolean" and isinstance(value, bool))
     )
 
-
-def _transition_state(
-    session: Session,
-    rule: MonitoringRule,
-    asset: Asset,
-    state: RuleState | None,
+def _transition_state(session: Session,rule: MonitoringRule,asset: Asset,state: RuleState | None,
     *,
     next_status: str,
     value: Any,
@@ -154,8 +142,7 @@ def _transition_state(
     state.condition_started_at = condition_started_at
     state.error_message = error_message
 
-    alert = session.scalar(
-        select(Alert)
+    alert = session.scalar(select(Alert)
         .where(Alert.rule_id == rule.id, Alert.target_asset_id == asset.id, Alert.status == "active")
         .order_by(Alert.id.desc())
         .limit(1)
@@ -182,8 +169,7 @@ def _transition_state(
             if alert.severity != next_status:
                 previous_severity = alert.severity
                 alert.severity = next_status
-                emit_event(
-                    session,
+                emit_event(session,
                     event_type="alert_severity_changed",
                     message=f"Alert severity changed to {next_status}: {message}",
                     occurred_at=evaluated_at,
@@ -198,8 +184,7 @@ def _transition_state(
             alert.threshold = threshold
             alert.last_updated_at = evaluated_at
         if transitioned:
-            emit_event(
-                session,
+            emit_event(session,
                 event_type="warning_triggered" if next_status == "warning" else "alert_triggered",
                 message=message,
                 occurred_at=evaluated_at,
@@ -213,8 +198,7 @@ def _transition_state(
         alert.status = "resolved"
         alert.resolved_at = evaluated_at
         alert.last_updated_at = evaluated_at
-        emit_event(
-            session,
+        emit_event(session,
             event_type="alert_resolved",
             message=f"Condition cleared: {rule.name}",
             occurred_at=evaluated_at,
@@ -233,22 +217,15 @@ def _transition_state(
             asset_id=asset.id,
             rule_id=rule.id,
         )
-    if (
-        next_status == "unknown"
-        and error_message == "stale_reading"
-        and previous_error != "stale_reading"
-    ):
-        emit_event(
-            session,
+    if (next_status == "unknown" and error_message == "stale_reading" and previous_error != "stale_reading"):
+        emit_event(session,
             event_type="stale_data_detected",
             message=message,
             occurred_at=evaluated_at,
             asset_id=asset.id,
             rule_id=rule.id,
         )
-    if error_message not in {None, "stale_reading"} and (
-        transitioned or previous_error != error_message
-    ):
+    if error_message not in {None, "stale_reading"} and (transitioned or previous_error != error_message):
         emit_event(
             session,
             event_type="evaluation_failure",
@@ -260,10 +237,7 @@ def _transition_state(
         )
     return state
 
-
-def evaluate_rule(
-    session: Session,
-    rule: MonitoringRule,
+def evaluate_rule(session: Session,rule: MonitoringRule,
     *,
     evaluated_at: datetime | None = None,
     stale_after_seconds: int = 300,
@@ -275,10 +249,8 @@ def evaluate_rule(
     state = current_state(session, rule, asset)
 
     if not rule.is_enabled:
-        return _transition_state(
-            session,
-            rule,
-            asset,
+        return _transition_state(session,
+            rule,asset,
             state,
             next_status="unknown",
             value=state.latest_value if state else None,
@@ -305,8 +277,7 @@ def evaluate_rule(
             evaluated_at=now, condition_started_at=None, error_message="target_variable_unavailable",
         )
 
-    reading = session.scalar(
-        select(Reading)
+    reading = session.scalar(select(Reading)
         .where(Reading.asset_id == asset.id, Reading.variable_id == variable.id)
         .order_by(Reading.recorded_at.desc(), Reading.id.desc())
         .limit(1)
@@ -387,9 +358,7 @@ def evaluate_rule(
         threshold=threshold,
     )
 
-
-def evaluate_rules(
-    session: Session,
+def evaluate_rules(session: Session,
     *,
     evaluated_at: datetime | None = None,
     stale_after_seconds: int = 300,
@@ -433,9 +402,7 @@ def evaluate_rules(
     session.flush()
     return counts
 
-
-def acquire_scheduler_lease(
-    session: Session,
+def acquire_scheduler_lease(session: Session,
     *,
     owner_id: str,
     now: datetime,
@@ -472,10 +439,7 @@ def acquire_scheduler_lease(
         session.rollback()
         return False
 
-
-def evaluate_reading_rules(
-    session: Session,
-    *,
+def evaluate_reading_rules(session: Session,*,
     asset_id: int,
     variable_id: int,
     evaluated_at: datetime | None = None,
@@ -492,19 +456,15 @@ def evaluate_reading_rules(
     matching = [rule for rule in rules if rule.target_asset_id in (None, asset_id)]
     counts = {"evaluated": 0, "unknown": 0, "normal": 0, "warning": 0, "alert": 0}
     for rule in matching:
-        state = evaluate_rule(
-            session, rule, evaluated_at=evaluated_at, stale_after_seconds=stale_after_seconds
-        )
+        state = evaluate_rule(session, rule, evaluated_at=evaluated_at, stale_after_seconds=stale_after_seconds)
         if state is not None:
             counts["evaluated"] += 1
             counts[state.status] += 1
     session.flush()
     return counts
 
-
 def set_rule_enabled_state(
-    session: Session, rule: MonitoringRule, enabled: bool, *, at: datetime | None = None
-) -> None:
+    session: Session, rule: MonitoringRule, enabled: bool, *, at: datetime | None = None) -> None:
     if rule.is_enabled == enabled:
         return
     now = at or utc_now()

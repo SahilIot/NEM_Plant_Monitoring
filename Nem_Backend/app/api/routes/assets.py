@@ -1,22 +1,30 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+# Assests API router
+#API Router for group related endpoints into one router
+#Depends- tell fastapi to provide dependencies, such as a database session.
+# HTTP Exception - Returns HTTP errors such as 404,409,422 etc
+#Query - Validates query parameters such as limits and offsets
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status 
+#Build SQL queries using SQLAlchemy, func provide sql functions such as count, session represents a database session
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-
+#get_db supplies the database session to an endpoint
 from app.db.session import get_db
-from app.models import Asset, MonitoringRule, Reading, Variable
-from app.schemas.asset import AssetCreate, AssetRead, AssetTree, AssetUpdate
+from app.models import Asset, MonitoringRule, Reading, Variable  # these are database models
+from app.schemas.asset import AssetCreate, AssetRead, AssetTree, AssetUpdate # pydantic schema for input validation and output formatting
 
 
-router = APIRouter(prefix="/assets", tags=["assets"])
+router = APIRouter(prefix="/assets", tags=["assets"]) 
 
-
+#check if an asset exists in the database, if not raise a 404 error
 def asset_or_404(session: Session, asset_id: int) -> Asset:
     asset = session.get(Asset, asset_id)
     if asset is None:
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     return asset
 
-
+#Protecting the asset heirarchy
 def validate_parent(session: Session, parent_id: int | None, asset_id: int | None = None) -> None:
     if parent_id is None:
         return
@@ -37,7 +45,7 @@ def validate_parent(session: Session, parent_id: int | None, asset_id: int | Non
         visited.add(ancestor.id)
         ancestor = session.get(Asset, ancestor.parent_asset_id) if ancestor.parent_asset_id else None
 
-
+# Building a nested hierarchy of assets, starting from a given asset and recursively adding its children. It also checks for cycles in the hierarchy to prevent infinite loops.
 def to_tree(session: Session, asset: Asset, ancestors: frozenset[int] = frozenset()) -> AssetTree:
     if asset.id in ancestors:
         raise HTTPException(status_code=409, detail="Existing asset hierarchy contains a cycle")
@@ -50,7 +58,7 @@ def to_tree(session: Session, asset: Asset, ancestors: frozenset[int] = frozense
         children=[to_tree(session, child, next_ancestors) for child in children],
     )
 
-
+# Creating an assest, validating the parent asset if provided, and returning the created asset with a 201 status code.
 @router.post("", response_model=AssetRead, status_code=status.HTTP_201_CREATED)
 def create_asset(payload: AssetCreate, session: Session = Depends(get_db)) -> Asset:
     validate_parent(session, payload.parent_asset_id)
@@ -60,7 +68,7 @@ def create_asset(payload: AssetCreate, session: Session = Depends(get_db)) -> As
     session.refresh(asset)
     return asset
 
-
+# Listing assets
 @router.get("")
 def list_assets(
     parent_asset_id: int | None = Query(default=None, gt=0),
@@ -71,6 +79,7 @@ def list_assets(
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
+    
     query = select(Asset)
     count_query = select(func.count()).select_from(Asset)
     if parent_asset_id is not None:
@@ -93,12 +102,12 @@ def list_assets(
         "offset": offset,
     }
 
-
+#Getting one asset 
 @router.get("/{asset_id}", response_model=AssetRead)
 def get_asset(asset_id: int, session: Session = Depends(get_db)) -> Asset:
     return asset_or_404(session, asset_id)
 
-
+#Updating the assets
 @router.patch("/{asset_id}", response_model=AssetRead)
 def update_asset(
     asset_id: int, payload: AssetUpdate, session: Session = Depends(get_db)
@@ -118,7 +127,7 @@ def update_asset(
     session.refresh(asset)
     return asset
 
-
+# Getting the children of a specific asset
 @router.get("/{asset_id}/children")
 def list_children(
     asset_id: int,
@@ -137,7 +146,7 @@ def list_children(
         "offset": offset,
     }
 
-
+# Getting the entire hierarchy of a specific asset, including all its descendants, and returning it as a nested tree structure. It also checks for cycles in the hierarchy to prevent infinite loops.
 @router.get("/{asset_id}/hierarchy", response_model=AssetTree)
 def asset_hierarchy(asset_id: int, session: Session = Depends(get_db)) -> AssetTree:
     asset = asset_or_404(session, asset_id)
@@ -151,7 +160,7 @@ def asset_hierarchy(asset_id: int, session: Session = Depends(get_db)) -> AssetT
         raise HTTPException(status_code=409, detail="Existing asset hierarchy contains a cycle")
     return to_tree(session, asset)
 
-
+# Moving an asset to a new parent asset, validating the new parent to ensure it doesn't create a circular hierarchy, and returning the updated asset.
 @router.post("/{asset_id}/move", response_model=AssetRead)
 def move_asset(
     asset_id: int,
@@ -165,7 +174,7 @@ def move_asset(
     session.refresh(asset)
     return asset
 
-
+# Deleting an asset, ensuring it has no children, variables, readings, or rules associated with it before deletion. If any of these exist, a 409 conflict error is raised, suggesting deactivation instead of deletion.
 @router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_asset(asset_id: int, session: Session = Depends(get_db)) -> Response:
     asset = asset_or_404(session, asset_id)

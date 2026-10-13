@@ -1,3 +1,4 @@
+# create,view,update and filter machine monitoring rules
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -8,9 +9,7 @@ from app.schemas.rule import RuleCreate, RuleRead, RuleUpdate
 from app.services.monitoring_engine import emit_event, set_rule_enabled_state
 from app.services.monitoring_engine import utc_now
 
-
 router = APIRouter(prefix="/rules", tags=["monitoring rules"])
-
 
 def rule_or_404(session: Session, rule_id: int) -> MonitoringRule:
     rule = session.get(MonitoringRule, rule_id)
@@ -18,7 +17,7 @@ def rule_or_404(session: Session, rule_id: int) -> MonitoringRule:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id} was not found")
     return rule
 
-
+# make sure a rule refers to valid machine assets and variables, and its configuration makes sense
 def validate_targets(
     session: Session,
     target_asset_id: int | None,
@@ -28,8 +27,10 @@ def validate_targets(
     threshold,
     parameters: dict | None,
 ) -> None:
+    #Check that asset exits
     if target_asset_id is not None and session.get(Asset, target_asset_id) is None:
         raise HTTPException(status_code=404, detail=f"Asset {target_asset_id} was not found")
+    #Varibale exists
     variable = session.get(Variable, variable_id) if variable_id is not None else None
     if variable_id is not None and variable is None:
         raise HTTPException(status_code=404, detail=f"Variable {variable_id} was not found")
@@ -57,9 +58,10 @@ def validate_targets(
                 detail="Runtime rules require a positive parameters.duration_seconds",
             )
 
-
+# Create a new rule
 @router.post("", response_model=RuleRead, status_code=status.HTTP_201_CREATED)
 def create_rule(payload: RuleCreate, session: Session = Depends(get_db)) -> MonitoringRule:
+    # Validate the target
     validate_targets(
         session, payload.target_asset_id, payload.variable_id, payload.rule_type,
         payload.operator, payload.threshold, payload.parameters,
@@ -67,6 +69,7 @@ def create_rule(payload: RuleCreate, session: Session = Depends(get_db)) -> Moni
     rule = MonitoringRule(**payload.model_dump())
     session.add(rule)
     session.flush()
+
     if not rule.is_enabled:
         emit_event(
             session,
@@ -80,7 +83,7 @@ def create_rule(payload: RuleCreate, session: Session = Depends(get_db)) -> Moni
     session.refresh(rule)
     return rule
 
-
+#list and filter rules
 @router.get("")
 def list_rules(
     target_asset_id: int | None = Query(default=None, gt=0),
@@ -91,6 +94,7 @@ def list_rules(
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
+    #Build the database queries
     query = select(MonitoringRule)
     count_query = select(func.count()).select_from(MonitoringRule)
     for condition, column in (
@@ -111,12 +115,12 @@ def list_rules(
         "offset": offset,
     }
 
-
+# retrieve one rule
 @router.get("/{rule_id}", response_model=RuleRead)
 def get_rule(rule_id: int, session: Session = Depends(get_db)) -> MonitoringRule:
     return rule_or_404(session, rule_id)
 
-
+#Update a rule
 @router.patch("/{rule_id}", response_model=RuleRead)
 def update_rule(
     rule_id: int, payload: RuleUpdate, session: Session = Depends(get_db)
@@ -138,7 +142,9 @@ def update_rule(
         session, validated.target_asset_id, validated.variable_id, validated.rule_type,
         validated.operator, validated.threshold, validated.parameters,
     )
+    # prevent changing targets after evaluation state exits
     target_fields = {"target_asset_id", "variable_id"}
+    #Prevent changing targets while alerts are active
     if target_fields.intersection(changes) and session.scalar(
         select(RuleState.id).where(RuleState.rule_id == rule.id).limit(1)
     ):
@@ -153,6 +159,7 @@ def update_rule(
             status_code=409,
             detail="Resolve active alerts before changing a rule target",
         )
+    #Apply the changes
     for field, value in changes.items():
         if field != "is_enabled":
             setattr(rule, field, value)

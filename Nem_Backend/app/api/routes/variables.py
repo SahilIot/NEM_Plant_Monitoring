@@ -1,3 +1,4 @@
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -7,19 +8,17 @@ from app.db.session import get_db
 from app.models import Asset, Variable
 from app.schemas.variable import VariableCreate, VariableRead, VariableUpdate
 
-
 router = APIRouter(tags=["variables"])
 
-
+#find a variable 
 def variable_or_404(session: Session, variable_id: int) -> Variable:
     variable = session.get(Variable, variable_id)
     if variable is None:
         raise HTTPException(status_code=404, detail=f"Variable {variable_id} was not found")
     return variable
 
-
-@router.post(
-    "/assets/{asset_id}/variables",
+# create a variable
+@router.post("/assets/{asset_id}/variables",
     response_model=VariableRead,
     status_code=status.HTTP_201_CREATED,
 )
@@ -39,7 +38,6 @@ def create_variable(
         ) from error
     session.refresh(variable)
     return variable
-
 
 @router.get("/assets/{asset_id}/variables")
 def list_variables(
@@ -64,11 +62,9 @@ def list_variables(
         "offset": offset,
     }
 
-
 @router.get("/variables/{variable_id}", response_model=VariableRead)
 def get_variable(variable_id: int, session: Session = Depends(get_db)) -> Variable:
     return variable_or_404(session, variable_id)
-
 
 @router.patch("/variables/{variable_id}", response_model=VariableRead)
 def update_variable(
