@@ -3,8 +3,8 @@
 Standalone Python/FastAPI backend for a configurable industrial asset hierarchy,
 typed time-series readings, evaluated monitoring rules, persisted rule states,
 alerts, event history, maintenance records, and a browser dashboard. There is no
-continuous PLC/Node-RED connection: readings can arrive through the REST API or
-a secure one-shot OPC UA read request. Demo readings are explicitly marked with
+PLC write/control path: readings can arrive through the REST API or secure,
+read-only OPC UA collection. Demo readings are explicitly marked with
 `source_id` and metadata.
 
 ## Architecture and database
@@ -14,39 +14,51 @@ a secure one-shot OPC UA read request. Demo readings are explicitly marked with
 - `app/models/`: SQLAlchemy 2.x models.
 - `app/services/`: reusable business logic as it is added.
 - `app/core/`: environment-driven settings.
-- `alembic/`: versioned schema migrations.
+- PostgreSQL is the only supported database. SQLAlchemy uses the synchronous
+  `psycopg` driver.
 
-PostgreSQL is the recommended database for deployment and Node-RED ingestion.
-The backend uses SQLAlchemy, so all assets, variables, readings, monitoring
-rules, alerts, and maintenance records are stored in the configured database.
-SQLite remains available for local development and tests. The generic schema
-stores assets with optional self-referential parent links, variables with keys
-unique per asset, typed JSON reading values with asset/variable/time indexes,
-and monitoring rules with optional asset/variable targets and JSON parameters.
-Rule evaluations persist their current state, alert lifecycle, and event
-history. Timestamps are normalized to UTC.
+The generic NEM schema stores assets with optional self-referential parent
+links, variables with keys unique per asset, typed JSON reading values, and
+monitoring rules with optional asset/variable targets and JSON parameters. Rule
+evaluations persist their current state, alert lifecycle, and event history.
+Timestamps are normalized to UTC.
 
-The earlier prototype's `plants`, `production_lines`, `machines`, and
-`machine_readings` tables are preserved by the new migration; the new generic
-asset API does not use those tables.
+The existing PostgreSQL database contains PLC-shaped `public.readings`,
+`public.monitoring_rules`, and `public.alerts` tables. Those tables and their
+records are preserved unchanged. NEM uses separate `nem_readings`,
+`nem_monitoring_rules`, `nem_rule_states`, `nem_alerts`,
+`nem_monitoring_events`, and `nem_maintenance_records` tables, while reusing
+the compatible `assets` and `variables` tables. Existing NodeId-based history
+is not imported because no NodeId-to-asset/variable mapping has been provided.
+Existing legacy `rule_states`, `monitoring_events`, `maintenance_records`, and
+the singular `machine_monitoring_state` / `machine_monitoring_config` tables
+are left untouched too. The compatible `machine_monitoring_states` table is
+reused by the NEM monitoring model.
+At startup, all ORM models are imported and `Base.metadata.create_all()` may
+create missing tables only; it never modifies existing tables or adds columns.
+Back up the database before the first startup that creates these NEM tables.
 
 ## Windows PowerShell setup
 
 Prerequisite: Python 3.12 or newer. Open PowerShell and run:
 
-First create the PostgreSQL database and application user, then configure
-`DATABASE_URL` in `.env` as described below. If `.env` does not exist, create it
-from `.env.postgres.example`; if it already exists, preserve it and update only
-`DATABASE_URL` so OPC UA settings are not overwritten.
+Keep the existing `.env`; do not overwrite it because it may contain PLC
+settings. Confirm that `DATABASE_URL` points to the configured PostgreSQL
+database. Back it up before the first startup that creates the NEM tables.
 
 ```powershell
 cd C:\Users\Sahil\Downloads\NEM_Plant_Monitoring\Nem_Backend
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python -m alembic upgrade head
-python seed.py
-python -m uvicorn app.main:app --reload
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+New-Item -ItemType Directory -Force -Path .\backups | Out-Null
+$backupFile = ".\backups\plc_monitoring-before-nem-tables-$((Get-Date).ToString('yyyyMMdd-HHmmss')).dump"
+& 'C:\Program Files\PostgreSQL\18\bin\pg_dump.exe' --host localhost --port 5432 --username plc_app --format=custom --file $backupFile plc_monitoring
+if ($LASTEXITCODE -ne 0) { throw "PostgreSQL backup failed" }
+& 'C:\Program Files\PostgreSQL\18\bin\pg_restore.exe' --list $backupFile > $null
+if ($LASTEXITCODE -ne 0) { throw "PostgreSQL backup verification failed" }
+
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
 In a separate PowerShell window, start the React frontend during development:
@@ -62,26 +74,20 @@ server at `http://127.0.0.1:8000`. For serving the built frontend from FastAPI,
 run `npm run build` in `Nem_Frontend` first; then `http://127.0.0.1:8000/`
 redirects to the React dashboard at `/ui/`.
 
-If PowerShell blocks activation, use the virtual-environment executable
-directly instead:
+Create a dedicated PostgreSQL test database as an administrator. The following
+command may prompt for the administrator password:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m alembic upgrade head
-.\.venv\Scripts\python.exe seed.py
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+& 'C:\Program Files\PostgreSQL\18\bin\psql.exe' --host localhost --port 5432 --username postgres --dbname postgres --command "CREATE DATABASE plc_monitoring_test OWNER plc_app;"
 ```
 
-Create the `nem_plant_monitoring` database and a dedicated application user in
-PostgreSQL (for example, using pgAdmin), then set this value in `.env` with the
-actual user and password:
+Set `TEST_DATABASE_URL` in the existing `.env` to a `postgresql+psycopg` URL
+for `plc_monitoring_test`. Never point it at the application database. Run the
+backend test suite with:
 
-```dotenv
-DATABASE_URL=postgresql+psycopg://nem_user:YOUR_PASSWORD@127.0.0.1:5432/nem_plant_monitoring
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
 ```
-
-If the username or password contains URL-reserved characters, percent-encode
-them in the connection URL. Keep the real `.env` out of source control.
 
 The API is at `http://127.0.0.1:8000`, Swagger UI at
 `http://127.0.0.1:8000/docs`, and OpenAPI JSON at
@@ -89,21 +95,16 @@ The API is at `http://127.0.0.1:8000`, Swagger UI at
 `http://127.0.0.1:8000/` (or `/ui/`). Keep the server terminal open and press
 Ctrl+C to stop the server.
 
-Without a `DATABASE_URL` setting, the fallback database is
-`machine_monitor.db` in the current working directory (SQLite). For normal
-Node-RED operation, configure PostgreSQL explicitly in `.env`. Apply Alembic
-migrations before starting the server or running the demo seed.
-
 ## Environment configuration
 
-Configure `.env` using `.env.postgres.example` as a reference; do not overwrite
-an existing `.env` because it may contain OPC UA settings. Apply migrations
-against the configured PostgreSQL database before starting the API; the same
-URL is used by Alembic, the API, and the seed script.
+Keep the existing `.env` and its PLC settings. The API and seed script use the
+application database; tests use only the separate `TEST_DATABASE_URL`.
 
-- `DATABASE_URL` — set to
-  `postgresql+psycopg://user:password@host:5432/database` for PostgreSQL.
-  The default `sqlite:///./machine_monitor.db` is for local development only.
+- `DATABASE_URL` —
+  `postgresql+psycopg://plc_app:<URL-encoded-password>@localhost:5432/plc_monitoring`.
+  There is no fallback database.
+- `TEST_DATABASE_URL` — a `postgresql+psycopg` URL for a dedicated test
+  database whose name differs from the application database.
 - `CORS_ORIGINS` — comma-separated origins allowed to call the API from a
   browser. It is empty by default (CORS disabled); never enable unrestricted
   origins in production.
@@ -197,11 +198,9 @@ one signal. Restart the backend after changing the mapping. The startup
 configuration is validated against active NEM assets and boolean variables.
 No PLC NodeIds, asset IDs, or credentials are bundled with the project.
 
-Apply the new Alembic migration before starting an existing deployment:
-
-```powershell
-python -m alembic upgrade head
-```
+The API's NEM ORM uses PostgreSQL-only `nem_*` tables to avoid interpreting
+existing PLC-shaped tables as NEM data. No legacy rows are renamed, dropped, or
+copied. A future import requires an explicitly reviewed NodeId mapping.
 
 `GET /api/v1/plc/status` reports the subscription status, latest valid
 notification freshness, machine state, persisted cycle/runtime totals,
@@ -272,29 +271,6 @@ read; it does not start polling. A successful value is saved as a reading and
 matching monitoring rules are evaluated. A real connection requires the
 engineer-provided endpoint and approved certificates in the backend `.env`;
 the dashboard does not configure or expose secrets.
-
-## Database migrations
-
-Apply all migrations:
-
-```powershell
-python -m alembic upgrade head
-```
-
-The initial migration records the former prototype tables; later migrations add
-the generic assets, variables, readings, rules, and Phase 2 monitoring tables
-without dropping those existing tables. After model changes, create and apply a
-subsequent migration:
-
-```powershell
-python -m alembic revision --autogenerate -m "describe schema change"
-python -m alembic upgrade head
-python -m alembic check
-```
-
-The Alembic environment explicitly ignores the retained legacy tables during
-autogeneration so changing the new generic models cannot inadvertently drop
-that older data.
 
 ## Demo data
 
@@ -461,10 +437,7 @@ required.
 The periodic scheduler starts with the application by default and evaluates
 enabled rules every `MONITORING_EVALUATION_INTERVAL_SECONDS`. A database lease
 elects one scheduler worker when multiple app processes share the database.
-Apply migrations before starting the app. For multi-instance deployments, use a
-shared database with reliable transactions; SQLite is intended for local
-development, not concurrent production scheduling. Do not run multiple
-independent schedulers against separate databases.
+For multi-instance deployments, use a shared PostgreSQL database with reliable transactions. Do not run multiple independent schedulers against separate databases.
 
 This is monitoring software, **not a safety interlock or control system**. It
 does not stop machinery, and it is not a substitute for certified PLC safety
@@ -559,11 +532,12 @@ API errors use a consistent envelope, for example:
 
 ## Tests
 
-Automated tests use a separate temporary SQLite database and never modify the
-development database:
+Automated tests require the dedicated PostgreSQL database configured by
+`TEST_DATABASE_URL`. Each test rolls back its data changes and does not connect
+to `DATABASE_URL`:
 
 ```powershell
-python -m pytest -q
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
 ## Implemented features and limitations
@@ -572,11 +546,11 @@ Implemented: generic nested assets, hierarchy reads and moves, variables,
 single and batch reading ingestion, time-series queries, threshold and duration
 rule evaluation, periodic scheduling, rule state, alert lifecycle and
 acknowledgement, event history, persistent maintenance records with next-due
-dates, a browser dashboard, dashboard state counts, health checks, SQLite
-migrations, and repeatable demo data.
+dates, a browser dashboard, dashboard state counts, health checks, and
+repeatable demo data.
 
-Not implemented: PLC/Node-RED continuous polling, email/SMS delivery,
-automatic calendar-trigger rules, maintenance task templates, authentication/
+Not implemented: email/SMS delivery, automatic calendar-trigger rules,
+maintenance task templates, authentication/
 authorization, analytics integrations, or backup/restore. Validate the
-read-only one-shot OPC UA path with simulated inputs and PLC-engineer-approved
+read-only OPC UA path with simulated inputs and PLC-engineer-approved
 credentials before connecting live equipment.

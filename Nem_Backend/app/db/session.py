@@ -2,11 +2,11 @@ from datetime import datetime, timezone
 from typing import Generator
 
 from fastapi import Request
-from sqlalchemy import DateTime, Engine, create_engine, event
+from sqlalchemy import DateTime, Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.types import TypeDecorator
 
-from app.core.config import get_settings
+from app.core.config import get_settings, validate_postgresql_database_url
 
 
 class UTCDateTime(TypeDecorator[datetime]):
@@ -27,16 +27,9 @@ class UTCDateTime(TypeDecorator[datetime]):
 
 
 def create_database_engine(database_url: str | None = None) -> Engine:
-    url = database_url or get_settings().database_url
-    connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-    engine = create_engine(url, connect_args=connect_args, pool_pre_ping=True)
-    if url.startswith("sqlite"):
-        @event.listens_for(engine, "connect")
-        def enable_foreign_keys(connection, _record) -> None:
-            cursor = connection.cursor()
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
-    return engine
+    url = get_settings().database_url if database_url is None else database_url
+    validate_postgresql_database_url(url)
+    return create_engine(url, pool_pre_ping=True)
 
 
 def create_session_factory(engine: Engine) -> sessionmaker[Session]:

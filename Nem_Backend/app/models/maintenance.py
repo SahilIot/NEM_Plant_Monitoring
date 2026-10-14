@@ -8,9 +8,9 @@ from app.db.session import UTCDateTime
 
 
 class MaintenanceRecord(Base):
-    __tablename__ = "maintenance_records"
+    __tablename__ = "nem_maintenance_records"
     __table_args__ = (
-        Index("ix_maintenance_records_asset_performed", "asset_id", "performed_at"),
+        Index("ix_nem_maintenance_records_asset_performed", "asset_id", "performed_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -18,7 +18,7 @@ class MaintenanceRecord(Base):
         ForeignKey("assets.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     alert_id: Mapped[int | None] = mapped_column(
-        ForeignKey("alerts.id", ondelete="RESTRICT"), index=True
+        ForeignKey("nem_alerts.id", ondelete="RESTRICT"), index=True
     )
     summary: Mapped[str] = mapped_column(String(200), nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)

@@ -13,4 +13,3 @@ htmlcov/
 *.db
 *.sqlite
 *.sqlite3
-alembic/versions/__pycache__/

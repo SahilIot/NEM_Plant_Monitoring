@@ -13,6 +13,8 @@ from app.services.opcua_client import (
 )
 from tests.test_api import create_asset, create_variable
 
+_SETTINGS_DATABASE_URL = "postgresql+psycopg://localhost/opcua_settings_test"
+
 
 def test_unconfigured_opcua_endpoints_return_setup_error(client: TestClient):
     client.app.state.settings.opcua_endpoint = ""
@@ -83,7 +85,11 @@ def test_opcua_value_must_match_existing_variable_type(client, monkeypatch):
 
 
 def test_opcua_connection_requires_all_pinned_certificate_files(tmp_path):
-    settings = Settings(_env_file=None, opcua_endpoint="opc.tcp://127.0.0.1:4840")
+    settings = Settings(
+        _env_file=None,
+        database_url=_SETTINGS_DATABASE_URL,
+        opcua_endpoint="opc.tcp://127.0.0.1:4840",
+    )
     with pytest.raises(OpcUaConfigurationError, match="OPCUA_CLIENT_CERT"):
         _validate_connection_settings(settings)
 
@@ -93,6 +99,7 @@ def test_opcua_connection_requires_all_pinned_certificate_files(tmp_path):
         path.write_bytes(b"placeholder")
     settings = Settings(
         _env_file=None,
+        database_url=_SETTINGS_DATABASE_URL,
         opcua_endpoint="opc.tcp://127.0.0.1:4840",
         opcua_client_cert=str(cert),
         opcua_client_key=str(key),
@@ -104,6 +111,7 @@ def test_opcua_connection_requires_all_pinned_certificate_files(tmp_path):
 def test_opcua_rejects_credentials_embedded_in_endpoint_and_partial_auth():
     endpoint_with_credentials = Settings(
         _env_file=None,
+        database_url=_SETTINGS_DATABASE_URL,
         opcua_endpoint="opc.tcp://operator:password@127.0.0.1:4840",
     )
     with pytest.raises(OpcUaConfigurationError, match="do not place credentials"):
@@ -111,6 +119,7 @@ def test_opcua_rejects_credentials_embedded_in_endpoint_and_partial_auth():
 
     partial_auth = Settings(
         _env_file=None,
+        database_url=_SETTINGS_DATABASE_URL,
         opcua_endpoint="opc.tcp://127.0.0.1:4840",
         opcua_username="operator",
     )
@@ -131,6 +140,7 @@ def test_opcua_client_uses_sign_encrypt_and_pinned_server_certificate(tmp_path, 
         path.write_bytes(b"placeholder")
     settings = Settings(
         _env_file=None,
+        database_url=_SETTINGS_DATABASE_URL,
         opcua_endpoint="opc.tcp://127.0.0.1:4840/machine",
         opcua_client_cert=str(paths["opcua_client_cert"]),
         opcua_client_key=str(paths["opcua_client_key"]),

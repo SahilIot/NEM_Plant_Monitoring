@@ -10,16 +10,16 @@ from app.db.session import UTCDateTime
 
 
 class MonitoringRule(Base):
-    __tablename__ = "monitoring_rules"
+    __tablename__ = "nem_monitoring_rules"
     __table_args__ = (
         CheckConstraint(
-            "severity IN ('warning', 'alert')", name="ck_monitoring_rules_severity"
+            "severity IN ('warning', 'alert')", name="ck_nem_monitoring_rules_severity"
         ),
         CheckConstraint(
             "rule_type IN ('parameter_threshold', 'runtime_duration', 'duration', 'generic')",
-            name="ck_monitoring_rules_type",
+            name="ck_nem_monitoring_rules_type",
         ),
-        Index("ix_monitoring_rules_target_enabled", "target_asset_id", "is_enabled"),
+        Index("ix_nem_monitoring_rules_target_enabled", "target_asset_id", "is_enabled"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -51,18 +51,18 @@ class MonitoringRule(Base):
 
 
 class RuleState(Base):
-    __tablename__ = "rule_states"
+    __tablename__ = "nem_rule_states"
     __table_args__ = (
         CheckConstraint(
             "status IN ('normal', 'warning', 'alert', 'unknown')",
-            name="ck_rule_states_status",
+            name="ck_nem_rule_states_status",
         ),
-        Index("ix_rule_states_status", "status"),
+        Index("ix_nem_rule_states_status", "status"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     rule_id: Mapped[int] = mapped_column(
-        ForeignKey("monitoring_rules.id", ondelete="RESTRICT"), nullable=False, unique=True
+        ForeignKey("nem_monitoring_rules.id", ondelete="RESTRICT"), nullable=False, unique=True
     )
     target_asset_id: Mapped[int] = mapped_column(
         ForeignKey("assets.id", ondelete="RESTRICT"), nullable=False, index=True
@@ -80,25 +80,24 @@ class RuleState(Base):
 
 
 class Alert(Base):
-    __tablename__ = "alerts"
+    __tablename__ = "nem_alerts"
     __table_args__ = (
-        CheckConstraint("severity IN ('warning', 'alert')", name="ck_alerts_severity"),
-        CheckConstraint("status IN ('active', 'resolved')", name="ck_alerts_status"),
-        Index("ix_alerts_active_asset_severity", "status", "target_asset_id", "severity"),
-        Index("ix_alerts_rule_status", "rule_id", "status"),
+        CheckConstraint("severity IN ('warning', 'alert')", name="ck_nem_alerts_severity"),
+        CheckConstraint("status IN ('active', 'resolved')", name="ck_nem_alerts_status"),
+        Index("ix_nem_alerts_active_asset_severity", "status", "target_asset_id", "severity"),
+        Index("ix_nem_alerts_rule_status", "rule_id", "status"),
         Index(
-            "uq_alerts_active_rule_asset",
+            "uq_nem_alerts_active_rule_asset",
             "rule_id",
             "target_asset_id",
             unique=True,
-            sqlite_where=text("status = 'active'"),
             postgresql_where=text("status = 'active'"),
         ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     rule_id: Mapped[int] = mapped_column(
-        ForeignKey("monitoring_rules.id", ondelete="RESTRICT"), nullable=False, index=True
+        ForeignKey("nem_monitoring_rules.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     target_asset_id: Mapped[int] = mapped_column(
         ForeignKey("assets.id", ondelete="RESTRICT"), nullable=False, index=True
@@ -120,10 +119,10 @@ class Alert(Base):
 
 
 class MonitoringEvent(Base):
-    __tablename__ = "monitoring_events"
+    __tablename__ = "nem_monitoring_events"
     __table_args__ = (
-        Index("ix_monitoring_events_asset_timestamp", "asset_id", "occurred_at"),
-        Index("ix_monitoring_events_type_timestamp", "event_type", "occurred_at"),
+        Index("ix_nem_monitoring_events_asset_timestamp", "asset_id", "occurred_at"),
+        Index("ix_nem_monitoring_events_type_timestamp", "event_type", "occurred_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -133,10 +132,10 @@ class MonitoringEvent(Base):
         ForeignKey("assets.id", ondelete="RESTRICT"), index=True
     )
     rule_id: Mapped[int | None] = mapped_column(
-        ForeignKey("monitoring_rules.id", ondelete="RESTRICT"), index=True
+        ForeignKey("nem_monitoring_rules.id", ondelete="RESTRICT"), index=True
     )
     alert_id: Mapped[int | None] = mapped_column(
-        ForeignKey("alerts.id", ondelete="RESTRICT"), index=True
+        ForeignKey("nem_alerts.id", ondelete="RESTRICT"), index=True
     )
     message: Mapped[str] = mapped_column(Text, nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)

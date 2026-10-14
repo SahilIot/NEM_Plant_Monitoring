@@ -9,10 +9,10 @@ from app.db.session import UTCDateTime
 
 
 class Reading(Base):
-    __tablename__ = "readings"
+    __tablename__ = "nem_readings"
     __table_args__ = (
-        Index("ix_readings_variable_recorded", "variable_id", "recorded_at"),
-        Index("ix_readings_asset_recorded", "asset_id", "recorded_at"),
+        Index("ix_nem_readings_variable_recorded", "variable_id", "recorded_at"),
+        Index("ix_nem_readings_asset_recorded", "asset_id", "recorded_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

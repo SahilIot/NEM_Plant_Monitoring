@@ -1,16 +1,12 @@
 from sqlalchemy import func, select
 
-from app.db.base import Base
-from app.db.session import create_database_engine, create_session_factory
 from app.models import Asset, Reading, Variable
 from seed import seed_demo_data
 
 
-def test_demo_seed_is_repeatable_and_does_not_rewrite_existing_readings(tmp_path, monkeypatch):
+def test_demo_seed_is_repeatable_and_does_not_rewrite_existing_readings(client, monkeypatch):
     monkeypatch.setenv("DEMO_ROOT_NAME", "Test Demo Root")
-    engine = create_database_engine(f"sqlite:///{(tmp_path / 'demo.db').as_posix()}")
-    Base.metadata.create_all(engine)
-    factory = create_session_factory(engine)
+    factory = client.app.state.session_factory
     with factory() as session:
         seed_demo_data(session)
         first_count = session.scalar(select(func.count()).select_from(Reading))
@@ -23,4 +19,3 @@ def test_demo_seed_is_repeatable_and_does_not_rewrite_existing_readings(tmp_path
         assert session.scalar(
             select(func.count()).select_from(Asset).where(Asset.is_demo.is_(True))
         ) == 6
-    engine.dispose()
