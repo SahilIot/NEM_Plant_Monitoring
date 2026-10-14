@@ -65,6 +65,7 @@ def ingest_reading(
     payload: ReadingCreate,
     *,
     stale_after_seconds: int,
+    commit: bool = True,
 ) -> Reading:
     validate_reading(session, payload)
     reading = make_reading(payload)
@@ -76,6 +77,7 @@ def ingest_reading(
         variable_id=reading.variable_id,
         stale_after_seconds=stale_after_seconds,
     )
-    session.commit()
-    session.refresh(reading)
+    if commit:
+        session.commit()
+        session.refresh(reading)
     return reading

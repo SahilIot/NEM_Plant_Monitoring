@@ -17,8 +17,38 @@ from app.services.opcua_client import (
     test_opcua_connection,
 )
 from app.services.reading_ingestion import ingest_reading
+from app.services.opcua_collector import machine_status_rows
 
 router = APIRouter(prefix="/plc", tags=["PLC / OPC UA"])
+
+
+@router.get("/status")
+def plc_monitoring_status(
+    request: Request,
+    session: Session = Depends(get_db),
+) -> dict[str, object]:
+    collector = request.app.state.opcua_collector
+    connection = dict(collector.status)
+    last_notification_at = connection["last_notification_at"]
+    connection["stale"] = (
+        last_notification_at is None
+        or (
+            datetime.now(timezone.utc) - last_notification_at
+        ).total_seconds()
+        > request.app.state.settings.monitoring_default_stale_after_seconds
+    )
+    connection["stale_after_seconds"] = (
+        request.app.state.settings.monitoring_default_stale_after_seconds
+    )
+    return {
+        "connection": connection,
+        "machines": machine_status_rows(
+            session,
+            collector,
+            stale_after_seconds=request.app.state.settings.monitoring_default_stale_after_seconds,
+        ),
+    }
+
 
 #Translate internal errors into HTTP errors
 def opcua_http_error(error: Exception) -> HTTPException:

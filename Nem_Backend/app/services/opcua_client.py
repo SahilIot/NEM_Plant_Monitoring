@@ -81,6 +81,27 @@ def _safe_connection_error(error: Exception) -> OpcUaConnectionError:
 
 # Most importantly, this function connects to the OPC UA server, reads the value of a specified node, and returns it along with its timestamps. It handles configuration validation, security setup, and error management.
 async def read_opcua_node(settings: Settings, node_id: str) -> OpcUaRead:
+    try:
+        client = await create_configured_opcua_client(settings)
+       #Connect and read a node
+        async with client:
+            data_value = await client.get_node(node_id).read_data_value()
+    except Exception as error:
+        if isinstance(error, OpcUaConfigurationError):
+            raise
+        raise _safe_connection_error(error) from error
+#Extract the returned value
+    variant = data_value.Value
+    if variant is None:
+        raise OpcUaConnectionError("The OPC UA node returned no value.")
+    return OpcUaRead(
+        value=variant.Value,
+        source_timestamp=data_value.SourceTimestamp,
+        server_timestamp=data_value.ServerTimestamp,
+    )
+
+
+async def create_configured_opcua_client(settings: Settings) -> Client:
     endpoint, client_cert, client_key, server_cert = _validate_connection_settings(settings)
     client = Client(url=endpoint, timeout=settings.opcua_timeout_seconds)
     security_string = ",".join(
@@ -97,20 +118,9 @@ async def read_opcua_node(settings: Settings, node_id: str) -> OpcUaRead:
         if settings.opcua_username.strip():
             client.set_user(settings.opcua_username.strip())
             client.set_password(settings.opcua_password.get_secret_value())
-       #Connect and read a node
-        async with client:
-            data_value = await client.get_node(node_id).read_data_value()
     except Exception as error:
         raise _safe_connection_error(error) from error
-#Extract the returned value
-    variant = data_value.Value
-    if variant is None:
-        raise OpcUaConnectionError("The OPC UA node returned no value.")
-    return OpcUaRead(
-        value=variant.Value,
-        source_timestamp=data_value.SourceTimestamp,
-        server_timestamp=data_value.ServerTimestamp,
-    )
+    return client
 
 # test the connection to the OPC UA server by reading a well-known node (i=2258) that returns the server's current time. 
 # This function is useful for verifying that the connection settings are correct and that the server is responsive.

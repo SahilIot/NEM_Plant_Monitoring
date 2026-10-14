@@ -122,6 +122,13 @@ URL is used by Alembic, the API, and the seed script.
 - `OPCUA_USERNAME`, `OPCUA_PASSWORD` — optional credentials; configure both or
   leave both empty. Keep credentials and private keys out of Git.
 - `OPCUA_TIMEOUT_SECONDS` — connection/read timeout, default `10`.
+- `OPCUA_MACHINE_MAPPINGS` — optional JSON array configuring continuous
+  subscriptions. Leave empty until the PLC engineer provides NodeIds and the
+  corresponding existing NEM asset/boolean-variable IDs.
+- `OPCUA_RECONNECT_DELAY_SECONDS` — wait before retrying a disconnected
+  subscription, default `5`.
+- `OPCUA_RUNTIME_CHECKPOINT_SECONDS` — subscription publishing and persisted
+  running-time checkpoint interval, default `10`.
 - `SETTINGS_ENCRYPTION_KEY` — Fernet key used to encrypt the SMTP password
   saved by the dashboard. Generate one with
   `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
@@ -139,11 +146,12 @@ account. Backup restore replaces the current monitoring data with the selected
 snapshot; keep backup files in a protected location and confirm the restore
 prompt before proceeding.
 The React dashboard is built from `Nem_Frontend`; its PLC page exposes the
-read-only connection test and one-shot read endpoint. SMTP settings are stored
+read-only connection test, one-shot read endpoint, and continuous monitoring
+status when configured. SMTP settings are stored
 by the dashboard with the password encrypted, but configuring SMTP does not by
 itself send alert email notifications.
 
-### OPC UA read-only PLC connection
+### OPC UA read-only PLC connection and machine monitoring
 
 Install the new dependency after updating the environment:
 
@@ -160,6 +168,46 @@ validation. The PLC must offer a compatible endpoint and trust the client
 certificate. If the endpoint uses a different security policy, coordinate that
 securely with the PLC engineer; do not disable validation or downgrade to an
 unencrypted connection.
+
+Continuous collection is started once by the FastAPI application lifespan only
+when `OPCUA_MACHINE_MAPPINGS` is set. The collector subscribes only to
+configured data-change NodeIds and uses the same secure, read-only OPC UA client
+as the one-shot read endpoint. It is guarded by a database lease so only one
+backend instance for the configured database owns the collector. Bad-quality
+and non-boolean machine-state notifications are ignored. A cycle is counted
+only on a `false` to `true` signal transition; the first valid signal is only
+the baseline. Running-time totals are checkpointed in `machine_monitoring_states`
+and survive restarts. Runtime accumulated while the collector is disconnected
+is not inferred or added.
+
+Create the PLC asset and its boolean `cycle_signal` / `running_signal`
+variables through the existing asset API or dashboard, then use their IDs and
+the real NodeIds supplied by the PLC engineer in `.env`. Optional entries in
+`readings` may map other NodeIds to active NEM variables of their matching data
+types; these readings use the shared ingestion, rule, alert, and event paths.
+Example structure (replace the placeholders; these are not real NodeIds or IDs):
+
+```dotenv
+OPCUA_MACHINE_MAPPINGS=[{"asset_id":<NEM_ASSET_ID>,"cycle_signal":{"node_id":"<PLC_CYCLE_NODEID>","variable_id":<CYCLE_BOOLEAN_VARIABLE_ID>},"running_signal":{"node_id":"<PLC_RUNNING_NODEID>","variable_id":<RUNNING_BOOLEAN_VARIABLE_ID>},"readings":[{"node_id":"<PLC_VALUE_NODEID>","variable_id":<NEM_VARIABLE_ID>}],"cycle_limit":<OPTIONAL_CYCLE_LIMIT>,"runtime_limit_seconds":<OPTIONAL_RUNTIME_LIMIT_SECONDS>}]
+```
+
+For a machine with only one available status signal, omit the other signal
+object. There may be one mapping per asset; do not map one NodeId to more than
+one signal. Restart the backend after changing the mapping. The startup
+configuration is validated against active NEM assets and boolean variables.
+No PLC NodeIds, asset IDs, or credentials are bundled with the project.
+
+Apply the new Alembic migration before starting an existing deployment:
+
+```powershell
+python -m alembic upgrade head
+```
+
+`GET /api/v1/plc/status` reports the subscription status, latest valid
+notification freshness, machine state, persisted cycle/runtime totals,
+configured limits, and active NEM alerts attached to each configured asset.
+Limit values are informational targets; to raise alerts, configure rules in
+NEM using its normal rule/alert workflow. OPC UA input remains read-only.
 
 Endpoints:
 
