@@ -1,4 +1,6 @@
 .env
+.env.opcua
+.env.postgres
 certificates/
 backups/
 .venv/
