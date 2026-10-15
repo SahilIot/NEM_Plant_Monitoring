@@ -66,3 +66,5 @@ export const EmptyArt = () => (
     <ellipse cx="170" cy="160" rx="75" ry="6" style={{ fill: "var(--art-shadow)" }} />
   </svg>
 );
+export const CheckIcon = mk("M5 12.5l4.5 4.5L19 7.5");
+export const PlusIcon = mk("M12 5v14M5 12h14");

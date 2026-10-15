@@ -2,6 +2,7 @@ import React from "react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../api.js";
+import { formatTime } from "../format.js";
 import { CreateModal, EmptyState } from "../components/UI.jsx";
 import { BackIcon } from "../components/Icons.jsx";
 
@@ -14,8 +15,8 @@ const TITLES = {
 };
 
 const FORMS = {
-  email: [["host", "SMTP host"], ["port", "Port"], ["username", "Username"], ["password", "Password", "password"], ["sender", "Sender address"]],
-  analytics: [["databus_host", "Databus host"], ["databus_port", "Databus port"], ["enabled", "Enabled (true/false)"]],
+  email: [["host", "SMTP host"], ["port", "Port", "number"], ["username", "Username"], ["password", "Password", "password"], ["sender", "Sender address"]],
+  analytics: [["databus_host", "Databus host"], ["databus_port", "Databus port"], ["enabled", "Enabled", "bool"]],
 };
 
 // [key, label, editable by the user?]  (role comes from the login, so it is read-only)
@@ -33,7 +34,7 @@ function UserInfo() {
   const [saveErr, setSaveErr] = useState("");
   const [msg, setMsg] = useState("");
   useEffect(() => { api.get("/me").then(setU).catch((e) => setErr(String(e.message || e))); }, []);
-  if (err) return <div className="panel-white" style={{ color: "crimson" }}>Backend error: {err}</div>;
+  if (err) return <div className="panel"><p className="notice error flush" role="alert">Could not load the profile: {err}</p></div>;
   if (!u) return <div className="loading">Loading…</div>;
 
   const startEdit = () => { setDraft({ name: u.name || "", email: u.email || "", phone: u.phone || "" }); setSaveErr(""); setMsg(""); };
@@ -115,12 +116,19 @@ function SettingsForm({ section }) {
         : "The SMTP password is encrypted before it is saved."}</p>}
       {FORMS[section].map(([k, label, type]) => (
         <label key={k}>{label}
-          <input type={type || "text"} autoComplete={type === "password" ? "new-password" : undefined}
-            value={v[k] || ""} onChange={(e) => setV({ ...v, [k]: e.target.value })} />
+          {type === "bool" ? (
+            <select value={String(v[k] ?? "false")} onChange={(e) => setV({ ...v, [k]: e.target.value })}>
+              <option value="true">Enabled</option>
+              <option value="false">Disabled</option>
+            </select>
+          ) : (
+            <input type={type || "text"} autoComplete={type === "password" ? "new-password" : undefined}
+              value={v[k] || ""} onChange={(e) => setV({ ...v, [k]: e.target.value })} />
+          )}
         </label>
       ))}
       <div><button className="btn-primary" onClick={save}>Save</button></div>
-      {msg && <p className="notice">{msg}</p>}
+      {msg && <p className={"notice" + (/^Could not/.test(msg) ? " error" : "")} role="status">{msg}</p>}
     </div>
   );
 }
@@ -134,7 +142,7 @@ function Usage() {
   return (
     <div className="usage-grid">
       {Object.entries(u).map(([k, v]) => (
-        <div key={k} className="stat-card"><div className="stat-sub">{k.replace("_", " ")}</div><div className="stat-val">{v}</div></div>
+        <div key={k} className="stat-card"><div className="stat-sub">{k.replaceAll("_", " ")}</div><div className="stat-val">{v}</div></div>
       ))}
     </div>
   );
@@ -163,7 +171,7 @@ function Backup() {
     <>
       <div className="panel-white">
         <button className="btn-primary" onClick={() => setOpen(true)}>Create backup</button>
-        {msg && <p className="notice">{msg}</p>}
+        {msg && <p className={"notice" + (/^Could not/.test(msg) ? " error" : "")} role="status">{msg}</p>}
       </div>
       {open && (
         <CreateModal
@@ -178,7 +186,7 @@ function Backup() {
         {list.length === 0 ? <EmptyState title="No backups yet" /> :
           <table className="table"><thead><tr><th>Name</th><th>Created</th><th /></tr></thead>
             <tbody>{list.map((b) => (
-              <tr key={b.id}><td>{b.name}</td><td>{b.created}</td>
+              <tr key={b.id}><td>{b.name}</td><td>{formatTime(b.created)}</td>
                 <td className="right"><button className="btn-outline" onClick={() => restore(b)}>Restore</button></td></tr>))}</tbody></table>}
       </div>
     </>
