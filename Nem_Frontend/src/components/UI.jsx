@@ -59,11 +59,11 @@ export const Modal = ({ title, onClose, children, wide }) => {
   );
 };
 
-// A <select> shows its first option even when no value has been chosen, so the
-// form state has to start on that option or the visible choice is never submitted.
+// Form values are kept as strings because HTML inputs/selects emit strings.
+// Required selects start empty unless a field explicitly supplies a default.
 const initialValue = (field) => {
-  if (field.default !== undefined && field.default !== null) return field.default;
-  if (field.type === "select" && field.options?.length) return field.options[0][0];
+  if (field.default !== undefined && field.default !== null) return String(field.default);
+  if (field.type === "select") return "";
   return "";
 };
 
@@ -73,6 +73,15 @@ export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "C
   );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Reinitialize if a modal is reused with a different set of fields/options.
+  // This prevents stale IDs remaining selected when the available options change.
+  useEffect(() => {
+    setValues(Object.fromEntries(fields.map((field) => [field.key, initialValue(field)])));
+    setError("");
+    setBusy(false);
+  }, [fields]);
+
   const set = (key, value) => setValues((current) => ({ ...current, [key]: value }));
 
   const submit = async (e) => {
@@ -85,7 +94,22 @@ export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "C
     setBusy(true);
     setError("");
     try {
-      await onSubmit(values);
+      const normalized = {};
+      for (const field of fields) {
+        const value = values[field.key] ?? "";
+        if (field.type === "number" && String(value).trim() !== "") {
+          const number = Number(value);
+          if (!Number.isFinite(number)) {
+            setError(`${field.label} must be a valid number.`);
+            setBusy(false);
+            return;
+          }
+          normalized[field.key] = number;
+        } else {
+          normalized[field.key] = value;
+        }
+      }
+      await onSubmit(normalized);
     } catch (err) {
       setError(String(err.message || err));
       setBusy(false);
@@ -103,20 +127,33 @@ export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "C
               {f.required && <span className="req"> *</span>}
             </label>
             {f.type === "textarea" ? (
-              <textarea id={"f-" + f.key} rows={3} placeholder={f.placeholder} value={values[f.key]} onChange={(e) => set(f.key, e.target.value)} />
+              <textarea id={"f-" + f.key} rows={3} placeholder={f.placeholder} value={values[f.key] ?? ""} disabled={busy} onChange={(e) => set(f.key, e.target.value)} />
             ) : f.type === "select" ? (
-              <select id={"f-" + f.key} value={values[f.key]} onChange={(e) => set(f.key, e.target.value)}>
-                {f.options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              <select
+                id={"f-" + f.key}
+                value={values[f.key] ?? ""}
+                required={Boolean(f.required)}
+                disabled={Boolean(f.disabled || busy)}
+                onChange={(e) => {
+                  set(f.key, e.target.value);
+                  setError("");
+                  if (f.onChange) f.onChange(e.target.value, values, setValues);
+                }}
+              >
+                <option value="" disabled={Boolean(f.required)}>
+                  {f.placeholder || `Select ${f.label.toLowerCase()}`}
+                </option>
+                {f.options.map(([v, l]) => <option key={String(v)} value={String(v)}>{l}</option>)}
               </select>
             ) : (
-              <input id={"f-" + f.key} type={f.type || "text"} step={f.type === "number" ? "any" : undefined} autoFocus={i === 0} placeholder={f.placeholder} value={values[f.key]} onChange={(e) => set(f.key, e.target.value)} />
+              <input id={"f-" + f.key} type={f.type || "text"} step={f.type === "number" ? "any" : undefined} autoFocus={i === 0} required={Boolean(f.required)} disabled={busy} placeholder={f.placeholder} value={values[f.key] ?? ""} onChange={(e) => set(f.key, e.target.value)} />
             )}
             {f.hint && <span className="hint">{f.hint}</span>}
           </div>
         ))}
         {error && <p className="notice error" role="alert">{error}</p>}
         <div className="modal-actions">
-          <button type="button" className="btn-outline" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn-outline" disabled={busy} onClick={onClose}>Cancel</button>
           <button type="submit" className="btn-primary" disabled={busy}>{busy ? "Saving…" : submitLabel}</button>
         </div>
       </form>
