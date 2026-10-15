@@ -8,9 +8,9 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import HTTPException
-from pydantic import ValidationError
-from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
+from pydantic import ValidationError # type: ignore
+from sqlalchemy import select # type: ignore
+from sqlalchemy.orm import Session, sessionmaker # type: ignore
 
 from app.core.config import Settings
 from app.models import (

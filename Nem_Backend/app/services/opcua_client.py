@@ -101,26 +101,29 @@ async def read_opcua_node(settings: Settings, node_id: str) -> OpcUaRead:
     )
 
 
+
 async def create_configured_opcua_client(settings: Settings) -> Client:
-    endpoint, client_cert, client_key, server_cert = _validate_connection_settings(settings)
-    client = Client(url=endpoint, timeout=settings.opcua_timeout_seconds)
-    security_string = ",".join(
-        (
-            "Basic256Sha256",
-            "SignAndEncrypt",
-            str(client_cert),
-            str(client_key),
-            str(server_cert),
+    endpoint = settings.opcua_endpoint.strip()
+
+    if not endpoint.startswith("opc.tcp://"):
+        raise OpcUaConfigurationError(
+            "Set OPCUA_ENDPOINT to the PLC's opc.tcp:// endpoint."
         )
+
+    client = Client(
+        url=endpoint,
+        timeout=settings.opcua_timeout_seconds,
     )
-    try:
-        await client.set_security_string(security_string)
-        if settings.opcua_username.strip():
-            client.set_user(settings.opcua_username.strip())
-            client.set_password(settings.opcua_password.get_secret_value())
-    except Exception as error:
-        raise _safe_connection_error(error) from error
+
+    # TEMPORARY LOCAL TEST ONLY:
+    # No certificate security is configured here.
+    # Keep the client read-only; do not add write operations.
+    if settings.opcua_username.strip():
+        client.set_user(settings.opcua_username.strip())
+        client.set_password(settings.opcua_password.get_secret_value())
+
     return client
+
 
 # test the connection to the OPC UA server by reading a well-known node (i=2258) that returns the server's current time. 
 # This function is useful for verifying that the connection settings are correct and that the server is responsive.
