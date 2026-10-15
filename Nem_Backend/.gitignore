@@ -14,4 +14,4 @@ htmlcov/
 *.sqlite
 *.sqlite3
 .postman/
-4.vscode/
+.vscode/
