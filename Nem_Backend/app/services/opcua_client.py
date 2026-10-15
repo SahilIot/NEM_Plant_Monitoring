@@ -74,10 +74,16 @@ def _validate_connection_settings(settings: Settings) -> tuple[str, Path, Path, 
     return endpoint, client_cert, client_key, server_cert
 
 # function converts a low-level exception into a more controlled error message, without exposing sensitive information like credentials or file paths. It logs the error type for diagnostics while returning a generic connection error to the caller.
+
 def _safe_connection_error(error: Exception) -> OpcUaConnectionError:
-    error_name = type(error).__name__
-    LOGGER.warning("OPC UA operation failed (%s); credentials and exception details omitted", error_name)
-    return OpcUaConnectionError(f"OPC UA operation failed ({error_name}).")
+    LOGGER.error(
+        "OPC UA operation failed",
+        exc_info=(type(error), error, error.__traceback__),
+    )
+    return OpcUaConnectionError(
+        f"OPC UA operation failed ({type(error).__name__})."
+    )
+
 
 # Most importantly, this function connects to the OPC UA server, reads the value of a specified node, and returns it along with its timestamps. It handles configuration validation, security setup, and error management.
 async def read_opcua_node(settings: Settings, node_id: str) -> OpcUaRead:
