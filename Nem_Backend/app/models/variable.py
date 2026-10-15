@@ -1,11 +1,15 @@
 
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.db.session import UTCDateTime
+
+if TYPE_CHECKING:
+    from app.models.asset import Asset
 
 
 class Variable(Base):
