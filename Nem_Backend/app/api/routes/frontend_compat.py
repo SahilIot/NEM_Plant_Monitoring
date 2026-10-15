@@ -18,6 +18,7 @@ from app.models import (
     MaintenanceRecord,
     MonitoringEvent,
     MonitoringRule,
+    Reading,
     RuleCollection,
     RuleState,
     Variable,
