@@ -18,6 +18,7 @@ from app.models import (
     Alert,
     Asset,
     MachineMonitoringState,
+    MonitoringRule,
     SchedulerLease,
     Variable,
 )
@@ -578,14 +579,6 @@ class OpcUaCollector:
             return
         state.cycle_count += 1
         state.last_cycle_at = at
-        emit_event(
-            session,
-            event_type="machine_cycle_counted",
-            message=f"Machine cycle counted for asset {state.asset_id}.",
-            occurred_at=at,
-            asset_id=state.asset_id,
-            metadata={"cycle_count": state.cycle_count},
-        )
 
     @staticmethod
     def _apply_running_signal(
@@ -603,12 +596,12 @@ class OpcUaCollector:
                 state.runtime_checkpoint_at = at
         else:
             state.runtime_checkpoint_at = None
-        if previous is None or previous == value:
+        if previous is not True or value:
             return
         emit_event(
             session,
-            event_type="machine_status_changed",
-            message=f"Machine {'started' if value else 'stopped'} for asset {state.asset_id}.",
+            event_type="machine_stopped",
+            message=f"Machine stopped for asset {state.asset_id}.",
             occurred_at=at,
             asset_id=state.asset_id,
             metadata={"is_running": value},
@@ -740,9 +733,12 @@ def machine_status_rows(
     }
     alerts = session.scalars(
         select(Alert)
+        .join(MonitoringRule, MonitoringRule.id == Alert.rule_id)
         .where(
             Alert.target_asset_id.in_(asset_ids),
             Alert.status == "active",
+            MonitoringRule.is_enabled.is_(True),
+            MonitoringRule.is_archived.is_(False),
         )
         .order_by(Alert.started_at.desc(), Alert.id.desc())
     ).all()

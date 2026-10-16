@@ -185,7 +185,9 @@ and non-boolean machine-state notifications are ignored. A cycle is counted
 only on a `false` to `true` signal transition; the first valid signal is only
 the baseline. Running-time totals are checkpointed in `machine_monitoring_states`
 and survive restarts. Runtime accumulated while the collector is disconnected
-is not inferred or added.
+is not inferred or added. Configure `running_signal` with a dedicated boolean
+that stays true for the full time the machine is operating and false while it
+is stopped; a momentary cycle pulse cannot measure running duration.
 
 Create the PLC asset and its boolean `cycle_signal` / `running_signal`
 variables through the existing asset API or dashboard, then use their IDs and
@@ -348,12 +350,19 @@ writing, so invalid batches do not partially insert data. The API enforces a
   `is_enabled`, `limit`, and `offset`.
 - `GET /api/v1/rules/{rule_id}`
 - `PATCH /api/v1/rules/{rule_id}` — set `is_enabled: false` to disable evaluation.
+- Deactivating a rule closes its active alert while retaining alert history.
+- Archiving a deactivated rule hides it from normal rule lists and preserves
+  its evaluation, alert, and event history.
 - `GET /api/v1/rules/{rule_id}/status` — current state.
 - `POST /api/v1/monitoring/evaluate` — evaluate enabled rules immediately;
   optional `asset_id` or `rule_id` filters.
 - `GET /api/v1/monitoring/status` — paginated state list; supports `status`,
   `asset_id`, and `rule_id` filters.
 - `GET /api/v1/assets/{asset_id}/monitoring-status` — states for an asset.
+
+The asset Event Log shows rule creation, warning/alert transitions, and machine
+stops. Cycle pulses and routine evaluation/maintenance events remain out of that
+operator-facing log; cycle counts continue to update from OPC UA as before.
 
 Rule types are `parameter_threshold`, `runtime_duration`, `duration`, and
 `generic`. Threshold rules need a numeric variable, an operator (`lt`, `lte`,

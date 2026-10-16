@@ -536,7 +536,7 @@ export default function AssetDetail() {
   const remove = async (rule) => {
     if (
       !window.confirm(
-        `Delete the rule “${rule.name}”?`
+        `Archive the rule “${rule.name}”? It will be hidden from the rule list, and its alert and evaluation history will be retained.`
       )
     ) {
       return;
@@ -1175,12 +1175,15 @@ export default function AssetDetail() {
                       </button>
                     )}
 
-                    <button
-                      className="btn-danger"
-                      onClick={() => remove(rule)}
-                    >
-                      Delete
-                    </button>
+                    {!isAct(rule) && (
+                      <button
+                        className="btn-danger"
+                        onClick={() => remove(rule)}
+                        title="Remove from the rule list while preserving its alert and evaluation history"
+                      >
+                        Archive
+                      </button>
+                    )}
                   </div>
                 );
               })}

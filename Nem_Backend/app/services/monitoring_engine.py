@@ -762,7 +762,11 @@ def evaluate_rules(
 ) -> dict[str, int]:
     now = evaluated_at or utc_now()
 
-    query = select(MonitoringRule).order_by(MonitoringRule.id)
+    query = (
+        select(MonitoringRule)
+        .where(MonitoringRule.is_archived.is_(False))
+        .order_by(MonitoringRule.id)
+    )
 
     if rule_id is not None:
         query = query.where(MonitoringRule.id == rule_id)
@@ -892,6 +896,7 @@ def evaluate_reading_rules(
         select(MonitoringRule)
         .where(
             MonitoringRule.is_enabled.is_(True),
+            MonitoringRule.is_archived.is_(False),
             MonitoringRule.variable_id == variable_id,
         )
         .order_by(MonitoringRule.id)
@@ -952,13 +957,12 @@ def set_rule_enabled_state(
                 state,
                 next_status="unknown",
                 value=state.latest_value if state else None,
-                message=(
-                    "Rule disabled; any active alert remains open "
-                    "and acknowledged status is unchanged."
-                ),
+                message="Rule disabled; its active alert has been closed.",
                 evaluated_at=now,
                 condition_started_at=None,
             )
+
+    resolve_active_rule_alerts(session, rule.id, now)
 
     emit_event(
         session,
@@ -971,3 +975,21 @@ def set_rule_enabled_state(
         asset_id=asset.id if asset else None,
         rule_id=rule.id,
     )
+
+
+def resolve_active_rule_alerts(
+    session: Session,
+    rule_id: int,
+    at: datetime | None = None,
+) -> None:
+    now = at or utc_now()
+    active_alerts = session.scalars(
+        select(Alert).where(
+            Alert.rule_id == rule_id,
+            Alert.status == "active",
+        )
+    ).all()
+    for alert in active_alerts:
+        alert.status = "resolved"
+        alert.resolved_at = now
+        alert.last_updated_at = now

@@ -188,7 +188,7 @@ def test_rule_severity_change_updates_active_alert_without_duplicate(client):
     assert client.get("/api/v1/events?event_type=alert_severity_changed").json()["total"] == 1
 
 
-def test_disabled_rule_remains_unknown_and_does_not_resolve_existing_alert(client):
+def test_disabling_rule_closes_active_alert_and_preserves_history(client):
     asset_id = create_asset(client)
     variable_id = create_variable(client, asset_id)
     rule_id = make_threshold_rule(
@@ -200,12 +200,39 @@ def test_disabled_rule_remains_unknown_and_does_not_resolve_existing_alert(clien
     create_reading(client, asset_id, variable_id, 50)
     client.post("/api/v1/monitoring/evaluate")
     assert latest_state(client, rule_id)["status"] == "unknown"
-    assert client.get(f"/api/v1/alerts/{alert['id']}").json()["status"] == "active"
-    assert client.get(f"/api/v1/alerts/active?rule_id={rule_id}").json()["total"] == 1
+    closed_alert = client.get(f"/api/v1/alerts/{alert['id']}").json()
+    assert closed_alert["status"] == "resolved"
+    assert closed_alert["resolved_at"] is not None
+    assert client.get(f"/api/v1/alerts/active?rule_id={rule_id}").json()["total"] == 0
     assert client.get("/api/v1/events?event_type=rule_disabled").json()["total"] == 1
     assert client.patch(f"/api/v1/rules/{rule_id}", json={"is_enabled": True}).status_code == 200
     create_reading(client, asset_id, variable_id, 0)
     assert client.get(f"/api/v1/alerts/{alert['id']}").json()["status"] == "resolved"
+
+
+def test_disabled_rule_can_be_archived_without_deleting_history(client):
+    asset_id = create_asset(client)
+    variable_id = create_variable(client, asset_id)
+    rule_id = make_threshold_rule(
+        client, asset_id, variable_id, name="Archive me", threshold=20, severity="alert"
+    )
+    create_reading(client, asset_id, variable_id, 30)
+    alert = client.get(f"/api/v1/alerts/active?rule_id={rule_id}").json()["items"][0]
+
+    assert client.delete(f"/api/v1/rules/{rule_id}").status_code == 409
+    assert client.patch(
+        f"/api/v1/rules/{rule_id}", json={"is_enabled": False}
+    ).status_code == 200
+    assert client.delete(f"/api/v1/rules/{rule_id}").status_code == 204
+
+    assert client.get(f"/api/v1/assets/{asset_id}/rules").json() == []
+    assert client.get(f"/api/v1/rules/{rule_id}").status_code == 404
+    assert client.get(f"/api/v1/alerts/{alert['id']}").json()["status"] == "resolved"
+    archived_event = client.get(
+        f"/api/v1/events?rule_id={rule_id}&event_type=rule_archived"
+    )
+    assert archived_event.status_code == 200
+    assert archived_event.json()["total"] == 1
 
 
 def test_missing_stale_and_future_data_never_claim_normal(client):
@@ -373,3 +400,47 @@ def test_alert_and_event_filters_and_stable_pagination(client):
     assert len(page["items"]) == 1
     assert client.get("/api/v1/events?severity=invalid").status_code == 422
     assert client.get("/api/v1/alerts?lifecycle_status=invalid").status_code == 422
+
+
+def test_asset_event_log_shows_only_rule_alert_and_machine_stop_events(client):
+    asset_id = create_asset(client)
+    variable_id = create_variable(client, asset_id)
+    rule_id = make_threshold_rule(
+        client, asset_id, variable_id, name="Visible alert", threshold=1, severity="alert"
+    )
+    create_reading(client, asset_id, variable_id, 5)
+
+    with client.app.state.session_factory() as session:
+        occurred_at = datetime.now(timezone.utc)
+        session.add_all(
+            [
+                MonitoringEvent(
+                    event_type="machine_cycle_counted",
+                    message="Cycle pulse",
+                    occurred_at=occurred_at,
+                    asset_id=asset_id,
+                ),
+                MonitoringEvent(
+                    event_type="evaluation_failure",
+                    message="Evaluation noise",
+                    occurred_at=occurred_at,
+                    asset_id=asset_id,
+                    rule_id=rule_id,
+                ),
+                MonitoringEvent(
+                    event_type="machine_stopped",
+                    message="Machine stopped",
+                    occurred_at=occurred_at,
+                    asset_id=asset_id,
+                ),
+            ]
+        )
+        session.commit()
+
+    events = client.get(f"/api/v1/assets/{asset_id}/events").json()
+    messages = [event["text"] for event in events]
+    assert "Machine stopped" in messages
+    assert any("Rule 'Visible alert' created." == message for message in messages)
+    assert any("Visible alert" in message for message in messages)
+    assert "Cycle pulse" not in messages
+    assert "Evaluation noise" not in messages

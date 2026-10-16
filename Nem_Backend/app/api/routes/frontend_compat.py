@@ -25,7 +25,11 @@ from app.models import (
 )
 from app.schemas.rule import RuleCreate
 from app.services.frontend_backup import create_backup, restore_backup
-from app.services.monitoring_engine import set_rule_enabled_state
+from app.services.monitoring_engine import (
+    emit_event,
+    resolve_active_rule_alerts,
+    set_rule_enabled_state,
+)
 from app.api.routes.rules import configured_cycle_signal_mapping, validate_targets
 from app.api.routes.monitoring import state_for_rule
 
@@ -115,7 +119,11 @@ def _rule_row(session: Session, rule: MonitoringRule) -> dict[str, Any]:
         "asset_name": asset.name if asset else "",
         "severity": rule.severity,
         "state": "activated" if rule.is_enabled else "not_activated",
-        "status": {"normal": "ok"}.get(state.status, state.status),
+        "status": (
+            {"normal": "ok"}.get(state.status, state.status)
+            if rule.is_enabled
+            else "unknown"
+        ),
         "rule_type": rule.rule_type,
         "variable_id": rule.variable_id,
         "operator": rule.operator,
@@ -176,7 +184,11 @@ def frontend_summary(session: Session = Depends(get_db)) -> dict[str, Any]:
 def frontend_rules_by_status(kind: str, session: Session = Depends(get_db)) -> list[dict[str, Any]]:
     if kind not in {"alert", "warning"}:
         raise HTTPException(status_code=422, detail="Rule status must be alert or warning")
-    rows = session.scalars(select(MonitoringRule).order_by(MonitoringRule.id)).all()
+    rows = session.scalars(
+        select(MonitoringRule)
+        .where(MonitoringRule.is_archived.is_(False))
+        .order_by(MonitoringRule.id)
+    ).all()
     return [
         row
         for row in (_rule_row(session, rule) for rule in rows)
@@ -195,7 +207,10 @@ def frontend_asset_rules(
     asset_ids = _descendant_ids(session, asset_id) if include_children else {asset_id}
     rules = session.scalars(
         select(MonitoringRule)
-        .where(MonitoringRule.target_asset_id.in_(asset_ids))
+        .where(
+            MonitoringRule.target_asset_id.in_(asset_ids),
+            MonitoringRule.is_archived.is_(False),
+        )
         .order_by(MonitoringRule.id)
     ).all()
     return [_rule_row(session, rule) for rule in rules]
@@ -217,6 +232,15 @@ def frontend_create_asset_rule(
     )
     rule = MonitoringRule(**payload.model_dump())
     session.add(rule)
+    session.flush()
+    emit_event(
+        session,
+        event_type="rule_created",
+        message=f"Rule '{rule.name}' created.",
+        occurred_at=datetime.now(timezone.utc),
+        asset_id=rule.target_asset_id,
+        rule_id=rule.id,
+    )
     session.commit()
     session.refresh(rule)
     return _rule_row(session, rule)
@@ -234,7 +258,10 @@ def frontend_bulk_rule_state(
     if state not in {"activated", "not_activated"}:
         raise HTTPException(status_code=422, detail="State must be activated or not_activated")
     rules = session.scalars(
-        select(MonitoringRule).where(MonitoringRule.target_asset_id == asset_id)
+        select(MonitoringRule).where(
+            MonitoringRule.target_asset_id == asset_id,
+            MonitoringRule.is_archived.is_(False),
+        )
     ).all()
     enabled = state == "activated"
     for rule in rules:
@@ -247,19 +274,23 @@ def frontend_bulk_rule_state(
 @router.delete("/rules/{rule_id}", status_code=204)
 def frontend_delete_rule(rule_id: int, session: Session = Depends(get_db)) -> None:
     rule = session.get(MonitoringRule, rule_id)
-    if rule is None:
+    if rule is None or rule.is_archived:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id} was not found")
-    if session.scalar(select(RuleState.id).where(RuleState.rule_id == rule_id).limit(1)):
+    if rule.is_enabled:
         raise HTTPException(
-            status_code=409, detail="Evaluated rules cannot be deleted; disable the rule to preserve its history."
+            status_code=409, detail="Deactivate the rule before archiving it."
         )
-    if session.scalar(select(Alert.id).where(Alert.rule_id == rule_id).limit(1)) or session.scalar(
-        select(MonitoringEvent.id).where(MonitoringEvent.rule_id == rule_id).limit(1)
-    ):
-        raise HTTPException(
-            status_code=409, detail="Rules with alert history cannot be deleted; disable the rule instead."
-        )
-    session.delete(rule)
+    set_rule_enabled_state(session, rule, False)
+    resolve_active_rule_alerts(session, rule.id)
+    rule.is_archived = True
+    emit_event(
+        session,
+        event_type="rule_archived",
+        message=f"Rule '{rule.name}' archived; evaluation and alert history retained.",
+        occurred_at=datetime.now(timezone.utc),
+        asset_id=rule.target_asset_id,
+        rule_id=rule.id,
+    )
     session.commit()
 
 
@@ -316,7 +347,17 @@ def frontend_asset_events(
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     events = session.scalars(
         select(MonitoringEvent)
-        .where(MonitoringEvent.asset_id == asset_id)
+        .where(
+            MonitoringEvent.asset_id == asset_id,
+            MonitoringEvent.event_type.in_(
+                (
+                    "rule_created",
+                    "warning_triggered",
+                    "alert_triggered",
+                    "machine_stopped",
+                )
+            ),
+        )
         .order_by(MonitoringEvent.occurred_at.desc())
         .limit(200)
     ).all()

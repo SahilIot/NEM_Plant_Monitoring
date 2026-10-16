@@ -83,12 +83,30 @@ export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "C
           values[field.requiredWhen.key] === field.requiredWhen.equals)
     );
 
-  // Reinitialize if a modal is reused with a different set of fields/options.
-  // This prevents stale IDs remaining selected when the available options change.
+  // Preserve edits when parent polling refreshes dynamic field options.
   useEffect(() => {
-    setValues(Object.fromEntries(fields.map((field) => [field.key, initialValue(field)])));
-    setError("");
-    setBusy(false);
+    setValues((current) => {
+      let changed = Object.keys(current).length !== fields.length;
+      const next = Object.fromEntries(
+        fields.map((field) => {
+          const hasValue = Object.hasOwn(current, field.key);
+          let value = hasValue ? current[field.key] : initialValue(field);
+
+          if (
+            field.type === "select" &&
+            value !== "" &&
+            field.options &&
+            !field.options.some(([option]) => String(option) === String(value))
+          ) {
+            value = initialValue(field);
+          }
+
+          if (!hasValue || value !== current[field.key]) changed = true;
+          return [field.key, value];
+        })
+      );
+      return changed ? next : current;
+    });
   }, [fields]);
 
   const set = (key, value) => setValues((current) => ({ ...current, [key]: value }));

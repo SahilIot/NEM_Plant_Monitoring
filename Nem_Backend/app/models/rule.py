@@ -2,7 +2,17 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, JSON, Numeric, String, Text, text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    JSON,
+    Numeric,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -40,6 +50,9 @@ class MonitoringRule(Base):
     parameters: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    is_archived: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
     evaluation_interval_seconds: Mapped[int | None] = mapped_column()
     stale_after_seconds: Mapped[int | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(

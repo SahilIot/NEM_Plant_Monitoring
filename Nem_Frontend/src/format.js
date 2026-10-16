@@ -26,9 +26,10 @@ export function timeAgo(value, now = Date.now()) {
 
 export function formatDuration(seconds) {
   const total = Number(seconds);
-  if (!Number.isFinite(total) || total < 0) return "0h 0m";
-  const minutes = Math.floor(total / 60);
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  if (!Number.isFinite(total) || total < 0) return "0h 0m 0s";
+  const wholeSeconds = Math.floor(total);
+  const minutes = Math.floor(wholeSeconds / 60);
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m ${wholeSeconds % 60}s`;
 }
 
 export function formatValue(value) {

@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext } from "react-router-dom";
 import { api } from "../api.js";
-import { formatValue, timeAgo } from "../format.js";
+import { formatDuration, formatValue, timeAgo } from "../format.js";
 import { EmptyState } from "../components/UI.jsx";
 import { CheckIcon } from "../components/Icons.jsx";
 
@@ -314,6 +314,10 @@ export default function Home() {
                     {machine?.last_seen_at
                       ? ` · signal ${timeAgo(machine.last_seen_at)}`
                       : ""}
+                  </span>
+                  <span className="value-age">
+                    Running time:{" "}
+                    {formatDuration(machine?.running_seconds ?? 0)}
                   </span>
                   <span className="value-age">
                     {cycleRule

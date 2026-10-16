@@ -30,7 +30,7 @@ def configured_cycle_signal_mapping(
 
 def rule_or_404(session: Session, rule_id: int) -> MonitoringRule:
     rule = session.get(MonitoringRule, rule_id)
-    if rule is None:
+    if rule is None or rule.is_archived:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id} was not found")
     return rule
 
@@ -143,15 +143,14 @@ def create_rule(
     session.add(rule)
     session.flush()
 
-    if not rule.is_enabled:
-        emit_event(
-            session,
-            event_type="rule_disabled",
-            message=f"Rule '{rule.name}' created disabled.",
-            occurred_at=utc_now(),
-            asset_id=rule.target_asset_id,
-            rule_id=rule.id,
-        )
+    emit_event(
+        session,
+        event_type="rule_created",
+        message=f"Rule '{rule.name}' created.",
+        occurred_at=utc_now(),
+        asset_id=rule.target_asset_id,
+        rule_id=rule.id,
+    )
     session.commit()
     session.refresh(rule)
     return rule
@@ -168,8 +167,12 @@ def list_rules(
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
     #Build the database queries
-    query = select(MonitoringRule)
-    count_query = select(func.count()).select_from(MonitoringRule)
+    query = select(MonitoringRule).where(MonitoringRule.is_archived.is_(False))
+    count_query = (
+        select(func.count())
+        .select_from(MonitoringRule)
+        .where(MonitoringRule.is_archived.is_(False))
+    )
     for condition, column in (
         (target_asset_id, MonitoringRule.target_asset_id),
         (rule_type, MonitoringRule.rule_type),

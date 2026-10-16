@@ -83,7 +83,7 @@ def test_cycle_counts_only_false_to_true_transitions_and_persists(client):
             session.query(MonitoringEvent)
             .filter_by(event_type="machine_cycle_counted", asset_id=asset_id)
             .count()
-            == 2
+            == 0
         )
 
     restarted = OpcUaCollector(
@@ -212,6 +212,12 @@ def test_running_time_is_checkpointed_and_resumes_from_persisted_total(client):
         assert float(state.accumulated_running_seconds) == pytest.approx(15)
         assert state.is_running is False
         assert state.last_cycle_signal_at == start
+        assert (
+            session.query(MonitoringEvent)
+            .filter_by(event_type="machine_stopped", asset_id=asset_id)
+            .count()
+            == 1
+        )
 
     collector._process_notification(
         notification(
