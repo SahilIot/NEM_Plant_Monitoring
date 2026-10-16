@@ -10,6 +10,8 @@ from app.core.config import get_settings, validate_postgresql_database_url
 
 
 class UTCDateTime(TypeDecorator[datetime]):
+    """Expose aware UTC datetimes while storing UTC-naive timestamps."""
+
     impl = DateTime
     cache_ok = True
 
@@ -17,13 +19,17 @@ class UTCDateTime(TypeDecorator[datetime]):
         if value is None:
             return None
         if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
+            value = value.replace(tzinfo=timezone.utc)
+        else:
+            value = value.astimezone(timezone.utc)
+        return value.replace(tzinfo=None)
 
     def process_result_value(self, value: datetime | None, dialect) -> datetime | None:
-        if value is None or value.tzinfo is not None:
-            return value
-        return value.replace(tzinfo=timezone.utc)
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
 
 def create_database_engine(database_url: str | None = None) -> Engine:

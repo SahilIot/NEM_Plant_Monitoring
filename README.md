@@ -128,8 +128,14 @@ application database; tests use only the separate `TEST_DATABASE_URL`.
   corresponding existing NEM asset/boolean-variable IDs.
 - `OPCUA_RECONNECT_DELAY_SECONDS` — wait before retrying a disconnected
   subscription, default `5`.
-- `OPCUA_RUNTIME_CHECKPOINT_SECONDS` — subscription publishing and persisted
-  running-time checkpoint interval, default `10`.
+- `OPCUA_SUBSCRIPTION_PUBLISHING_INTERVAL_MS` — requested OPC UA subscription
+  publishing interval in milliseconds, default `1000`. The server may revise
+  this value; `/api/v1/plc/status` and collector logs report the negotiated
+  value when available. The collector's monitored-item sampling interval
+  remains asyncua's `50` ms default and queue size `0` (server default).
+- `OPCUA_RUNTIME_CHECKPOINT_SECONDS` — persisted running-time checkpoint and
+  collector wait interval in seconds, default `10`; this does not set the
+  subscription publishing interval.
 - `SETTINGS_ENCRYPTION_KEY` — Fernet key used to encrypt the SMTP password
   saved by the dashboard. Generate one with
   `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`

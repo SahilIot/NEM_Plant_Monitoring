@@ -73,6 +73,15 @@ export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "C
   );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const isVisible = (field) =>
+    !field.showWhen ||
+    values[field.showWhen.key] === field.showWhen.equals;
+  const isRequired = (field) =>
+    Boolean(
+      field.required ||
+        (field.requiredWhen &&
+          values[field.requiredWhen.key] === field.requiredWhen.equals)
+    );
 
   // Reinitialize if a modal is reused with a different set of fields/options.
   // This prevents stale IDs remaining selected when the available options change.
@@ -87,7 +96,11 @@ export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "C
   const submit = async (e) => {
     e.preventDefault();
     for (const f of fields) {
-      if (f.required && !String(values[f.key] ?? "").trim()) {
+      if (
+        isVisible(f) &&
+        isRequired(f) &&
+        !String(values[f.key] ?? "").trim()
+      ) {
         return setError(`${f.label} is required.`);
       }
     }
@@ -120,11 +133,11 @@ export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "C
     <Modal title={title} onClose={onClose} wide>
       <form onSubmit={submit}>
         {intro && <p className="muted modal-intro">{intro}</p>}
-        {fields.map((f, i) => (
+        {fields.filter(isVisible).map((f, i) => (
           <div className="field" key={f.key}>
             <label htmlFor={"f-" + f.key}>
               {f.label}
-              {f.required && <span className="req"> *</span>}
+              {isRequired(f) && <span className="req"> *</span>}
             </label>
             {f.type === "textarea" ? (
               <textarea id={"f-" + f.key} rows={3} placeholder={f.placeholder} value={values[f.key] ?? ""} disabled={busy} onChange={(e) => set(f.key, e.target.value)} />
@@ -132,7 +145,7 @@ export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "C
               <select
                 id={"f-" + f.key}
                 value={values[f.key] ?? ""}
-                required={Boolean(f.required)}
+                required={isRequired(f)}
                 disabled={Boolean(f.disabled || busy)}
                 onChange={(e) => {
                   set(f.key, e.target.value);
@@ -146,7 +159,7 @@ export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "C
                 {f.options.map(([v, l]) => <option key={String(v)} value={String(v)}>{l}</option>)}
               </select>
             ) : (
-              <input id={"f-" + f.key} type={f.type || "text"} step={f.type === "number" ? "any" : undefined} autoFocus={i === 0} required={Boolean(f.required)} disabled={busy} placeholder={f.placeholder} value={values[f.key] ?? ""} onChange={(e) => set(f.key, e.target.value)} />
+              <input id={"f-" + f.key} type={f.type || "text"} step={f.type === "number" ? "any" : undefined} autoFocus={i === 0} required={isRequired(f)} disabled={busy} placeholder={f.placeholder} value={values[f.key] ?? ""} onChange={(e) => set(f.key, e.target.value)} />
             )}
             {f.hint && <span className="hint">{f.hint}</span>}
           </div>

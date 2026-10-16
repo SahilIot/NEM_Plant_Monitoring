@@ -26,7 +26,7 @@ from app.models import (
 from app.schemas.rule import RuleCreate
 from app.services.frontend_backup import create_backup, restore_backup
 from app.services.monitoring_engine import set_rule_enabled_state
-from app.api.routes.rules import validate_targets
+from app.api.routes.rules import configured_cycle_signal_mapping, validate_targets
 from app.api.routes.monitoring import state_for_rule
 
 router = APIRouter(tags=["frontend compatibility"])
@@ -205,6 +205,7 @@ def frontend_asset_rules(
 def frontend_create_asset_rule(
     asset_id: int,
     payload: RuleCreate,
+    request: Request,
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     if payload.target_asset_id != asset_id:
@@ -212,6 +213,7 @@ def frontend_create_asset_rule(
     validate_targets(
         session, payload.target_asset_id, payload.variable_id, payload.rule_type,
         payload.operator, payload.threshold, payload.parameters,
+        configured_cycle_signal_mapping(request, payload.variable_id),
     )
     rule = MonitoringRule(**payload.model_dump())
     session.add(rule)
@@ -382,6 +384,7 @@ def delete_document(document_id: int, session: Session = Depends(get_db)) -> Non
 @router.post("/import")
 def import_configuration(
     payload: dict[str, Any],
+    request: Request,
     session: Session = Depends(get_db),
 ) -> dict[str, int]:
     collections = payload.get("collections", [])
@@ -407,6 +410,7 @@ def import_configuration(
         validate_targets(
             session, data.target_asset_id, data.variable_id, data.rule_type,
             data.operator, data.threshold, data.parameters,
+            configured_cycle_signal_mapping(request, data.variable_id),
         )
         session.add(MonitoringRule(**data.model_dump()))
     session.commit()

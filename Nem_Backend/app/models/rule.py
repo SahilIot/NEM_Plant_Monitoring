@@ -16,9 +16,12 @@ class MonitoringRule(Base):
             "severity IN ('warning', 'alert')", name="ck_nem_monitoring_rules_severity"
         ),
         CheckConstraint(
-            "rule_type IN ('parameter_threshold', 'runtime_duration', 'duration', 'generic')",
+            "rule_type IN ('parameter_threshold', 'runtime_duration', "
+            "'duration', 'generic', 'boolean_condition', "
+            "'boolean_count_threshold')",
             name="ck_nem_monitoring_rules_type",
         ),
+
         Index("ix_nem_monitoring_rules_target_enabled", "target_asset_id", "is_enabled"),
     )
 

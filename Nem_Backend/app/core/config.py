@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     opcua_machine_mappings: str = ""
     opcua_reconnect_delay_seconds: int = Field(default=5, ge=1, le=300)
     opcua_runtime_checkpoint_seconds: int = Field(default=10, ge=1, le=300)
+    opcua_subscription_publishing_interval_ms: int = Field(default=1000, ge=1)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

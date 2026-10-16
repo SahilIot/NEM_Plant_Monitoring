@@ -10,6 +10,21 @@ from app.core.config import Settings # application`s configuration class, which 
 
 LOGGER = logging.getLogger("nem_backend.opcua")
 
+
+class _ConfiguredOpcUaClient(Client):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.last_subscription_result: ua.CreateSubscriptionResult | None = None
+
+    def get_subscription_revised_params(
+        self,
+        params: ua.CreateSubscriptionParameters,
+        results: ua.CreateSubscriptionResult,
+    ) -> ua.ModifySubscriptionParameters | None:
+        self.last_subscription_result = results
+        return super().get_subscription_revised_params(params, results)
+
+
 # something is wrong with your configuration- missing cert or invalid endpoint
 class OpcUaConfigurationError(RuntimeError):
     pass
@@ -116,7 +131,7 @@ async def create_configured_opcua_client(settings: Settings) -> Client:
             "OPC UA endpoint is not configured."
         )
 
-    client = Client(
+    client = _ConfiguredOpcUaClient(
         url=endpoint,
         timeout=settings.opcua_timeout_seconds,
     )

@@ -1,11 +1,14 @@
 import asyncio
 import json
+import logging
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
+from sqlalchemy import text
 
 from app.models import MachineMonitoringState, MonitoringEvent, Reading
 from app.schemas.opcua import OpcUaMachineMapping
@@ -190,6 +193,9 @@ def test_running_time_is_checkpointed_and_resumes_from_persisted_total(client):
     start = datetime.now(timezone.utc)
 
     collector._process_notification(
+        notification("ns=2;s=Machine.Cycle", False, start)
+    )
+    collector._process_notification(
         notification("ns=2;s=Machine.Running", True, start)
     )
     collector._checkpoint_runtime(start + timedelta(seconds=10))
@@ -205,6 +211,7 @@ def test_running_time_is_checkpointed_and_resumes_from_persisted_total(client):
         state = session.get(MachineMonitoringState, asset_id)
         assert float(state.accumulated_running_seconds) == pytest.approx(15)
         assert state.is_running is False
+        assert state.last_cycle_signal_at == start
 
     collector._process_notification(
         notification(
@@ -218,6 +225,116 @@ def test_running_time_is_checkpointed_and_resumes_from_persisted_total(client):
         persisted = session.get(MachineMonitoringState, asset_id)
         assert float(persisted.accumulated_running_seconds) == pytest.approx(22)
         assert persisted.is_running is True
+        assert persisted.last_cycle_signal_at == start
+
+
+def test_postgresql_utc_timestamp_round_trips_with_non_utc_session_timezone(client):
+    asset_id = create_asset(client)
+    timestamp = datetime(2026, 10, 16, 9, 12, 17, 106412, tzinfo=timezone.utc)
+
+    with client.app.state.session_factory() as session:
+        session.execute(text("SET LOCAL TIME ZONE 'Asia/Calcutta'"))
+        session.add(
+            MachineMonitoringState(
+                asset_id=asset_id,
+                last_cycle_signal_at=timestamp,
+                updated_at=timestamp,
+            )
+        )
+        session.commit()
+
+    with client.app.state.session_factory() as session:
+        session.execute(text("SET LOCAL TIME ZONE 'Asia/Calcutta'"))
+        state = session.get(MachineMonitoringState, asset_id)
+        stored_timestamp = session.scalar(
+            text(
+                "SELECT last_cycle_signal_at FROM machine_monitoring_states "
+                "WHERE asset_id = :asset_id"
+            ),
+            {"asset_id": asset_id},
+        )
+
+    assert state is not None
+    assert state.last_cycle_signal_at == timestamp
+    assert state.last_cycle_signal_at.tzinfo == timezone.utc
+    assert stored_timestamp == timestamp.replace(tzinfo=None)
+
+
+def test_naive_notification_timestamp_is_interpreted_as_utc(client, caplog):
+    asset_id = create_asset(client)
+    variable_id = create_variable(client, asset_id, key="cycle_signal", data_type="boolean")
+    collector = configure_collector(client, asset_id, variable_id)
+    timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    with caplog.at_level(logging.WARNING, logger="nem_backend.opcua.collector"):
+        collector._process_notification(
+            notification("ns=2;s=Machine.Cycle", False, timestamp)
+        )
+
+    with client.app.state.session_factory() as session:
+        state = session.get(MachineMonitoringState, asset_id)
+        assert state is not None
+        assert state.last_cycle_signal_at == timestamp.replace(tzinfo=timezone.utc)
+    assert "interpreting it as UTC" in caplog.text
+
+
+def test_corrected_legacy_timestamp_allows_new_cycle_notification(client, caplog):
+    asset_id = create_asset(client)
+    variable_id = create_variable(client, asset_id, key="cycle_signal", data_type="boolean")
+    collector = configure_collector(client, asset_id, variable_id)
+    source_timestamp = datetime.now(timezone.utc) - timedelta(seconds=5)
+    incorrectly_stored_timestamp = source_timestamp.astimezone(
+        ZoneInfo("Asia/Calcutta")
+    ).replace(tzinfo=None)
+
+    with client.app.state.session_factory() as session:
+        session.add(
+            MachineMonitoringState(
+                asset_id=asset_id,
+                cycle_count=0,
+                last_cycle_signal_at=source_timestamp,
+                updated_at=source_timestamp,
+            )
+        )
+        session.commit()
+        session.execute(
+            text(
+                "UPDATE machine_monitoring_states "
+                "SET last_cycle_signal_at = :timestamp WHERE asset_id = :asset_id"
+            ),
+            {"timestamp": incorrectly_stored_timestamp, "asset_id": asset_id},
+        )
+        session.commit()
+
+    with caplog.at_level(logging.WARNING, logger="nem_backend.opcua.collector"):
+        collector._process_notification(
+            notification("ns=2;s=Machine.Cycle", True, source_timestamp)
+        )
+
+    with client.app.state.session_factory() as session:
+        assert session.query(Reading).filter_by(variable_id=variable_id).count() == 0
+        session.execute(
+            text(
+                "UPDATE machine_monitoring_states "
+                "SET last_cycle_signal_at = "
+                "(last_cycle_signal_at AT TIME ZONE 'Asia/Calcutta') "
+                "AT TIME ZONE 'UTC' WHERE asset_id = :asset_id"
+            ),
+            {"asset_id": asset_id},
+        )
+        session.commit()
+
+    accepted_timestamp = source_timestamp + timedelta(seconds=1)
+    collector._process_notification(
+        notification("ns=2;s=Machine.Cycle", True, accepted_timestamp)
+    )
+
+    with client.app.state.session_factory() as session:
+        state = session.get(MachineMonitoringState, asset_id)
+        assert state is not None
+        assert state.last_cycle_signal_at == accepted_timestamp
+        assert session.query(Reading).filter_by(variable_id=variable_id).count() == 1
+    assert "Out-of-order OPC UA notification" in caplog.text
 
 
 def test_startup_pauses_runtime_without_counting_backend_downtime(client):
@@ -475,14 +592,36 @@ def test_subscription_uses_only_data_change_subscribe_and_releases_resources(
     assert all("write" not in operation[0] for operation in operations)
 
 
-def test_database_lease_prevents_duplicate_collectors(client):
+def test_database_lease_prevents_duplicate_collectors(client, monkeypatch):
     asset_id = create_asset(client)
     variable_id = create_variable(client, asset_id, key="cycle_signal", data_type="boolean")
     first = configure_collector(client, asset_id, variable_id)
     second = OpcUaCollector(first.settings, client.app.state.session_factory)
+    checkpoint = datetime.now(timezone.utc)
+    with client.app.state.session_factory() as session:
+        session.add(
+            MachineMonitoringState(
+                asset_id=asset_id,
+                is_running=True,
+                runtime_checkpoint_at=checkpoint,
+                updated_at=checkpoint,
+            )
+        )
+        session.commit()
 
     assert first._acquire_lease() is True
     assert second._acquire_lease() is False
+
+    async def stop_standby_collector():
+        second._stop_event.set()
+
+    monkeypatch.setattr(second, "_wait_before_retry", stop_standby_collector)
+    asyncio.run(second._run())
+    with client.app.state.session_factory() as session:
+        state = session.get(MachineMonitoringState, asset_id)
+        assert state is not None
+        assert state.runtime_checkpoint_at == checkpoint
+
     first._release_lease()
     assert second._acquire_lease() is True
     second._release_lease()

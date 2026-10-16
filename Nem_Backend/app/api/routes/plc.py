@@ -48,8 +48,12 @@ def plc_monitoring_status(request: Request,session: Session = Depends(get_db),) 
     connection["stale_after_seconds"] = (
         request.app.state.settings.monitoring_default_stale_after_seconds
     )
+    connection["requested_publishing_interval_ms"] = (
+        request.app.state.settings.opcua_subscription_publishing_interval_ms
+    )
     return {
         "connection": connection,
+        "mappings": collector.configured_mapping_rows(session),
         "machines": machine_status_rows(
             session,
             collector,

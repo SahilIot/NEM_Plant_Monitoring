@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
 import { formatDuration, timeAgo } from "../format.js";
 
@@ -23,111 +23,112 @@ export default function Plc() {
   const [monitoring, setMonitoring] = useState(null);
   const [monitoringLoading, setMonitoringLoading] = useState(true);
   const [monitoringError, setMonitoringError] = useState("");
+  const monitoringRequest = useRef(null);
+  const monitoringMounted = useRef(false);
 
   const [latestReadings, setLatestReadings] = useState([]);
   const [latestError, setLatestError] = useState("");
   const [latestLoading, setLatestLoading] = useState(true);
 
-  // Refresh the latest readings saved in the backend database.
-  useEffect(() => {
-    let active = true;
-    let requestRunning = false;
+  // Load saved readings once, or refresh them after an explicit action.
+  const loadLatestReadings = useCallback(async () => {
+    try {
+      const result = await api.getAll("/readings/latest?limit=100");
+      const items = Array.isArray(result) ? result : [];
+      const newestByVariable = new Map();
 
-    const loadLatestReadings = async () => {
-      if (requestRunning) return;
-      requestRunning = true;
+      for (const item of items) {
+        const key = `${item.asset_id}:${item.variable_id}`;
+        const previous = newestByVariable.get(key);
 
-      try {
-        const result = await api.getAll("/readings/latest?limit=100");
-
-        if (!active) return;
-
-        const items = Array.isArray(result) ? result : [];
-        const newestByVariable = new Map();
-
-        for (const item of items) {
-          const key = `${item.asset_id}:${item.variable_id}`;
-          const previous = newestByVariable.get(key);
-
-          if (
-            !previous ||
-            new Date(item.recorded_at).getTime() >
-              new Date(previous.recorded_at).getTime()
-          ) {
-            newestByVariable.set(key, item);
-          }
+        if (
+          !previous ||
+          new Date(item.recorded_at).getTime() >
+            new Date(previous.recorded_at).getTime()
+        ) {
+          newestByVariable.set(key, item);
         }
-
-        const newest = [...newestByVariable.values()].sort(
-          (a, b) =>
-            new Date(b.recorded_at).getTime() -
-            new Date(a.recorded_at).getTime()
-        );
-
-        setLatestReadings(newest);
-        setLatestError("");
-      } catch (error) {
-        if (active) {
-          setLatestError(error.message || "Could not load latest readings.");
-        }
-      } finally {
-        requestRunning = false;
-        if (active) setLatestLoading(false);
       }
-    };
 
-    loadLatestReadings();
-    const timer = window.setInterval(loadLatestReadings, 2000);
+      const newest = [...newestByVariable.values()].sort(
+        (a, b) =>
+          new Date(b.recorded_at).getTime() -
+          new Date(a.recorded_at).getTime()
+      );
 
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
+      setLatestReadings(newest);
+      setLatestError("");
+    } catch (error) {
+      setLatestError(
+        error.message || "Could not load latest readings."
+      );
+    } finally {
+      setLatestLoading(false);
+    }
   }, []);
 
-  // Refresh continuous machine monitoring status.
-  useEffect(() => {
-    let active = true;
+  // Share one in-flight request between initial load, polling, and manual refresh.
+  const loadMonitoringStatus = useCallback(async () => {
+    if (monitoringRequest.current) return monitoringRequest.current;
 
-    const loadStatus = async () => {
+    let request;
+    request = (async () => {
       try {
         const result = await api.get("/plc/status");
-
-        if (!active) return;
-
-        setMonitoring(result);
-        setMonitoringError("");
+        if (monitoringMounted.current) {
+          setMonitoring(result);
+          setMonitoringError("");
+        }
       } catch (error) {
-        if (active) {
-          setMonitoringError(error.message || "Could not load PLC status.");
+        if (monitoringMounted.current) {
+          setMonitoringError(
+            error.message || "Could not load PLC status."
+          );
         }
       } finally {
-        if (active) setMonitoringLoading(false);
+        if (monitoringMounted.current) {
+          setMonitoringLoading(false);
+        }
+        if (monitoringRequest.current === request) {
+          monitoringRequest.current = null;
+        }
       }
-    };
+    })();
 
-    loadStatus();
-    const interval = window.setInterval(loadStatus, 5000);
+    monitoringRequest.current = request;
+    return request;
+  }, []);
 
+  useEffect(() => {
+    monitoringMounted.current = true;
     return () => {
-      active = false;
-      window.clearInterval(interval);
+      monitoringMounted.current = false;
     };
   }, []);
 
-  // Load active assets.
+  // Initial data load.
   useEffect(() => {
     let active = true;
+
+    const loadInitialData = async () => {
+      await Promise.all([
+        loadLatestReadings(),
+        loadMonitoringStatus(),
+      ]);
+    };
+
+    loadInitialData();
 
     api
       .getAll("/assets?is_active=true")
       .then((items) => {
         if (!active) return;
 
-        setAssets(items);
+        const list = Array.isArray(items) ? items : [];
+        setAssets(list);
 
-        if (items.length) {
-          setAssetId(String(items[0].id));
+        if (list.length) {
+          setAssetId(String(list[0].id));
         }
       })
       .catch((error) => {
@@ -142,9 +143,34 @@ export default function Plc() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [loadLatestReadings, loadMonitoringStatus]);
 
-  // Load variables whenever the selected asset changes.
+  // Poll status after each completed request so requests never overlap.
+  useEffect(() => {
+    let active = true;
+    let timeoutId;
+
+    const pollMonitoringStatus = async () => {
+      const requestStartedAt = Date.now();
+      await loadMonitoringStatus();
+      if (active) {
+        const elapsed = Date.now() - requestStartedAt;
+        timeoutId = window.setTimeout(
+          pollMonitoringStatus,
+          Math.max(0, 1500 - elapsed)
+        );
+      }
+    };
+
+    pollMonitoringStatus();
+
+    return () => {
+      active = false;
+      window.clearTimeout(timeoutId);
+    };
+  }, [loadMonitoringStatus]);
+
+  // Load active variables whenever the selected asset changes.
   useEffect(() => {
     let active = true;
 
@@ -152,7 +178,9 @@ export default function Plc() {
 
     if (!assetId) {
       setVariables([]);
-      return undefined;
+      return () => {
+        active = false;
+      };
     }
 
     api
@@ -160,17 +188,20 @@ export default function Plc() {
       .then((items) => {
         if (!active) return;
 
-        setVariables(items);
+        const list = Array.isArray(items) ? items : [];
+        setVariables(list);
 
-        if (items.length) {
-          setVariableId(String(items[0].id));
+        if (list.length) {
+          setVariableId(String(list[0].id));
         }
       })
       .catch((error) => {
         if (!active) return;
 
         setVariables([]);
-        setReading(`Could not load variables: ${error.message}`);
+        setReading(
+          `Could not load variables: ${error.message}`
+        );
         setReadError(true);
       });
 
@@ -198,7 +229,8 @@ export default function Plc() {
     } catch (error) {
       setConnection({
         state: "error",
-        message: error.message || "OPC UA connection test failed.",
+        message:
+          error.message || "OPC UA connection test failed.",
       });
     } finally {
       setBusy("");
@@ -221,43 +253,22 @@ export default function Plc() {
       });
 
       const recordedAt = result.reading?.recorded_at
-        ? new Date(result.reading.recorded_at).toLocaleString()
+        ? new Date(
+            result.reading.recorded_at
+          ).toLocaleString()
         : "time unavailable";
 
       setReading(
-        `Read and saved: ${JSON.stringify(result.value)} at ${recordedAt}`
+        `Read and saved: ${JSON.stringify(
+          result.value
+        )} at ${recordedAt}`
       );
 
-      // Refresh the readings panel immediately after a successful read.
-      try {
-        const items = await api.getAll("/readings/latest?limit=100");
-        const newestByVariable = new Map();
-
-        for (const item of Array.isArray(items) ? items : []) {
-          const key = `${item.asset_id}:${item.variable_id}`;
-          const previous = newestByVariable.get(key);
-
-          if (
-            !previous ||
-            new Date(item.recorded_at).getTime() >
-              new Date(previous.recorded_at).getTime()
-          ) {
-            newestByVariable.set(key, item);
-          }
-        }
-
-        setLatestReadings(
-          [...newestByVariable.values()].sort(
-            (a, b) =>
-              new Date(b.recorded_at).getTime() -
-              new Date(a.recorded_at).getTime()
-          )
-        );
-
-        setLatestError("");
-      } catch {
-        // The regular polling effect will try again.
-      }
+      // Refresh the display after a successful one-time read.
+      await Promise.all([
+        loadLatestReadings(),
+        loadMonitoringStatus(),
+      ]);
     } catch (error) {
       setReading(`PLC read failed: ${error.message}`);
       setReadError(true);
@@ -284,11 +295,7 @@ export default function Plc() {
 
   const formatValue = (value) => {
     if (value === null || value === undefined) return "—";
-
-    if (typeof value === "object") {
-      return JSON.stringify(value);
-    }
-
+    if (typeof value === "object") return JSON.stringify(value);
     return String(value);
   };
 
@@ -313,13 +320,22 @@ export default function Plc() {
         on the backend.
       </p>
 
-      {/* Latest saved readings */}
       <section className="panel plc-panel wide">
-        <h2>Latest PLC readings</h2>
+        <div className="panel-head">
+          <h2>Latest PLC readings</h2>
+          <button
+            type="button"
+            className="btn-outline"
+            disabled={latestLoading}
+            onClick={loadLatestReadings}
+          >
+            Refresh readings
+          </button>
+        </div>
 
         <p className="muted">
-          Latest values saved in the backend database. This panel refreshes
-          automatically every 2 seconds.
+          Latest values saved in the backend database. This table updates when
+          the page opens, when you read a node, or when you refresh manually.
         </p>
 
         {latestLoading && (
@@ -334,12 +350,14 @@ export default function Plc() {
           </p>
         )}
 
-        {!latestLoading && !latestError && latestReadings.length === 0 && (
-          <p className="muted">
-            No readings have been saved yet. Use “Read node and save” to test
-            a node, or configure continuous subscriptions in the backend.
-          </p>
-        )}
+        {!latestLoading &&
+          !latestError &&
+          latestReadings.length === 0 && (
+            <p className="muted">
+              No readings have been saved yet. Use “Read node and save” to test
+              a node, or configure continuous subscriptions in the backend.
+            </p>
+          )}
 
         {latestReadings.length > 0 && (
           <div className="table-wrap">
@@ -354,7 +372,6 @@ export default function Plc() {
                   <th>NodeId</th>
                 </tr>
               </thead>
-
               <tbody>
                 {latestReadings.map((item) => (
                   <tr key={`${item.asset_id}-${item.variable_id}`}>
@@ -371,7 +388,9 @@ export default function Plc() {
                           : "—"}
                       </span>
                       <br />
-                      <small>{formatTimestamp(item.recorded_at)}</small>
+                      <small>
+                        {formatTimestamp(item.recorded_at)}
+                      </small>
                     </td>
                     <td>
                       <code>
@@ -386,9 +405,22 @@ export default function Plc() {
         )}
       </section>
 
-      {/* Existing continuous machine monitoring */}
       <section className="panel plc-panel wide">
-        <h2>Continuous machine monitoring</h2>
+        <div className="panel-head">
+          <h2>Continuous machine monitoring</h2>
+          <button
+            type="button"
+            className="btn-outline"
+            disabled={monitoringLoading}
+            onClick={loadMonitoringStatus}
+          >
+            Refresh status
+          </button>
+        </div>
+
+        <p className="muted">
+          Monitoring status refreshes automatically every 1.5 seconds.
+        </p>
 
         {monitoringLoading && (
           <p className="muted" role="status">
@@ -428,6 +460,77 @@ export default function Plc() {
               </p>
             )}
 
+            <p className="muted">
+              Effective NodeId mappings come from backend
+              {" "}OPCUA_MACHINE_MAPPINGS (read-only). Requested publishing
+              interval: {conn?.requested_publishing_interval_ms ?? "—"} ms;
+              negotiated:{" "}
+              {conn?.negotiated_publishing_interval_ms == null
+                ? "unavailable"
+                : `${conn.negotiated_publishing_interval_ms} ms`}
+              . asyncua monitors at a requested 50 ms sampling interval with
+              server-default queue size; the server may revise either value.
+            </p>
+
+            {monitoring.mappings?.length > 0 && (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Asset</th>
+                      <th>Variable</th>
+                      <th>Type</th>
+                      <th>Configured NodeId</th>
+                      <th>Collector role</th>
+                      <th>Mapping status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monitoring.mappings.map((mapping) => {
+                      const mappingIsValid = mapping.mapping_valid;
+                      const storedNodeDiffers =
+                        mapping.variable_opcua_node_id &&
+                        mapping.variable_opcua_node_id !== mapping.node_id;
+                      return (
+                        <tr
+                          key={`${mapping.asset_id}-${mapping.variable_id}-${mapping.node_id}`}
+                        >
+                          <td>
+                            {mapping.asset_name || "Missing asset"}
+                            {" "}
+                            <small>#{mapping.asset_id}</small>
+                          </td>
+                          <td>
+                            {mapping.variable_name || "Missing variable"}
+                            {" "}
+                            <small>#{mapping.variable_id}</small>
+                          </td>
+                          <td>{mapping.data_type || "—"}</td>
+                          <td><code>{mapping.node_id}</code></td>
+                          <td>
+                            {mapping.role === "cycle_signal"
+                              ? "Cycle signal"
+                              : mapping.role === "running_signal"
+                                ? "Running signal"
+                                : "Ordinary reading"}
+                          </td>
+                          <td>
+                            {!mappingIsValid
+                              ? "Invalid or inactive database target"
+                              : storedNodeDiffers
+                                ? "Warning: variable NodeId differs from collector config"
+                                : conn?.connected
+                                  ? "Configured; collector connected"
+                                  : "Configured; collector disconnected"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
             {!monitoring.machines?.length ? (
               <p className="muted">
                 No machine NodeId mappings are configured.
@@ -435,11 +538,19 @@ export default function Plc() {
             ) : (
               <div className="machine-cards">
                 {monitoring.machines.map((machine) => (
-                  <article className="machine-card" key={machine.asset_id}>
+                  <article
+                    className="machine-card"
+                    key={machine.asset_id}
+                  >
                     <header>
-                      <h3>{machine.asset_name || `Asset ${machine.asset_id}`}</h3>
+                      <h3>
+                        {machine.asset_name ||
+                          `Asset ${machine.asset_id}`}
+                      </h3>
 
-                      <span className={"machine-state " + machine.status}>
+                      <span
+                        className={"machine-state " + machine.status}
+                      >
                         <i
                           className={
                             "lamp " +
@@ -450,7 +561,9 @@ export default function Plc() {
                                 : "warning")
                           }
                         />
-                        <span className="cap">{machine.status}</span>
+                        <span className="cap">
+                          {machine.status}
+                        </span>
                         {machine.stale && <em>stale data</em>}
                       </span>
                     </header>
@@ -473,7 +586,10 @@ export default function Plc() {
                           {machine.runtime_limit_seconds ? (
                             <small>
                               {" "}
-                              / {formatDuration(machine.runtime_limit_seconds)}
+                              /{" "}
+                              {formatDuration(
+                                machine.runtime_limit_seconds
+                              )}
                             </small>
                           ) : null}
                         </b>
@@ -483,7 +599,9 @@ export default function Plc() {
                     <p className="muted">
                       Last signal:{" "}
                       {machine.last_seen_at
-                        ? `${timeAgo(machine.last_seen_at)} (${formatTimestamp(
+                        ? `${timeAgo(
+                            machine.last_seen_at
+                          )} (${formatTimestamp(
                             machine.last_seen_at
                           )})`
                         : "not received"}
@@ -492,12 +610,13 @@ export default function Plc() {
                     {machine.alerts?.length > 0 && (
                       <div role="status" className="machine-alerts">
                         <strong>Active alerts</strong>
-
                         {machine.alerts.map((alert) => (
                           <p
                             className={
                               "notice " +
-                              (alert.severity === "alert" ? "error" : "warn")
+                              (alert.severity === "alert"
+                                ? "error"
+                                : "warn")
                             }
                             key={alert.id}
                           >
@@ -514,7 +633,6 @@ export default function Plc() {
         )}
       </section>
 
-      {/* Existing secure connection test */}
       <section className="panel plc-panel">
         <h2>Secure connection</h2>
 
@@ -528,13 +646,16 @@ export default function Plc() {
           disabled={busy !== ""}
           onClick={testConnection}
         >
-          {busy === "test" ? "Testing…" : "Test secure connection"}
+          {busy === "test"
+            ? "Testing…"
+            : "Test secure connection"}
         </button>
 
         {connection.message && (
           <p
             className={
-              "notice" + (connection.state === "error" ? " error" : "")
+              "notice" +
+              (connection.state === "error" ? " error" : "")
             }
             role="status"
           >
@@ -543,7 +664,6 @@ export default function Plc() {
         )}
       </section>
 
-      {/* Existing one-time read */}
       <section className="panel plc-panel">
         <h2>Read and save one value</h2>
 
@@ -616,14 +736,18 @@ export default function Plc() {
                 !nodeId.trim()
               }
             >
-              {busy === "read" ? "Reading…" : "Read node and save"}
+              {busy === "read"
+                ? "Reading…"
+                : "Read node and save"}
             </button>
           </div>
         </form>
 
         {reading && (
           <p
-            className={"notice" + (readError ? " error" : "")}
+            className={
+              "notice" + (readError ? " error" : "")
+            }
             role="status"
           >
             {reading}

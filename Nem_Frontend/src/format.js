@@ -48,6 +48,20 @@ const OPERATOR_SYMBOL = {
 };
 
 export function conditionText(rule, variableName) {
+  if (rule.rule_type === "boolean_count_threshold") {
+    const warnings = rule.parameters?.warning_thresholds;
+    const alert = rule.parameters?.alert_threshold;
+    if (
+      !Array.isArray(warnings) ||
+      warnings.length !== 2 ||
+      alert == null
+    ) {
+      return "Cycle-count thresholds";
+    }
+    const formatCount = (value) =>
+      Number(value).toLocaleString([], { maximumFractionDigits: 0 });
+    return `Cycles: warning at ${formatCount(warnings[0])} / ${formatCount(warnings[1])}, alert at ${formatCount(alert)}`;
+  }
   if (rule.rule_type !== "parameter_threshold" || rule.threshold == null) return "";
   const symbol = OPERATOR_SYMBOL[rule.operator] || rule.operator || "";
   return `${variableName || "Value"} ${symbol} ${rule.threshold}`;

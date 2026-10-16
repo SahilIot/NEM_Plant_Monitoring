@@ -30,6 +30,56 @@ def latest_state(client, rule_id):
     return response.json()
 
 
+def test_rule_creation_scopes_cycle_threshold_validation_to_count_rules(client):
+    asset_id = create_asset(client)
+    numeric_variable_id = create_variable(client, asset_id)
+
+    parameter_rule = client.post(
+        "/api/v1/rules",
+        json={
+            "name": "Temperature threshold",
+            "rule_type": "parameter_threshold",
+            "target_asset_id": asset_id,
+            "variable_id": numeric_variable_id,
+            "operator": ">",
+            "threshold": 80,
+            "severity": "warning",
+        },
+    )
+    assert parameter_rule.status_code == 201, parameter_rule.text
+
+    boolean_variable_id = create_variable(
+        client, asset_id, key="cycle_signal", data_type="boolean"
+    )
+    count_rule = client.post(
+        "/api/v1/rules",
+        json={
+            "name": "Cycle count thresholds",
+            "rule_type": "boolean_count_threshold",
+            "target_asset_id": asset_id,
+            "variable_id": boolean_variable_id,
+            "parameters": {
+                "warning_thresholds": [100, 200],
+                "alert_threshold": 300,
+            },
+            "severity": "warning",
+        },
+    )
+    assert count_rule.status_code == 201, count_rule.text
+
+    invalid_count_rule = client.post(
+        "/api/v1/rules",
+        json={
+            "name": "Missing cycle thresholds",
+            "rule_type": "boolean_count_threshold",
+            "target_asset_id": asset_id,
+            "variable_id": boolean_variable_id,
+            "severity": "warning",
+        },
+    )
+    assert invalid_count_rule.status_code == 422
+
+
 def test_threshold_normal_warning_alert_recovery_and_deduplication(client):
     asset_id = create_asset(client)
     variable_id = create_variable(client, asset_id)
