@@ -271,9 +271,7 @@ export default function AssetDetail() {
             mapping.mapping_valid
         );
         setCycleVariableIds(
-          activeCycleMapping
-            ? [activeCycleMapping.variable_id]
-            : []
+          activeCycleMapping ? [activeCycleMapping.variable_id] : []
         );
         setCycleMapping(activeCycleMapping || null);
         setPlcConnection(plc.value?.connection || null);
