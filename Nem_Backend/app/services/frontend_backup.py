@@ -1,14 +1,15 @@
 import json
 import os
 import tempfile
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
+from enum import Enum
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import delete, insert, text
+from sqlalchemy import delete, insert, inspect as sa_inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -54,17 +55,31 @@ def backup_directory(settings: Settings) -> Path:
 def _json_default(value: Any) -> Any:
     if isinstance(value, datetime):
         return {"__datetime__": value.isoformat()}
+    if isinstance(value, date):
+        return {"__date__": value.isoformat()}
     if isinstance(value, Decimal):
         return {"__decimal__": str(value)}
+    if isinstance(value, Enum):
+        return value.value
     raise TypeError(f"Unsupported value in database backup: {type(value).__name__}")
 
 
 def _json_object_hook(value: dict[str, Any]) -> Any:
     if set(value) == {"__datetime__"}:
         return datetime.fromisoformat(value["__datetime__"])
+    if set(value) == {"__date__"}:
+        return date.fromisoformat(value["__date__"])
     if set(value) == {"__decimal__"}:
         return Decimal(value["__decimal__"])
     return value
+
+
+def _attribute_keys(model: Any) -> dict[str, str]:
+    mapper = sa_inspect(model)
+    return {
+        column.name: mapper.get_property_by_column(column).key
+        for column in model.__table__.columns
+    }
 
 
 def create_backup(session: Session, settings: Settings, name: str, note: str | None):
@@ -72,13 +87,14 @@ def create_backup(session: Session, settings: Settings, name: str, note: str | N
 
     filename = f"{uuid4().hex}.json"
     target = backup_directory(settings) / filename
-    content = {
-        model.__tablename__: [
-            {column.name: getattr(row, column.key) for column in model.__table__.columns}
-            for row in session.query(model).order_by(model.__table__.primary_key.columns.values()[0]).all()
+    content = {}
+    for model in SNAPSHOT_MODELS:
+        keys = _attribute_keys(model)
+        rows = session.query(model).order_by(model.__table__.primary_key.columns.values()[0]).all()
+        content[model.__tablename__] = [
+            {column_name: getattr(row, attribute) for column_name, attribute in keys.items()}
+            for row in rows
         ]
-        for model in SNAPSHOT_MODELS
-    }
     encoded = json.dumps(content, default=_json_default, separators=(",", ":"))
     temporary_path = None
     try:

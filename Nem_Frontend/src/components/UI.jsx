@@ -59,8 +59,7 @@ export const Modal = ({ title, onClose, children, wide }) => {
   );
 };
 
-// A <select> shows its first option even when no value has been chosen, so the
-// form state has to start on that option or the visible choice is never submitted.
+
 const initialValue = (field) => {
   if (field.default !== undefined && field.default !== null) return field.default;
   if (field.type === "select" && field.options?.length) return field.options[0][0];

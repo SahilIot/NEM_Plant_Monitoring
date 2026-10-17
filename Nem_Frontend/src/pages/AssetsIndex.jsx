@@ -5,8 +5,8 @@ import { EmptyState } from "../components/UI.jsx";
 export default function AssetsIndex() {
   const { assets, assetsLoaded } = useOutletContext();
   if (!assetsLoaded) return <div className="loading" role="status">Loading assets…</div>;
-  // Open the top of the hierarchy first so the tree is expanded around it.
-  const first = assets.find((asset) => asset.parent_asset_id == null) || assets[0];
+  
+ const first = assets.find((asset) => asset.parent_asset_id == null) || assets[0];
   if (first) return <Navigate to={`/assets/${first.id}`} replace />;
   return (
     <div className="panel">
