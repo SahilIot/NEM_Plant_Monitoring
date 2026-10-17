@@ -1,3 +1,4 @@
+#Readings API router.Focusing on receiving PLC readings,saving them to postgreSQL,retrieving the lastest or historical readings for the frontend
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -8,28 +9,16 @@ from app.db.session import get_db
 from app.models import Asset, Reading, Variable
 from app.schemas.reading import ReadingBatch, ReadingCreate, ReadingRead
 from app.services.monitoring_engine import evaluate_reading_rules
-from app.services.reading_ingestion import (
-    ingest_reading as persist_reading,
-    make_reading,
-    validate_reading,
-)
-
+from app.services.reading_ingestion import (ingest_reading as persist_reading,make_reading,validate_reading,)
 
 router = APIRouter(prefix="/readings", tags=["readings"])
 MAX_BATCH_SIZE = 100
 
-
 @router.post("", response_model=ReadingRead, status_code=status.HTTP_201_CREATED)
-def ingest_reading(
-    payload: ReadingCreate, request: Request, session: Session = Depends(get_db)
-) -> Reading:
-    return persist_reading(
-        session,
-        payload,
+def ingest_reading(payload: ReadingCreate, request: Request, session: Session = Depends(get_db)) -> Reading:
+    return persist_reading(session,payload,
         stale_after_seconds=request.app.state.settings.monitoring_default_stale_after_seconds,
     )
-
-
 
 @router.get("/latest", response_model=list[ReadingRead])
 def latest_readings(

@@ -14,7 +14,6 @@ from app.db.session import get_db
 from app.models import Asset, MonitoringRule, Reading, Variable  # these are database models
 from app.schemas.asset import AssetCreate, AssetRead, AssetTree, AssetUpdate # pydantic schema for input validation and output formatting
 
-
 router = APIRouter(prefix="/assets", tags=["assets"]) 
 
 #check if an asset exists in the database, if not raise a 404 error
