@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
 import { api } from "../api.js";
 import { REFRESH_MS } from "../config.js";
+import PredefinedRulesModal from "./PredefinedRulesModal.jsx";
 import { conditionText, formatDuration, formatTime, formatValue, timeAgo } from "../format.js";
 import { CreateModal, EmptyState, Modal, StatusBadge } from "../components/UI.jsx";
 import {
@@ -52,6 +53,20 @@ const ruleFields = (variables) => [
   },
 ];
 
+const TIME_RULE_FIELDS = () => [
+  { key: "name", label: "Rule name", required: true, placeholder: "e.g. Daily operating window" },
+  { key: "description", label: "Description", type: "textarea", placeholder: "What should this rule watch?" },
+  { key: "current_time", label: "Current time", type: "time", required: true },
+  { key: "end_time", label: "End time", type: "time", required: true },
+  {
+    key: "severity",
+    label: "Severity",
+    type: "select",
+    default: "warning",
+    options: [["warning", "Warning"], ["alert", "Alert"]],
+  },
+];
+
 const LOG_FIELDS = [
   { key: "text", label: "Entry", type: "textarea", required: true, placeholder: "What was done or noticed?" },
 ];
@@ -70,20 +85,9 @@ const VARIABLE_FIELDS = [
     label: "Data type",
     type: "select",
     default: "number",
-    options: [
-      ["number", "Number"],
-      ["integer", "Whole number"],
-      ["boolean", "On / off"],
-      ["string", "Text"],
-    ],
+    options: [["number", "Number"], ["integer", "Whole number"], ["boolean", "On / off"], ["string", "Text"]],
   },
   { key: "unit", label: "Unit", placeholder: "e.g. °C, rpm, cycles" },
-  {
-    key: "node_id",
-    label: "PLC OPC UA Node ID",
-    placeholder: "e.g. ns=3;s=Machine.CycleCount",
-    hint: "Enter the actual Node ID from your PLC's OPC UA server.",
-  },
 ];
 
 export default function AssetDetail() {
@@ -106,14 +110,16 @@ export default function AssetDetail() {
   const [showFilter, setShowFilter] = useState(false);
   const [menu, setMenu] = useState(false);
   const [sortMenu, setSortMenu] = useState(false);
+  const [addRuleMenu, setAddRuleMenu] = useState(false);
   const [modal, setModal] = useState(null);
+  const [showPredefinedRules, setShowPredefinedRules] = useState(false);
   const [logs, setLogs] = useState([]);
   const [events, setEvents] = useState([]);
   const [loadError, setLoadError] = useState("");
   const [, setTick] = useState(0);
   const seq = useRef(0);
 
-  
+  // Everything that changes while the machine runs: rules, readings, rule states, PLC runtime.
   const loadLive = useCallback(async () => {
     const mine = ++seq.current;
     const [r, rd, st, plc] = await Promise.allSettled([
@@ -164,6 +170,7 @@ export default function AssetDetail() {
     setTab("status");
     setList("activated");
     setFilter("");
+    setAddRuleMenu(false);
     setReadings([]);
     setMachine(null);
     setLogs([]);
@@ -191,7 +198,7 @@ export default function AssetDetail() {
       .catch((error) => setLoadError(error.message));
   }, [tab, assetId]);
 
-
+  // Rules on child assets reference variables this page has not loaded; look up their names.
   useEffect(() => {
     const missing = [...new Set(rules.map((r) => r.variable_id).filter((v) => v != null && !varNames.has(v)))];
     if (!missing.length) return;
@@ -295,17 +302,15 @@ export default function AssetDetail() {
   };
 
   const addVariable = async (values) => {
-  await api.post(`/assets/${assetId}/variables`, {
-    name: values.name.trim(),
-    key: values.key.trim(),
-    data_type: values.data_type,
-    unit: values.unit?.trim() || null,
-    node_id: values.node_id?.trim() || null,
-  });
-
-  setModal("variables");
-  await loadVariables();
-};
+    await api.post(`/assets/${assetId}/variables`, {
+      name: values.name.trim(),
+      key: values.key.trim(),
+      data_type: values.data_type,
+      unit: values.unit?.trim() || null,
+    });
+    setModal("variables");
+    await loadVariables();
+  };
 
   if (!asset) {
     return assetsLoaded
@@ -366,20 +371,6 @@ export default function AssetDetail() {
                 <span>Cycles</span>
                 <b>{machine.cycle_count}{machine.cycle_limit ? <small> / {machine.cycle_limit}</small> : null}</b>
               </div>
-              <div className="machine-fig">
-                <span>Rotation direction</span>
-                <b>
-                  {["clockwise", "cw"].includes(
-                    String(machine.rotation_direction || "").toLowerCase()
-                  )
-                  ? "↻ Clockwise"
-                  : ["counterclockwise", "counter-clockwise", "ccw"].includes(
-                    String(machine.rotation_direction || "").toLowerCase()
-                  )
-                  ? "↺ Counterclockwise"
-                  : "Unknown"}
-                  </b>
-                  </div>
               <div className="machine-fig">
                 <span>Running time</span>
                 <b>
@@ -466,9 +457,30 @@ export default function AssetDetail() {
               )}
             </div>
 
-            <button className="btn-primary" onClick={() => setModal("add")}>
-              <PlusCircle size={17} /> Add rule
-            </button>
+            <div className="rule-actions dropdown">
+              <button
+                type="button"
+                className="btn-primary add-rule-trigger"
+                onClick={() => { setAddRuleMenu((open) => !open); setMenu(false); }}
+                aria-haspopup="menu"
+                aria-expanded={addRuleMenu}
+              >
+                <PlusCircle size={17} /> Add rule <ChevronDown size={15} />
+              </button>
+              {addRuleMenu && (
+                <div className="menu right add-rule-menu" role="menu">
+                  <div role="menuitem" onClick={() => { setAddRuleMenu(false); setModal("ruleTypeOptions"); }}>
+                    <PlusCircle size={15} /> Create new
+                  </div>
+                  <div role="menuitem" onClick={() => { setAddRuleMenu(false); setShowPredefinedRules(true); }}>
+                    <GearIcon size={15} /> Assign predefined monitoring rules
+                  </div>
+                  <div role="menuitem" onClick={() => { setAddRuleMenu(false); setModal("copyRulesInfo"); }}>
+                    <AssetIcon size={15} /> Copy from another asset
+                  </div>
+                </div>
+              )}
+            </div>
 
             <div className="dropdown">
               <button className="icon-outline sm" onClick={() => setMenu(!menu)} title="Rule actions" aria-label="Rule actions" aria-haspopup="menu" aria-expanded={menu}>
@@ -569,6 +581,25 @@ export default function AssetDetail() {
         </div>
       )}
 
+      {modal === "ruleTypeOptions" && (
+        <Modal title="Create new rule" onClose={() => setModal(null)}>
+          <div className="rule-type-options">
+            <button type="button" className="rule-type-option" onClick={() => setModal("add")}>
+              <strong>Interval-based</strong>
+              <small>Create a rule based on intervals</small>
+            </button>
+            <button type="button" className="rule-type-option" onClick={() => setModal("addUsage")}>
+              <strong>Usage-based</strong>
+              <small>Create a rule based on machine usage</small>
+            </button>
+            <button type="button" className="rule-type-option" onClick={() => setModal("addTime")}>
+              <strong>Time-based</strong>
+              <small>Create a rule with current time and end time</small>
+            </button>
+          </div>
+        </Modal>
+      )}
+
       {modal === "add" && (
         <CreateModal
           title="Add rule"
@@ -576,7 +607,69 @@ export default function AssetDetail() {
           intro={numericVariables.length ? undefined : "This asset has no numeric variables yet. Add one under Variables, then come back to create a threshold rule."}
           fields={ruleFields(numericVariables)}
           onSubmit={addRule}
-          onClose={() => setModal(null)}
+          onClose={() => setModal("ruleTypeOptions")}
+        />
+      )}
+
+      {modal === "addUsage" && (
+        <CreateModal
+          title="Create usage-based rule"
+          submitLabel="Create rule"
+          intro="Usage-based rule saving is not connected to the backend yet. The fields below are a draft only."
+          fields={[
+            { key: "name", label: "Rule name", required: true, placeholder: "e.g. Monthly usage limit" },
+            { key: "description", label: "Description", type: "textarea", placeholder: "What usage should this rule monitor?" },
+            { key: "usage_limit", label: "Usage limit", type: "number", required: true, placeholder: "Enter usage limit" },
+            { key: "severity", label: "Severity", type: "select", default: "warning", options: [["warning", "Warning"], ["alert", "Alert"]] },
+          ]}
+          onSubmit={async (values) => {
+            const limit = Number(values.usage_limit);
+            if (!Number.isFinite(limit)) throw new Error("Enter a valid usage limit.");
+            console.log("Usage-based rule draft:", {
+              name: values.name.trim(),
+              description: values.description?.trim() || "",
+              usage_limit: limit,
+              severity: values.severity,
+            });
+            setModal(null);
+          }}
+          onClose={() => setModal("ruleTypeOptions")}
+        />
+      )}
+
+      {modal === "copyRulesInfo" && (
+        <Modal title="Copy from another asset" onClose={() => setModal(null)}>
+          <p className="muted">Copying rules from another asset is not connected in this version of AssetDetail.</p>
+          <div className="modal-actions">
+            <button type="button" className="btn-outline" onClick={() => setModal(null)}>Close</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal === "addTime" && (
+        <CreateModal
+          title="Create time-based rule"
+          submitLabel="Create rule"
+          fields={TIME_RULE_FIELDS()}
+          onSubmit={async (values) => {
+            if (!values.name?.trim()) throw new Error("Please enter a rule name.");
+            if (!values.current_time || !values.end_time) {
+              throw new Error("Please select both current time and end time.");
+            }
+            if (values.current_time === values.end_time) {
+              throw new Error("Current time and end time cannot be the same.");
+            }
+            // Frontend-only draft: saving to the backend will be added later.
+            console.log("Time-based rule draft:", {
+              name: values.name.trim(),
+              description: values.description?.trim() || "",
+              current_time: values.current_time,
+              end_time: values.end_time,
+              severity: values.severity,
+            });
+            setModal(null);
+          }}
+          onClose={() => setModal("ruleTypeOptions")}
         />
       )}
 
@@ -614,15 +707,7 @@ export default function AssetDetail() {
         <Modal title="Variables" onClose={() => setModal(null)}>
           {variables.length ? (
             <table className="table">
-              <thead>
-                <tr>
-                  <th>Variable</th>
-                  <th>Key</th>
-                  <th>Type</th>
-                  <th>Unit</th>
-                  <th>PLC Node ID</th>
-                  </tr>
-                  </thead>
+              <thead><tr><th>Variable</th><th>Key</th><th>Type</th><th>Unit</th></tr></thead>
               <tbody>
                 {variables.map((variable) => (
                   <tr key={variable.id}>
@@ -630,10 +715,9 @@ export default function AssetDetail() {
                     <td>{variable.key}</td>
                     <td>{variable.data_type}</td>
                     <td>{variable.unit || "—"}</td>
-                    <td>{variable.node_id || "Not configured"}</td>
-                    </tr>
-                  ))}
-                  </tbody>
+                  </tr>
+                ))}
+              </tbody>
             </table>
           ) : (
             <p className="muted">No active variables are configured for this asset.</p>
@@ -643,6 +727,18 @@ export default function AssetDetail() {
             <button className="btn-primary" onClick={() => setModal(null)}>Close</button>
           </div>
         </Modal>
+      )}
+
+      {showPredefinedRules && (
+        <PredefinedRulesModal
+          assetId={assetId}
+          onClose={() => setShowPredefinedRules(false)}
+          onAssigned={async () => {
+            setShowPredefinedRules(false);
+            setList("not_activated");
+            await refreshAll();
+          }}
+        />
       )}
     </div>
   );

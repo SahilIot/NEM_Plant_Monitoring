@@ -1,7 +1,4 @@
-﻿/* NEM Plant Monitor.
-   Palette: cool steel neutrals; brand red is reserved for identity so that red
-   on screen always means "alert". Actions use oil-blue. Status colors are the
-   only saturated colors in the interface. */
+﻿
 
 :root {
   --font: "Barlow", "Bahnschrift", "Segoe UI", system-ui, sans-serif;
@@ -103,7 +100,7 @@ h3 { margin: 0; }
 .clickable { cursor: pointer; }
 .lede { margin: -8px 0 18px; max-width: 70ch; }
 
-/* ---------- Shell ---------- */
+
 .app { display: flex; flex-direction: column; height: 100%; border-top: 3px solid var(--brand); }
 .topbar { height: 58px; display: flex; align-items: center; gap: 16px; padding: 0 20px; background: var(--surface); border-bottom: 1px solid var(--line); }
 .brand-logo { height: 38px; width: auto; display: block; }
@@ -144,7 +141,7 @@ h3 { margin: 0; }
 .banner p { margin: 0; }
 .banner.error { background: var(--alert-soft); border-color: var(--alert); color: var(--ink); }
 
-/* ---------- Asset panel ---------- */
+
 .tree { width: 310px; flex-shrink: 0; margin: 0 0 20px 20px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .tree-tools { display: flex; gap: 8px; padding: 10px; border-bottom: 1px solid var(--line); }
 .tree-tools input { flex: 1; min-width: 0; height: var(--ctl); padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--r-ctl); }
@@ -165,14 +162,14 @@ h3 { margin: 0; }
 .tree-foot { padding: 10px; border-top: 1px solid var(--line); }
 .wide-btn { width: 100%; }
 
-/* Status lamp: the one visual device used for asset health, alerts and machine state. */
+
 .lamp { display: inline-block; width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; background: var(--off); }
 .lamp.ok { background: var(--ok); }
 .lamp.warning { background: var(--warn-lamp); box-shadow: 0 0 0 3px var(--warn-soft); }
 .lamp.alert { background: var(--alert); box-shadow: 0 0 0 3px var(--alert-soft); }
 .lamp.off { background: transparent; border: 2px solid var(--off); }
 
-/* ---------- Panels, buttons, forms ---------- */
+
 .panel, .panel-white, .panel-gray { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); padding: 18px 20px; margin-bottom: 18px; max-width: 1120px; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 1120px; }
@@ -221,7 +218,7 @@ button:disabled { opacity: 0.55; cursor: default; }
 .modal-intro { margin: -6px 0 16px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 
-/* ---------- Tables, badges ---------- */
+
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { text-align: left; padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .table th { color: var(--muted); font-weight: 600; font-size: 13.5px; background: var(--surface-2); }
@@ -237,7 +234,7 @@ button:disabled { opacity: 0.55; cursor: default; }
 .badge.unknown { background: var(--surface-2); color: var(--muted); border: 1px solid var(--line); }
 .badge.role { background: var(--action-soft); color: var(--action); }
 
-/* ---------- Overview ---------- */
+
 .annunciator { display: grid; grid-template-columns: repeat(4, 1fr); max-width: 1120px; margin-bottom: 18px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-panel); overflow: hidden; }
 .tile { position: relative; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; text-align: left; padding: 20px 20px 16px; border: none; border-right: 1px solid var(--line); background: var(--surface); color: var(--ink); min-height: 128px; }
 .tile:last-child { border-right: none; }
@@ -283,7 +280,7 @@ button:disabled { opacity: 0.55; cursor: default; }
 .state-list a:hover span { color: var(--action); }
 .state-list b { font-family: var(--font-num); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
-/* ---------- Configuration and settings index ---------- */
+
 .cards-col { display: flex; flex-direction: column; gap: 12px; max-width: 720px; }
 .cardlink { display: flex; align-items: center; gap: 18px; padding: 18px 20px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); color: inherit; text-decoration: none; }
 .cardlink:hover { border-color: var(--action); background: var(--surface-2); }
@@ -291,7 +288,7 @@ button:disabled { opacity: 0.55; cursor: default; }
 .cardlink-title { color: var(--ink); font-weight: 600; font-size: 17px; margin-bottom: 2px; }
 .cardlink-desc { color: var(--muted); }
 
-/* ---------- Asset page ---------- */
+
 .asset-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; max-width: 1120px; margin-bottom: 14px; }
 .asset-head .page-title { margin-bottom: 8px; }
 .asset-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; }
@@ -358,7 +355,7 @@ button:disabled { opacity: 0.55; cursor: default; }
 .rule-now b { font-family: var(--font-num); font-size: 17px; color: var(--ink); font-variant-numeric: tabular-nums; }
 .rule-row .badge { min-width: 78px; text-align: center; }
 
-/* ---------- PLC ---------- */
+
 .plc-panel { max-width: 780px; }
 .plc-panel.wide { max-width: 1120px; }
 .plc-panel h2 { margin-bottom: 8px; }
@@ -374,7 +371,7 @@ button:disabled { opacity: 0.55; cursor: default; }
 .machine-card p { margin: 6px 0 0; }
 .machine-alerts { margin-top: 10px; }
 
-/* ---------- Profile and settings ---------- */
+
 .profile { max-width: 640px; }
 .profile-head { display: flex; align-items: center; gap: 16px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
 .avatar { width: 60px; height: 60px; border-radius: 50%; background: var(--ink); color: var(--surface); display: flex; align-items: center; justify-content: center; font-family: var(--font-num); font-size: 28px; font-weight: 600; flex-shrink: 0; }
@@ -393,7 +390,7 @@ button:disabled { opacity: 0.55; cursor: default; }
 .usage-grid .stat-sub { color: var(--muted); text-transform: capitalize; }
 .usage-grid .stat-val { font-family: var(--font-num); font-size: 38px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
 
-/* ---------- Responsive ---------- */
+
 @media (max-width: 1100px) {
   .annunciator { grid-template-columns: repeat(2, 1fr); }
   .tile:nth-child(2) { border-right: none; }
@@ -625,4 +622,78 @@ button:disabled { opacity: 0.55; cursor: default; }
   .plc-page .form{grid-template-columns:1fr}
   .plc-page .plc-hero{padding:18px}
   .plc-page .machine-figs{grid-template-columns:1fr}
+}
+
+
+/* Add Rule Dropdown */
+.rule-actions.dropdown {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.rule-actions .add-rule-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.rule-actions .add-rule-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  left: auto;
+  min-width: 275px;
+  padding: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  z-index: 1000;
+  text-align: left;
+}
+
+.rule-actions .add-rule-menu div[role="menuitem"] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 5px;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.rule-actions .add-rule-menu div[role="menuitem"]:hover {
+  background: var(--action-soft);
+  color: var(--action);
+}
+
+.rule-actions .add-rule-menu div[role="menuitem"] svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.rule-actions .add-rule-menu div[role="menuitem"]:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: -2px;
+}
+
+@media (max-width: 640px) {
+  .rule-actions .add-rule-menu {
+    right: 0;
+    left: auto;
+    min-width: min(275px, calc(100vw - 40px));
+  }
+
+  .rule-actions .add-rule-menu div[role="menuitem"] {
+    white-space: normal;
+  }
 }

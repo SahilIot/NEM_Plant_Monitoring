@@ -209,7 +209,7 @@ export default function Plc() {
 
   return (
     <div ref={rootRef} className={"plc-page" + (light ? " plc-light" : "")}>
-      {/*header*/}
+      {}
       <div className="page-head plc-hero">
         <div className="plc-hero-icon"><IconChip size={26} /></div>
         <div className="plc-hero-text">
@@ -219,7 +219,7 @@ export default function Plc() {
         <span className={"pill " + pill.tone} role="status"><i />{pill.text}</span>
       </div>
 
-      {/*continuous monitoring*/}
+      {}
       <section className="panel plc-panel wide">
         <div className="panel-head">
           <span className="panel-icon"><IconPulse /></span>
@@ -302,7 +302,7 @@ export default function Plc() {
         )}
       </section>
 
-      {/*connection + read, side by side*/}
+      {}
       <div className="plc-grid">
         <section className="panel plc-panel">
           <div className="panel-head">
