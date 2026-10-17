@@ -26,9 +26,10 @@ export function timeAgo(value, now = Date.now()) {
 
 export function formatDuration(seconds) {
   const total = Number(seconds);
-  if (!Number.isFinite(total) || total < 0) return "0h 0m";
-  const minutes = Math.floor(total / 60);
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  if (!Number.isFinite(total) || total < 0) return "0h 0m 0s";
+  const wholeSeconds = Math.floor(total);
+  const minutes = Math.floor(wholeSeconds / 60);
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m ${wholeSeconds % 60}s`;
 }
 
 export function formatValue(value) {
@@ -48,6 +49,20 @@ const OPERATOR_SYMBOL = {
 };
 
 export function conditionText(rule, variableName) {
+  if (rule.rule_type === "boolean_count_threshold") {
+    const warnings = rule.parameters?.warning_thresholds;
+    const alert = rule.parameters?.alert_threshold;
+    if (
+      !Array.isArray(warnings) ||
+      warnings.length !== 2 ||
+      alert == null
+    ) {
+      return "Cycle-count thresholds";
+    }
+    const formatCount = (value) =>
+      Number(value).toLocaleString([], { maximumFractionDigits: 0 });
+    return `Cycles: warning at ${formatCount(warnings[0])} / ${formatCount(warnings[1])}, alert at ${formatCount(alert)}`;
+  }
   if (rule.rule_type !== "parameter_threshold" || rule.threshold == null) return "";
   const symbol = OPERATOR_SYMBOL[rule.operator] || rule.operator || "";
   return `${variableName || "Value"} ${symbol} ${rule.threshold}`;

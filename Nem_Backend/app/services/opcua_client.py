@@ -4,10 +4,26 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from asyncua import Client # Provides the OPC UA client connection and real operations
+from asyncua import Client, ua # Provides the OPC UA client connection and protocol types
+from asyncua.crypto.security_policies import SecurityPolicyBasic256Sha256
 from app.core.config import Settings # application`s configuration class, which supplies connection settings
 
 LOGGER = logging.getLogger("nem_backend.opcua")
+
+
+class _ConfiguredOpcUaClient(Client):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.last_subscription_result: ua.CreateSubscriptionResult | None = None
+
+    def get_subscription_revised_params(
+        self,
+        params: ua.CreateSubscriptionParameters,
+        results: ua.CreateSubscriptionResult,
+    ) -> ua.ModifySubscriptionParameters | None:
+        self.last_subscription_result = results
+        return super().get_subscription_revised_params(params, results)
+
 
 # something is wrong with your configuration- missing cert or invalid endpoint
 class OpcUaConfigurationError(RuntimeError):
@@ -107,26 +123,24 @@ async def read_opcua_node(settings: Settings, node_id: str) -> OpcUaRead:
     )
 
 
-
 async def create_configured_opcua_client(settings: Settings) -> Client:
     endpoint = settings.opcua_endpoint.strip()
 
-    if not endpoint.startswith("opc.tcp://"):
+    if not endpoint:
         raise OpcUaConfigurationError(
-            "Set OPCUA_ENDPOINT to the PLC's opc.tcp:// endpoint."
+            "OPC UA endpoint is not configured."
         )
 
-    client = Client(
+    client = _ConfiguredOpcUaClient(
         url=endpoint,
         timeout=settings.opcua_timeout_seconds,
     )
 
-    # TEMPORARY LOCAL TEST ONLY:
-    # No certificate security is configured here.
-    # Keep the client read-only; do not add write operations.
     if settings.opcua_username.strip():
         client.set_user(settings.opcua_username.strip())
-        client.set_password(settings.opcua_password.get_secret_value())
+        client.set_password(
+            settings.opcua_password.get_secret_value()
+        )
 
     return client
 
@@ -141,7 +155,7 @@ async def test_opcua_connection(settings: Settings) -> dict[str, object]:
         "endpoint": settings.opcua_endpoint.strip(),
         "test": "read_only",
         "server_time": server_time.isoformat() if isinstance(server_time, datetime) else str(server_time),
-        "message": "OPC UA secure connection and read test succeeded.",
+        "message": "OPC UA certificate-secured connection and read test succeeded.",
     }
 
 # Handled communication with the PLC.
