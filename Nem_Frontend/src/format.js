@@ -1,4 +1,4 @@
-// Backend timestamps are ISO-8601 strings with a UTC offset.
+
 export function formatTime(value) {
   if (!value) return "—";
   const date = new Date(value);
@@ -67,3 +67,4 @@ export function conditionText(rule, variableName) {
   const symbol = OPERATOR_SYMBOL[rule.operator] || rule.operator || "";
   return `${variableName || "Value"} ${symbol} ${rule.threshold}`;
 }
+

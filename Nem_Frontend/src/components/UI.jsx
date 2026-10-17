@@ -59,8 +59,7 @@ export const Modal = ({ title, onClose, children, wide }) => {
   );
 };
 
-// Form values are kept as strings because HTML inputs/selects emit strings.
-// Required selects start empty unless a field explicitly supplies a default.
+
 const initialValue = (field) => {
   if (field.default !== undefined && field.default !== null) return String(field.default);
   if (field.type === "select") return "";
