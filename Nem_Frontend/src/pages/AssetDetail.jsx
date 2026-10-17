@@ -70,9 +70,20 @@ const VARIABLE_FIELDS = [
     label: "Data type",
     type: "select",
     default: "number",
-    options: [["number", "Number"], ["integer", "Whole number"], ["boolean", "On / off"], ["string", "Text"]],
+    options: [
+      ["number", "Number"],
+      ["integer", "Whole number"],
+      ["boolean", "On / off"],
+      ["string", "Text"],
+    ],
   },
   { key: "unit", label: "Unit", placeholder: "e.g. °C, rpm, cycles" },
+  {
+    key: "node_id",
+    label: "PLC OPC UA Node ID",
+    placeholder: "e.g. ns=3;s=Machine.CycleCount",
+    hint: "Enter the actual Node ID from your PLC's OPC UA server.",
+  },
 ];
 
 export default function AssetDetail() {
@@ -102,7 +113,7 @@ export default function AssetDetail() {
   const [, setTick] = useState(0);
   const seq = useRef(0);
 
-  // Everything that changes while the machine runs: rules, readings, rule states, PLC runtime.
+  
   const loadLive = useCallback(async () => {
     const mine = ++seq.current;
     const [r, rd, st, plc] = await Promise.allSettled([
@@ -180,7 +191,7 @@ export default function AssetDetail() {
       .catch((error) => setLoadError(error.message));
   }, [tab, assetId]);
 
-  // Rules on child assets reference variables this page has not loaded; look up their names.
+
   useEffect(() => {
     const missing = [...new Set(rules.map((r) => r.variable_id).filter((v) => v != null && !varNames.has(v)))];
     if (!missing.length) return;
@@ -284,15 +295,17 @@ export default function AssetDetail() {
   };
 
   const addVariable = async (values) => {
-    await api.post(`/assets/${assetId}/variables`, {
-      name: values.name.trim(),
-      key: values.key.trim(),
-      data_type: values.data_type,
-      unit: values.unit?.trim() || null,
-    });
-    setModal("variables");
-    await loadVariables();
-  };
+  await api.post(`/assets/${assetId}/variables`, {
+    name: values.name.trim(),
+    key: values.key.trim(),
+    data_type: values.data_type,
+    unit: values.unit?.trim() || null,
+    node_id: values.node_id?.trim() || null,
+  });
+
+  setModal("variables");
+  await loadVariables();
+};
 
   if (!asset) {
     return assetsLoaded
@@ -353,6 +366,20 @@ export default function AssetDetail() {
                 <span>Cycles</span>
                 <b>{machine.cycle_count}{machine.cycle_limit ? <small> / {machine.cycle_limit}</small> : null}</b>
               </div>
+              <div className="machine-fig">
+                <span>Rotation direction</span>
+                <b>
+                  {["clockwise", "cw"].includes(
+                    String(machine.rotation_direction || "").toLowerCase()
+                  )
+                  ? "↻ Clockwise"
+                  : ["counterclockwise", "counter-clockwise", "ccw"].includes(
+                    String(machine.rotation_direction || "").toLowerCase()
+                  )
+                  ? "↺ Counterclockwise"
+                  : "Unknown"}
+                  </b>
+                  </div>
               <div className="machine-fig">
                 <span>Running time</span>
                 <b>
@@ -587,7 +614,15 @@ export default function AssetDetail() {
         <Modal title="Variables" onClose={() => setModal(null)}>
           {variables.length ? (
             <table className="table">
-              <thead><tr><th>Variable</th><th>Key</th><th>Type</th><th>Unit</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Variable</th>
+                  <th>Key</th>
+                  <th>Type</th>
+                  <th>Unit</th>
+                  <th>PLC Node ID</th>
+                  </tr>
+                  </thead>
               <tbody>
                 {variables.map((variable) => (
                   <tr key={variable.id}>
@@ -595,9 +630,10 @@ export default function AssetDetail() {
                     <td>{variable.key}</td>
                     <td>{variable.data_type}</td>
                     <td>{variable.unit || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
+                    <td>{variable.node_id || "Not configured"}</td>
+                    </tr>
+                  ))}
+                  </tbody>
             </table>
           ) : (
             <p className="muted">No active variables are configured for this asset.</p>
