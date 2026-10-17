@@ -11,11 +11,8 @@ from app.services.monitoring_engine import utc_now
 
 router = APIRouter(prefix="/rules", tags=["monitoring rules"])
 
-
-def configured_cycle_signal_mapping(
-    request: Request,
-    variable_id: int | None,
-) -> tuple[int, int] | None:
+#Configured PLC cycle signal
+def configured_cycle_signal_mapping(request: Request,variable_id: int | None,) -> tuple[int, int] | None:
     collector = request.app.state.opcua_collector
     return next(
         (
@@ -27,7 +24,7 @@ def configured_cycle_signal_mapping(
         None,
     )
 
-
+#Find the rule safely
 def rule_or_404(session: Session, rule_id: int) -> MonitoringRule:
     rule = session.get(MonitoringRule, rule_id)
     if rule is None or rule.is_archived:

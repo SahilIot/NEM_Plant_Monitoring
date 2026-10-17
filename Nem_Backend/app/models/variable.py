@@ -1,4 +1,4 @@
-
+# stores the variables or signals that belong to each machine 
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -11,7 +11,6 @@ from app.db.session import UTCDateTime
 if TYPE_CHECKING:
     from app.models.asset import Asset
 
-
 class Variable(Base):
     __tablename__ = "variables"
     __table_args__ = (
@@ -22,8 +21,7 @@ class Variable(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
-    asset_id: Mapped[int] = mapped_column(
-        ForeignKey("assets.id", ondelete="RESTRICT"),
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
@@ -35,29 +33,23 @@ class Variable(Base):
     description: Mapped[str | None] = mapped_column(Text)
 
     # Optional link to a discovered OPC UA node on the PLC.
-    opcua_node_id: Mapped[str | None] = mapped_column(
-        String(512),
-        nullable=True,
-    )
+    opcua_node_id: Mapped[str | None] = mapped_column(String(512),nullable=True,)
 
-    is_active: Mapped[bool] = mapped_column(
-        Boolean,
-        default=True,
-        nullable=False,
-        index=True,
-    )
+    is_active: Mapped[bool] = mapped_column(Boolean,default=True,nullable=False,index=True,)
 
-    created_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(),
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(),
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
 
-    updated_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(),
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
-
     asset: Mapped["Asset"] = relationship(back_populates="variables")
+'''
+    Asset tells the system which machine it is monitoring. 
+    Variable tells it which signal on that machine it cares about. 
+    Reading stores the values received from that signal over time.
+    '''

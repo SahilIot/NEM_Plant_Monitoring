@@ -22,42 +22,30 @@ from app.db.session import UTCDateTime
 class MonitoringRule(Base):
     __tablename__ = "nem_monitoring_rules"
     __table_args__ = (
-        CheckConstraint(
-            "severity IN ('warning', 'alert')", name="ck_nem_monitoring_rules_severity"
-        ),
+        CheckConstraint("severity IN ('warning', 'alert')", name="ck_nem_monitoring_rules_severity"),
         CheckConstraint(
             "rule_type IN ('parameter_threshold', 'runtime_duration', "
             "'duration', 'generic', 'boolean_condition', "
             "'boolean_count_threshold')",
             name="ck_nem_monitoring_rules_type",
         ),
-
         Index("ix_nem_monitoring_rules_target_enabled", "target_asset_id", "is_enabled"),
     )
-
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     rule_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
-    target_asset_id: Mapped[int | None] = mapped_column(
-        ForeignKey("assets.id", ondelete="RESTRICT"), index=True
-    )
-    variable_id: Mapped[int | None] = mapped_column(
-        ForeignKey("variables.id", ondelete="RESTRICT"), index=True
-    )
+    target_asset_id: Mapped[int | None] = mapped_column(ForeignKey("assets.id", ondelete="RESTRICT"), index=True)
+    variable_id: Mapped[int | None] = mapped_column(ForeignKey("variables.id", ondelete="RESTRICT"), index=True)
     operator: Mapped[str | None] = mapped_column(String(10))
     threshold: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
     parameters: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
-    is_archived: Mapped[bool] = mapped_column(
-        Boolean, default=False, server_default=text("false"), nullable=False
-    )
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
     evaluation_interval_seconds: Mapped[int | None] = mapped_column()
     stale_after_seconds: Mapped[int | None] = mapped_column()
-    created_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(), default=lambda: datetime.now(timezone.utc), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(),
         default=lambda: datetime.now(timezone.utc),
@@ -65,27 +53,18 @@ class MonitoringRule(Base):
         nullable=False,
     )
 
-
+# rule`s current result
 class RuleState(Base):
     __tablename__ = "nem_rule_states"
     __table_args__ = (
-        CheckConstraint(
-            "status IN ('normal', 'warning', 'alert', 'unknown')",
-            name="ck_nem_rule_states_status",
-        ),
+        CheckConstraint("status IN ('normal', 'warning', 'alert', 'unknown')",name="ck_nem_rule_states_status",),
         Index("ix_nem_rule_states_status", "status"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    rule_id: Mapped[int] = mapped_column(
-        ForeignKey("nem_monitoring_rules.id", ondelete="RESTRICT"), nullable=False, unique=True
-    )
-    target_asset_id: Mapped[int] = mapped_column(
-        ForeignKey("assets.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
-    target_variable_id: Mapped[int | None] = mapped_column(
-        ForeignKey("variables.id", ondelete="RESTRICT"), index=True
-    )
+    rule_id: Mapped[int] = mapped_column(ForeignKey("nem_monitoring_rules.id", ondelete="RESTRICT"), nullable=False, unique=True)
+    target_asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id", ondelete="RESTRICT"), nullable=False, index=True)
+    target_variable_id: Mapped[int | None] = mapped_column(ForeignKey("variables.id", ondelete="RESTRICT"), index=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")
     latest_value: Mapped[Any | None] = mapped_column(JSON)
     message: Mapped[str] = mapped_column(Text, nullable=False)
@@ -94,7 +73,7 @@ class RuleState(Base):
     last_transition_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     error_message: Mapped[str | None] = mapped_column(Text)
 
-
+# what problem needs attention
 class Alert(Base):
     __tablename__ = "nem_alerts"
     __table_args__ = (
@@ -133,7 +112,8 @@ class Alert(Base):
     acknowledged_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     acknowledged_by: Mapped[str | None] = mapped_column(String(200))
 
-
+#What happened in the system
+#Stores an event history
 class MonitoringEvent(Base):
     __tablename__ = "nem_monitoring_events"
     __table_args__ = (
@@ -144,20 +124,14 @@ class MonitoringEvent(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     event_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     severity: Mapped[str | None] = mapped_column(String(20))
-    asset_id: Mapped[int | None] = mapped_column(
-        ForeignKey("assets.id", ondelete="RESTRICT"), index=True
-    )
-    rule_id: Mapped[int | None] = mapped_column(
-        ForeignKey("nem_monitoring_rules.id", ondelete="RESTRICT"), index=True
-    )
-    alert_id: Mapped[int | None] = mapped_column(
-        ForeignKey("nem_alerts.id", ondelete="RESTRICT"), index=True
-    )
+    asset_id: Mapped[int | None] = mapped_column(ForeignKey("assets.id", ondelete="RESTRICT"), index=True)
+    rule_id: Mapped[int | None] = mapped_column(ForeignKey("nem_monitoring_rules.id", ondelete="RESTRICT"), index=True)
+    alert_id: Mapped[int | None] = mapped_column(ForeignKey("nem_alerts.id", ondelete="RESTRICT"), index=True)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     event_metadata: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSON)
 
-
+#which process owns a scheduled task A lease is a temporary claim to perform that work
 class SchedulerLease(Base):
     __tablename__ = "scheduler_leases"
 
@@ -165,3 +139,4 @@ class SchedulerLease(Base):
     owner_id: Mapped[str] = mapped_column(String(100), nullable=False)
     lease_until: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, index=True)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    

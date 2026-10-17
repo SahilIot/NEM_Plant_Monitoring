@@ -1,4 +1,4 @@
-# Assests API router
+# Assests API router through which the frontend can work with assets
 #API Router for group related endpoints into one router
 #Depends- tell fastapi to provide dependencies, such as a database session.
 # HTTP Exception - Returns HTTP errors such as 404,409,422 etc

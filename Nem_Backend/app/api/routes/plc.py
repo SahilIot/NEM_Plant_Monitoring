@@ -1,3 +1,4 @@
+#Plc/OPC UA API  router 
 from datetime import datetime, timezone
 import math
 
@@ -16,9 +17,7 @@ from uuid import uuid4
 _discovery_jobs={}
 _discovery_lock=asyncio.Lock()
 
-from app.services.opcua_client import (
-    OpcUaConfigurationError,
-    OpcUaConnectionError,
+from app.services.opcua_client import (OpcUaConfigurationError,OpcUaConnectionError,
     read_opcua_node, 
     test_opcua_connection,
     create_configured_opcua_client,
@@ -33,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/plc", tags=["PLC / OPC UA"])
 
+#Checking monitoring status
 @router.get("/status")
 def plc_monitoring_status(request: Request,session: Session = Depends(get_db),) -> dict[str, object]:
     collector = request.app.state.opcua_collector
@@ -45,12 +45,8 @@ def plc_monitoring_status(request: Request,session: Session = Depends(get_db),) 
         ).total_seconds()
         > request.app.state.settings.monitoring_default_stale_after_seconds
     )
-    connection["stale_after_seconds"] = (
-        request.app.state.settings.monitoring_default_stale_after_seconds
-    )
-    connection["requested_publishing_interval_ms"] = (
-        request.app.state.settings.opcua_subscription_publishing_interval_ms
-    )
+    connection["stale_after_seconds"] = (request.app.state.settings.monitoring_default_stale_after_seconds)
+    connection["requested_publishing_interval_ms"] = (request.app.state.settings.opcua_subscription_publishing_interval_ms)
     return {
         "connection": connection,
         "mappings": collector.configured_mapping_rows(session),
@@ -79,7 +75,7 @@ async def plc_connection_test(request: Request) -> dict[str, object]:
 from fastapi import HTTPException, Query, Request
 from asyncua import ua
 
-
+#Discover the PLC nodes
 @router.post("/discover")
 async def start_opcua_discovery(
     request: Request,
@@ -91,15 +87,11 @@ async def start_opcua_discovery(
 
     async with _discovery_lock:
         # Avoid starting multiple full scans simultaneously.
-        running = any(
-            job["status"] == "running"
+        running = any(job["status"] == "running"
             for job in _discovery_jobs.values()
         )
         if running:
-            raise HTTPException(
-                status_code=409,
-                detail="A discovery job is already running.",
-            )
+            raise HTTPException(status_code=409,detail="A discovery job is already running.",)
 
         _discovery_jobs[job_id] = {
             "status": "running",
@@ -108,7 +100,6 @@ async def start_opcua_discovery(
             "error": None,
             "truncated": False,
         }
-
     async def scan():
         visited = set()
         variables = []
@@ -186,8 +177,9 @@ async def start_opcua_discovery(
         "message": "Discovery started in the background.",
     }
 
+# Get discover results
 @router.get("/discover/{job_id}")
-async def get_opcua_discovery_result(job_id: str):
+async def get_opcua_discovery_result(job_id: str): # job_id is identifier created in discover function and used here to get the result of the discover results
     async with _discovery_lock:
         job = _discovery_jobs.get(job_id)
 
@@ -204,7 +196,7 @@ async def get_opcua_discovery_result(job_id: str):
             "error": job["error"],
         }
 
-# main endpoint 
+# main endpoint read a PLC node and save it
 @router.post("/read", response_model=OpcUaReadResponse, status_code=201)
 async def read_plc_value(
     payload: OpcUaReadRequest,

@@ -1,10 +1,11 @@
-from functools import lru_cache
+from functools import lru_cache # Caches the settings object so it doesn`t need to be recreated every time
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
+#Function check whether the db connection URL is in the required format
 def validate_postgresql_database_url(value: str) -> str:
     try:
         url = make_url(value)
@@ -14,6 +15,7 @@ def validate_postgresql_database_url(value: str) -> str:
         raise ValueError("Database URL must use postgresql+psycopg and name a database")
     return value
 
+# Settings is the central configuration class
 class Settings(BaseSettings):
     app_name: str = "NEM Machine Monitoring API"
     database_url: str
@@ -38,13 +40,14 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+# Validating db URLs automatically
     @field_validator("database_url", "test_database_url")
     @classmethod
     def validate_database_urls(cls, value: str | None) -> str | None:
         if value is None:
             return None
         return validate_postgresql_database_url(value)
-
+#Preventing the test db from being the production db
     @model_validator(mode="after")
     def validate_test_database_isolation(self) -> "Settings":
         if self.test_database_url is None:
@@ -62,7 +65,8 @@ class Settings(BaseSettings):
     def allowed_origins(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
-
+#Caching the settings object small but import optimization  -> Creates the settings object once and reuse it whenever get_settings() is called
+#rather that repeatedly loading and validating the .env configuration
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
