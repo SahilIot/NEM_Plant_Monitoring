@@ -91,7 +91,10 @@ def monitoring_status(
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
-    query = select(MonitoringRule).where(MonitoringRule.is_enabled.is_(True))
+    query = select(MonitoringRule).where(
+        MonitoringRule.is_enabled.is_(True),
+        MonitoringRule.is_archived.is_(False),
+    )
     if rule_id is not None:
         query = query.where(MonitoringRule.id == rule_id)
     rules = session.scalars(query.order_by(MonitoringRule.id)).all()
@@ -126,6 +129,7 @@ def asset_monitoring_status(
         select(MonitoringRule)
         .where(
             MonitoringRule.is_enabled.is_(True),
+            MonitoringRule.is_archived.is_(False),
             or_(
                 MonitoringRule.target_asset_id == asset_id,
                 MonitoringRule.variable_id.in_(
@@ -142,7 +146,7 @@ def asset_monitoring_status(
 @router.get("/rules/{rule_id}/status", response_model=RuleStateRead)
 def rule_status(rule_id: int, session: Session = Depends(get_db)) -> RuleStateRead:
     rule = session.get(MonitoringRule, rule_id)
-    if rule is None:
+    if rule is None or rule.is_archived:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id} was not found")
     return state_for_rule(session, rule)
 
@@ -172,6 +176,17 @@ def alert_query(
         filters.append(Alert.severity == severity)
     if lifecycle_status is not None:
         filters.append(Alert.status == lifecycle_status)
+        if lifecycle_status == "active":
+            query = query.join(MonitoringRule, MonitoringRule.id == Alert.rule_id)
+            count_query = count_query.join(
+                MonitoringRule, MonitoringRule.id == Alert.rule_id
+            )
+            filters.extend(
+                [
+                    MonitoringRule.is_enabled.is_(True),
+                    MonitoringRule.is_archived.is_(False),
+                ]
+            )
     if acknowledged is True:
         filters.append(Alert.acknowledged_at.is_not(None))
     if acknowledged is False:

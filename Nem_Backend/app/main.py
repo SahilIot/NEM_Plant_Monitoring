@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -52,7 +51,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         initialize_database(engine)
-        await asyncio.to_thread(opcua_collector.prepare_startup)
         opcua_collector.start()
         try:
             yield

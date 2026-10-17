@@ -128,8 +128,14 @@ application database; tests use only the separate `TEST_DATABASE_URL`.
   corresponding existing NEM asset/boolean-variable IDs.
 - `OPCUA_RECONNECT_DELAY_SECONDS` — wait before retrying a disconnected
   subscription, default `5`.
-- `OPCUA_RUNTIME_CHECKPOINT_SECONDS` — subscription publishing and persisted
-  running-time checkpoint interval, default `10`.
+- `OPCUA_SUBSCRIPTION_PUBLISHING_INTERVAL_MS` — requested OPC UA subscription
+  publishing interval in milliseconds, default `1000`. The server may revise
+  this value; `/api/v1/plc/status` and collector logs report the negotiated
+  value when available. The collector's monitored-item sampling interval
+  remains asyncua's `50` ms default and queue size `0` (server default).
+- `OPCUA_RUNTIME_CHECKPOINT_SECONDS` — persisted running-time checkpoint and
+  collector wait interval in seconds, default `10`; this does not set the
+  subscription publishing interval.
 - `SETTINGS_ENCRYPTION_KEY` — Fernet key used to encrypt the SMTP password
   saved by the dashboard. Generate one with
   `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
@@ -179,7 +185,9 @@ and non-boolean machine-state notifications are ignored. A cycle is counted
 only on a `false` to `true` signal transition; the first valid signal is only
 the baseline. Running-time totals are checkpointed in `machine_monitoring_states`
 and survive restarts. Runtime accumulated while the collector is disconnected
-is not inferred or added.
+is not inferred or added. Configure `running_signal` with a dedicated boolean
+that stays true for the full time the machine is operating and false while it
+is stopped; a momentary cycle pulse cannot measure running duration.
 
 Create the PLC asset and its boolean `cycle_signal` / `running_signal`
 variables through the existing asset API or dashboard, then use their IDs and
@@ -342,12 +350,19 @@ writing, so invalid batches do not partially insert data. The API enforces a
   `is_enabled`, `limit`, and `offset`.
 - `GET /api/v1/rules/{rule_id}`
 - `PATCH /api/v1/rules/{rule_id}` — set `is_enabled: false` to disable evaluation.
+- Deactivating a rule closes its active alert while retaining alert history.
+- Archiving a deactivated rule hides it from normal rule lists and preserves
+  its evaluation, alert, and event history.
 - `GET /api/v1/rules/{rule_id}/status` — current state.
 - `POST /api/v1/monitoring/evaluate` — evaluate enabled rules immediately;
   optional `asset_id` or `rule_id` filters.
 - `GET /api/v1/monitoring/status` — paginated state list; supports `status`,
   `asset_id`, and `rule_id` filters.
 - `GET /api/v1/assets/{asset_id}/monitoring-status` — states for an asset.
+
+The asset Event Log shows rule creation, warning/alert transitions, and machine
+stops. Cycle pulses and routine evaluation/maintenance events remain out of that
+operator-facing log; cycle counts continue to update from OPC UA as before.
 
 Rule types are `parameter_threshold`, `runtime_duration`, `duration`, and
 `generic`. Threshold rules need a numeric variable, an operator (`lt`, `lte`,

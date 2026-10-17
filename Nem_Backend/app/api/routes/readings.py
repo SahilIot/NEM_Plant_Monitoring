@@ -30,6 +30,33 @@ def ingest_reading(
     )
 
 
+
+@router.get("/latest", response_model=list[ReadingRead])
+def latest_readings(
+    limit: int = Query(default=100, ge=1, le=1000),
+    session: Session = Depends(get_db),
+) -> list[ReadingRead]:
+    """Return the newest reading for each asset-variable pair."""
+    rows = session.scalars(
+        select(Reading).order_by(
+            Reading.recorded_at.desc(),
+            Reading.id.desc(),
+        )
+    ).all()
+
+    latest: dict[tuple[int, int], Reading] = {}
+
+    for row in rows:
+        key = (row.asset_id, row.variable_id)
+        if key not in latest:
+            latest[key] = row
+
+        if len(latest) >= limit:
+            break
+
+    return [ReadingRead.model_validate(row) for row in latest.values()]
+
+
 @router.post("/batch", response_model=list[ReadingRead], status_code=status.HTTP_201_CREATED)
 def ingest_batch(
     payload: ReadingBatch, request: Request, session: Session = Depends(get_db)
