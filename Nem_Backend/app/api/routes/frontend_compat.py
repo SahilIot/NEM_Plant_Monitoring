@@ -1,6 +1,6 @@
 #FastApi router that connects your react frontend to your backend and postgreSQL database
-
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
+from pathlib import Path
 from typing import Any
 
 from cryptography.fernet import Fernet # encrypts and decrypts sensitive values, such as a saved email password
@@ -102,6 +102,61 @@ class LogbookEntry(BaseModel):
         value = value.strip()
         if not value:
             raise ValueError("Logbook entry cannot be empty")
+        return value
+
+
+class UsageRuleCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+    usage_limit: float = Field(gt=0)
+    severity: str = "warning"
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Rule name cannot be empty")
+        return value
+
+    @field_validator("severity")
+    @classmethod
+    def validate_severity(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in {"warning", "alert"}:
+            raise ValueError("Severity must be warning or alert")
+        return value
+
+
+class TimeRuleCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+    current_time: time
+    end_time: time
+    severity: str = "warning"
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Rule name cannot be empty")
+        return value
+
+    @field_validator("severity")
+    @classmethod
+    def validate_severity(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in {"warning", "alert"}:
+            raise ValueError("Severity must be warning or alert")
+        return value
+
+    @field_validator("end_time")
+    @classmethod
+    def validate_times(cls, value: time, info: Any) -> time:
+        start = info.data.get("current_time")
+        if start is not None and start == value:
+            raise ValueError("Current time and end time cannot be the same")
         return value
 #All the above classes are use to make sure invalid data is rejected before it reaches the database, and to provide clear error messages to the frontend.
 
