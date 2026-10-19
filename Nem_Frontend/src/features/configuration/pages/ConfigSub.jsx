@@ -18,7 +18,7 @@ const CRUD = {
   },
   documents: {
     title: "Instructions and documents", endpoint: "documents", button: "Create document", noun: "Document",
-    cols: [["title", "Title"], ["kind", "Type"], ["description", "Description"]],
+    cols: [["title", "Title"], ["kind", "Type"], ["description", "Description"], ["files", "Attachments"]],
   },
 };
 
@@ -49,6 +49,7 @@ function fieldsFor(sub, variables) {
     { key: "title", label: "Title", required: true, placeholder: "e.g. Mixer inspection steps" },
     { key: "kind", label: "Type", type: "select", options: DOC_TYPES, default: "Instruction" },
     { key: "description", label: "Description", type: "textarea" },
+    { key: "files", label: "Attach files (optional)", type: "files", hint: "PDF, DOC, DOCX or TXT. Up to 10 files; 10 MB each." },
   ];
 }
 
@@ -56,6 +57,11 @@ function cell(key, row, variableNames) {
   if (key === "condition") {
     const text = conditionText(row, variableNames.get(row.variable_id));
     return text || <span className="muted">-</span>;
+  }
+  if (key === "files") {
+    const files = row.files || [];
+    if (!files.length) return <span className="muted">No files</span>;
+    return <span>{files.map((file, i) => <React.Fragment key={file.id}>{i > 0 ? ", " : ""}<a href={file.download_url} target="_blank" rel="noreferrer">{file.name}</a></React.Fragment>)}</span>;
   }
   const value = row[key];
   if (value === undefined || value === null || value === "") return <span className="muted">-</span>;
@@ -114,7 +120,7 @@ export default function ConfigSub() {
       setRows(
         rules.map((rule) => ({
           ...rule,
-          asset_name: assetNames.get(rule.target_asset_id) || "—",
+          asset_name: assetNames.get(rule.target_asset_id) || "â€”",
           state: rule.is_enabled ? "activated" : "not_activated",
           status: stateByRule.get(rule.id) === "normal" ? "ok" : stateByRule.get(rule.id) || "unknown",
         }))
@@ -170,6 +176,18 @@ export default function ConfigSub() {
         threshold,
         severity: values.severity,
       });
+    } else if (sub === "documents") {
+      const files = values.files || [];
+      if (files.length) {
+        const form = new FormData();
+        form.append("title", values.title);
+        form.append("kind", values.kind);
+        form.append("description", values.description || "");
+        files.forEach((file) => form.append("files", file));
+        await api.postForm("/documents/with-files", form);
+      } else {
+        await api.post("/documents", { title: values.title, kind: values.kind, description: values.description || null });
+      }
     } else {
       await api.post(`/${cfg.endpoint}`, values);
     }
@@ -208,9 +226,9 @@ export default function ConfigSub() {
         <div className="panel">
           {msg.text && <p className={"notice flush" + (msg.error ? " error" : "")} role="status">{msg.text}</p>}
           {rows === null ? (
-            <div className="loading" role="status">Loading…</div>
+            <div className="loading" role="status">Loadingâ€¦</div>
           ) : rows.length === 0 ? (
-            <EmptyState art={false} title="Nothing here yet" lines={[`Select “${cfg.button}” to add the first one.`]} />
+            <EmptyState art={false} title="Nothing here yet" lines={[`Select â€œ${cfg.button}â€ to add the first one.`]} />
           ) : (
             <table className="table">
               <thead>
@@ -233,7 +251,7 @@ export default function ConfigSub() {
         <CreateModal
           title={cfg.button}
           submitLabel={cfg.button}
-          intro={sub === "rules" && numericVariables.length === 0 ? "No active numeric variables exist yet. Add one from an asset’s Variables panel first." : undefined}
+          intro={sub === "rules" && numericVariables.length === 0 ? "No active numeric variables exist yet. Add one from an assetâ€™s Variables panel first." : undefined}
           fields={fieldsFor(sub, numericVariables)}
           onSubmit={create}
           onClose={() => setOpen(false)}
@@ -242,3 +260,4 @@ export default function ConfigSub() {
     </div>
   );
 }
+

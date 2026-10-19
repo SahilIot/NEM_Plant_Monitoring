@@ -10,6 +10,7 @@ const TITLES = {
   user: "User information",
   email: "Email server settings",
   analytics: "Analytics extensions",
+  connectivity: "Connectivity configuration",
   usage: "Usage information",
   backup: "Backup and restore",
 };
@@ -17,6 +18,7 @@ const TITLES = {
 const FORMS = {
   email: [["host", "SMTP host"], ["port", "Port", "number"], ["username", "Username"], ["password", "Password", "password"], ["sender", "Sender address"]],
   analytics: [["databus_host", "Databus host"], ["databus_port", "Databus port"], ["enabled", "Enabled", "bool"]],
+  connectivity: [["databus_host", "IE Databus address"], ["username", "Username"], ["password", "Password", "password"], ["discovery_topic", "Discovery topic"], ["enabled", "Enabled", "bool"]],
 };
 
 // [key, label, editable by the user?]  (role comes from the login, so it is read-only)
@@ -35,7 +37,7 @@ function UserInfo() {
   const [msg, setMsg] = useState("");
   useEffect(() => { api.get("/me").then(setU).catch((e) => setErr(String(e.message || e))); }, []);
   if (err) return <div className="panel"><p className="notice error flush" role="alert">Could not load the profile: {err}</p></div>;
-  if (!u) return <div className="loading">Loading…</div>;
+  if (!u) return <div className="loading">LoadingÃ¢â‚¬Â¦</div>;
 
   const startEdit = () => { setDraft({ name: u.name || "", email: u.email || "", phone: u.phone || "" }); setSaveErr(""); setMsg(""); };
   const cancel = () => { setDraft(null); setSaveErr(""); };
@@ -99,7 +101,7 @@ function SettingsForm({ section }) {
     setMsg(""); setV(null);
     api.get(`/settings/${section}`).then(setV).catch((error) => setMsg(`Could not load settings: ${error.message}`));
   }, [section]);
-  if (!v) return msg ? <div className="notice error">{msg}</div> : <div className="loading">Loading…</div>;
+  if (!v) return msg ? <div className="notice error">{msg}</div> : <div className="loading">LoadingÃ¢â‚¬Â¦</div>;
   const save = async () => {
     try {
       const saved = await api.put(`/settings/${section}`, v);
@@ -111,9 +113,9 @@ function SettingsForm({ section }) {
   };
   return (
     <div className="panel-white form">
-      {section === "email" && <p className="hint">{v.has_password
-        ? "An SMTP password is stored securely. Leave the password field empty to keep it, or enter a replacement."
-        : "The SMTP password is encrypted before it is saved."}</p>}
+      {(section === "email" || section === "connectivity") && <p className="hint">{v.has_password
+        ? "A password is stored encrypted. Leave the password field empty to keep it, or enter a replacement."
+        : "The password is encrypted before it is saved."}</p>}
       {FORMS[section].map(([k, label, type]) => (
         <label key={k}>{label}
           {type === "bool" ? (
@@ -138,7 +140,7 @@ function Usage() {
   const [error, setError] = useState("");
   useEffect(() => { api.get("/usage").then(setU).catch((e) => setError(e.message)); }, []);
   if (error) return <div className="notice error">Could not load usage: {error}</div>;
-  if (!u) return <div className="loading">Loading…</div>;
+  if (!u) return <div className="loading">LoadingÃ¢â‚¬Â¦</div>;
   return (
     <div className="usage-grid">
       {Object.entries(u).map(([k, v]) => (
@@ -201,7 +203,7 @@ export default function SettingsSub() {
       <button className="link-btn" onClick={() => nav("/settings")}><BackIcon size={14} /> Back</button>
       <h1>{TITLES[sub] || "Settings"}</h1>
       {sub === "user" && <UserInfo />}
-      {(sub === "email" || sub === "analytics") && <SettingsForm section={sub} />}
+      {(sub === "email" || sub === "analytics" || sub === "connectivity") && <SettingsForm section={sub} />}
       {sub === "usage" && <Usage />}
       {sub === "backup" && <Backup />}
     </div>

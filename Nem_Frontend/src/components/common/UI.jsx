@@ -61,6 +61,7 @@ export const Modal = ({ title, onClose, children, wide }) => {
 
 
 const initialValue = (field) => {
+  if (field.type === "files") return [];
   if (field.default !== undefined && field.default !== null) return String(field.default);
   if (field.type === "select") return "";
   return "";
@@ -116,7 +117,7 @@ export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "C
       if (
         isVisible(f) &&
         isRequired(f) &&
-        !String(values[f.key] ?? "").trim()
+        !(f.type === "files" ? (Array.isArray(values[f.key]) && values[f.key].length > 0) : String(values[f.key] ?? "").trim())
       ) {
         return setError(`${f.label} is required.`);
       }
@@ -126,8 +127,10 @@ export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "C
     try {
       const normalized = {};
       for (const field of fields) {
-        const value = values[field.key] ?? "";
-        if (field.type === "number" && String(value).trim() !== "") {
+        const value = values[field.key] ?? (field.type === "files" ? [] : "");
+        if (field.type === "files") {
+          normalized[field.key] = value;
+        } else if (field.type === "number" && String(value).trim() !== "") {
           const number = Number(value);
           if (!Number.isFinite(number)) {
             setError(`${field.label} must be a valid number.`);
@@ -156,7 +159,13 @@ export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "C
               {f.label}
               {isRequired(f) && <span className="req"> *</span>}
             </label>
-            {f.type === "textarea" ? (
+            {f.type === "files" ? (
+              <>
+                <input id={"f-" + f.key} type="file" multiple accept={f.accept || ".pdf,.doc,.docx,.txt"} disabled={busy} onChange={(e) => set(f.key, Array.from(e.target.files || []))} />
+                {Array.isArray(values[f.key]) && values[f.key].length > 0 && <ul className="hint">{values[f.key].map((file) => <li key={`${file.name}-${file.size}`}>{file.name} ({(file.size / 1024).toFixed(1)} KB)</li>)}</ul>}
+                {f.hint && <span className="hint">{f.hint}</span>}
+              </>
+            ) : f.type === "textarea" ? (
               <textarea id={"f-" + f.key} rows={3} placeholder={f.placeholder} value={values[f.key] ?? ""} disabled={busy} onChange={(e) => set(f.key, e.target.value)} />
             ) : f.type === "select" ? (
               <select
@@ -176,7 +185,7 @@ export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "C
                 {f.options.map(([v, l]) => <option key={String(v)} value={String(v)}>{l}</option>)}
               </select>
             ) : (
-              <input id={"f-" + f.key} type={f.type || "text"} step={f.type === "number" ? "any" : undefined} autoFocus={i === 0} required={isRequired(f)} disabled={busy} placeholder={f.placeholder} value={values[f.key] ?? ""} onChange={(e) => set(f.key, e.target.value)} />
+              <input id={"f-" + f.key} type={f.type || "text"} step={f.type === "number" ? "any" : undefined} autoFocus={i === 0} required={isRequired(f)} disabled={busy} placeholder={f.placeholder} value={f.type === "files" ? undefined : (values[f.key] ?? "")} onChange={(e) => set(f.key, e.target.value)} />
             )}
             {f.hint && <span className="hint">{f.hint}</span>}
           </div>

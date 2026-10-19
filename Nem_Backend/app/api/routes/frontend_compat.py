@@ -1,10 +1,13 @@
 #FastApi router that connects your react frontend to your backend and postgreSQL database
-from datetime import datetime, time, timezone
+
+from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 from typing import Any
 
 from cryptography.fernet import Fernet # encrypts and decrypts sensitive values, such as a saved email password
-from fastapi import APIRouter, Depends, HTTPException, Request 
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, ValidationError, field_validator 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError # Handles database constraint failures,such as duplicate collection name
@@ -102,61 +105,6 @@ class LogbookEntry(BaseModel):
         value = value.strip()
         if not value:
             raise ValueError("Logbook entry cannot be empty")
-        return value
-
-
-class UsageRuleCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-    description: str | None = None
-    usage_limit: float = Field(gt=0)
-    severity: str = "warning"
-
-    @field_validator("name")
-    @classmethod
-    def strip_name(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("Rule name cannot be empty")
-        return value
-
-    @field_validator("severity")
-    @classmethod
-    def validate_severity(cls, value: str) -> str:
-        value = value.strip().lower()
-        if value not in {"warning", "alert"}:
-            raise ValueError("Severity must be warning or alert")
-        return value
-
-
-class TimeRuleCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-    description: str | None = None
-    current_time: time
-    end_time: time
-    severity: str = "warning"
-
-    @field_validator("name")
-    @classmethod
-    def strip_name(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("Rule name cannot be empty")
-        return value
-
-    @field_validator("severity")
-    @classmethod
-    def validate_severity(cls, value: str) -> str:
-        value = value.strip().lower()
-        if value not in {"warning", "alert"}:
-            raise ValueError("Severity must be warning or alert")
-        return value
-
-    @field_validator("end_time")
-    @classmethod
-    def validate_times(cls, value: time, info: Any) -> time:
-        start = info.data.get("current_time")
-        if start is not None and start == value:
-            raise ValueError("Current time and end time cannot be the same")
         return value
 #All the above classes are use to make sure invalid data is rejected before it reaches the database, and to provide clear error messages to the frontend.
 
@@ -529,7 +477,20 @@ def delete_collection(collection_id: int, session: Session = Depends(get_db)) ->
 @router.get("/documents")
 def list_documents(session: Session = Depends(get_db)) -> list[dict[str, Any]]:
     rows = session.scalars(select(InstructionDocument).order_by(InstructionDocument.id)).all()
-    return [{"id": row.id, "title": row.title, "kind": row.kind, "description": row.description} for row in rows]
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        attachments = session.scalars(
+            select(InstructionDocumentFile).where(InstructionDocumentFile.document_id == row.id)
+            .order_by(InstructionDocumentFile.id)
+        ).all()
+        result.append({
+            "id": row.id, "title": row.title, "kind": row.kind, "description": row.description,
+            "files": [{"id": f.id, "name": f.original_name, "size_bytes": f.size_bytes,
+                       "content_type": f.content_type,
+                       "download_url": f"/api/v1/documents/{row.id}/files/{f.id}/download"}
+                      for f in attachments],
+        })
+    return result
 
 #Creates a document
 @router.post("/documents", status_code=201)
@@ -543,14 +504,100 @@ def create_document(payload: DocumentCreate, session: Session = Depends(get_db))
     return {"id": document.id, "title": document.title, "kind": document.kind,
             "description": document.description}
 
+# Create a document and store multiple attachments in the backend uploads directory.
+@router.post("/documents/with-files", status_code=201)
+async def create_document_with_files(
+    title: str = Form(...),
+    kind: str = Form(...),
+    description: str = Form(""),
+    files: list[UploadFile] = File(default=[]),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    title, kind = title.strip(), kind.strip()
+    if not title or not kind:
+        raise HTTPException(status_code=422, detail="Title and type are required")
+    if len(files) > MAX_FILES_PER_DOCUMENT:
+        raise HTTPException(status_code=413, detail=f"Choose no more than {MAX_FILES_PER_DOCUMENT} files")
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    saved_paths: list[Path] = []
+    total = 0
+    try:
+        document = InstructionDocument(title=title, kind=kind, description=description.strip() or None)
+        session.add(document)
+        session.flush()
+        for upload in files:
+            original = Path(upload.filename or "document").name
+            suffix = Path(original).suffix.lower()
+            if suffix not in ALLOWED_DOCUMENT_EXTENSIONS:
+                raise HTTPException(status_code=415, detail=f"Unsupported file type: {original}. Allowed: PDF, DOC, DOCX, TXT")
+            stored = f"{uuid4().hex}{suffix}"
+            destination = UPLOAD_DIR / stored
+            size = 0
+            try:
+                with destination.open("wb") as output:
+                    while True:
+                        chunk = await upload.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        size += len(chunk)
+                        total += len(chunk)
+                        if size > MAX_FILE_BYTES:
+                            raise HTTPException(status_code=413, detail=f"{original} exceeds the 10 MB per-file limit")
+                        if total > MAX_TOTAL_UPLOAD_BYTES:
+                            raise HTTPException(status_code=413, detail="Combined uploads exceed the 24 MB limit")
+                        output.write(chunk)
+                saved_paths.append(destination)
+            except Exception:
+                destination.unlink(missing_ok=True)
+                raise
+            session.add(InstructionDocumentFile(
+                document_id=document.id, original_name=original, stored_name=stored,
+                content_type=upload.content_type, size_bytes=size,
+            ))
+        session.commit()
+        session.refresh(document)
+        return {"id": document.id, "title": document.title, "kind": document.kind,
+                "description": document.description, "file_count": len(saved_paths)}
+    except Exception:
+        session.rollback()
+        for path in saved_paths:
+            path.unlink(missing_ok=True)
+        raise
+    finally:
+        for upload in files:
+            await upload.close()
+
+
+@router.get("/documents/{document_id}/files/{file_id}/download")
+def download_document_file(document_id: int, file_id: int, session: Session = Depends(get_db)):
+    attachment = session.scalar(select(InstructionDocumentFile).where(
+        InstructionDocumentFile.id == file_id,
+        InstructionDocumentFile.document_id == document_id,
+    ))
+    if attachment is None:
+        raise HTTPException(status_code=404, detail="Document attachment was not found")
+    path = UPLOAD_DIR / attachment.stored_name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Stored file is missing")
+    return FileResponse(path, filename=attachment.original_name, media_type=attachment.content_type or "application/octet-stream")
+
+
 #Delete a document
 @router.delete("/documents/{document_id}", status_code=204)
 def delete_document(document_id: int, session: Session = Depends(get_db)) -> None:
     document = session.get(InstructionDocument, document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="Document was not found")
+    attachments = session.scalars(select(InstructionDocumentFile).where(
+        InstructionDocumentFile.document_id == document_id
+    )).all()
+    stored_paths = [UPLOAD_DIR / item.stored_name for item in attachments]
+    for attachment in attachments:
+        session.delete(attachment)
     session.delete(document)
     session.commit()
+    for path in stored_paths:
+        path.unlink(missing_ok=True)
 
 #Importing configuration
 @router.post("/import")
@@ -606,14 +653,22 @@ def update_profile(payload: ProfileUpdate, session: Session = Depends(get_db)) -
 #only two sections are accepted : email and analytics
 @router.get("/settings/{section}")
 def get_frontend_settings(section: str, session: Session = Depends(get_db)) -> dict[str, Any]:
-    if section not in {"email", "analytics"}:
+    if section not in {"email", "analytics", "connectivity"}:
         raise HTTPException(status_code=404, detail="Settings section was not found")
     value = _config(session, section)
-    if section == "email":
-        has_password = bool(value.get("password_ciphertext"))
-        public_value = {key: item for key, item in value.items() if key != "password_ciphertext"}
-        return {**public_value, "password": "", "has_password": has_password}
-    return value or {"databus_host": "", "databus_port": "", "enabled": "false"}
+    if section in {"email", "connectivity"}:
+        secret_key = "password_ciphertext"
+        has_password = bool(value.get(secret_key))
+        public_value = {key: item for key, item in value.items() if key != secret_key}
+        public_value["password"] = ""
+        public_value["has_password"] = has_password
+        if section == "connectivity":
+            public_value.setdefault("databus_host", "mqtt://ie-databus:1883")
+            public_value.setdefault("username", "")
+            public_value.setdefault("discovery_topic", "$diapp/discovery")
+            public_value.setdefault("enabled", "false")
+        return public_value
+    return value or {"databus_host": "mqtt://ie-databus:1883", "databus_port": "1883", "enabled": "false"}
 
 
 @router.put("/settings/{section}")
@@ -623,10 +678,10 @@ def update_frontend_settings(
     request: Request,
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    if section not in {"email", "analytics"}:
+    if section not in {"email", "analytics", "connectivity"}:
         raise HTTPException(status_code=404, detail="Settings section was not found")
     value = _config(session, section)
-    if section == "email":
+    if section in {"email", "connectivity"}:
         password = str(payload.pop("password", "") or "")
         payload.pop("password_ciphertext", None)
         payload.pop("has_password", None)
@@ -692,4 +747,3 @@ def restore_frontend_backup(
         session, request.app.state.engine, request.app.state.settings, record.file_name
     )
     return {"status": "restored", "name": record.name}
-#This routes is mainly responsible for the serving rule infromation to the frontend

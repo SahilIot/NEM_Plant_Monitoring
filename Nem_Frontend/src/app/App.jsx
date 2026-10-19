@@ -1,16 +1,16 @@
 import React from "react";
-import RuleCreatePage from "../features/rules/pages/RuleCreatePage.jsx";
 import { Routes, Route } from "react-router-dom";
 import Layout from "../components/common/Layout.jsx";
 import Home from "../features/dashboard/pages/Home.jsx";
 import AlertRules from "../features/rules/pages/AlertRules.jsx";
+import RuleCreatePage from "../features/rules/pages/RuleCreatePage.jsx";
 import AssetsIndex from "../features/assets/pages/AssetsIndex.jsx";
 import AssetDetail from "../features/assets/pages/AssetDetail.jsx";
 import Configuration from "../features/configuration/pages/Configuration.jsx";
 import ConfigSub from "../features/configuration/pages/ConfigSub.jsx";
+import Plc from "../features/plc/pages/Plc.jsx";
 import Settings from "../features/settings/pages/Settings.jsx";
 import SettingsSub from "../features/settings/pages/SettingsSub.jsx";
-import Plc from "../features/plc/pages/Plc.jsx";
 
 export default function App() {
   return (

@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timedelta, timezone
-
+from app.db.init_db import initialize_database
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -125,10 +125,16 @@ def seed_demo_data(session: Session) -> None:
     session.commit()
 
 
+
 def main() -> None:
     engine = create_database_engine(get_settings().database_url)
+
+    
+    initialize_database(engine)
+
     with create_session_factory(engine)() as session:
         seed_demo_data(session)
+
     engine.dispose()
     print("Demo assets, variables, and readings are ready.")
 

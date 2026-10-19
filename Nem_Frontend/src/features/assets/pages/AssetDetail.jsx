@@ -1,6 +1,6 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useOutletContext, useParams } from "react-router-dom";
+import { useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { api } from "../../../services/api.js";
 import MaintenancePanel from "../components/MaintenancePanel.jsx";
 import {
@@ -236,6 +236,7 @@ export default function AssetDetail() {
   const [logs, setLogs] = useState([]);
   const [events, setEvents] = useState([]);
   const [loadError, setLoadError] = useState("");
+  const navigate = useNavigate();
 
   // Prevent older requests from overwriting newer results.
   const seq = useRef(0);
@@ -1072,7 +1073,7 @@ export default function AssetDetail() {
 
             <button
               className="btn-primary"
-              onClick={() => setModal("add")}
+              onClick={() => setModal("ruleTypeOptions")}
             >
               <PlusCircle size={17} /> Add rule
             </button>
@@ -1299,43 +1300,46 @@ export default function AssetDetail() {
 
       
 
+
+
+
 {modal === "ruleTypeOptions" && (
   <Modal
     title="Create new rule"
     onClose={() => setModal(null)}
   >
     <div className="rule-type-options">
+      {/* Interval-based rule */}
       <button
         type="button"
         className="rule-type-option"
-        onClick={() => {
-          setModal(null);
-          navigate(`/assets/${assetId}/rules/new/interval`);
-        }}
+        onClick={() =>
+          navigate(`/assets/${assetId}/rules/new/interval`)
+        }
       >
         <strong>Interval-based</strong>
         <small>Create a rule based on intervals</small>
       </button>
 
+      {/* Usage-based rule */}
       <button
         type="button"
         className="rule-type-option"
-        onClick={() => {
-          setModal(null);
-          navigate(`/assets/${assetId}/rules/new/usage`);
-        }}
+        onClick={() =>
+          navigate(`/assets/${assetId}/rules/new/usage`)
+        }
       >
         <strong>Usage-based</strong>
         <small>Create a rule based on machine usage</small>
       </button>
 
+      {/* Time-based rule */}
       <button
         type="button"
         className="rule-type-option"
-        onClick={() => {
-          setModal(null);
-          navigate(`/assets/${assetId}/rules/new/time`);
-        }}
+        onClick={() =>
+          navigate(`/assets/${assetId}/rules/new/time`)
+        }
       >
         <strong>Time-based</strong>
         <small>Create a rule with current time and end time</small>
