@@ -21,7 +21,7 @@ const FORMS = {
   connectivity: [["databus_host", "IE Databus address"], ["username", "Username"], ["password", "Password", "password"], ["discovery_topic", "Discovery topic"], ["enabled", "Enabled", "bool"]],
 };
 
-// [key, label, editable by the user?]  (role comes from the login, so it is read-only)
+
 const FIELDS = [
   ["name", "Name", true],
   ["role", "Role", false],

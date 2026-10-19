@@ -31,40 +31,66 @@ export default function AssetTree({ assets = [], selectedId, onRefresh }) {
     const byId = new Map(assets.map((asset) => [asset.id, asset]));
     const result = new Set();
     let cursor = byId.get(selectedId);
-    while (cursor && cursor.parent_asset_id != null && !result.has(cursor.parent_asset_id)) {
+
+    while (
+      cursor &&
+      cursor.parent_asset_id != null &&
+      !result.has(cursor.parent_asset_id)
+    ) {
       result.add(cursor.parent_asset_id);
       cursor = byId.get(cursor.parent_asset_id);
     }
+
     return result;
   }, [assets, selectedId]);
 
   const tree = useMemo(() => {
     const childrenByParent = new Map();
+
     for (const asset of assets) {
       const key = asset.parent_asset_id ?? null;
-      if (!childrenByParent.has(key)) childrenByParent.set(key, []);
+
+      if (!childrenByParent.has(key)) {
+        childrenByParent.set(key, []);
+      }
+
       childrenByParent.get(key).push(asset);
     }
+
     const query = q.trim().toLowerCase();
 
     function build(asset, ancestors = new Set()) {
       if (ancestors.has(asset.id)) return null;
+
       const next = new Set(ancestors).add(asset.id);
+
       const children = (childrenByParent.get(asset.id) ?? [])
         .map((child) => build(child, next))
         .filter(Boolean);
-      const matchesName = !query || String(asset.name ?? "").toLowerCase().includes(query);
+
+      const matchesName =
+        !query ||
+        String(asset.name ?? "").toLowerCase().includes(query);
+
       const matchesRules = !onlyRules || asset.has_rules === true;
-      // Keep ancestors of matches so a matching descendant stays reachable.
-      if ((matchesName && matchesRules) || children.length) return { asset, children };
+
+      if ((matchesName && matchesRules) || children.length) {
+        return { asset, children };
+      }
+
       return null;
     }
 
-    return (childrenByParent.get(null) ?? []).map((asset) => build(asset)).filter(Boolean);
+    return (childrenByParent.get(null) ?? [])
+      .map((asset) => build(asset))
+      .filter(Boolean);
   }, [assets, q, onlyRules]);
 
-  const isOpen = (id, depth) => open[id] ?? (depth < 1 || ancestorsOfSelected.has(id));
-  const toggle = (id, depth) => setOpen((prev) => ({ ...prev, [id]: !isOpen(id, depth) }));
+  const isOpen = (id, depth) =>
+    open[id] ?? (depth < 1 || ancestorsOfSelected.has(id));
+
+  const toggle = (id, depth) =>
+    setOpen((prev) => ({ ...prev, [id]: !isOpen(id, depth) }));
 
   const renderNode = ({ asset, children }, depth = 0) => {
     const expanded = Boolean(q.trim()) || isOpen(asset.id, depth);
@@ -75,7 +101,9 @@ export default function AssetTree({ assets = [], selectedId, onRefresh }) {
     return (
       <div key={asset.id}>
         <div
-          className={"tree-row" + (selectedId === asset.id ? " selected" : "")}
+          className={
+            "tree-row" + (selectedId === asset.id ? " selected" : "")
+          }
           style={{ paddingLeft: 10 + depth * 18 }}
           role="button"
           tabIndex={0}
@@ -103,33 +131,55 @@ export default function AssetTree({ assets = [], selectedId, onRefresh }) {
                 }
               }}
             >
-              {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+              {expanded ? (
+                <ChevronDown size={15} />
+              ) : (
+                <ChevronRight size={15} />
+              )}
             </span>
           ) : (
             <span className="tree-toggle" />
           )}
+
           <i className={"lamp " + health} aria-label={label} />
-          <span className="tree-name">{asset.name || `Asset ${asset.id}`}</span>
+
+          <span className="tree-name">
+            {asset.name || `Asset ${asset.id}`}
+          </span>
+
           {asset.rule_count > 0 && (
-            <span className="tree-count" title={`${asset.rule_count} monitoring rule${asset.rule_count === 1 ? "" : "s"}`}>
+            <span
+              className="tree-count"
+              title={`${asset.rule_count} monitoring rule${
+                asset.rule_count === 1 ? "" : "s"
+              }`}
+            >
               {asset.rule_count}
             </span>
           )}
         </div>
+
         {expanded && children.map((child) => renderNode(child, depth + 1))}
       </div>
     );
   };
 
-  const parentOptions = [["", "No parent (top level)"], ...assets.map((a) => [a.id, a.name])];
+  const parentOptions = [
+    ["", "No parent (top level)"],
+    ...assets.map((a) => [a.id, a.name]),
+  ];
 
   const createAsset = async (values) => {
     const created = await api.post("/assets", {
       name: values.name.trim(),
       asset_type: values.asset_type.trim(),
       description: values.description?.trim() || null,
-      parent_asset_id: values.parent_asset_id === "" ? null : Number(values.parent_asset_id),
+      parent_asset_id:
+        values.parent_asset_id === ""
+          ? null
+          : Number(values.parent_asset_id),
     });
+
     setAdding(false);
     await onRefresh?.();
     nav(`/assets/${created.id}`);
@@ -145,6 +195,7 @@ export default function AssetTree({ assets = [], selectedId, onRefresh }) {
           value={q}
           onChange={(event) => setQ(event.target.value)}
         />
+
         <div className="btn-group">
           <button
             type="button"
@@ -156,13 +207,31 @@ export default function AssetTree({ assets = [], selectedId, onRefresh }) {
           >
             <FxIcon size={17} />
           </button>
-          <button type="button" title="Rules with alert status" aria-label="Rules with alert status" onClick={() => nav("/rules/alert")}>
+
+          <button
+            type="button"
+            title="Rules with alert status"
+            aria-label="Rules with alert status"
+            onClick={() => nav("/rules/alert")}
+          >
             <AlertDiamond size={17} />
           </button>
-          <button type="button" title="Rules with warning status" aria-label="Rules with warning status" onClick={() => nav("/rules/warning")}>
+
+          <button
+            type="button"
+            title="Rules with warning status"
+            aria-label="Rules with warning status"
+            onClick={() => nav("/rules/warning")}
+          >
             <WarnTriangle size={17} />
           </button>
-          <button type="button" title="Refresh" aria-label="Refresh" onClick={() => onRefresh?.().catch?.(() => {})}>
+
+          <button
+            type="button"
+            title="Refresh"
+            aria-label="Refresh"
+            onClick={() => onRefresh?.().catch?.(() => {})}
+          >
             <RefreshIcon size={17} />
           </button>
         </div>
@@ -183,7 +252,11 @@ export default function AssetTree({ assets = [], selectedId, onRefresh }) {
       </div>
 
       <div className="tree-foot">
-        <button type="button" className="btn-outline wide-btn" onClick={() => setAdding(true)}>
+        <button
+          type="button"
+          className="btn-outline wide-btn"
+          onClick={() => setAdding(true)}
+        >
           <PlusIcon size={16} /> Add asset
         </button>
       </div>
@@ -195,10 +268,30 @@ export default function AssetTree({ assets = [], selectedId, onRefresh }) {
           onClose={() => setAdding(false)}
           onSubmit={createAsset}
           fields={[
-            { key: "name", label: "Name", required: true, placeholder: "e.g. Mixer 2" },
-            { key: "asset_type", label: "Type", required: true, default: "machine", placeholder: "e.g. machine, line, plant" },
-            { key: "parent_asset_id", label: "Belongs to", type: "select", options: parentOptions },
-            { key: "description", label: "Description", type: "textarea" },
+            {
+              key: "name",
+              label: "Name",
+              required: true,
+              placeholder: "e.g. Mixer 2",
+            },
+            {
+              key: "asset_type",
+              label: "Type",
+              required: true,
+              default: "machine",
+              placeholder: "e.g. machine, line, plant",
+            },
+            {
+              key: "parent_asset_id",
+              label: "Belongs to",
+              type: "select",
+              options: parentOptions,
+            },
+            {
+              key: "description",
+              label: "Description",
+              type: "textarea",
+            },
           ]}
         />
       )}

@@ -83,7 +83,7 @@ export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "C
           values[field.requiredWhen.key] === field.requiredWhen.equals)
     );
 
-  // Preserve edits when parent polling refreshes dynamic field options.
+  
   useEffect(() => {
     setValues((current) => {
       let changed = Object.keys(current).length !== fields.length;

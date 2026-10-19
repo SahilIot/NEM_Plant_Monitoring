@@ -1,0 +1,298 @@
+﻿.copy-rules-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.62);
+  backdrop-filter: blur(5px);
+  overflow-y: auto;
+}
+
+.copy-rules-modal {
+  width: min(100%, 680px);
+  max-height: min(86vh, 820px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #ffffff;
+  color: #172033;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.28);
+}
+
+.copy-rules-modal .modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 24px;
+  border-bottom: 1px solid #e8edf4;
+  background: #ffffff;
+}
+
+.copy-rules-modal .modal-header h2 {
+  margin: 0;
+  color: #172033;
+  font-size: 20px;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+.copy-rules-modal .copy-rules-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.copy-rules-modal .copy-rules-close:hover {
+  background: #eef2f7;
+  color: #0f172a;
+}
+
+.copy-rules-modal .copy-rules-close:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.copy-rules-modal .modal-body {
+  padding: 22px 24px;
+  overflow-y: auto;
+}
+
+.copy-rules-modal .modal-body > p:first-child {
+  margin: 0 0 22px;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.copy-rules-modal .field-label {
+  display: block;
+  margin: 0 0 8px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.copy-rules-modal .form-input {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 10px 13px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #172033;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+
+.copy-rules-modal .form-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.13);
+}
+
+.copy-rules-modal .form-input:disabled {
+  background: #f8fafc;
+  cursor: not-allowed;
+}
+
+.copy-rules-modal .copy-rules-summary {
+  margin: 20px 0 12px;
+  padding: 11px 13px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.copy-rules-modal .copy-rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 2px 3px 2px 0;
+}
+
+.copy-rules-modal .copy-rule-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.copy-rules-modal .copy-rule-row:hover {
+  border-color: #93c5fd;
+  background: #f8fbff;
+}
+
+.copy-rules-modal .copy-rule-row:has(input:checked) {
+  border-color: #60a5fa;
+  background: #eff6ff;
+}
+
+.copy-rules-modal .copy-rule-row:has(input:disabled) {
+  cursor: not-allowed;
+}
+
+.copy-rules-modal .copy-rule-row input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  margin: 3px 0 0;
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+
+.copy-rules-modal .copy-rule-content {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.copy-rules-modal .copy-rule-content strong {
+  color: #1e293b;
+  font-size: 14px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.copy-rules-modal .copy-rule-content small {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.copy-rules-modal .form-error {
+  color: #b91c1c !important;
+}
+
+.copy-rules-modal .copy-rules-results {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+  background: #f0fdf4;
+  color: #166534;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.copy-rules-modal .copy-rules-results p {
+  margin: 8px 0 0;
+}
+
+.copy-rules-modal .copy-rules-results ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.copy-rules-modal .modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 24px;
+  border-top: 1px solid #e8edf4;
+  background: #f8fafc;
+}
+
+.copy-rules-modal .modal-actions button {
+  min-height: 42px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.copy-rules-modal .modal-actions .btn-outline {
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+}
+
+.copy-rules-modal .modal-actions .btn-outline:hover {
+  background: #f1f5f9;
+}
+
+.copy-rules-modal .modal-actions .btn-primary {
+  border: 1px solid #1d4ed8;
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.copy-rules-modal .modal-actions .btn-primary:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.copy-rules-modal .modal-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.copy-rules-modal .copy-rules-loading {
+  margin: 16px 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+@media (max-width: 600px) {
+  .copy-rules-overlay {
+    align-items: flex-start;
+    padding: 12px;
+  }
+
+  .copy-rules-modal {
+    max-height: calc(100vh - 24px);
+    border-radius: 14px;
+  }
+
+  .copy-rules-modal .modal-header,
+  .copy-rules-modal .modal-body {
+    padding: 18px;
+  }
+
+  .copy-rules-modal .modal-header h2 {
+    font-size: 17px;
+  }
+
+  .copy-rules-modal .modal-actions {
+    padding: 14px 18px;
+  }
+
+  .copy-rules-modal .modal-actions button {
+    flex: 1;
+    padding-inline: 10px;
+  }
+}
