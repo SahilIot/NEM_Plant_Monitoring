@@ -1,7 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../../../services/api.js";
 import "./PredefinedRulesModal.css";
-
+import {
+  ShieldCheck,
+  Search,
+  X,
+  Check,
+  Activity,
+  AlertTriangle,
+  CircleAlert,
+  Settings2,
+} from "lucide-react";
 
 export default function PredefinedRulesModal({ assetId, onClose, onAssigned }) {
   const [rules, setRules] = useState([]);
@@ -16,7 +25,7 @@ export default function PredefinedRulesModal({ assetId, onClose, onAssigned }) {
     api.getAll("/rules", 200)
       .then((items) => {
         if (!alive) return;
-        // A predefined rule is a rule not assigned to any asset yet.
+        
         setRules((Array.isArray(items) ? items : []).filter((rule) =>
           rule.target_asset_id == null && rule.asset_id == null
         ));
@@ -60,28 +69,79 @@ export default function PredefinedRulesModal({ assetId, onClose, onAssigned }) {
     <div className="prm-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
       <section className="prm-dialog" role="dialog" aria-modal="true" aria-labelledby="prm-title">
         <header className="prm-header">
-          <h2 id="prm-title">Assign Monitoring Rules</h2>
-          <button type="button" className="prm-close" onClick={onClose} disabled={saving} aria-label="Close">×</button>
-        </header>
+  <h2 id="prm-title" className="prm-title">
+    <ShieldCheck size={22} />
+    Assign Monitoring Rules
+  </h2>
+
+  <button
+    type="button"
+    className="prm-close"
+    onClick={onClose}
+    disabled={saving}
+    aria-label="Close"
+  >
+    <X size={22} />
+  </button>
+</header>
         <div className="prm-tools">
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search monitoring rules…" aria-label="Search monitoring rules" />
-          <span>{selected.size} selected</span>
-        </div>
+  <div className="prm-search">
+    <Search size={18} />
+    <input
+      value={search}
+      onChange={(e) => setSearch(e.target.value)}
+      placeholder="Search monitoring rules…"
+      aria-label="Search monitoring rules"
+    />
+  </div>
+  <span>{selected.size} selected</span>
+</div>
         {error && <div className="prm-error" role="alert">{error}</div>}
         <div className="prm-list">
           {loading ? <p className="prm-empty">Loading rules…</p> : visibleRules.length === 0 ? (
             <p className="prm-empty">{rules.length ? "No rules match your search." : "No unassigned predefined rules found. Create a rule in Configuration first."}</p>
           ) : visibleRules.map((rule) => (
             <label className="prm-rule" key={rule.id}>
-              <input type="checkbox" checked={selected.has(rule.id)} onChange={() => toggle(rule.id)} />
-              <span className="prm-rule-copy"><strong>{rule.name}</strong><small>{rule.description || (rule.rule_type || "Monitoring rule").replaceAll("_", " ")}</small></span>
-              <span className="prm-severity">{rule.severity || "warning"}</span>
-            </label>
+  <input
+    type="checkbox"
+    checked={selected.has(rule.id)}
+    onChange={() => toggle(rule.id)}
+  />
+
+  <Activity size={19} className="prm-rule-icon" />
+
+  <span className="prm-rule-copy">
+    <strong>{rule.name}</strong>
+    <small>
+      {rule.description ||
+        (rule.rule_type || "Monitoring rule").replaceAll("_", " ")}
+    </small>
+  </span>
+
+  <span
+    className={`prm-severity prm-severity-${(rule.severity || "warning").toLowerCase()}`}
+  >
+    {(rule.severity || "warning").toLowerCase() === "critical" ? (
+      <CircleAlert size={15} />
+    ) : (
+      <AlertTriangle size={15} />
+    )}
+    {rule.severity || "warning"}
+  </span>
+</label>
           ))}
         </div>
         <footer className="prm-footer">
           <span className="prm-note">Assigned rules remain inactive until you activate them.</span>
-          <div><button type="button" className="btn-outline" onClick={onClose} disabled={saving}>Cancel</button><button type="button" className="btn-primary" onClick={assign} disabled={saving || loading || selected.size === 0}>{saving ? "Assigning…" : `Assign${selected.size ? ` (${selected.size})` : ""}`}</button></div>
+          <button
+  type="button"
+  className="btn-primary prm-assign-btn"
+  onClick={assign}
+  disabled={saving || loading || selected.size === 0}
+>
+  {!saving && <Check size={17} />}
+  {saving ? "Assigning…" : `Assign${selected.size ? ` (${selected.size})` : ""}`}
+</button>
         </footer>
       </section>
     </div>

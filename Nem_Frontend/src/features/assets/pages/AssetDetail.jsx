@@ -1,6 +1,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useOutletContext, useParams } from "react-router-dom";
+import CopyRulesModal from "../components/CopyRulesModal.jsx";
+import PredefinedRulesModal from "../../rules/components/PredefinedRulesModal.jsx";
 import { api } from "../../../services/api.js";
 import MaintenancePanel from "../components/MaintenancePanel.jsx";
 import {
@@ -238,12 +240,12 @@ export default function AssetDetail() {
   const [loadError, setLoadError] = useState("");
   const navigate = useNavigate();
 
-  // Prevent older requests from overwriting newer results.
+  
   const seq = useRef(0);
   const liveLoading = useRef(false);
   const readingRequest = useRef(null);
 
-  // Load rules, latest readings, monitoring states and PLC status.
+  
   const loadLive = useCallback(async () => {
     if (liveLoading.current) return;
     liveLoading.current = true;
@@ -368,8 +370,7 @@ export default function AssetDetail() {
       });
   }, [assetId]);
 
-  // Initial load when opening or switching assets.
-  // There is intentionally no setInterval polling here.
+  
   useEffect(() => {
     setTab("status");
     setList("activated");
@@ -393,7 +394,7 @@ export default function AssetDetail() {
     };
   }, [assetId, loadVariables, loadLogs, loadLive, loadLatestReadings]);
 
-  // PLC readings can change faster than the machine summary; keep Live values fresh.
+
   useEffect(() => {
     let active = true;
     let timeoutId;
@@ -413,7 +414,7 @@ export default function AssetDetail() {
     };
   }, [loadLatestReadings]);
 
-  // Refresh machine counters and evaluated rule states while this asset is open.
+  
   useEffect(() => {
     let active = true;
     let timeoutId;
@@ -433,7 +434,7 @@ export default function AssetDetail() {
     };
   }, [loadLive]);
 
-  // Load events when the Event log tab is opened.
+ 
   useEffect(() => {
     if (tab !== "events") return;
 
@@ -459,7 +460,6 @@ export default function AssetDetail() {
     };
   }, [tab, assetId]);
 
-  // Look up names for variables belonging to child assets.
   useEffect(() => {
     const missing = [
       ...new Set(
@@ -532,7 +532,7 @@ export default function AssetDetail() {
         (ORDER[b.status] ?? 3)
   );
 
-  // Explicit refresh only; no background frontend timer.
+ 
   const refreshAll = async () => {
     await Promise.all([
       loadLive(),
@@ -1089,26 +1089,35 @@ export default function AssetDetail() {
               >
                 <DotsIcon size={17} />
               </button>
-
-              {menu && (
-                <div className="menu right" role="menu">
-                  <div
+                {menu && (
+                  <div className="menu right" role="menu">
+                    <div
                     role="menuitem"
                     onClick={() => bulk("activated")}
-                  >
-                    Activate all rules
-                  </div>
-
-                  <div
-                    role="menuitem"
-                    onClick={() => bulk("not_activated")}
-                  >
-                    Deactivate all rules
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+                    >
+                      Activate all rules
+                      </div>
+                      <div
+                      role="menuitem"
+                      onClick={() => bulk("not_activated")}
+                      >Deactivate all rules</div>
+                      <div
+                      role="menuitem"
+                      onClick={() => {
+                        setMenu(false);
+                        setShowPredefinedRules(true);
+                      }}>Assign predefined monitoring rules</div>
+                      <div
+                      role="menuitem"
+                      onClick={() => {
+                        setMenu(false);
+                        setModal("copyRules");
+                      }}
+                      >Copy from another asset</div>
+                      </div>
+                    )}
+                    </div>
+                    </div>
 
           {shown.length === 0 ? (
             <div className="panel">
@@ -1349,15 +1358,18 @@ export default function AssetDetail() {
 )}
 
 
-      {modal === "copyRulesInfo" && (
-        <Modal title="Copy rules from another asset" onClose={() => setModal(null)}>
-          <p>Rule copying from another asset is not available in this version yet. You can create a rule or assign predefined monitoring rules instead.</p>
-          <div className="modal-actions">
-            <button className="btn-outline" onClick={() => setModal("ruleTypeOptions")}>Create rule</button>
-            <button className="btn-primary" onClick={() => { setModal(null); setShowPredefinedRules(true); }}>Predefined rules</button>
-          </div>
-        </Modal>
-      )}
+      
+{modal === "copyRules" && (
+  <CopyRulesModal
+    assetId={assetId}
+    onClose={() => setModal(null)}
+    onCopied={async () => {
+      setModal(null);
+      await refreshAll();
+    }}
+  />
+)}
+
 
       {modal === "add" && (
         <CreateModal

@@ -1,5 +1,5 @@
+# Maintenance records and schedules
 from datetime import date, datetime, time, timedelta, timezone
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -20,22 +20,15 @@ from app.services.monitoring_engine import emit_event, utc_now
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
 
-
+#Find a maintenance schedule by its db ID
 def _schedule_or_404(session: Session, schedule_id: int) -> MaintenanceSchedule:
     schedule = session.get(MaintenanceSchedule, schedule_id)
     if schedule is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Maintenance schedule {schedule_id} was not found",
-        )
+        raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
     return schedule
 
-
-def _schedule_read(
-    schedule: MaintenanceSchedule,
-    *,
-    today: date | None = None,
-) -> MaintenanceScheduleRead:
+# This prepares a db schedule for the frontend
+def _schedule_read(schedule: MaintenanceSchedule,*,today: date | None = None,) -> MaintenanceScheduleRead:
     progress_date = today or utc_now().date()
     if schedule.status in {"completed", "cancelled"} and schedule.last_completed_at:
         progress_date = schedule.last_completed_at.date()
@@ -67,7 +60,7 @@ def _schedule_read(
         }
     )
 
-
+#This function creates an individual maintenance job from a recurring schedule
 def _create_occurrence(
     session: Session,
     schedule: MaintenanceSchedule,
@@ -99,7 +92,7 @@ def _create_occurrence(
     schedule.due_alerted_for = None
     return record
 
-
+#This creates a monitoring event related to a schedule
 def _emit_schedule_event(
     session: Session,
     schedule: MaintenanceSchedule,
@@ -121,7 +114,7 @@ def _emit_schedule_event(
         },
     )
 
-
+# This standardizes datetimes to UTC
 def _normalized(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -129,7 +122,7 @@ def _normalized(value: datetime | None) -> datetime | None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
 
-
+#Similar to schedule_or_404, but it looks up a single maintenance record instead of schedule
 def _record_or_404(session: Session, record_id: int) -> MaintenanceRecord:
     record = session.get(MaintenanceRecord, record_id)
     if record is None:
@@ -139,7 +132,7 @@ def _record_or_404(session: Session, record_id: int) -> MaintenanceRecord:
         )
     return record
 
-
+#validates an alert associated with a maintenance record
 def _validate_alert(
     session: Session,
     *,
@@ -158,24 +151,18 @@ def _validate_alert(
         )
     return alert
 
-
+#Checks that the dates are logically ordered
 def _validate_record_dates(record: MaintenanceRecord) -> None:
     planned_start = _normalized(record.planned_start_at)
     planned_end = _normalized(record.planned_end_at)
     actual_start = _normalized(record.actual_started_at)
     actual_end = _normalized(record.actual_completed_at)
     if planned_start is not None and planned_end is not None and planned_end < planned_start:
-        raise HTTPException(
-            status_code=422,
-            detail="planned_end_at must not precede planned_start_at",
-        )
+        raise HTTPException(status_code=422,detail="planned_end_at must not precede planned_start_at",) 
     if actual_start is not None and actual_end is not None and actual_end < actual_start:
-        raise HTTPException(
-            status_code=422,
-            detail="actual_completed_at must not precede actual_started_at",
-        )
+        raise HTTPException(status_code=422,detail="actual_completed_at must not precede actual_started_at",)
 
-
+#this records events for individual maintenance jobs, such as starting or completing a  job.
 def _emit_maintenance_event(
     session: Session,
     record: MaintenanceRecord,
@@ -200,7 +187,7 @@ def _emit_maintenance_event(
         },
     )
 
-
+#Create an individual maintenance record
 @router.post("", response_model=MaintenanceRead, status_code=status.HTTP_201_CREATED)
 def create_maintenance_record(
     payload: MaintenanceCreate,
@@ -283,12 +270,8 @@ def create_maintenance_record(
     session.refresh(record)
     return record
 
-
-@router.post(
-    "/schedules",
-    response_model=MaintenanceScheduleRead,
-    status_code=status.HTTP_201_CREATED,
-)
+#Creating a recurring maintenance schedule
+@router.post("/schedules",response_model=MaintenanceScheduleRead,status_code=status.HTTP_201_CREATED,)
 def create_maintenance_schedule(
     payload: MaintenanceScheduleCreate,
     session: Session = Depends(get_db),
@@ -329,7 +312,7 @@ def create_maintenance_schedule(
     session.refresh(schedule)
     return _schedule_read(schedule)
 
-
+#Listing and viewing schedules
 @router.get("/schedules")
 def list_maintenance_schedules(
     asset_id: int | None = Query(default=None, gt=0),
@@ -352,7 +335,7 @@ def list_maintenance_schedules(
         results = [schedule for schedule in results if schedule.due_status == due_state]
     return results
 
-
+#Returns one schedule by ID
 @router.get("/schedules/{schedule_id}", response_model=MaintenanceScheduleRead)
 def get_maintenance_schedule(
     schedule_id: int,
@@ -360,7 +343,7 @@ def get_maintenance_schedule(
 ) -> MaintenanceScheduleRead:
     return _schedule_read(_schedule_or_404(session, schedule_id))
 
-
+#User can change selected fields without sending the entire schedule again
 @router.patch("/schedules/{schedule_id}", response_model=MaintenanceScheduleRead)
 def update_maintenance_schedule(
     schedule_id: int,
@@ -380,16 +363,10 @@ def update_maintenance_schedule(
             or schedule.last_completed_at is not None
         )
     ):
-        raise HTTPException(
-            status_code=409,
-            detail="The first due date cannot change after an occurrence has been completed",
-        )
+        raise HTTPException(status_code=409,detail="The first due date cannot change after an occurrence has been completed",)
     if "schedule_start_date" in changes:
         if schedule.last_completed_at is not None:
-            raise HTTPException(
-                status_code=409,
-                detail="The schedule anchor cannot change after an occurrence has been completed",
-            )
+            raise HTTPException(status_code=409,detail="The schedule anchor cannot change after an occurrence has been completed",)
         if schedule.current_occurrence_id is not None:
             current_occurrence = session.get(
                 MaintenanceRecord, schedule.current_occurrence_id
@@ -404,17 +381,11 @@ def update_maintenance_schedule(
     if "schedule_start_date" in changes:
         schedule.current_period_start_date = schedule.schedule_start_date
     if schedule.first_due_date < schedule.schedule_start_date:
-        raise HTTPException(
-            status_code=422,
-            detail="first_due_date must not precede schedule_start_date",
-        )
+        raise HTTPException(status_code=422,detail="first_due_date must not precede schedule_start_date",)
     if schedule.recurrence_enabled and (
         schedule.recurrence_interval is None or schedule.recurrence_unit is None
     ):
-        raise HTTPException(
-            status_code=422,
-            detail="recurrence_interval and recurrence_unit are required",
-        )
+        raise HTTPException(status_code=422,detail="recurrence_interval and recurrence_unit are required",)
     if not schedule.recurrence_enabled:
         schedule.recurrence_interval = None
         schedule.recurrence_unit = None
@@ -431,14 +402,9 @@ def update_maintenance_schedule(
     ):
         occurrence = session.get(MaintenanceRecord, schedule.current_occurrence_id)
         if occurrence is None or occurrence.status != "planned":
-            raise HTTPException(
-                status_code=409,
-                detail="The first due date can only change before maintenance starts",
-            )
+            raise HTTPException(status_code=409,detail="The first due date can only change before maintenance starts",)
         occurrence.planned_due_date = schedule.first_due_date
-        occurrence.planned_end_at = datetime.combine(
-            schedule.first_due_date, time.max, tzinfo=timezone.utc
-        )
+        occurrence.planned_end_at = datetime.combine(schedule.first_due_date, time.max, tzinfo=timezone.utc)
         schedule.current_period_start_date = schedule.schedule_start_date
         if previous_due_date is not None:
             alerts = session.scalars(
@@ -479,11 +445,8 @@ def update_maintenance_schedule(
     session.refresh(schedule)
     return _schedule_read(schedule)
 
-
-@router.post(
-    "/schedules/{schedule_id}/confirm-next",
-    response_model=MaintenanceScheduleRead,
-)
+#Confirming the next occurrence -> approval step for recurring maintenance
+@router.post("/schedules/{schedule_id}/confirm-next",response_model=MaintenanceScheduleRead,)
 def confirm_next_occurrence(
     schedule_id: int,
     payload: MaintenanceScheduleConfirm,
@@ -495,29 +458,17 @@ def confirm_next_occurrence(
         .with_for_update()
     )
     if schedule is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Maintenance schedule {schedule_id} was not found",
-        )
+        raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
     if schedule.approval_status == "approved" and schedule.current_occurrence_id:
         return _schedule_read(schedule)
     if schedule.approval_status != "pending" or schedule.proposed_due_date is None:
         raise HTTPException(status_code=409, detail="No proposed occurrence awaits approval")
     if payload.due_date <= schedule.schedule_start_date:
-        raise HTTPException(
-            status_code=422,
-            detail="Next due date must be after the schedule start date",
-        )
+        raise HTTPException(status_code=422,detail="Next due date must be after the schedule start date",)
     if schedule.last_completed_at and payload.due_date <= schedule.last_completed_at.date():
-        raise HTTPException(
-            status_code=422,
-            detail="Next due date must be after the last completion date",
-        )
+        raise HTTPException(status_code=422,detail="Next due date must be after the last completion date",)
     if schedule.current_due_date and payload.due_date <= schedule.current_due_date:
-        raise HTTPException(
-            status_code=422,
-            detail="Next due date must be after the previous scheduled due date",
-        )
+        raise HTTPException(status_code=422,detail="Next due date must be after the previous scheduled due date",)
     previous_due_date = schedule.current_due_date
     schedule.current_due_date = payload.due_date
     schedule.proposed_due_date = None
@@ -538,11 +489,8 @@ def confirm_next_occurrence(
     schedule.current_occurrence_id = occurrence.id
     return _schedule_read(schedule)
 
-
-@router.post(
-    "/schedules/{schedule_id}/decline-next",
-    response_model=MaintenanceScheduleRead,
-)
+#allow user to decline the proposed next occurrence
+@router.post("/schedules/{schedule_id}/decline-next",response_model=MaintenanceScheduleRead,)
 def decline_next_occurrence(
     schedule_id: int,
     session: Session = Depends(get_db),
@@ -565,7 +513,7 @@ def decline_next_occurrence(
     session.refresh(schedule)
     return _schedule_read(schedule)
 
-
+# returns individual maintenance jobs,rather than schedule definitions
 @router.get("")
 def list_maintenance_records(
     asset_id: int | None = Query(default=None, gt=0),
@@ -618,7 +566,7 @@ def list_maintenance_records(
         "offset": offset,
     }
 
-
+# returns a single maintenanace record
 @router.get("/{record_id}", response_model=MaintenanceRead)
 def get_maintenance_record(
     record_id: int,
@@ -626,7 +574,7 @@ def get_maintenance_record(
 ) -> MaintenanceRecord:
     return _record_or_404(session, record_id)
 
-
+# code does not pysically delete the db row, instead performs  a soft delete also called archiving
 @router.delete("/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
 def archive_completed_maintenance_record(
     record_id: int,
@@ -675,7 +623,7 @@ def archive_completed_maintenance_record(
     session.commit()
     return None
 
-
+#Modifies a maintenance record,but not allow completed or archived records to be edited 
 @router.patch("/{record_id}", response_model=MaintenanceRead)
 def update_maintenance_record(
     record_id: int,
@@ -723,7 +671,7 @@ def update_maintenance_record(
     session.refresh(record)
     return record
 
-
+#Only records  in planned status can be started
 @router.post("/{record_id}/start", response_model=MaintenanceRead)
 def start_maintenance_record(
     record_id: int,
@@ -747,7 +695,7 @@ def start_maintenance_record(
     session.refresh(record)
     return record
 
-
+#important functions in maintenance system -> locks the record and rejects jobs that are already completed or cancelled
 @router.post("/{record_id}/complete", response_model=MaintenanceRead)
 def complete_maintenance_record(
     record_id: int,
@@ -829,7 +777,7 @@ def complete_maintenance_record(
     session.refresh(record)
     return record
 
-
+#cancels a job unless it is already completed
 @router.post("/{record_id}/cancel", response_model=MaintenanceRead)
 def cancel_maintenance_record(
     record_id: int,
@@ -868,3 +816,5 @@ def cancel_maintenance_record(
         session.commit()
         session.refresh(record)
     return record
+# connects the frontend to your maintenance db and business logic, it creates jobs,manages recurring schedules,track start/completion/cancellation,calculates
+# the next proposed due date,waits for approval and emits events so maintenanace activity can be reflected in monitoring system.

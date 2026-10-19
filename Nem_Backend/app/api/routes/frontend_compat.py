@@ -1,5 +1,4 @@
 #FastApi router that connects your react frontend to your backend and postgreSQL database
-
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -31,11 +30,7 @@ from app.models import (
 )
 from app.schemas.rule import RuleCreate
 from app.services.frontend_backup import create_backup, restore_backup
-from app.services.monitoring_engine import (
-    emit_event,
-    resolve_active_rule_alerts,
-    set_rule_enabled_state,
-)
+from app.services.monitoring_engine import (emit_event,resolve_active_rule_alerts,set_rule_enabled_state,)
 from app.api.routes.rules import configured_cycle_signal_mapping, validate_targets
 from app.api.routes.monitoring import state_for_rule
 
@@ -48,7 +43,6 @@ MAX_TOTAL_UPLOAD_BYTES = 24 * 1024 * 1024
 MAX_FILES_PER_DOCUMENT = 10
 
 ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt"}
-
 
 class ProfileUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
@@ -162,16 +156,11 @@ def _descendant_ids(session: Session, asset_id: int) -> set[int]:
 def _fernet(request: Request) -> Fernet:
     value = request.app.state.settings.settings_encryption_key.get_secret_value().strip()
     if not value:
-        raise HTTPException(
-            status_code=503,
-            detail="Email password encryption is not configured; set SETTINGS_ENCRYPTION_KEY in the backend environment.",
-        )
+        raise HTTPException( status_code=503,detail="Email password encryption is not configured; set SETTINGS_ENCRYPTION_KEY in the backend environment.",)
     try:
         return Fernet(value.encode("ascii"))
     except (ValueError, UnicodeEncodeError) as error:
-        raise HTTPException(
-            status_code=503, detail="SETTINGS_ENCRYPTION_KEY must be a valid Fernet key."
-        ) from error
+        raise HTTPException(status_code=503, detail="SETTINGS_ENCRYPTION_KEY must be a valid Fernet key.") from error
 
 #Dashboard summary endpoint
 @router.get("/summary")
@@ -261,7 +250,7 @@ def frontend_create_asset_rule(
 @router.post("/assets/{asset_id}/rules/usage", status_code=201)
 def frontend_create_usage_rule(
     asset_id: int,
-    payload: UsageRuleCreate,
+    payload: UsageRuleCreate, # type: ignore
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     asset = session.get(Asset, asset_id)
@@ -289,7 +278,7 @@ def frontend_create_usage_rule(
 @router.post("/assets/{asset_id}/rules/time", status_code=201)
 def frontend_create_time_rule(
     asset_id: int,
-    payload: TimeRuleCreate,
+    payload: TimeRuleCreate, # type: ignore
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     asset = session.get(Asset, asset_id)

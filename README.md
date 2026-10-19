@@ -133,7 +133,6 @@ No secrets belong in source control.
 | `MAINTENANCE_DUE_ALERTS_ENABLED` | Enables the leased maintenance due-alert evaluator; defaults to `true` and checks once per minute. |
 | `MONITORING_DEFAULT_STALE_AFTER_SECONDS` | Freshness window, default `300`; a rule may override it. |
 | `OPCUA_ENDPOINT` | `opc.tcp://host:port/...` for the PLC. |
-| `OPCUA_CLIENT_CERT`, `OPCUA_CLIENT_KEY`, `OPCUA_SERVER_CERT` | Certificate/key paths (relative to `Nem_Backend/`); settings exist, but current client creation does not apply the certificate/security configuration. |
 | `OPCUA_USERNAME`, `OPCUA_PASSWORD` | Optional; set both or neither. |
 | `OPCUA_TIMEOUT_SECONDS` | Connection/read timeout, default `10`. |
 | `OPCUA_RECONNECT_DELAY_SECONDS` | Delay before reconnecting, default `5`. |
@@ -149,12 +148,11 @@ very short pulses are captured.
 
 ## OPC UA machine mappings
 
-The collector's current subscription and one-shot read paths are read-only.
-However, `create_configured_opcua_client()` does not currently call the
-certificate/security configuration helper or apply a security policy. Do not
-assume the connection is certificate-secured because certificate settings exist.
-Integrate the server-approved security policy before using the connection on an
-untrusted or production network.
+The collector's subscription and one-shot read paths are read-only. OPC UA
+transport encryption and certificate validation are intentionally disabled for
+development testing. Use this only on a trusted, isolated network; do not use
+this configuration on production or untrusted networks. Add the PLC-approved
+security policy and certificates before deployment.
 
 Mappings live in `OPCUA_MACHINE_MAPPINGS`; they are not created from the UI.
 There is at most one entry per asset, and a NodeId may be mapped only once
