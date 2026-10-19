@@ -1,17 +1,21 @@
+#Pydantic schemas for creating,updating and reading monitoring rules 
 from datetime import datetime
 from decimal import Decimal
 import math
 from typing import Any, Literal
-
 from pydantic import Field, field_validator, model_validator
-
 from app.schemas.common import ORMModel
-
-
+#This schems defines what information a user must supply when creating a rule
 class RuleCreate(ORMModel):
     name: str = Field(min_length=1, max_length=200)
     description: str | None = None
-    rule_type: Literal["parameter_threshold", "runtime_duration", "duration", "generic"]
+    rule_type: Literal[
+        "parameter_threshold",
+        "runtime_duration",
+        "duration",
+        "generic",
+        "boolean_count_threshold",
+    ]
     target_asset_id: int | None = Field(default=None, gt=0)
     variable_id: int | None = Field(default=None, gt=0)
     operator: Literal["<", "<=", "==", "!=", ">=", ">", "lt", "lte", "eq", "ne", "gte", "gt"] | None = None
@@ -43,9 +47,7 @@ class RuleCreate(ORMModel):
             raise ValueError("A rule must target an asset, a variable, or both")
         if self.rule_type == "parameter_threshold":
             if self.variable_id is None or self.operator is None or self.threshold is None:
-                raise ValueError(
-                    "Parameter threshold rules require a variable, operator, and threshold"
-                )
+                raise ValueError("Parameter threshold rules require a variable, operator, and threshold")
         if self.rule_type in {"runtime_duration", "duration"}:
             duration = self.parameters.get("duration_seconds") if self.parameters else None
             if not isinstance(duration, int) or isinstance(duration, bool) or duration <= 0:
@@ -58,31 +60,56 @@ class RuleCreate(ORMModel):
                     if self.parameters.get("operator") not in {
                         "<", "<=", "==", "!=", ">=", ">", "lt", "lte", "eq", "ne", "gte", "gt"
                     } or not isinstance(self.parameters.get("threshold"), (int, float)):
-                        raise ValueError(
-                            "Threshold duration rules require a supported operator and numeric threshold"
-                        )
+                        raise ValueError("Threshold duration rules require a supported operator and numeric threshold")
                     threshold = self.parameters["threshold"]
-                    if isinstance(threshold, bool) or (
-                        isinstance(threshold, float) and not math.isfinite(threshold)
-                    ):
+                    if isinstance(threshold, bool) or (isinstance(threshold, float) and not math.isfinite(threshold)):
                         raise ValueError("parameters.threshold must be finite and numeric")
                 elif condition == "equals":
                     expected_value = self.parameters.get("expected_value")
                     if not isinstance(expected_value, (str, bool, int, float)):
-                        raise ValueError(
-                            "Equals duration rules require a scalar parameters.expected_value"
-                        )
+                        raise ValueError("Equals duration rules require a scalar parameters.expected_value")
                     if isinstance(expected_value, float) and not math.isfinite(expected_value):
                         raise ValueError("parameters.expected_value must be finite")
                 else:
                     raise ValueError("Duration condition must be 'equals' or 'threshold'")
+        if self.rule_type == "boolean_count_threshold":
+            if self.variable_id is None:
+                raise ValueError("Boolean count threshold rules require a variable_id")
+            parameters = self.parameters or {}
+            warning_thresholds = parameters.get("warning_thresholds")
+            alert_threshold = parameters.get("alert_threshold")
+            if (
+                not isinstance(warning_thresholds, list)
+                or len(warning_thresholds) != 2
+                or any(
+                    not isinstance(value, int)
+                    or isinstance(value, bool)
+                    or value <= 0
+                    for value in warning_thresholds
+                )
+                or warning_thresholds[0] >= warning_thresholds[1]
+            ):
+                raise ValueError("warning_thresholds must contain two increasing positive integers")
+
+            if (
+                not isinstance(alert_threshold, int)
+                or isinstance(alert_threshold, bool)
+                or alert_threshold <= warning_thresholds[1]
+            ):
+                raise ValueError("alert_threshold must be a positive integer greater than both warnings")
         return self
 
-
+#Modifying an existing rule
 class RuleUpdate(ORMModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = None
-    rule_type: Literal["parameter_threshold", "runtime_duration", "duration", "generic"] | None = None
+    rule_type: Literal[
+        "parameter_threshold",
+        "runtime_duration",
+        "duration",
+        "generic",
+        "boolean_count_threshold",
+    ] | None = None
     target_asset_id: int | None = Field(default=None, gt=0)
     variable_id: int | None = Field(default=None, gt=0)
     operator: Literal["<", "<=", "==", "!=", ">=", ">", "lt", "lte", "eq", "ne", "gte", "gt"] | None = None
@@ -134,7 +161,7 @@ class RuleUpdate(ORMModel):
             raise ValueError("Rule name cannot be empty")
         return value
 
-
+# returning a rule to the frontend
 class RuleRead(ORMModel):
     id: int
     name: str
