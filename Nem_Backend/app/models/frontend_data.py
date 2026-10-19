@@ -30,19 +30,6 @@ class InstructionDocument(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class InstructionDocumentFile(Base):
-    __tablename__ = "instruction_document_files"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    document_id: Mapped[int] = mapped_column(ForeignKey("instruction_documents.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    stored_name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
-    content_type: Mapped[str | None] = mapped_column(String(150), nullable=True)
-    size_bytes: Mapped[int] = mapped_column(nullable=False)
-
-
 #Keeping track of backups
 class BackupRecord(Base):
     __tablename__ = "frontend_backups"
@@ -53,3 +40,16 @@ class BackupRecord(Base):
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), default=lambda: datetime.now(timezone.utc), nullable=False
     )
+
+# Metadata for files attached to an instruction/manual/checklist document.
+class InstructionDocumentFile(Base):
+    __tablename__ = "instruction_document_files"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("instruction_documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    content_type: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    size_bytes: Mapped[int] = mapped_column(nullable=False)

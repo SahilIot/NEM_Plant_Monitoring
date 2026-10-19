@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../../services/api.js";
 import { formatDuration, timeAgo } from "../../../utils/format.js";
+import "../styles/Plc.css";
 
 
 const Svg = ({ children, size = 22 }) => (
@@ -16,51 +17,27 @@ const Spinner = () => <span className="spin" aria-hidden="true" />;
 
 
 
-function useAppTheme(ref) {
-  const [light, setLight] = useState(false);
+function useAppTheme() {
+  const [light, setLight] = useState(
+    () => document.documentElement.dataset.theme !== "dark"
+  );
+
   useEffect(() => {
-    const parse = (value) => {
-      const m = value.match(/rgba?\(([^)]+)\)/);
-      if (!m) return null;
-      const p = m[1].split(",").map((x) => parseFloat(x));
-      return p.length === 4 && p[3] === 0 ? null : p;
+    const updateTheme = () => {
+      setLight(document.documentElement.dataset.theme !== "dark");
     };
-    const detect = () => {
-      let el = ref.current ? ref.current.parentElement : null;
-      while (el) {
-        const rgb = parse(getComputedStyle(el).backgroundColor);
-        if (rgb) {
-          setLight(0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2] > 140);
-          return;
-        }
-        el = el.parentElement;
-      }
-      setLight(!window.matchMedia("(prefers-color-scheme: dark)").matches);
-    };
-    const detectSoon = () => {
-      detect();
-      window.setTimeout(detect, 150);
-      window.setTimeout(detect, 600); // theme transition ke baad
-    };
-    detect();
-    const observer = new MutationObserver((records) => {
-      if (ref.current && records.every((r) => ref.current.contains(r.target))) return;
-      detectSoon();
-    });
+
+    updateTheme();
+
+    const observer = new MutationObserver(updateTheme);
     observer.observe(document.documentElement, {
       attributes: true,
-      subtree: true,
-      attributeFilter: ["class", "data-theme", "data-mode", "style"],
+      attributeFilter: ["data-theme"],
     });
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    media.addEventListener && media.addEventListener("change", detectSoon);
-    window.addEventListener("storage", detectSoon);
-    return () => {
-      observer.disconnect();
-      media.removeEventListener && media.removeEventListener("change", detectSoon);
-      window.removeEventListener("storage", detectSoon);
-    };
-  }, [ref]);
+
+    return () => observer.disconnect();
+  }, []);
+
   return light;
 }
 
@@ -68,8 +45,7 @@ const percent = (value, limit) => (limit ? Math.min(100, Math.round((value / lim
 const barTone = (pct) => (pct >= 100 ? " bad" : pct >= 80 ? " warn" : "");
 
 export default function Plc() {
-  const rootRef = useRef(null);
-  const light = useAppTheme(rootRef);
+  const light = useAppTheme();
   const [assets, setAssets] = useState([]);
   const [variables, setVariables] = useState([]);
   const [assetId, setAssetId] = useState("");
@@ -96,7 +72,7 @@ export default function Plc() {
   const [latestError, setLatestError] = useState("");
   const [latestLoading, setLatestLoading] = useState(true);
 
-  // Load saved readings once, or refresh them after an explicit action.
+
   const loadLatestReadings = useCallback(async () => {
     try {
       const result = await api.getAll("/readings/latest?limit=100");
@@ -133,7 +109,7 @@ export default function Plc() {
     }
   }, []);
 
-  // Share one in-flight request between initial load, polling, and manual refresh.
+
   const loadMonitoringStatus = useCallback(async () => {
     if (monitoringRequest.current) return monitoringRequest.current;
 
@@ -211,7 +187,7 @@ export default function Plc() {
     };
   }, [loadLatestReadings, loadMonitoringStatus]);
 
-  // Poll status after each completed request so requests never overlap.
+
   useEffect(() => {
     let active = true;
     let timeoutId;
@@ -236,7 +212,7 @@ export default function Plc() {
     };
   }, [loadMonitoringStatus]);
 
-  // Load active variables whenever the selected asset changes.
+ 
   useEffect(() => {
     let active = true;
 
@@ -330,7 +306,7 @@ export default function Plc() {
         )} at ${recordedAt}`
       );
 
-      // Refresh the display after a successful one-time read.
+     
       await Promise.all([
         loadLatestReadings(),
         loadMonitoringStatus(),
@@ -389,7 +365,7 @@ export default function Plc() {
   const readOk = reading.startsWith("Read and saved");
 
   return (
-    <div>
+    <div className="plc-page">
       <div className="page-head">
         <h1 className="page-title">PLC / OPC UA</h1>
       </div>
@@ -439,7 +415,7 @@ export default function Plc() {
           )}
 
         {latestReadings.length > 0 && (
-          <div className="table-wrap">
+         <div className="plc-table-wrap">
             <table>
               <thead>
                 <tr>
