@@ -59,11 +59,10 @@ export const Modal = ({ title, onClose, children, wide }) => {
   );
 };
 
-// A <select> shows its first option even when no value has been chosen, so the
-// form state has to start on that option or the visible choice is never submitted.
+
 const initialValue = (field) => {
-  if (field.default !== undefined && field.default !== null) return field.default;
-  if (field.type === "select" && field.options?.length) return field.options[0][0];
+  if (field.default !== undefined && field.default !== null) return String(field.default);
+  if (field.type === "select") return "";
   return "";
 };
 
@@ -73,19 +72,74 @@ export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "C
   );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const isVisible = (field) =>
+    !field.showWhen ||
+    values[field.showWhen.key] === field.showWhen.equals;
+  const isRequired = (field) =>
+    Boolean(
+      field.required ||
+        (field.requiredWhen &&
+          values[field.requiredWhen.key] === field.requiredWhen.equals)
+    );
+
+  // Preserve edits when parent polling refreshes dynamic field options.
+  useEffect(() => {
+    setValues((current) => {
+      let changed = Object.keys(current).length !== fields.length;
+      const next = Object.fromEntries(
+        fields.map((field) => {
+          const hasValue = Object.hasOwn(current, field.key);
+          let value = hasValue ? current[field.key] : initialValue(field);
+
+          if (
+            field.type === "select" &&
+            value !== "" &&
+            field.options &&
+            !field.options.some(([option]) => String(option) === String(value))
+          ) {
+            value = initialValue(field);
+          }
+
+          if (!hasValue || value !== current[field.key]) changed = true;
+          return [field.key, value];
+        })
+      );
+      return changed ? next : current;
+    });
+  }, [fields]);
+
   const set = (key, value) => setValues((current) => ({ ...current, [key]: value }));
 
   const submit = async (e) => {
     e.preventDefault();
     for (const f of fields) {
-      if (f.required && !String(values[f.key] ?? "").trim()) {
+      if (
+        isVisible(f) &&
+        isRequired(f) &&
+        !String(values[f.key] ?? "").trim()
+      ) {
         return setError(`${f.label} is required.`);
       }
     }
     setBusy(true);
     setError("");
     try {
-      await onSubmit(values);
+      const normalized = {};
+      for (const field of fields) {
+        const value = values[field.key] ?? "";
+        if (field.type === "number" && String(value).trim() !== "") {
+          const number = Number(value);
+          if (!Number.isFinite(number)) {
+            setError(`${field.label} must be a valid number.`);
+            setBusy(false);
+            return;
+          }
+          normalized[field.key] = number;
+        } else {
+          normalized[field.key] = value;
+        }
+      }
+      await onSubmit(normalized);
     } catch (err) {
       setError(String(err.message || err));
       setBusy(false);
@@ -96,27 +150,40 @@ export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "C
     <Modal title={title} onClose={onClose} wide>
       <form onSubmit={submit}>
         {intro && <p className="muted modal-intro">{intro}</p>}
-        {fields.map((f, i) => (
+        {fields.filter(isVisible).map((f, i) => (
           <div className="field" key={f.key}>
             <label htmlFor={"f-" + f.key}>
               {f.label}
-              {f.required && <span className="req"> *</span>}
+              {isRequired(f) && <span className="req"> *</span>}
             </label>
             {f.type === "textarea" ? (
-              <textarea id={"f-" + f.key} rows={3} placeholder={f.placeholder} value={values[f.key]} onChange={(e) => set(f.key, e.target.value)} />
+              <textarea id={"f-" + f.key} rows={3} placeholder={f.placeholder} value={values[f.key] ?? ""} disabled={busy} onChange={(e) => set(f.key, e.target.value)} />
             ) : f.type === "select" ? (
-              <select id={"f-" + f.key} value={values[f.key]} onChange={(e) => set(f.key, e.target.value)}>
-                {f.options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              <select
+                id={"f-" + f.key}
+                value={values[f.key] ?? ""}
+                required={isRequired(f)}
+                disabled={Boolean(f.disabled || busy)}
+                onChange={(e) => {
+                  set(f.key, e.target.value);
+                  setError("");
+                  if (f.onChange) f.onChange(e.target.value, values, setValues);
+                }}
+              >
+                <option value="" disabled={Boolean(f.required)}>
+                  {f.placeholder || `Select ${f.label.toLowerCase()}`}
+                </option>
+                {f.options.map(([v, l]) => <option key={String(v)} value={String(v)}>{l}</option>)}
               </select>
             ) : (
-              <input id={"f-" + f.key} type={f.type || "text"} step={f.type === "number" ? "any" : undefined} autoFocus={i === 0} placeholder={f.placeholder} value={values[f.key]} onChange={(e) => set(f.key, e.target.value)} />
+              <input id={"f-" + f.key} type={f.type || "text"} step={f.type === "number" ? "any" : undefined} autoFocus={i === 0} required={isRequired(f)} disabled={busy} placeholder={f.placeholder} value={values[f.key] ?? ""} onChange={(e) => set(f.key, e.target.value)} />
             )}
             {f.hint && <span className="hint">{f.hint}</span>}
           </div>
         ))}
         {error && <p className="notice error" role="alert">{error}</p>}
         <div className="modal-actions">
-          <button type="button" className="btn-outline" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn-outline" disabled={busy} onClick={onClose}>Cancel</button>
           <button type="submit" className="btn-primary" disabled={busy}>{busy ? "Saving…" : submitLabel}</button>
         </div>
       </form>

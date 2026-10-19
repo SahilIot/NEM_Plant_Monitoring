@@ -1,4 +1,4 @@
-# Assests API router
+# Assests API router through which the frontend can work with assets
 #API Router for group related endpoints into one router
 #Depends- tell fastapi to provide dependencies, such as a database session.
 # HTTP Exception - Returns HTTP errors such as 404,409,422 etc
@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models import Asset, MonitoringRule, Reading, Variable  # these are database models
 from app.schemas.asset import AssetCreate, AssetRead, AssetTree, AssetUpdate # pydantic schema for input validation and output formatting
-
 
 router = APIRouter(prefix="/assets", tags=["assets"]) 
 

@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, matchPath } from "react-router-dom";
 import { api } from "../api.js";
-import { APP_TITLE, REFRESH_MS } from "../config.js";
+import { APP_TITLE } from "../config.js";
 import Brand from "./Brand.jsx";
 import AssetTree from "./AssetTree.jsx";
 import {
@@ -38,56 +39,83 @@ function crumbs(path, assets) {
       { label: `Rules in ${m.params.kind} status` },
     ];
   }
+
   if ((m = matchPath("/assets/:id", path))) {
     const asset = assets.find((x) => x.id === Number(m.params.id));
-    return [{ label: "Assets", to: "/assets" }, { label: asset ? asset.name : `Asset ${m.params.id}` }];
+    return [
+      { label: "Assets", to: "/assets" },
+      { label: asset ? asset.name : `Asset ${m.params.id}` },
+    ];
   }
+
   if (path === "/assets") return [{ label: "Assets" }];
   if (path === "/plc") return [{ label: "PLC / OPC UA" }];
+
   if ((m = matchPath("/configuration/:sub", path))) {
     return [
       { label: "Configuration", to: "/configuration" },
       { label: TITLES[m.params.sub] || m.params.sub },
     ];
   }
+
   if ((m = matchPath("/settings/:sub", path))) {
     return [
       { label: "Settings", to: "/settings" },
       { label: TITLES[m.params.sub] || m.params.sub },
     ];
   }
+
   if (path.startsWith("/configuration")) return [{ label: "Configuration" }];
   if (path.startsWith("/settings")) return [{ label: "Settings" }];
+
   return [{ label: "Overview" }];
 }
 
 const RANK = { off: 0, ok: 1, warning: 2, alert: 3 };
 
-// Worst active alert on an asset, rolled up to every ancestor so a collapsed
-// branch of the tree still shows that something below it needs attention.
 function computeHealth(assets, alerts) {
   const own = new Map();
+
   for (const alert of alerts) {
     const current = own.get(alert.target_asset_id) || "ok";
-    if (RANK[alert.severity] > RANK[current]) own.set(alert.target_asset_id, alert.severity);
+    if (RANK[alert.severity] > RANK[current]) {
+      own.set(alert.target_asset_id, alert.severity);
+    }
   }
+
   const byId = new Map(assets.map((asset) => [asset.id, asset]));
   const health = new Map();
+
   const raise = (id, level) => {
-    if ((RANK[level] ?? 0) > (RANK[health.get(id)] ?? -1)) health.set(id, level);
+    if ((RANK[level] ?? 0) > (RANK[health.get(id)] ?? -1)) {
+      health.set(id, level);
+    }
   };
+
   for (const asset of assets) {
     const level = own.get(asset.id) || (asset.is_active ? "ok" : "off");
     raise(asset.id, level);
+
     if (level !== "warning" && level !== "alert") continue;
-    let cursor = asset.parent_asset_id != null ? byId.get(asset.parent_asset_id) : null;
+
+    let cursor =
+      asset.parent_asset_id != null
+        ? byId.get(asset.parent_asset_id)
+        : null;
+
     const seen = new Set([asset.id]);
+
     while (cursor && !seen.has(cursor.id)) {
       seen.add(cursor.id);
       raise(cursor.id, level);
-      cursor = cursor.parent_asset_id != null ? byId.get(cursor.parent_asset_id) : null;
+
+      cursor =
+        cursor.parent_asset_id != null
+          ? byId.get(cursor.parent_asset_id)
+          : null;
     }
   }
+
   return health;
 }
 
@@ -99,7 +127,12 @@ export default function Layout() {
   const [alerts, setAlerts] = useState([]);
   const [assetError, setAssetError] = useState("");
   const [assetsLoaded, setAssetsLoaded] = useState(false);
-  const [link, setLink] = useState({ online: null, reason: "", at: null });
+  const [link, setLink] = useState({
+    online: null,
+    reason: "",
+    at: null,
+  });
+
   const [railOpen, setRailOpen] = useState(() => {
     try {
       return localStorage.getItem("nem-nav") !== "collapsed";
@@ -107,6 +140,7 @@ export default function Layout() {
       return true;
     }
   });
+
   const [treeOpen, setTreeOpen] = useState(true);
 
   const [theme, setTheme] = useState(() => {
@@ -114,17 +148,21 @@ export default function Layout() {
       const saved = localStorage.getItem("nem-theme");
       if (saved === "light" || saved === "dark") return saved;
     } catch {
-      // Storage may be unavailable in restricted browser environments.
+      // Storage may be unavailable.
     }
-    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+
+    return window.matchMedia?.("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
   });
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+
     try {
       localStorage.setItem("nem-theme", theme);
     } catch {
-      // The selected theme still applies for this session.
+      // Theme still applies for this session.
     }
   }, [theme]);
 
@@ -132,12 +170,10 @@ export default function Layout() {
     try {
       localStorage.setItem("nem-nav", railOpen ? "expanded" : "collapsed");
     } catch {
-      // Ignored: the preference simply is not remembered.
+      // Preference is not persisted.
     }
   }, [railOpen]);
 
-  // Assets are required for the page to work; rules and alerts only enrich the
-  // tree, so a failure there must not blank the screen.
   const loadAssets = useCallback(async () => {
     try {
       const items = await api.getAll("/assets");
@@ -158,6 +194,7 @@ export default function Layout() {
       api.getAll("/rules"),
       api.getAll("/alerts/active", 500),
     ]);
+
     if (ready.status === "fulfilled") {
       setLink({ online: true, reason: "", at: new Date() });
     } else {
@@ -168,38 +205,49 @@ export default function Layout() {
         at: new Date(),
       });
     }
-    if (ruleList.status === "fulfilled") setRules(ruleList.value);
-    if (alertList.status === "fulfilled") setAlerts(alertList.value);
+
+    if (ruleList.status === "fulfilled") {
+      setRules(ruleList.value);
+    }
+
+    if (alertList.status === "fulfilled") {
+      setAlerts(alertList.value);
+    }
   }, []);
 
   const reload = useCallback(async () => {
-    const [items] = await Promise.all([loadAssets(), refreshStatus()]);
+    const [items] = await Promise.all([
+      loadAssets(),
+      refreshStatus(),
+    ]);
+
     return items;
   }, [loadAssets, refreshStatus]);
 
+  // Initial load only. No setInterval or background polling.
   useEffect(() => {
     reload().catch(() => {
-      // The error is shown in the page.
+      // The error is displayed in the page.
     });
   }, [reload]);
 
-  const timer = useRef(null);
-  useEffect(() => {
-    timer.current = window.setInterval(() => {
-      if (!document.hidden) refreshStatus();
-    }, REFRESH_MS);
-    return () => window.clearInterval(timer.current);
-  }, [refreshStatus]);
-
-  const health = useMemo(() => computeHealth(rawAssets, alerts), [rawAssets, alerts]);
+  const health = useMemo(
+    () => computeHealth(rawAssets, alerts),
+    [rawAssets, alerts]
+  );
 
   const assets = useMemo(() => {
     const ruleCount = new Map();
+
     for (const rule of rules) {
       if (rule.target_asset_id != null) {
-        ruleCount.set(rule.target_asset_id, (ruleCount.get(rule.target_asset_id) || 0) + 1);
+        ruleCount.set(
+          rule.target_asset_id,
+          (ruleCount.get(rule.target_asset_id) || 0) + 1
+        );
       }
     }
+
     return rawAssets.map((asset) => ({
       ...asset,
       parent: asset.parent_asset_id ?? null,
@@ -211,11 +259,17 @@ export default function Layout() {
   }, [rawAssets, rules, health]);
 
   const showTree =
-    pathname === "/" || pathname.startsWith("/rules") || pathname.startsWith("/assets");
-  const selectedId = Number(matchPath("/assets/:id", pathname)?.params.id);
-  const breadcrumbs = crumbs(pathname, assets);
+    pathname === "/" ||
+    pathname.startsWith("/rules") ||
+    pathname.startsWith("/assets");
 
+  const selectedId = Number(
+    matchPath("/assets/:id", pathname)?.params.id
+  );
+
+  const breadcrumbs = crumbs(pathname, assets);
   const pageTitle = breadcrumbs[breadcrumbs.length - 1].label;
+
   useEffect(() => {
     document.title = `${pageTitle} - NEM Plant Monitor`;
   }, [pageTitle]);
@@ -224,7 +278,9 @@ export default function Layout() {
     <NavLink
       to={to}
       end={end}
-      className={({ isActive }) => "rail-item" + (isActive ? " active" : "")}
+      className={({ isActive }) =>
+        "rail-item" + (isActive ? " active" : "")
+      }
       title={label}
     >
       <Icon size={20} />
@@ -233,7 +289,11 @@ export default function Layout() {
   );
 
   const linkText =
-    link.online === null ? "Connecting" : link.online ? "Backend connected" : link.reason;
+    link.online === null
+      ? "Connecting"
+      : link.online
+        ? "Backend connected"
+        : link.reason;
 
   return (
     <div className="app">
@@ -241,14 +301,23 @@ export default function Layout() {
         <Brand />
         <div className="app-title">{APP_TITLE}</div>
         <div className="spacer" />
+
         <div
-          className={"link-state " + (link.online === null ? "wait" : link.online ? "up" : "down")}
+          className={
+            "link-state " +
+            (link.online === null ? "wait" : link.online ? "up" : "down")
+          }
           role="status"
-          title={link.at ? `Checked ${link.at.toLocaleTimeString()}` : "Checking backend"}
+          title={
+            link.at
+              ? `Checked ${link.at.toLocaleTimeString()}`
+              : "Checking backend"
+          }
         >
           <i />
           {linkText}
         </div>
+
         <button
           className="icon-btn"
           title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
@@ -268,6 +337,7 @@ export default function Layout() {
             {navItem("/configuration", ShapesIcon, "Configuration")}
             {navItem("/settings", GearIcon, "Settings")}
           </div>
+
           <button
             className="rail-item rail-toggle"
             onClick={() => setRailOpen((open) => !open)}
@@ -285,10 +355,15 @@ export default function Layout() {
               {breadcrumbs.map((crumb, index) => (
                 <span key={index}>
                   {index > 0 && <span className="sep">/</span>}
-                  {crumb.to ? <Link to={crumb.to}>{crumb.label}</Link> : <span className="cur">{crumb.label}</span>}
+                  {crumb.to ? (
+                    <Link to={crumb.to}>{crumb.label}</Link>
+                  ) : (
+                    <span className="cur">{crumb.label}</span>
+                  )}
                 </span>
               ))}
             </nav>
+
             {showTree && (
               <button
                 className="icon-btn"
@@ -304,19 +379,38 @@ export default function Layout() {
 
           <div className="content-row">
             {showTree && treeOpen && (
-              <AssetTree assets={assets} selectedId={selectedId} onRefresh={reload} />
+              <AssetTree
+                assets={assets}
+                selectedId={selectedId}
+                onRefresh={reload}
+              />
             )}
 
             <main className="content">
               {assetError && (
                 <div className="banner error" role="alert">
                   <p>Could not load assets: {assetError}</p>
-                  <button type="button" className="btn-outline" onClick={() => reload().catch(() => {})}>
+                  <button
+                    type="button"
+                    className="btn-outline"
+                    onClick={() => reload().catch(() => {})}
+                  >
                     Retry
                   </button>
                 </div>
               )}
-              <Outlet context={{ assets, assetsLoaded, rules, alerts, reload, refreshStatus, link }} />
+
+              <Outlet
+                context={{
+                  assets,
+                  assetsLoaded,
+                  rules,
+                  alerts,
+                  reload,
+                  refreshStatus,
+                  link,
+                }}
+              />
             </main>
           </div>
         </div>

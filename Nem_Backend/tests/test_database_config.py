@@ -1,8 +1,10 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from pydantic import ValidationError
 
 from app.core.config import Settings
-from app.db.session import create_database_engine
+from app.db.session import UTCDateTime, create_database_engine
 from app.models import (
     Alert,
     MaintenanceRecord,
@@ -13,6 +15,31 @@ from app.models import (
 )
 
 POSTGRES_URL = "postgresql+psycopg://localhost/nem_test"
+
+
+def test_utc_datetime_bind_and_result_use_aware_utc_in_python():
+    utc_type = UTCDateTime()
+    local_time = datetime(
+        2026,
+        10,
+        16,
+        14,
+        42,
+        tzinfo=timezone(timedelta(hours=5, minutes=30)),
+    )
+
+    assert utc_type.process_bind_param(local_time, None) == datetime(
+        2026, 10, 16, 9, 12
+    )
+    assert utc_type.process_bind_param(datetime(2026, 10, 16, 9, 12), None) == (
+        datetime(2026, 10, 16, 9, 12)
+    )
+    assert utc_type.process_result_value(datetime(2026, 10, 16, 9, 12), None) == (
+        datetime(2026, 10, 16, 9, 12, tzinfo=timezone.utc)
+    )
+    assert utc_type.process_result_value(local_time, None) == datetime(
+        2026, 10, 16, 9, 12, tzinfo=timezone.utc
+    )
 
 
 def test_settings_accept_sync_psycopg_postgresql_url():
