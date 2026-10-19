@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { EmptyArt } from "./Icons.jsx";
@@ -6,13 +7,17 @@ export const EmptyState = ({ title, lines = [], art = true }) => (
   <div className="empty">
     {art && <EmptyArt />}
     {title && <div className="empty-title">{title}</div>}
-    {lines.map((l, i) => <div key={i} className="empty-line">{l}</div>)}
+    {lines.map((line, index) => (
+      <div key={index} className="empty-line">{line}</div>
+    ))}
   </div>
 );
 
 export const CardLink = ({ to, icon: Icon, title, desc }) => (
   <Link to={to} className="cardlink">
-    <div className="cardlink-ico"><Icon size={34} strokeWidth={1.5} /></div>
+    <div className="cardlink-ico">
+      <Icon size={34} strokeWidth={1.5} />
+    </div>
     <div className="cardlink-txt">
       <div className="cardlink-title">{title}</div>
       <div className="cardlink-desc">{desc}</div>
@@ -39,6 +44,7 @@ export const Modal = ({ title, onClose, children, wide }) => {
     const onKey = (event) => {
       if (event.key === "Escape") onClose?.();
     };
+
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
@@ -50,7 +56,7 @@ export const Modal = ({ title, onClose, children, wide }) => {
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        onClick={(e) => e.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
       >
         <h3>{title}</h3>
         {children}
@@ -59,92 +65,144 @@ export const Modal = ({ title, onClose, children, wide }) => {
   );
 };
 
-
 const initialValue = (field) => {
   if (field.type === "files") return [];
-  if (field.default !== undefined && field.default !== null) return String(field.default);
-  if (field.type === "select") return "";
+  if (field.default !== undefined && field.default !== null) {
+    return String(field.default);
+  }
   return "";
 };
 
-export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "Create", intro }) {
+export function CreateModal({
+  title,
+  fields,
+  onSubmit,
+  onClose,
+  submitLabel = "Create",
+  intro,
+  initialValues = {},
+}) {
   const [values, setValues] = useState(() =>
-    Object.fromEntries(fields.map((f) => [f.key, initialValue(f)]))
+    Object.fromEntries(
+      fields.map((field) => [
+        field.key,
+        initialValues[field.key] !== undefined &&
+        initialValues[field.key] !== null
+          ? String(initialValues[field.key])
+          : initialValue(field),
+      ])
+    )
   );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
   const isVisible = (field) =>
     !field.showWhen ||
     values[field.showWhen.key] === field.showWhen.equals;
+
   const isRequired = (field) =>
     Boolean(
       field.required ||
-        (field.requiredWhen &&
-          values[field.requiredWhen.key] === field.requiredWhen.equals)
+      (field.requiredWhen &&
+        values[field.requiredWhen.key] === field.requiredWhen.equals)
     );
 
-  // Preserve edits when parent polling refreshes dynamic field options.
   useEffect(() => {
     setValues((current) => {
       let changed = Object.keys(current).length !== fields.length;
+
       const next = Object.fromEntries(
         fields.map((field) => {
-          const hasValue = Object.hasOwn(current, field.key);
-          let value = hasValue ? current[field.key] : initialValue(field);
+          const hasCurrent = Object.hasOwn(current, field.key);
+          const hasInitial = Object.hasOwn(initialValues, field.key);
+
+          let value = hasCurrent
+            ? current[field.key]
+            : hasInitial
+              ? String(initialValues[field.key] ?? "")
+              : initialValue(field);
 
           if (
             field.type === "select" &&
             value !== "" &&
             field.options &&
-            !field.options.some(([option]) => String(option) === String(value))
+            !field.options.some(
+              ([option]) => String(option) === String(value)
+            )
           ) {
             value = initialValue(field);
           }
 
-          if (!hasValue || value !== current[field.key]) changed = true;
+          if (!hasCurrent || value !== current[field.key]) {
+            changed = true;
+          }
+
           return [field.key, value];
         })
       );
+
       return changed ? next : current;
     });
-  }, [fields]);
+  }, [fields, initialValues]);
 
-  const set = (key, value) => setValues((current) => ({ ...current, [key]: value }));
+  const set = (key, value) => {
+    setValues((current) => ({ ...current, [key]: value }));
+    setError("");
+  };
 
-  const submit = async (e) => {
-    e.preventDefault();
-    for (const f of fields) {
+  const submit = async (event) => {
+    event.preventDefault();
+
+    for (const field of fields) {
       if (
-        isVisible(f) &&
-        isRequired(f) &&
-        !(f.type === "files" ? (Array.isArray(values[f.key]) && values[f.key].length > 0) : String(values[f.key] ?? "").trim())
+        isVisible(field) &&
+        isRequired(field) &&
+        !(
+          field.type === "files"
+            ? Array.isArray(values[field.key]) &&
+              values[field.key].length > 0
+            : String(values[field.key] ?? "").trim()
+        )
       ) {
-        return setError(`${f.label} is required.`);
+        setError(`${field.label} is required.`);
+        return;
       }
     }
+
+    const normalized = {};
+
+    for (const field of fields) {
+      const value =
+        values[field.key] ??
+        (field.type === "files" ? [] : "");
+
+      if (field.type === "files") {
+        normalized[field.key] = value;
+      } else if (
+        field.type === "number" &&
+        String(value).trim() !== ""
+      ) {
+        const number = Number(value);
+
+        if (!Number.isFinite(number)) {
+          setError(`${field.label} must be a valid number.`);
+          return;
+        }
+
+        normalized[field.key] = number;
+      } else {
+        normalized[field.key] = value;
+      }
+    }
+
     setBusy(true);
     setError("");
+
     try {
-      const normalized = {};
-      for (const field of fields) {
-        const value = values[field.key] ?? (field.type === "files" ? [] : "");
-        if (field.type === "files") {
-          normalized[field.key] = value;
-        } else if (field.type === "number" && String(value).trim() !== "") {
-          const number = Number(value);
-          if (!Number.isFinite(number)) {
-            setError(`${field.label} must be a valid number.`);
-            setBusy(false);
-            return;
-          }
-          normalized[field.key] = number;
-        } else {
-          normalized[field.key] = value;
-        }
-      }
       await onSubmit(normalized);
     } catch (err) {
-      setError(String(err.message || err));
+      setError(String(err?.message || err));
+    } finally {
       setBusy(false);
     }
   };
@@ -153,47 +211,112 @@ export function CreateModal({ title, fields, onSubmit, onClose, submitLabel = "C
     <Modal title={title} onClose={onClose} wide>
       <form onSubmit={submit}>
         {intro && <p className="muted modal-intro">{intro}</p>}
-        {fields.filter(isVisible).map((f, i) => (
-          <div className="field" key={f.key}>
-            <label htmlFor={"f-" + f.key}>
-              {f.label}
-              {isRequired(f) && <span className="req"> *</span>}
+
+        {fields.filter(isVisible).map((field, index) => (
+          <div className="field" key={field.key}>
+            <label htmlFor={"f-" + field.key}>
+              {field.label}
+              {isRequired(field) && <span className="req"> *</span>}
             </label>
-            {f.type === "files" ? (
+
+            {field.type === "files" ? (
               <>
-                <input id={"f-" + f.key} type="file" multiple accept={f.accept || ".pdf,.doc,.docx,.txt"} disabled={busy} onChange={(e) => set(f.key, Array.from(e.target.files || []))} />
-                {Array.isArray(values[f.key]) && values[f.key].length > 0 && <ul className="hint">{values[f.key].map((file) => <li key={`${file.name}-${file.size}`}>{file.name} ({(file.size / 1024).toFixed(1)} KB)</li>)}</ul>}
-                {f.hint && <span className="hint">{f.hint}</span>}
+                <input
+                  id={"f-" + field.key}
+                  type="file"
+                  multiple
+                  accept={field.accept || ".pdf,.doc,.docx,.txt"}
+                  disabled={busy}
+                  onChange={(event) =>
+                    set(field.key, Array.from(event.target.files || []))
+                  }
+                />
+
+                {Array.isArray(values[field.key]) &&
+                  values[field.key].length > 0 && (
+                    <ul className="hint">
+                      {values[field.key].map((file) => (
+                        <li key={`${file.name}-${file.size}`}>
+                          {file.name} ({(file.size / 1024).toFixed(1)} KB)
+                        </li>
+                      ))}
+                    </ul>
+                  )}
               </>
-            ) : f.type === "textarea" ? (
-              <textarea id={"f-" + f.key} rows={3} placeholder={f.placeholder} value={values[f.key] ?? ""} disabled={busy} onChange={(e) => set(f.key, e.target.value)} />
-            ) : f.type === "select" ? (
+            ) : field.type === "textarea" ? (
+              <textarea
+                id={"f-" + field.key}
+                rows={3}
+                placeholder={field.placeholder}
+                value={values[field.key] ?? ""}
+                disabled={busy}
+                onChange={(event) => set(field.key, event.target.value)}
+              />
+            ) : field.type === "select" ? (
               <select
-                id={"f-" + f.key}
-                value={values[f.key] ?? ""}
-                required={isRequired(f)}
-                disabled={Boolean(f.disabled || busy)}
-                onChange={(e) => {
-                  set(f.key, e.target.value);
-                  setError("");
-                  if (f.onChange) f.onChange(e.target.value, values, setValues);
+                id={"f-" + field.key}
+                value={values[field.key] ?? ""}
+                required={isRequired(field)}
+                disabled={Boolean(field.disabled || busy)}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  set(field.key, value);
+
+                  if (field.onChange) {
+                    field.onChange(value, values, setValues);
+                  }
                 }}
               >
-                <option value="" disabled={Boolean(f.required)}>
-                  {f.placeholder || `Select ${f.label.toLowerCase()}`}
+                <option value="" disabled={Boolean(field.required)}>
+                  {field.placeholder ||
+                    `Select ${field.label.toLowerCase()}`}
                 </option>
-                {f.options.map(([v, l]) => <option key={String(v)} value={String(v)}>{l}</option>)}
+
+                {(field.options || []).map(([option, label]) => (
+                  <option key={String(option)} value={String(option)}>
+                    {label}
+                  </option>
+                ))}
               </select>
             ) : (
-              <input id={"f-" + f.key} type={f.type || "text"} step={f.type === "number" ? "any" : undefined} autoFocus={i === 0} required={isRequired(f)} disabled={busy} placeholder={f.placeholder} value={f.type === "files" ? undefined : (values[f.key] ?? "")} onChange={(e) => set(f.key, e.target.value)} />
+              <input
+                id={"f-" + field.key}
+                type={field.type || "text"}
+                step={field.type === "number" ? "any" : undefined}
+                autoFocus={index === 0}
+                required={isRequired(field)}
+                disabled={busy}
+                placeholder={field.placeholder}
+                value={values[field.key] ?? ""}
+                onChange={(event) => set(field.key, event.target.value)}
+              />
             )}
-            {f.hint && <span className="hint">{f.hint}</span>}
+
+            {field.hint && <span className="hint">{field.hint}</span>}
           </div>
         ))}
-        {error && <p className="notice error" role="alert">{error}</p>}
+
+        {error && (
+          <p className="notice error" role="alert">{error}</p>
+        )}
+
         <div className="modal-actions">
-          <button type="button" className="btn-outline" disabled={busy} onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn-primary" disabled={busy}>{busy ? "Saving…" : submitLabel}</button>
+          <button
+            type="button"
+            className="btn-outline"
+            disabled={busy}
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={busy}
+          >
+            {busy ? "Saving..." : submitLabel}
+          </button>
         </div>
       </form>
     </Modal>

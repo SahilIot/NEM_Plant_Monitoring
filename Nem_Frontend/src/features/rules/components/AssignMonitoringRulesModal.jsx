@@ -39,8 +39,7 @@ export default function AssignMonitoringRulesModal({
             rule.asset_id == null
         );
 
-        // Prefer real rules returned by the API.
-        // Use sample rows only when the API returns no unassigned rules.
+        
         setRules(
           unassigned.length
             ? unassigned

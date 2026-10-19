@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../../services/api.js";
 import { formatDuration, timeAgo } from "../../../utils/format.js";
 import "../styles/Plc.css";
-
+document.documentElement.dataset.theme
 
 const Svg = ({ children, size = 22 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"

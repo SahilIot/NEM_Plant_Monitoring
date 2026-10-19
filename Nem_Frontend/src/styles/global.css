@@ -625,7 +625,7 @@ button:disabled { opacity: 0.55; cursor: default; }
 }
 
 
-/* Create New Rule - option cards */
+
 .rule-type-options {
   display: grid;
   grid-template-columns: 1fr;

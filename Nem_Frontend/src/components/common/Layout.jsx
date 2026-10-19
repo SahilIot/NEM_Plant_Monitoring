@@ -148,7 +148,7 @@ export default function Layout() {
       const saved = localStorage.getItem("nem-theme");
       if (saved === "light" || saved === "dark") return saved;
     } catch {
-      // Storage may be unavailable.
+      
     }
 
     return window.matchMedia?.("(prefers-color-scheme: dark)").matches
@@ -162,7 +162,7 @@ export default function Layout() {
     try {
       localStorage.setItem("nem-theme", theme);
     } catch {
-      // Theme still applies for this session.
+      
     }
   }, [theme]);
 
@@ -170,7 +170,7 @@ export default function Layout() {
     try {
       localStorage.setItem("nem-nav", railOpen ? "expanded" : "collapsed");
     } catch {
-      // Preference is not persisted.
+      
     }
   }, [railOpen]);
 
@@ -224,10 +224,10 @@ export default function Layout() {
     return items;
   }, [loadAssets, refreshStatus]);
 
-  // Initial load only. No setInterval or background polling.
+ 
   useEffect(() => {
     reload().catch(() => {
-      // The error is displayed in the page.
+      
     });
   }, [reload]);
 
