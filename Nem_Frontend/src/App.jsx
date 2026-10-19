@@ -1,4 +1,5 @@
 import React from "react";
+import RuleCreatePage from "./pages/RuleCreatePage.jsx";
 import { Routes, Route } from "react-router-dom";
 import Layout from "./components/Layout.jsx";
 import Home from "./pages/Home.jsx";
@@ -19,6 +20,7 @@ export default function App() {
         <Route path="/rules/:kind" element={<AlertRules />} />
         <Route path="/assets" element={<AssetsIndex />} />
         <Route path="/assets/:id" element={<AssetDetail />} />
+        <Route path="/assets/:id/rules/new/:kind"element={<RuleCreatePage />} />
         <Route path="/configuration" element={<Configuration />} />
         <Route path="/configuration/:sub" element={<ConfigSub />} />
         <Route path="/settings" element={<Settings />} />

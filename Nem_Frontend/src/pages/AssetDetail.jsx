@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { useOutletContext, useParams } from "react-router-dom";
+import { useOutletContext, useParams, useNavigate } from "react-router-dom";
 import { api } from "../api.js";
 import { REFRESH_MS } from "../config.js";
 import PredefinedRulesModal from "./PredefinedRulesModal.jsx";
@@ -14,6 +14,8 @@ import {
   PlusCircle,
   DotsIcon,
   ChevronDown,
+  BookmarkIcon,
+  FxIcon,
 } from "../components/Icons.jsx";
 
 const ORDER = { alert: 0, warning: 1, ok: 2 };
@@ -110,14 +112,15 @@ export default function AssetDetail() {
   const [showFilter, setShowFilter] = useState(false);
   const [menu, setMenu] = useState(false);
   const [sortMenu, setSortMenu] = useState(false);
-  const [addRuleMenu, setAddRuleMenu] = useState(false);
   const [modal, setModal] = useState(null);
   const [showPredefinedRules, setShowPredefinedRules] = useState(false);
+  const [addRuleMenu, setAddRuleMenu] = useState(false);
   const [logs, setLogs] = useState([]);
   const [events, setEvents] = useState([]);
   const [loadError, setLoadError] = useState("");
   const [, setTick] = useState(0);
   const seq = useRef(0);
+  const navigate = useNavigate();
 
   // Everything that changes while the machine runs: rules, readings, rule states, PLC runtime.
   const loadLive = useCallback(async () => {
@@ -170,7 +173,6 @@ export default function AssetDetail() {
     setTab("status");
     setList("activated");
     setFilter("");
-    setAddRuleMenu(false);
     setReadings([]);
     setMachine(null);
     setLogs([]);
@@ -460,27 +462,96 @@ export default function AssetDetail() {
             <div className="rule-actions dropdown">
               <button
                 type="button"
-                className="btn-primary add-rule-trigger"
-                onClick={() => { setAddRuleMenu((open) => !open); setMenu(false); }}
+                className="btn-primary"
+                onClick={() => setAddRuleMenu((open) => !open)}
                 aria-haspopup="menu"
                 aria-expanded={addRuleMenu}
               >
-                <PlusCircle size={17} /> Add rule <ChevronDown size={15} />
+                <PlusCircle size={17} /> Add rule <ChevronDown size={14} />
               </button>
               {addRuleMenu && (
-                <div className="menu right add-rule-menu" role="menu">
-                  <div role="menuitem" onClick={() => { setAddRuleMenu(false); setModal("ruleTypeOptions"); }}>
-                    <PlusCircle size={15} /> Create new
-                  </div>
-                  <div role="menuitem" onClick={() => { setAddRuleMenu(false); setShowPredefinedRules(true); }}>
-                    <GearIcon size={15} /> Assign predefined monitoring rules
-                  </div>
-                  <div role="menuitem" onClick={() => { setAddRuleMenu(false); setModal("copyRulesInfo"); }}>
-                    <AssetIcon size={15} /> Copy from another asset
-                  </div>
-                </div>
-              )}
-            </div>
+                <div className="add-rule-menu menu right" role="menu">
+                  <button
+                  type="button"
+                  className="add-rule-option"
+                  role="menuitem"
+                  onClick={() => {
+                    setAddRuleMenu(false);
+                    setModal("ruleTypeOptions");
+                  }}
+                  >
+                    <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                    >
+                      <path d="M12 5v14M5 12h14" />
+                      </svg>
+                      <span>
+                        <strong>Create rule</strong>
+                        <small>Create a custom monitoring rule</small>
+                        </span>
+                        </button>
+                        <button
+                        type="button"
+                        className="add-rule-option"
+                        role="menuitem"
+                        onClick={() => {
+                          setAddRuleMenu(false);
+                          setShowPredefinedRules(true);
+                        }}
+                        >
+                          <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                          >
+                            <path d="M9 11l3 3L22 4" />
+                            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                            </svg>
+      <span>
+        <strong>Assign predefined rules</strong>
+        <small>Use existing monitoring rules</small>
+      </span>
+    </button>
+
+    <button
+      type="button"
+      className="add-rule-option"
+      role="menuitem"
+      onClick={() => {
+        setAddRuleMenu(false);
+        setModal("copyRulesInfo");
+      }}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <rect x="8" y="8" width="13" height="13" rx="2" />
+        <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
+      </svg>
+      <span>
+        <strong>Copy from another asset</strong>
+        <small>Reuse rules from another asset</small>
+      </span>
+    </button>
+  </div>
+)}
+</div>
 
             <div className="dropdown">
               <button className="icon-outline sm" onClick={() => setMenu(!menu)} title="Rule actions" aria-label="Rule actions" aria-haspopup="menu" aria-expanded={menu}>
@@ -581,21 +652,60 @@ export default function AssetDetail() {
         </div>
       )}
 
-      {modal === "ruleTypeOptions" && (
-        <Modal title="Create new rule" onClose={() => setModal(null)}>
-          <div className="rule-type-options">
-            <button type="button" className="rule-type-option" onClick={() => setModal("add")}>
-              <strong>Interval-based</strong>
-              <small>Create a rule based on intervals</small>
-            </button>
-            <button type="button" className="rule-type-option" onClick={() => setModal("addUsage")}>
-              <strong>Usage-based</strong>
-              <small>Create a rule based on machine usage</small>
-            </button>
-            <button type="button" className="rule-type-option" onClick={() => setModal("addTime")}>
-              <strong>Time-based</strong>
-              <small>Create a rule with current time and end time</small>
-            </button>
+      
+
+{modal === "ruleTypeOptions" && (
+  <Modal
+    title="Create new rule"
+    onClose={() => setModal(null)}
+  >
+    <div className="rule-type-options">
+      <button
+        type="button"
+        className="rule-type-option"
+        onClick={() => {
+          setModal(null);
+          navigate(`/assets/${assetId}/rules/new/interval`);
+        }}
+      >
+        <strong>Interval-based</strong>
+        <small>Create a rule based on intervals</small>
+      </button>
+
+      <button
+        type="button"
+        className="rule-type-option"
+        onClick={() => {
+          setModal(null);
+          navigate(`/assets/${assetId}/rules/new/usage`);
+        }}
+      >
+        <strong>Usage-based</strong>
+        <small>Create a rule based on machine usage</small>
+      </button>
+
+      <button
+        type="button"
+        className="rule-type-option"
+        onClick={() => {
+          setModal(null);
+          navigate(`/assets/${assetId}/rules/new/time`);
+        }}
+      >
+        <strong>Time-based</strong>
+        <small>Create a rule with current time and end time</small>
+      </button>
+    </div>
+  </Modal>
+)}
+
+
+      {modal === "copyRulesInfo" && (
+        <Modal title="Copy rules from another asset" onClose={() => setModal(null)}>
+          <p>Rule copying from another asset is not available in this version yet. You can create a rule or assign predefined monitoring rules instead.</p>
+          <div className="modal-actions">
+            <button className="btn-outline" onClick={() => setModal("ruleTypeOptions")}>Create rule</button>
+            <button className="btn-primary" onClick={() => { setModal(null); setShowPredefinedRules(true); }}>Predefined rules</button>
           </div>
         </Modal>
       )}
@@ -607,7 +717,7 @@ export default function AssetDetail() {
           intro={numericVariables.length ? undefined : "This asset has no numeric variables yet. Add one under Variables, then come back to create a threshold rule."}
           fields={ruleFields(numericVariables)}
           onSubmit={addRule}
-          onClose={() => setModal("ruleTypeOptions")}
+          onClose={() => setModal(null)}
         />
       )}
 
@@ -615,7 +725,6 @@ export default function AssetDetail() {
         <CreateModal
           title="Create usage-based rule"
           submitLabel="Create rule"
-          intro="Usage-based rule saving is not connected to the backend yet. The fields below are a draft only."
           fields={[
             { key: "name", label: "Rule name", required: true, placeholder: "e.g. Monthly usage limit" },
             { key: "description", label: "Description", type: "textarea", placeholder: "What usage should this rule monitor?" },
@@ -624,26 +733,20 @@ export default function AssetDetail() {
           ]}
           onSubmit={async (values) => {
             const limit = Number(values.usage_limit);
-            if (!Number.isFinite(limit)) throw new Error("Enter a valid usage limit.");
-            console.log("Usage-based rule draft:", {
+            if (!values.name?.trim()) throw new Error("Please enter a rule name.");
+            if (!Number.isFinite(limit) || limit <= 0) throw new Error("Enter a valid positive usage limit.");
+            await api.post(`/assets/${assetId}/rules/usage`, {
               name: values.name.trim(),
-              description: values.description?.trim() || "",
+              description: values.description?.trim() || null,
               usage_limit: limit,
               severity: values.severity,
             });
             setModal(null);
+            setList("activated");
+            await refreshAll();
           }}
           onClose={() => setModal("ruleTypeOptions")}
         />
-      )}
-
-      {modal === "copyRulesInfo" && (
-        <Modal title="Copy from another asset" onClose={() => setModal(null)}>
-          <p className="muted">Copying rules from another asset is not connected in this version of AssetDetail.</p>
-          <div className="modal-actions">
-            <button type="button" className="btn-outline" onClick={() => setModal(null)}>Close</button>
-          </div>
-        </Modal>
       )}
 
       {modal === "addTime" && (
@@ -659,15 +762,16 @@ export default function AssetDetail() {
             if (values.current_time === values.end_time) {
               throw new Error("Current time and end time cannot be the same.");
             }
-            // Frontend-only draft: saving to the backend will be added later.
-            console.log("Time-based rule draft:", {
+            await api.post(`/assets/${assetId}/rules/time`, {
               name: values.name.trim(),
-              description: values.description?.trim() || "",
+              description: values.description?.trim() || null,
               current_time: values.current_time,
               end_time: values.end_time,
               severity: values.severity,
             });
             setModal(null);
+            setList("activated");
+            await refreshAll();
           }}
           onClose={() => setModal("ruleTypeOptions")}
         />

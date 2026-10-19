@@ -30,7 +30,7 @@ from app.db.session import create_database_engine, create_session_factory
 from app.services.opcua_collector import OpcUaCollector
 
 LOGGER = logging.getLogger("nem_backend")
-MAX_REQUEST_BODY_BYTES = 1_048_576
+MAX_REQUEST_BODY_BYTES = 25 * 1024 * 1024  
 
 
 class FrontendStaticFiles(StaticFiles):

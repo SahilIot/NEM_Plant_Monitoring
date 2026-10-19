@@ -1,8 +1,20 @@
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
+from pathlib import Path
+import uuid
 from typing import Any
 
 from cryptography.fernet import Fernet
-from fastapi import APIRouter, Depends, HTTPException, Request
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+)
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -15,6 +27,7 @@ from app.models import (
     BackupRecord,
     FrontendConfig,
     InstructionDocument,
+    InstructionDocumentFile,
     MaintenanceRecord,
     MonitoringEvent,
     MonitoringRule,
@@ -30,6 +43,14 @@ from app.api.routes.rules import validate_targets
 from app.api.routes.monitoring import state_for_rule
 
 router = APIRouter(tags=["frontend compatibility"])
+
+UPLOAD_DIR = Path(__file__).resolve().parents[3] / "uploads" / "instruction_documents"
+
+MAX_FILE_BYTES = 10 * 1024 * 1024
+MAX_TOTAL_UPLOAD_BYTES = 24 * 1024 * 1024
+MAX_FILES_PER_DOCUMENT = 10
+
+ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt"}
 
 
 class ProfileUpdate(BaseModel):
@@ -89,6 +110,61 @@ class LogbookEntry(BaseModel):
             raise ValueError("Logbook entry cannot be empty")
         return value
 
+
+
+class UsageRuleCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+    usage_limit: float = Field(gt=0)
+    severity: str = "warning"
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Rule name cannot be empty")
+        return value
+
+    @field_validator("severity")
+    @classmethod
+    def validate_severity(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in {"warning", "alert"}:
+            raise ValueError("Severity must be warning or alert")
+        return value
+
+
+class TimeRuleCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+    current_time: time
+    end_time: time
+    severity: str = "warning"
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Rule name cannot be empty")
+        return value
+
+    @field_validator("severity")
+    @classmethod
+    def validate_severity(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in {"warning", "alert"}:
+            raise ValueError("Severity must be warning or alert")
+        return value
+
+    @field_validator("end_time")
+    @classmethod
+    def validate_times(cls, value: time, info: Any) -> time:
+        start = info.data.get("current_time")
+        if start is not None and start == value:
+            raise ValueError("Current time and end time cannot be the same")
+        return value
 
 def _config(session: Session, key: str) -> dict[str, Any]:
     record = session.get(FrontendConfig, key)
@@ -214,6 +290,66 @@ def frontend_create_asset_rule(
         payload.operator, payload.threshold, payload.parameters,
     )
     rule = MonitoringRule(**payload.model_dump())
+    session.add(rule)
+    session.commit()
+    session.refresh(rule)
+    return _rule_row(session, rule)
+
+
+@router.post("/assets/{asset_id}/rules/usage", status_code=201)
+def frontend_create_usage_rule(
+    asset_id: int,
+    payload: UsageRuleCreate,
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    asset = session.get(Asset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+
+    rule = MonitoringRule(
+        name=payload.name,
+        description=payload.description,
+        rule_type="generic",
+        target_asset_id=asset_id,
+        variable_id=None,
+        operator=None,
+        threshold=None,
+        parameters={"kind": "usage_based", "usage_limit": payload.usage_limit},
+        severity=payload.severity,
+        is_enabled=True,
+    )
+    session.add(rule)
+    session.commit()
+    session.refresh(rule)
+    return _rule_row(session, rule)
+
+
+@router.post("/assets/{asset_id}/rules/time", status_code=201)
+def frontend_create_time_rule(
+    asset_id: int,
+    payload: TimeRuleCreate,
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    asset = session.get(Asset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+
+    rule = MonitoringRule(
+        name=payload.name,
+        description=payload.description,
+        rule_type="generic",
+        target_asset_id=asset_id,
+        variable_id=None,
+        operator=None,
+        threshold=None,
+        parameters={
+            "kind": "time_based",
+            "current_time": payload.current_time.isoformat(),
+            "end_time": payload.end_time.isoformat(),
+        },
+        severity=payload.severity,
+        is_enabled=True,
+    )
     session.add(rule)
     session.commit()
     session.refresh(rule)

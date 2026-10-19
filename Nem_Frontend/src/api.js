@@ -1,7 +1,5 @@
 const BASE = (import.meta.env.VITE_API_URL || "/api/v1").replace(/\/+$/, "");
 
-// The backend reports problems in three shapes: {detail}, {error:{message}} and
-// {error:{message, details:[{loc, msg}]}} for validation failures.
 function describeError(body, fallback) {
   if (body && typeof body === "object") {
     const details = body.error?.details;
@@ -34,10 +32,14 @@ async function req(path, opts = {}) {
   try {
     res = await fetch(`${BASE}${path}`, {
       ...opts,
-      headers: {
-        ...(opts.body ? { "Content-Type": "application/json" } : {}),
-        ...opts.headers,
-      },
+      
+headers: {
+  ...(opts.body && !(opts.body instanceof FormData)
+    ? { "Content-Type": "application/json" }
+    : {}),
+  ...opts.headers,
+},
+
     });
   } catch {
     throw new ApiError(
@@ -62,8 +64,7 @@ async function req(path, opts = {}) {
   return body;
 }
 
-// Reads every page of a paginated list endpoint ({items, total, limit, offset}).
-// Endpoints that already return a plain array are passed through unchanged.
+
 async function getAll(path, pageSize = 200) {
   const joiner = path.includes("?") ? "&" : "?";
   const all = [];
@@ -80,13 +81,16 @@ async function getAll(path, pageSize = 200) {
 }
 
 export const api = {
-  // Single object, or the `items` array when the endpoint is paginated.
+  
   get: async (p) => {
     const result = await req(p);
     return result && Array.isArray(result.items) ? result.items : result;
   },
   getAll,
   post: (p, body = {}) => req(p, { method: "POST", body: JSON.stringify(body) }),
+  postForm: (p, formData) =>
+  req(p, { method: "POST", body: formData }),
+
   put: (p, body) => req(p, { method: "PUT", body: JSON.stringify(body) }),
   patch: (p, body) => req(p, { method: "PATCH", body: JSON.stringify(body) }),
   del: (p) => req(p, { method: "DELETE" }),
