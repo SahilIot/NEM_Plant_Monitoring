@@ -1,18 +1,19 @@
 from datetime import datetime
 from typing import Literal
-
 from pydantic import Field, field_validator
-
 from app.schemas.common import ORMModel
 
+VariableDataType = Literal["number", "integer", "string", "boolean"]
 
 class VariableCreate(ORMModel):
     name: str = Field(min_length=1, max_length=150)
     key: str = Field(min_length=1, max_length=100)
-    data_type: Literal["number", "integer", "string", "boolean"]
+    data_type: VariableDataType
     unit: str | None = Field(default=None, max_length=50)
     description: str | None = None
     is_active: bool = True
+    # OPC UA node discovered on the PLC; optional for manually created variables.
+    opcua_node_id: str | None = Field(default=None, max_length=512)
 
     @field_validator("name", "key")
     @classmethod
@@ -22,14 +23,24 @@ class VariableCreate(ORMModel):
             raise ValueError("This field cannot be empty")
         return value
 
+    @field_validator("opcua_node_id")
+    @classmethod
+    def clean_opcua_node_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        return value
 
 class VariableUpdate(ORMModel):
     name: str | None = Field(default=None, min_length=1, max_length=150)
     key: str | None = Field(default=None, min_length=1, max_length=100)
-    data_type: Literal["number", "integer", "string", "boolean"] | None = None
+    data_type: VariableDataType | None = None
     unit: str | None = Field(default=None, max_length=50)
     description: str | None = None
     is_active: bool | None = None
+    opcua_node_id: str | None = Field(default=None, max_length=512)
 
     @field_validator("name", "key")
     @classmethod
@@ -41,6 +52,15 @@ class VariableUpdate(ORMModel):
             raise ValueError("This field cannot be empty")
         return value
 
+    @field_validator("opcua_node_id")
+    @classmethod
+    def clean_opcua_node_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        return value
 
 class VariableRead(ORMModel):
     id: int
@@ -51,5 +71,6 @@ class VariableRead(ORMModel):
     unit: str | None
     description: str | None
     is_active: bool
+    opcua_node_id: str | None = None
     created_at: datetime
     updated_at: datetime

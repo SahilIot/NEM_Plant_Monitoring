@@ -1,12 +1,11 @@
+#define the assest db model
 from datetime import datetime, timezone
-
 from sqlalchemy import Boolean, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
 from app.db.base import Base
 from app.db.session import UTCDateTime
 
-
+#defines how assest data is stored in postgreSQL
 class Asset(Base):
     __tablename__ = "assets"
 
@@ -33,4 +32,10 @@ class Asset(Base):
         "Asset", remote_side="Asset.id", back_populates="children"
     )
     children: Mapped[list["Asset"]] = relationship(back_populates="parent")
-    variables: Mapped[list["Variable"]] = relationship(back_populates="asset")
+    variables: Mapped[list["Variable"]] = relationship(back_populates="asset") # type: ignore
+
+'''
+    Asset tells the system which machine it is monitoring. 
+    Variable tells it which signal on that machine it cares about. 
+    Reading stores the values received from that signal over time.
+    '''

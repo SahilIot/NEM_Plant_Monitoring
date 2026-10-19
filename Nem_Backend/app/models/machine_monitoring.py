@@ -1,23 +1,17 @@
 from datetime import datetime
 from decimal import Decimal
-
 from sqlalchemy import ForeignKey, Numeric
 from sqlalchemy.orm import Mapped, mapped_column
-
 from app.db.base import Base
 from app.db.session import UTCDateTime
 
-
+#create the db table 
 class MachineMonitoringState(Base):
     __tablename__ = "machine_monitoring_states"
 
-    asset_id: Mapped[int] = mapped_column(
-        ForeignKey("assets.id", ondelete="RESTRICT"), primary_key=True
-    )
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id", ondelete="RESTRICT"), primary_key=True)
     cycle_count: Mapped[int] = mapped_column(default=0, nullable=False)
-    accumulated_running_seconds: Mapped[Decimal] = mapped_column(
-        Numeric(20, 3), default=0, nullable=False
-    )
+    accumulated_running_seconds: Mapped[Decimal] = mapped_column( Numeric(20, 3), default=0, nullable=False)
     cycle_signal: Mapped[bool | None] = mapped_column(nullable=True)
     is_running: Mapped[bool | None] = mapped_column(nullable=True)
     cycle_limit: Mapped[int | None] = mapped_column(nullable=True)

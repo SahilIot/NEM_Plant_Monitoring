@@ -1,0 +1,36 @@
+import React, { useEffect, useState } from "react";
+import { api } from "../../../services/api.js";
+import GroupedMenu from "../../../components/common/GroupedMenu.jsx";
+
+const ITEMS = [
+  { to: "/configuration/rules", icon: "rules", group: "Rules", title: "Monitoring Rules", desc: "Create and manage your Monitoring Rules." },
+  { to: "/configuration/collections", icon: "collections", group: "Rules", title: "Monitoring Rule collections", desc: "Group the individual monitoring rules, e.g. by machine type." },
+  { to: "/configuration/documents", icon: "documents", group: "Content", title: "Instructions and documents", desc: "Create and manage your task descriptions for Monitoring Rules and upload supplementary documents." },
+  { to: "/configuration/import", icon: "import", group: "Content", title: "Import configuration", desc: "Import monitoring rules and monitoring rule collections." },
+];
+
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+export default function Configuration() {
+  const [badges, setBadges] = useState({});
+
+  
+  useEffect(() => {
+    const count = (path, one, many) =>
+      api.get(path).then((list) => (Array.isArray(list) ? plural(list.length, one, many) : "")).catch(() => "");
+    Promise.all([
+      count("/rules?limit=200", "rule", "rules"),
+      count("/collections", "collection", "collections"),
+      count("/documents", "document", "documents"),
+    ]).then(([rules, collections, documents]) =>
+      setBadges({
+        "/configuration/rules": rules,
+        "/configuration/collections": collections,
+        "/configuration/documents": documents,
+        "/configuration/import": "JSON file",
+      })
+    );
+  }, []);
+
+  return <GroupedMenu title="Configuration" items={ITEMS} badges={badges} />;
+}
