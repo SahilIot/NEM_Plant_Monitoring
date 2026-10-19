@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
 import { api } from "../../../services/api.js";
+import MaintenancePanel from "../components/MaintenancePanel.jsx";
 import {
   conditionText,
   formatDuration,
@@ -1211,51 +1212,55 @@ export default function AssetDetail() {
       )}
 
       {tab === "logbook" && (
-        <div className="panel">
-          <div className="panel-head">
-            <span className="muted">
-              {logs.length}{" "}
-              {logs.length === 1 ? "entry" : "entries"}
-            </span>
+        <>
+          <MaintenancePanel assetId={assetId} onChanged={refreshStatus} />
+          <div className="panel">
+            <div className="panel-head">
+              <div>
+                <h2>Maintenance log notes</h2>
+                <span className="muted">
+                  {logs.length} {logs.length === 1 ? "entry" : "entries"}
+                </span>
+              </div>
+              <button
+                className="btn-primary"
+                onClick={() => setModal("log")}
+              >
+                <PlusCircle size={17} /> Add note
+              </button>
+            </div>
 
-            <button
-              className="btn-primary"
-              onClick={() => setModal("log")}
-            >
-              <PlusCircle size={17} /> Add entry
-            </button>
-          </div>
-
-          {logs.length === 0 ? (
-            <EmptyState
-              art={false}
-              title="No logbook entries"
-              lines={[
-                "Record inspections, repairs and observations here.",
-              ]}
-            />
-          ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th className="col-time">Time</th>
-                  <th>Entry</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {logs.map((entry) => (
-                  <tr key={entry.id}>
-                    <td className="col-time">
-                      {formatTime(entry.time)}
-                    </td>
-                    <td>{entry.text}</td>
+            {logs.length === 0 ? (
+              <EmptyState
+                art={false}
+                title="No logbook notes"
+                lines={[
+                  "Record brief observations separately from maintenance jobs.",
+                ]}
+              />
+            ) : (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th className="col-time">Time</th>
+                    <th>Entry</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+                </thead>
+
+                <tbody>
+                  {logs.map((entry) => (
+                    <tr key={entry.id}>
+                      <td className="col-time">
+                        {formatTime(entry.time)}
+                      </td>
+                      <td>{entry.text}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
       )}
 
       {tab === "events" && (

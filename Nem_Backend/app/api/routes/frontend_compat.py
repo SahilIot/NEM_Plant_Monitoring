@@ -456,6 +456,10 @@ def frontend_add_logbook_entry(
         notes=text_value if len(text_value) > 200 else None,
         performed_by="Dashboard",
         performed_at=datetime.now(timezone.utc),
+        actual_completed_at=datetime.now(timezone.utc),
+        maintenance_type="inspection",
+        status="completed",
+        priority="medium",
     )
     session.add(record)
     session.commit()

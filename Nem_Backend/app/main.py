@@ -1,6 +1,8 @@
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -26,10 +28,33 @@ from app.api.routes import (
 from app.core.config import Settings, get_settings
 from app.db.init_db import initialize_database
 from app.db.session import create_database_engine, create_session_factory
+from app.services.maintenance_schedule import emit_due_schedule_events
+from app.services.monitoring_engine import acquire_scheduler_lease, utc_now
 from app.services.opcua_collector import OpcUaCollector
 
 LOGGER = logging.getLogger("nem_backend")
 MAX_REQUEST_BODY_BYTES = 25 * 1024 * 1024  
+
+
+async def _maintenance_due_alert_loop(session_factory, owner_id: str) -> None:
+    while True:
+        try:
+            def evaluate_due_schedules() -> None:
+                with session_factory() as session:
+                    if not acquire_scheduler_lease(
+                        session,
+                        owner_id=owner_id,
+                        now=utc_now(),
+                        lease_seconds=90,
+                        name="maintenance-due-alerts",
+                    ):
+                        return
+                    emit_due_schedule_events(session, today=utc_now().date())
+
+            await asyncio.to_thread(evaluate_due_schedules)
+        except SQLAlchemyError:
+            LOGGER.exception("Maintenance due-date evaluation failed")
+        await asyncio.sleep(60)
 
 
 class FrontendStaticFiles(StaticFiles):
@@ -52,9 +77,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(application: FastAPI):
         initialize_database(engine)
         opcua_collector.start()
+        maintenance_due_task = None
+        if selected_settings.maintenance_due_alerts_enabled:
+            maintenance_due_task = asyncio.create_task(
+                _maintenance_due_alert_loop(
+                    session_factory,
+                    owner_id=f"maintenance-{uuid4()}",
+                ),
+                name="maintenance-due-alerts",
+            )
         try:
             yield
         finally:
+            if maintenance_due_task is not None:
+                maintenance_due_task.cancel()
+                try:
+                    await maintenance_due_task
+                except asyncio.CancelledError:
+                    pass
             try:
                 await opcua_collector.stop()
             finally:

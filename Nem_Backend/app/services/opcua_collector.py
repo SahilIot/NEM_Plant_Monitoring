@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from pydantic import ValidationError # type: ignore
-from sqlalchemy import select, update # type: ignore
+from sqlalchemy import and_, or_, select, update # type: ignore
 from sqlalchemy.orm import Session, sessionmaker # type: ignore
 
 from app.core.config import Settings
@@ -733,12 +733,17 @@ def machine_status_rows(
     }
     alerts = session.scalars(
         select(Alert)
-        .join(MonitoringRule, MonitoringRule.id == Alert.rule_id)
+        .outerjoin(MonitoringRule, MonitoringRule.id == Alert.rule_id)
         .where(
             Alert.target_asset_id.in_(asset_ids),
             Alert.status == "active",
-            MonitoringRule.is_enabled.is_(True),
-            MonitoringRule.is_archived.is_(False),
+            or_(
+                Alert.maintenance_schedule_id.is_not(None),
+                and_(
+                    MonitoringRule.is_enabled.is_(True),
+                    MonitoringRule.is_archived.is_(False),
+                ),
+            ),
         )
         .order_by(Alert.started_at.desc(), Alert.id.desc())
     ).all()
