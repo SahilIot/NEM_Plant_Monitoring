@@ -1,7 +1,12 @@
 
 import React, { useEffect, useState } from "react";
-import { useNavigate, useOutletContext, useParams } from "react-router-dom";
+import {
+  useNavigate,
+  useOutletContext,
+  useParams,
+} from "react-router-dom";
 import { api } from "../../../services/api.js";
+import "./RuleCreatePage.css";
 
 const titles = {
   interval: "Create interval-based rule",
@@ -24,10 +29,15 @@ const initialValues = {
 export default function RuleCreatePage() {
   const { id, kind } = useParams();
   const navigate = useNavigate();
-  const { assets = [], refreshStatus } = useOutletContext() || {};
+
+  const { assets = [], refreshStatus } =
+    useOutletContext() || {};
 
   const assetId = Number(id);
-  const asset = assets.find((item) => Number(item.id) === assetId);
+
+  const asset = assets.find(
+    (item) => Number(item.id) === assetId
+  );
 
   const [variables, setVariables] = useState([]);
   const [values, setValues] = useState({ ...initialValues });
@@ -45,8 +55,10 @@ export default function RuleCreatePage() {
       .then((items) => {
         if (cancelled) return;
 
-        const numericVariables = (Array.isArray(items) ? items : []).filter(
-          (item) => ["number", "integer"].includes(item.data_type)
+        const numericVariables = (
+          Array.isArray(items) ? items : []
+        ).filter((item) =>
+          ["number", "integer"].includes(item.data_type)
         );
 
         setVariables(numericVariables);
@@ -60,7 +72,9 @@ export default function RuleCreatePage() {
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err.message || "Could not load numeric variables.");
+          setError(
+            err.message || "Could not load numeric variables."
+          );
         }
       })
       .finally(() => {
@@ -94,13 +108,19 @@ export default function RuleCreatePage() {
 
     if (
       kind === "interval" &&
-      (!values.variable_id || values.threshold.trim() === "")
+      (!values.variable_id ||
+        values.threshold.trim() === "")
     ) {
-      setError("Select a numeric variable and enter a threshold.");
+      setError(
+        "Select a numeric variable and enter a threshold."
+      );
       return;
     }
 
-    if (kind === "usage" && values.usage_limit.trim() === "") {
+    if (
+      kind === "usage" &&
+      values.usage_limit.trim() === ""
+    ) {
       setError("Please enter a usage limit.");
       return;
     }
@@ -117,7 +137,9 @@ export default function RuleCreatePage() {
       kind === "time" &&
       values.current_time === values.end_time
     ) {
-      setError("Current time and end time cannot be the same.");
+      setError(
+        "Current time and end time cannot be the same."
+      );
       return;
     }
 
@@ -140,7 +162,9 @@ export default function RuleCreatePage() {
         const threshold = Number(values.threshold);
 
         if (!Number.isFinite(threshold)) {
-          throw new Error("Enter a valid numeric threshold.");
+          throw new Error(
+            "Enter a valid numeric threshold."
+          );
         }
 
         await api.post(`/assets/${assetId}/rules`, {
@@ -155,27 +179,38 @@ export default function RuleCreatePage() {
         const limit = Number(values.usage_limit);
 
         if (!Number.isFinite(limit) || limit <= 0) {
-          throw new Error("Enter a valid positive usage limit.");
+          throw new Error(
+            "Enter a valid positive usage limit."
+          );
         }
 
-        await api.post(`/assets/${assetId}/rules/usage`, {
-          ...common,
-          usage_limit: limit,
-        });
+        await api.post(
+          `/assets/${assetId}/rules/usage`,
+          {
+            ...common,
+            usage_limit: limit,
+          }
+        );
       } else if (kind === "time") {
-        await api.post(`/assets/${assetId}/rules/time`, {
-          ...common,
-          current_time: values.current_time,
-          end_time: values.end_time,
-        });
+        await api.post(
+          `/assets/${assetId}/rules/time`,
+          {
+            ...common,
+            current_time: values.current_time,
+            end_time: values.end_time,
+          }
+        );
       } else {
         throw new Error("Unknown rule type.");
       }
 
       await refreshStatus?.();
+
       navigate(`/assets/${id}`, { replace: true });
     } catch (err) {
-      setError(err.message || "Could not create the rule.");
+      setError(
+        err.message || "Could not create the rule."
+      );
     } finally {
       setSaving(false);
     }
@@ -185,11 +220,12 @@ export default function RuleCreatePage() {
     return (
       <section className="panel">
         <p>Unknown rule type.</p>
+
         <button
-  type="button"
-  className="btn-outline rule-back-btn"
-  onClick={goBack}
->
+          type="button"
+          className="btn-outline rule-back-btn"
+          onClick={goBack}
+        >
           Back to asset
         </button>
       </section>
@@ -197,189 +233,291 @@ export default function RuleCreatePage() {
   }
 
   if (loading) {
-    return <div className="loading">Loading numeric variables…</div>;
+    return (
+      <div className="loading">
+        Loading numeric variables…
+      </div>
+    );
   }
 
   return (
-     <div className="rule-create-page">
-      <button type="button" className="btn-outline" onClick={goBack}>
-        ← Back to {asset?.name || "asset"}
-      </button>
+    <div className="rule-create-page">
+      <div className="rule-create-container">
 
-      <div className="page-head rule-page-head" style={{ marginTop: 20 }}>
-  <h1 className="page-title rule-page-title">{titles[kind]}</h1>
-  <p className="muted rule-page-subtitle">
-    Asset: {asset?.name || `#{assetId}`}
-  </p>
-</div>
+        {/* Back link */}
+        <button
+          type="button"
+          className="btn-outline rule-back-btn"
+          onClick={goBack}
+        >
+          ← Back to {asset?.name || "asset"}
+        </button>
 
-      <section className="panel rule-form-panel">
-        <h2>{titles[kind]}</h2>
+        {/* Page heading */}
+        <div
+          className="page-head rule-page-head"
+          style={{ marginTop: 20 }}
+        >
+          <h1 className="page-title rule-page-title">
+            {titles[kind]}
+          </h1>
 
-        {error && (
-          <p role="alert" className="error-message">
-            {error}
+          {/* Asset name */}
+          <p className="muted rule-page-subtitle">
+            Asset: {asset?.name || `#${assetId}`}
           </p>
-        )}
+        </div>
 
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="rule-name">Rule name *</label>
-            <input
-              id="rule-name"
-              name="name"
-              value={values.name}
-              onChange={updateField}
-              placeholder="e.g. Motor temperature limit"
-              required
-            />
+        {/* Rule create card */}
+        <section className="rule-create-card">
+          <div className="rule-create-card-header">
+            <h2>{titles[kind]}</h2>
+
+            <p>
+              Configure the rule details below.
+            </p>
           </div>
 
-          <div className="form-group">
-            <label htmlFor="rule-description">Description</label>
-            <textarea
-              id="rule-description"
-              name="description"
-              value={values.description}
-              onChange={updateField}
-              rows={3}
-            />
-          </div>
+          <div className="rule-create-form">
+            {error && (
+              <p
+                role="alert"
+                className="error-message"
+              >
+                {error}
+              </p>
+            )}
 
-          {kind === "interval" && (
-            <>
+            <form onSubmit={handleSubmit}>
+              {/* Rule name */}
               <div className="form-group">
-                <label htmlFor="variable-id">Numeric variable *</label>
+                <label htmlFor="rule-name">
+                  Rule name *
+                </label>
+
+                <input
+                  id="rule-name"
+                  name="name"
+                  value={values.name}
+                  onChange={updateField}
+                  placeholder="e.g. Motor temperature limit"
+                  required
+                />
+              </div>
+
+              {/* Description */}
+              <div className="form-group">
+                <label htmlFor="rule-description">
+                  Description
+                </label>
+
+                <textarea
+                  id="rule-description"
+                  name="description"
+                  value={values.description}
+                  onChange={updateField}
+                  rows={3}
+                />
+              </div>
+
+              {/* Interval-based fields */}
+              {kind === "interval" && (
+                <>
+                  <div className="form-group">
+                    <label htmlFor="variable-id">
+                      Numeric variable *
+                    </label>
+
+                    <select
+                      id="variable-id"
+                      name="variable_id"
+                      value={values.variable_id}
+                      onChange={updateField}
+                      required
+                    >
+                      <option value="">
+                        Select a variable
+                      </option>
+
+                      {variables.map((variable) => (
+                        <option
+                          key={variable.id}
+                          value={String(variable.id)}
+                        >
+                          {variable.name}
+                          {variable.unit
+                            ? ` (${variable.unit})`
+                            : ""}
+                        </option>
+                      ))}
+                    </select>
+
+                    {!variables.length && (
+                      <small>
+                        No active numeric variables are available.
+                      </small>
+                    )}
+                  </div>
+
+                  <div className="form-group">
+                    <label htmlFor="operator">
+                      Trigger condition
+                    </label>
+
+                    <select
+                      id="operator"
+                      name="operator"
+                      value={values.operator}
+                      onChange={updateField}
+                    >
+                      <option value=">=">
+                        Greater than or equal to
+                      </option>
+
+                      <option value=">">
+                        Greater than
+                      </option>
+
+                      <option value="<=">
+                        Less than or equal to
+                      </option>
+
+                      <option value="<">
+                        Less than
+                      </option>
+
+                      <option value="==">
+                        Equal to
+                      </option>
+
+                      <option value="!=">
+                        Not equal to
+                      </option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label htmlFor="threshold">
+                      Threshold *
+                    </label>
+
+                    <input
+                      id="threshold"
+                      name="threshold"
+                      type="number"
+                      step="any"
+                      value={values.threshold}
+                      onChange={updateField}
+                      required
+                    />
+                  </div>
+                </>
+              )}
+
+              {/* Usage-based fields */}
+              {kind === "usage" && (
+                <div className="form-group">
+                  <label htmlFor="usage-limit">
+                    Usage limit *
+                  </label>
+
+                  <input
+                    id="usage-limit"
+                    name="usage_limit"
+                    type="number"
+                    min="0.01"
+                    step="any"
+                    value={values.usage_limit}
+                    onChange={updateField}
+                    required
+                  />
+                </div>
+              )}
+
+              {/* Time-based fields */}
+              {kind === "time" && (
+                <>
+                  <div className="form-group">
+                    <label htmlFor="current-time">
+                      Current time *
+                    </label>
+
+                    <input
+                      id="current-time"
+                      name="current_time"
+                      type="time"
+                      value={values.current_time}
+                      onChange={updateField}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label htmlFor="end-time">
+                      End time *
+                    </label>
+
+                    <input
+                      id="end-time"
+                      name="end_time"
+                      type="time"
+                      value={values.end_time}
+                      onChange={updateField}
+                      required
+                    />
+                  </div>
+                </>
+              )}
+
+              {/* Severity */}
+              <div className="form-group">
+                <label htmlFor="severity">
+                  Severity
+                </label>
+
                 <select
-                  id="variable-id"
-                  name="variable_id"
-                  value={values.variable_id}
-                  onChange={updateField}
-                  required
-                >
-                  <option value="">Select a variable</option>
-                  {variables.map((variable) => (
-                    <option key={variable.id} value={String(variable.id)}>
-                      {variable.name}
-                      {variable.unit ? ` (${variable.unit})` : ""}
-                    </option>
-                  ))}
-                </select>
-
-                {!variables.length && (
-                  <small>No active numeric variables are available.</small>
-                )}
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="operator">Trigger condition</label>
-                <select
-                  id="operator"
-                  name="operator"
-                  value={values.operator}
+                  id="severity"
+                  name="severity"
+                  value={values.severity}
                   onChange={updateField}
                 >
-                  <option value=">=">Greater than or equal to</option>
-                  <option value=">">Greater than</option>
-                  <option value="<=">Less than or equal to</option>
-                  <option value="<">Less than</option>
-                  <option value="==">Equal to</option>
-                  <option value="!=">Not equal to</option>
+                  <option value="warning">
+                    Warning
+                  </option>
+
+                  <option value="alert">
+                    Alert
+                  </option>
                 </select>
               </div>
 
-              <div className="form-group">
-                <label htmlFor="threshold">Threshold *</label>
-                <input
-                  id="threshold"
-                  name="threshold"
-                  type="number"
-                  step="any"
-                  value={values.threshold}
-                  onChange={updateField}
-                  required
-                />
+              {/* Form buttons */}
+              <div className="form-actions rule-form-actions">
+                <button
+                  type="button"
+                  className="btn-outline"
+                  onClick={goBack}
+                  disabled={saving}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={
+                    saving ||
+                    (kind === "interval" &&
+                      !variables.length)
+                  }
+                >
+                  {saving ? "Creating…" : "Create rule"}
+                </button>
               </div>
-            </>
-          )}
-
-          {kind === "usage" && (
-            <div className="form-group">
-              <label htmlFor="usage-limit">Usage limit *</label>
-              <input
-                id="usage-limit"
-                name="usage_limit"
-                type="number"
-                min="0.01"
-                step="any"
-                value={values.usage_limit}
-                onChange={updateField}
-                required
-              />
-            </div>
-          )}
-
-          {kind === "time" && (
-            <>
-              <div className="form-group">
-                <label htmlFor="current-time">Current time *</label>
-                <input
-                  id="current-time"
-                  name="current_time"
-                  type="time"
-                  value={values.current_time}
-                  onChange={updateField}
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="end-time">End time *</label>
-                <input
-                  id="end-time"
-                  name="end_time"
-                  type="time"
-                  value={values.end_time}
-                  onChange={updateField}
-                  required
-                />
-              </div>
-            </>
-          )}
-
-          <div className="form-group">
-            <label htmlFor="severity">Severity</label>
-            <select
-              id="severity"
-              name="severity"
-              value={values.severity}
-              onChange={updateField}
-            >
-              <option value="warning">Warning</option>
-              <option value="alert">Alert</option>
-            </select>
+            </form>
           </div>
-
-          <div className="form-actions rule-form-actions">
-            <button
-              type="button"
-              className="btn-outline"
-              onClick={goBack}
-              disabled={saving}
-            >
-              Cancel
-            </button>
-
-            <button
-              type="submit"
-              className="btn-primary"
-              disabled={saving || (kind === "interval" && !variables.length)}
-            >
-              {saving ? "Creating…" : "Create rule"}
-            </button>
-          </div>
-        </form>
-      </section>
+        </section>
+      </div>
     </div>
   );
 }
