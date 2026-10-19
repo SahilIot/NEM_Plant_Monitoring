@@ -344,25 +344,18 @@ Then start FastAPI; it serves the generated `Nem_Frontend/dist/` under `/ui/`.
 ## 9. OPC UA implementation and security status
 
 The collector path issues subscription/read operations and contains no
-write-to-PLC operation. However, the current code's
-`create_configured_opcua_client()` constructs an asyncua client and optionally
-sets username/password; it does not currently call the certificate/security
-configuration helper or apply a security policy. Certificate-related settings
-and validation code exist, but they are not currently connected to the client
-creation path.
-
-Therefore, do not describe the running client as certificate-secured based
-solely on those settings or imports. Confirm and implement the server-approved
-OPC UA security configuration before using this software on an untrusted or
-production network.
+write-to-PLC operation. OPC UA transport encryption and certificate validation
+are intentionally disabled for development testing. Use this configuration only
+on a trusted, isolated network. Implement the PLC-approved security policy and
+certificate validation before deploying to production or an untrusted network.
 
 ## 10. Known operational limitations
 
 - The API currently has no authentication/authorization. Do not expose it
   directly to the public internet or an untrusted network.
 - The application is for monitoring only; it is not a safety interlock.
-- The current OPC UA connection code does not apply its certificate/security
-  helper, as explained above.
+- OPC UA traffic is not encrypted during development testing; do not use this
+  configuration on production or untrusted networks.
 - Periodic rule-scheduler settings are present but no periodic evaluator is
   currently started by the application.
 - Runtime is not extrapolated while the collector is disconnected.
