@@ -1,25 +1,19 @@
-
+#responsible for creating database tables and updating older db schemas when your application starts
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
-
 import app.models  
 from app.db.base import Base
-
-
+#SQLAlchemy`s connection interface to your db -> engine 
+#application starts,create missing table,inspect existing tables and columns , apply required sql changes
 def initialize_database(engine: Engine) -> None:
-   
     Base.metadata.create_all(bind=engine)
-
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
-
-   
     if "variables" in table_names:
         variable_columns = {
             column["name"]
             for column in inspector.get_columns("variables")
         }
-
         if "opcua_node_id" not in variable_columns:
             with engine.begin() as connection:
                 connection.execute(
@@ -29,13 +23,11 @@ def initialize_database(engine: Engine) -> None:
                     )
                 )
 
-   
     if "nem_monitoring_rules" in table_names:
         rule_columns = {
             column["name"]
             for column in inspector.get_columns("nem_monitoring_rules")
         }
-
         if "is_archived" not in rule_columns:
             with engine.begin() as connection:
                 if engine.dialect.name == "postgresql":

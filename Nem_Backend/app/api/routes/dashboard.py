@@ -14,7 +14,6 @@ from app.schemas.dashboard import DashboardSummary
 #Creating an API endpoint
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
-
 @router.get("/summary", response_model=DashboardSummary)
 def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
     # total assets

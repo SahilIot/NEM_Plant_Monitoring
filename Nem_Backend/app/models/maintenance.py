@@ -1,5 +1,4 @@
 from datetime import date, datetime, timezone
-
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -14,11 +13,10 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
-
 from app.db.base import Base
 from app.db.session import UTCDateTime
 
-
+#represents the recurring maintenance plan
 class MaintenanceSchedule(Base):
     __tablename__ = "nem_maintenance_schedules"
     __table_args__ = (

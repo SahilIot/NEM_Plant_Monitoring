@@ -1,5 +1,4 @@
 from functools import lru_cache # Caches the settings object so it doesn`t need to be recreated every time
-
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
