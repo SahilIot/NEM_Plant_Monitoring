@@ -24,6 +24,8 @@ import {
   PlusCircle,
   DotsIcon,
   ChevronDown,
+  BookmarkIcon,
+  FxIcon,
 } from "../components/Icons.jsx";
 
 const ORDER = { alert: 0, warning: 1, ok: 2 };
@@ -145,6 +147,20 @@ const ruleFields = (variables, cycleVariableIds) => [
   },
 ];
 
+const TIME_RULE_FIELDS = () => [
+  { key: "name", label: "Rule name", required: true, placeholder: "e.g. Daily operating window" },
+  { key: "description", label: "Description", type: "textarea", placeholder: "What should this rule watch?" },
+  { key: "current_time", label: "Current time", type: "time", required: true },
+  { key: "end_time", label: "End time", type: "time", required: true },
+  {
+    key: "severity",
+    label: "Severity",
+    type: "select",
+    default: "warning",
+    options: [["warning", "Warning"], ["alert", "Alert"]],
+  },
+];
+
 const LOG_FIELDS = [
   {
     key: "text",
@@ -214,6 +230,8 @@ export default function AssetDetail() {
   const [menu, setMenu] = useState(false);
   const [sortMenu, setSortMenu] = useState(false);
   const [modal, setModal] = useState(null);
+  const [showPredefinedRules, setShowPredefinedRules] = useState(false);
+  const [addRuleMenu, setAddRuleMenu] = useState(false);
   const [logs, setLogs] = useState([]);
   const [events, setEvents] = useState([]);
   const [loadError, setLoadError] = useState("");
@@ -1274,6 +1292,64 @@ export default function AssetDetail() {
         </div>
       )}
 
+      
+
+{modal === "ruleTypeOptions" && (
+  <Modal
+    title="Create new rule"
+    onClose={() => setModal(null)}
+  >
+    <div className="rule-type-options">
+      <button
+        type="button"
+        className="rule-type-option"
+        onClick={() => {
+          setModal(null);
+          navigate(`/assets/${assetId}/rules/new/interval`);
+        }}
+      >
+        <strong>Interval-based</strong>
+        <small>Create a rule based on intervals</small>
+      </button>
+
+      <button
+        type="button"
+        className="rule-type-option"
+        onClick={() => {
+          setModal(null);
+          navigate(`/assets/${assetId}/rules/new/usage`);
+        }}
+      >
+        <strong>Usage-based</strong>
+        <small>Create a rule based on machine usage</small>
+      </button>
+
+      <button
+        type="button"
+        className="rule-type-option"
+        onClick={() => {
+          setModal(null);
+          navigate(`/assets/${assetId}/rules/new/time`);
+        }}
+      >
+        <strong>Time-based</strong>
+        <small>Create a rule with current time and end time</small>
+      </button>
+    </div>
+  </Modal>
+)}
+
+
+      {modal === "copyRulesInfo" && (
+        <Modal title="Copy rules from another asset" onClose={() => setModal(null)}>
+          <p>Rule copying from another asset is not available in this version yet. You can create a rule or assign predefined monitoring rules instead.</p>
+          <div className="modal-actions">
+            <button className="btn-outline" onClick={() => setModal("ruleTypeOptions")}>Create rule</button>
+            <button className="btn-primary" onClick={() => { setModal(null); setShowPredefinedRules(true); }}>Predefined rules</button>
+          </div>
+        </Modal>
+      )}
+
       {modal === "add" && (
         <CreateModal
           title="Add rule"
@@ -1286,6 +1362,62 @@ export default function AssetDetail() {
           fields={ruleFormFields}
           onSubmit={addRule}
           onClose={() => setModal(null)}
+        />
+      )}
+
+      {modal === "addUsage" && (
+        <CreateModal
+          title="Create usage-based rule"
+          submitLabel="Create rule"
+          fields={[
+            { key: "name", label: "Rule name", required: true, placeholder: "e.g. Monthly usage limit" },
+            { key: "description", label: "Description", type: "textarea", placeholder: "What usage should this rule monitor?" },
+            { key: "usage_limit", label: "Usage limit", type: "number", required: true, placeholder: "Enter usage limit" },
+            { key: "severity", label: "Severity", type: "select", default: "warning", options: [["warning", "Warning"], ["alert", "Alert"]] },
+          ]}
+          onSubmit={async (values) => {
+            const limit = Number(values.usage_limit);
+            if (!values.name?.trim()) throw new Error("Please enter a rule name.");
+            if (!Number.isFinite(limit) || limit <= 0) throw new Error("Enter a valid positive usage limit.");
+            await api.post(`/assets/${assetId}/rules/usage`, {
+              name: values.name.trim(),
+              description: values.description?.trim() || null,
+              usage_limit: limit,
+              severity: values.severity,
+            });
+            setModal(null);
+            setList("activated");
+            await refreshAll();
+          }}
+          onClose={() => setModal("ruleTypeOptions")}
+        />
+      )}
+
+      {modal === "addTime" && (
+        <CreateModal
+          title="Create time-based rule"
+          submitLabel="Create rule"
+          fields={TIME_RULE_FIELDS()}
+          onSubmit={async (values) => {
+            if (!values.name?.trim()) throw new Error("Please enter a rule name.");
+            if (!values.current_time || !values.end_time) {
+              throw new Error("Please select both current time and end time.");
+            }
+            if (values.current_time === values.end_time) {
+              throw new Error("Current time and end time cannot be the same.");
+            }
+            await api.post(`/assets/${assetId}/rules/time`, {
+              name: values.name.trim(),
+              description: values.description?.trim() || null,
+              current_time: values.current_time,
+              end_time: values.end_time,
+              severity: values.severity,
+            });
+            setModal(null);
+            setList("activated");
+            await refreshAll();
+          }}
+          onClose={() => setModal("ruleTypeOptions")}
         />
       )}
 
@@ -1399,6 +1531,18 @@ export default function AssetDetail() {
             </button>
           </div>
         </Modal>
+      )}
+
+      {showPredefinedRules && (
+        <PredefinedRulesModal
+          assetId={assetId}
+          onClose={() => setShowPredefinedRules(false)}
+          onAssigned={async () => {
+            setShowPredefinedRules(false);
+            setList("not_activated");
+            await refreshAll();
+          }}
+        />
       )}
     </div>
   );

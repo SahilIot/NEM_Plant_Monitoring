@@ -17,6 +17,7 @@ from app.models import (
     BackupRecord,
     FrontendConfig,
     InstructionDocument,
+    InstructionDocumentFile,
     MaintenanceRecord,
     MonitoringEvent,
     MonitoringRule,
@@ -36,6 +37,14 @@ from app.api.routes.rules import configured_cycle_signal_mapping, validate_targe
 from app.api.routes.monitoring import state_for_rule
 
 router = APIRouter(tags=["frontend compatibility"])
+
+UPLOAD_DIR = Path(__file__).resolve().parents[3] / "uploads" / "instruction_documents"
+
+MAX_FILE_BYTES = 10 * 1024 * 1024
+MAX_TOTAL_UPLOAD_BYTES = 24 * 1024 * 1024
+MAX_FILES_PER_DOCUMENT = 10
+
+ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt"}
 
 
 class ProfileUpdate(BaseModel):
@@ -245,7 +254,67 @@ def frontend_create_asset_rule(
     session.refresh(rule)
     return _rule_row(session, rule)
 
-#Enabling or disabling rules in bulk
+
+@router.post("/assets/{asset_id}/rules/usage", status_code=201)
+def frontend_create_usage_rule(
+    asset_id: int,
+    payload: UsageRuleCreate,
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    asset = session.get(Asset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+
+    rule = MonitoringRule(
+        name=payload.name,
+        description=payload.description,
+        rule_type="generic",
+        target_asset_id=asset_id,
+        variable_id=None,
+        operator=None,
+        threshold=None,
+        parameters={"kind": "usage_based", "usage_limit": payload.usage_limit},
+        severity=payload.severity,
+        is_enabled=True,
+    )
+    session.add(rule)
+    session.commit()
+    session.refresh(rule)
+    return _rule_row(session, rule)
+
+
+@router.post("/assets/{asset_id}/rules/time", status_code=201)
+def frontend_create_time_rule(
+    asset_id: int,
+    payload: TimeRuleCreate,
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    asset = session.get(Asset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+
+    rule = MonitoringRule(
+        name=payload.name,
+        description=payload.description,
+        rule_type="generic",
+        target_asset_id=asset_id,
+        variable_id=None,
+        operator=None,
+        threshold=None,
+        parameters={
+            "kind": "time_based",
+            "current_time": payload.current_time.isoformat(),
+            "end_time": payload.end_time.isoformat(),
+        },
+        severity=payload.severity,
+        is_enabled=True,
+    )
+    session.add(rule)
+    session.commit()
+    session.refresh(rule)
+    return _rule_row(session, rule)
+
+
 @router.post("/assets/{asset_id}/rules/bulk")
 def frontend_bulk_rule_state(
     asset_id: int,

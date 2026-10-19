@@ -1,7 +1,4 @@
-/* NEM Plant Monitor.
-   Palette: cool steel neutrals; brand red is reserved for identity so that red
-   on screen always means "alert". Actions use oil-blue. Status colors are the
-   only saturated colors in the interface. */
+
 
 :root {
   --font: "Barlow", "Bahnschrift", "Segoe UI", system-ui, sans-serif;
@@ -103,7 +100,7 @@ h3 { margin: 0; }
 .clickable { cursor: pointer; }
 .lede { margin: -8px 0 18px; max-width: 70ch; }
 
-/* ---------- Shell ---------- */
+
 .app { display: flex; flex-direction: column; height: 100%; border-top: 3px solid var(--brand); }
 .topbar { height: 58px; display: flex; align-items: center; gap: 16px; padding: 0 20px; background: var(--surface); border-bottom: 1px solid var(--line); }
 .brand-logo { height: 38px; width: auto; display: block; }

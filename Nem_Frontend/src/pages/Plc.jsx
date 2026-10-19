@@ -2,7 +2,74 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
 import { formatDuration, timeAgo } from "../format.js";
 
+
+const Svg = ({ children, size = 22 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
+);
+const IconChip = (p) => <Svg {...p}><rect x="6" y="6" width="12" height="12" rx="2" /><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" /></Svg>;
+const IconPulse = (p) => <Svg {...p}><path d="M3 12h4l2.5-7 5 14 2.5-7h4" /></Svg>;
+const IconShield = (p) => <Svg {...p}><path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z" /><path d="M9 12l2.2 2.2L15.5 10" /></Svg>;
+const IconDownload = (p) => <Svg {...p}><path d="M12 3v12M7 10l5 5 5-5M4 20h16" /></Svg>;
+const IconEmpty = (p) => <Svg size={34} {...p}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18M8 15h3" /></Svg>;
+const Spinner = () => <span className="spin" aria-hidden="true" />;
+
+
+
+function useAppTheme(ref) {
+  const [light, setLight] = useState(false);
+  useEffect(() => {
+    const parse = (value) => {
+      const m = value.match(/rgba?\(([^)]+)\)/);
+      if (!m) return null;
+      const p = m[1].split(",").map((x) => parseFloat(x));
+      return p.length === 4 && p[3] === 0 ? null : p;
+    };
+    const detect = () => {
+      let el = ref.current ? ref.current.parentElement : null;
+      while (el) {
+        const rgb = parse(getComputedStyle(el).backgroundColor);
+        if (rgb) {
+          setLight(0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2] > 140);
+          return;
+        }
+        el = el.parentElement;
+      }
+      setLight(!window.matchMedia("(prefers-color-scheme: dark)").matches);
+    };
+    const detectSoon = () => {
+      detect();
+      window.setTimeout(detect, 150);
+      window.setTimeout(detect, 600); // theme transition ke baad
+    };
+    detect();
+    const observer = new MutationObserver((records) => {
+      if (ref.current && records.every((r) => ref.current.contains(r.target))) return;
+      detectSoon();
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      subtree: true,
+      attributeFilter: ["class", "data-theme", "data-mode", "style"],
+    });
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    media.addEventListener && media.addEventListener("change", detectSoon);
+    window.addEventListener("storage", detectSoon);
+    return () => {
+      observer.disconnect();
+      media.removeEventListener && media.removeEventListener("change", detectSoon);
+      window.removeEventListener("storage", detectSoon);
+    };
+  }, [ref]);
+  return light;
+}
+
+const percent = (value, limit) => (limit ? Math.min(100, Math.round((value / limit) * 100)) : null);
+const barTone = (pct) => (pct >= 100 ? " bad" : pct >= 80 ? " warn" : "");
+
 export default function Plc() {
+  const rootRef = useRef(null);
+  const light = useAppTheme(rootRef);
   const [assets, setAssets] = useState([]);
   const [variables, setVariables] = useState([]);
   const [assetId, setAssetId] = useState("");
@@ -308,6 +375,19 @@ export default function Plc() {
       : date.toLocaleString();
   };
 
+  
+  const pill = !conn
+    ? { tone: "", text: monitoringError ? "Status unavailable" : "Checking…" }
+    : conn.connected
+      ? { tone: "ok", text: "Live" }
+      : conn.state === "disabled"
+        ? { tone: "", text: "Not configured" }
+        : conn.state === "connecting" || conn.state === "standby"
+          ? { tone: "warn", text: conn.state === "standby" ? "Standby" : "Connecting" }
+          : { tone: "bad", text: "Disconnected" };
+
+  const readOk = reading.startsWith("Read and saved");
+
   return (
     <div>
       <div className="page-head">
@@ -404,6 +484,7 @@ export default function Plc() {
         )}
       </section>
 
+      {}
       <section className="panel plc-panel wide">
         <div className="panel-head">
           <h2>Continuous machine monitoring</h2>
@@ -623,9 +704,24 @@ export default function Plc() {
                           </p>
                         ))}
                       </div>
-                    )}
-                  </article>
-                ))}
+
+                      <p className="muted">
+                        Last signal: {machine.last_seen_at ? `${timeAgo(machine.last_seen_at)} (${new Date(machine.last_seen_at).toLocaleString()})` : "not received"}
+                      </p>
+
+                      {machine.alerts?.length > 0 && (
+                        <div role="status" className="machine-alerts">
+                          <strong>Active alerts</strong>
+                          {machine.alerts.map((alert) => (
+                            <p className={"notice " + (alert.severity === "alert" ? "error" : "warn")} key={alert.id}>
+                              {alert.title}: {alert.message}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
               </div>
             )}
           </>
