@@ -92,6 +92,22 @@
   cursor: pointer;
 }
 
+.prm-rule-select {
+  display: inline-flex;
+  align-items: center;
+}
+
+.prm-rule select {
+  min-width: 150px;
+  max-width: 210px;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--border, #34404e);
+  border-radius: 5px;
+  background: var(--input, #10161d);
+  color: var(--text, #e8eef8);
+}
+
 .prm-rule-disabled {
   opacity: 0.72;
   cursor: not-allowed;

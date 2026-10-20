@@ -5,6 +5,7 @@ import CopyRulesModal from "../components/CopyRulesModal.jsx";
 import PredefinedRulesModal from "../../rules/components/PredefinedRulesModal.jsx";
 import { api } from "../../../services/api.js";
 import MaintenancePanel from "../components/MaintenancePanel.jsx";
+import "./AssetDetail.css";
 import {
   conditionText,
   formatDuration,
@@ -39,6 +40,29 @@ const HEALTH_LABEL = {
   ok: "No active alerts",
   off: "Disabled",
 };
+
+function thresholdMetrics(rule) {
+  if (rule.rule_type === "boolean_count_threshold") {
+    const warnings = rule.parameters?.warning_thresholds;
+    const alert = rule.parameters?.alert_threshold;
+    if (Array.isArray(warnings) && warnings.length === 2 && alert != null) {
+      return [
+        { label: "Warning", value: Number(warnings[0]).toLocaleString() },
+        { label: "Higher warning", value: Number(warnings[1]).toLocaleString() },
+        { label: "Alert", value: Number(alert).toLocaleString() },
+      ];
+    }
+  }
+  if (rule.threshold !== null && rule.threshold !== undefined) {
+    return [
+      {
+        label: "Threshold",
+        value: `${rule.operator || ""} ${formatValue(rule.threshold)}`.trim(),
+      },
+    ];
+  }
+  return [];
+}
 
 const ruleFields = (variables, cycleVariableIds) => [
   {
@@ -219,6 +243,7 @@ export default function AssetDetail() {
   const [menu, setMenu] = useState(false);
   const [bulkSaving, setBulkSaving] = useState(false);
   const [deletingRuleId, setDeletingRuleId] = useState(null);
+  const [ruleActionMenuId, setRuleActionMenuId] = useState(null);
   const [actionNotice, setActionNotice] = useState("");
   const [sortMenu, setSortMenu] = useState(false);
   const [modal, setModal] = useState(null);
@@ -351,7 +376,7 @@ export default function AssetDetail() {
   }, [assetId]);
 
   const loadLogs = useCallback(() => {
-    api
+    return api
       .get(`/assets/${assetId}/logbook`)
       .then((items) => {
         setLogs(Array.isArray(items) ? items : []);
@@ -362,6 +387,10 @@ export default function AssetDetail() {
         );
       });
   }, [assetId]);
+
+  const refreshMaintenanceData = useCallback(async () => {
+    await Promise.all([refreshStatus?.(), loadLogs()]);
+  }, [loadLogs, refreshStatus]);
 
   
   useEffect(() => {
@@ -898,40 +927,41 @@ const filteredLogs = [...logs]
 
       {tab === "status" && (
         <>
-          {machine && (
-            <p className="muted">
-              Cycle count and enabled cycle-threshold rule status refresh
-              automatically every 1.5 seconds. Counts and threshold evaluation
-              are maintained by the backend.
-            </p>
-          )}
+          <p className="muted status-caption">
+            Machine status and rule evaluations refresh automatically every
+            1.5 seconds. Counts and threshold evaluation are maintained by the
+            backend.
+          </p>
 
-          {machine && (
-            <section
-              className="machine-strip"
-              aria-label="Live machine monitoring"
-            >
-              <div className={"machine-state " + machine.status}>
+          <section
+            className={"machine-strip status-summary" + (machine ? "" : " unavailable")}
+            aria-label="Live machine monitoring"
+          >
+              <div className={"machine-state " + (machine?.status || "unknown")}>
                 <i
                   className={
                     "lamp " +
-                    (machine.status === "running"
+                    (machine?.status === "running"
                       ? "ok"
-                      : machine.status === "stopped"
+                      : machine?.status === "stopped"
                         ? "off"
                         : "warning")
                   }
                 />
-                <span className="cap">{machine.status}</span>
-                {machine.stale && <em>stale data</em>}
+                <span className="cap">
+                  {machine?.status || "Status unavailable"}
+                </span>
+                {machine?.stale && <em>stale data</em>}
               </div>
 
               <div className="machine-fig">
                 <span>Cycles</span>
                 <b>
-                  {machine.cycle_count}
-                  {machine.cycle_limit ? (
-                    <small> / {machine.cycle_limit}</small>
+                  {machine?.cycle_count == null
+                    ? "—"
+                    : Number(machine.cycle_count).toLocaleString()}
+                  {machine?.cycle_limit ? (
+                    <small> / {Number(machine.cycle_limit).toLocaleString()}</small>
                   ) : null}
                 </b>
               </div>
@@ -939,8 +969,8 @@ const filteredLogs = [...logs]
               <div className="machine-fig">
                 <span>Running time</span>
                 <b>
-                  {formatDuration(machine.running_seconds)}
-                  {machine.runtime_limit_seconds ? (
+                  {machine ? formatDuration(machine.running_seconds) : "—"}
+                  {machine?.runtime_limit_seconds ? (
                     <small>
                       {" / "}
                       {formatDuration(
@@ -954,7 +984,7 @@ const filteredLogs = [...logs]
               <div className="machine-fig">
                 <span>Last signal</span>
                 <b className="plain">
-                  {machine.last_seen_at
+                  {machine?.last_seen_at
                     ? timeAgo(machine.last_seen_at)
                     : "Not received"}
                 </b>
@@ -971,16 +1001,15 @@ const filteredLogs = [...logs]
                 </b>
               </div>
 
-              {cycleMapping && (
-                <div className="machine-fig">
+                <div className="machine-fig cycle-signal-fig">
                   <span>Cycle signal</span>
                   <b className="plain">
-                    {cycleMapping.variable_name} · {cycleMapping.node_id}
+                    {cycleMapping
+                      ? `${cycleMapping.variable_name} · ${cycleMapping.node_id}`
+                      : "Not configured"}
                   </b>
                 </div>
-              )}
-            </section>
-          )}
+          </section>
 
           <section className="panel values-panel">
             <div className="panel-head">
@@ -1081,7 +1110,7 @@ const filteredLogs = [...logs]
             )}
           </section>
 
-          <div className="toolbar">
+          <div className="toolbar rule-toolbar">
             <button
               className={
                 "icon-outline sm" +
@@ -1273,14 +1302,20 @@ const filteredLogs = [...logs]
                   varNames.get(rule.variable_id)
                 );
 
+                const limits = thresholdMetrics(rule);
+                const currentValue =
+                  state?.latest_value ?? rule.latest_value;
+
                 return (
-                  <div key={rule.id} className="rule-row">
+                  <article
+                    key={rule.id}
+                    className={`rule-row rule-card ${rule.status || "unknown"}`}
+                  >
                     <span className={"sev " + rule.status} />
 
-                    <div className="rule-name">
-                      {rule.name}
-
-                      <small>
+                    <div className="rule-name rule-card-main">
+                      <strong>{rule.name}</strong>
+                      <small className="rule-context">
                         {condition ||
                           rule.rule_type.replace("_", " ")}
 
@@ -1291,72 +1326,106 @@ const filteredLogs = [...logs]
                       </small>
 
                       {rule.description && (
-                        <small>{rule.description}</small>
+                        <small className="rule-description">{rule.description}</small>
                       )}
                     </div>
 
-                    {isAct(rule) &&
-                      state &&
-                      state.latest_value !== null &&
-                      state.latest_value !== undefined && (
-                        <span
-                          className="rule-now"
-                          title={state.message}
-                        >
-                          Now{" "}
-                          <b>
-                            {formatValue(state.latest_value)}
-                          </b>
-                        </span>
+                    <div className="rule-evaluation">
+                      <StatusBadge status={rule.status} />
+                      <small>
+                        {state?.message ||
+                          (isAct(rule)
+                            ? "Waiting for the next evaluation."
+                            : "Rule is not currently evaluating.")}
+                      </small>
+                    </div>
+
+                    <div className="rule-card-metrics">
+                      {currentValue !== null && currentValue !== undefined && (
+                        <div className="rule-current-value">
+                          <span>Now</span>
+                          <b>{formatValue(currentValue)}</b>
+                        </div>
                       )}
+                      {limits.length > 0 && (
+                        <div className="rule-limits">
+                          {limits.map((limit) => (
+                            <span key={limit.label}>
+                              <small>{limit.label}</small>
+                              <b>{limit.value}</b>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
 
-                    <StatusBadge status={rule.status} />
-
-                    {isAct(rule) ? (
-                      <button
-                        className="btn-outline"
-                        onClick={() =>
-                          setState(rule, "not_activated")
-                        }
-                        disabled={deletingRuleId !== null}
-                      >
-                        Deactivate
-                      </button>
-                    ) : (
-                      <button
-                        className="btn-outline"
-                        onClick={() =>
-                          setState(rule, "activated")
-                        }
-                        disabled={deletingRuleId !== null}
-                      >
-                        Activate
-                      </button>
-                    )}
-
-                    {!isAct(rule) && (
-                      <>
+                    <div className="rule-card-actions">
+                      {isAct(rule) ? (
                         <button
-                          className="btn-danger"
-                          onClick={() => remove(rule)}
-                          title="Remove from the rule list while preserving its alert and evaluation history"
+                          className="btn-outline"
+                          onClick={() => setState(rule, "not_activated")}
                           disabled={deletingRuleId !== null}
                         >
-                          Archive
+                          Deactivate
                         </button>
-                        <button
-                          className="btn-danger"
-                          onClick={() => permanentlyDeleteRule(rule)}
-                          title="Permanently delete this rule, alerts, and evaluation history"
-                          disabled={deletingRuleId !== null}
-                        >
-                          {deletingRuleId === rule.id
-                            ? "Deleting…"
-                            : "Delete permanently"}
-                        </button>
-                      </>
-                    )}
-                  </div>
+                      ) : (
+                        <>
+                          <button
+                            className="btn-outline"
+                            onClick={() => setState(rule, "activated")}
+                            disabled={deletingRuleId !== null}
+                          >
+                            Activate
+                          </button>
+                          <div className="dropdown rule-actions-menu">
+                            <button
+                              type="button"
+                              className="icon-outline sm"
+                              title={`More actions for ${rule.name}`}
+                              aria-label={`More actions for ${rule.name}`}
+                              aria-haspopup="menu"
+                              aria-expanded={ruleActionMenuId === rule.id}
+                              onClick={() =>
+                                setRuleActionMenuId((current) =>
+                                  current === rule.id ? null : rule.id
+                                )
+                              }
+                            >
+                              <DotsIcon size={17} />
+                            </button>
+                            {ruleActionMenuId === rule.id && (
+                              <div className="menu right" role="menu">
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => {
+                                    setRuleActionMenuId(null);
+                                    remove(rule);
+                                  }}
+                                  disabled={deletingRuleId !== null}
+                                >
+                                  Archive
+                                </button>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => {
+                                    setRuleActionMenuId(null);
+                                    permanentlyDeleteRule(rule);
+                                  }}
+                                  disabled={deletingRuleId !== null}
+                                >
+                                  {deletingRuleId === rule.id
+                                    ? "Deleting…"
+                                    : "Delete permanently"}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </article>
                 );
               })}
             </div>
@@ -1366,7 +1435,7 @@ const filteredLogs = [...logs]
 
       {tab === "logbook" && (
         <>
-          <MaintenancePanel assetId={assetId} onChanged={refreshStatus} />
+          <MaintenancePanel assetId={assetId} onChanged={refreshMaintenanceData} />
           <div className="panel">
             <div className="panel-head">
               <div>

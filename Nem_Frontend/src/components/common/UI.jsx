@@ -96,15 +96,24 @@ export function CreateModal({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const isVisible = (field) =>
-    !field.showWhen ||
-    values[field.showWhen.key] === field.showWhen.equals;
+  const matchesConditions = (conditions) =>
+    !conditions ||
+    (Array.isArray(conditions)
+      ? conditions.every(
+          (condition) => values[condition.key] === condition.equals
+        )
+      : conditions.anyOf
+        ? conditions.anyOf.some(
+            (condition) => values[condition.key] === condition.equals
+          )
+        : values[conditions.key] === conditions.equals);
+
+  const isVisible = (field) => matchesConditions(field.showWhen);
 
   const isRequired = (field) =>
     Boolean(
       field.required ||
-      (field.requiredWhen &&
-        values[field.requiredWhen.key] === field.requiredWhen.equals)
+      (field.requiredWhen && matchesConditions(field.requiredWhen))
     );
 
   useEffect(() => {
