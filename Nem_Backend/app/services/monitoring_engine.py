@@ -1,5 +1,6 @@
 
 import logging
+import math
 import operator
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -16,6 +17,7 @@ from app.models import (
     MonitoringEvent,
     MonitoringRule,
     Reading,
+    RuleCounterState,
     RuleState,
     SchedulerLease,
     Variable,
@@ -157,6 +159,117 @@ def _valid_value(variable: Variable, value: Any) -> bool:
             and isinstance(value, bool)
         )
     )
+
+
+def advance_rule_runtime(
+    counter: RuleCounterState,
+    at: datetime,
+    stale_after_seconds: int,
+) -> None:
+    if counter.is_running is not True or counter.last_signal_at is None:
+        return
+    latest_trustworthy_time = counter.last_signal_at + timedelta(
+        seconds=stale_after_seconds
+    )
+    end = min(at, latest_trustworthy_time)
+    checkpoint = counter.runtime_checkpoint_at
+    if checkpoint is not None and end > checkpoint:
+        counter.accumulated_running_seconds = Decimal(
+            counter.accumulated_running_seconds
+        ) + Decimal(str((end - checkpoint).total_seconds()))
+        counter.runtime_checkpoint_at = end
+        counter.updated_at = end
+
+
+def current_rule_runtime_seconds(
+    counter: RuleCounterState,
+    at: datetime,
+    stale_after_seconds: int,
+) -> Decimal:
+    total = Decimal(counter.accumulated_running_seconds)
+    if (
+        counter.is_running is not True
+        or counter.last_signal_at is None
+        or counter.runtime_checkpoint_at is None
+    ):
+        return total
+    end = min(
+        at,
+        counter.last_signal_at + timedelta(seconds=stale_after_seconds),
+    )
+    if end > counter.runtime_checkpoint_at:
+        total += Decimal(
+            str((end - counter.runtime_checkpoint_at).total_seconds())
+        )
+    return total
+
+
+def update_rule_signal_states(
+    session: Session,
+    *,
+    asset_id: int,
+    variable_id: int,
+    value: Any,
+    at: datetime,
+    stale_after_seconds: int,
+) -> None:
+    if not isinstance(value, bool):
+        return
+
+    rules = session.scalars(
+        select(MonitoringRule)
+        .where(
+            MonitoringRule.target_asset_id == asset_id,
+            MonitoringRule.variable_id == variable_id,
+            MonitoringRule.rule_type.in_(
+                {"boolean_count_threshold", "runtime_duration"}
+            ),
+            MonitoringRule.is_archived.is_(False),
+        )
+        .order_by(MonitoringRule.id)
+        .with_for_update()
+    ).all()
+    for rule in rules:
+        counter = session.scalar(
+            select(RuleCounterState)
+            .where(
+                RuleCounterState.rule_id == rule.id,
+                RuleCounterState.asset_id == asset_id,
+            )
+            .with_for_update()
+        )
+        if counter is None:
+            counter = RuleCounterState(
+                rule_id=rule.id,
+                asset_id=asset_id,
+                updated_at=at,
+            )
+            session.add(counter)
+            session.flush()
+
+        if counter.last_signal_at is not None and at <= counter.last_signal_at:
+            continue
+
+        if rule.rule_type == "boolean_count_threshold":
+            signal_is_fresh = (
+                counter.last_signal_at is not None
+                and at - counter.last_signal_at
+                <= timedelta(seconds=stale_after_seconds)
+            )
+            if (
+                signal_is_fresh
+                and counter.cycle_signal is False
+                and value is True
+            ):
+                counter.cycle_count += 1
+            counter.cycle_signal = value
+        else:
+            advance_rule_runtime(counter, at, stale_after_seconds)
+            counter.is_running = value
+            counter.runtime_checkpoint_at = at if value else None
+
+        counter.last_signal_at = at
+        counter.updated_at = at
 
 
 def _transition_state(
@@ -381,9 +494,16 @@ def evaluate_boolean_count_threshold(
             error_message="invalid_count_threshold_configuration",
         )
 
-    machine_state = session.get(MachineMonitoringState, asset.id)
+    counter = session.scalar(
+        select(RuleCounterState)
+        .where(
+            RuleCounterState.rule_id == rule.id,
+            RuleCounterState.asset_id == asset.id,
+        )
+        .with_for_update()
+    )
 
-    if machine_state is None:
+    if counter is None:
         return _transition_state(
             session,
             rule,
@@ -391,13 +511,13 @@ def evaluate_boolean_count_threshold(
             state,
             next_status="unknown",
             value=None,
-            message="No cumulative machine counter is available.",
+            message="No rule-specific cycle counter is available.",
             evaluated_at=evaluated_at,
             condition_started_at=None,
             error_message="machine_counter_unavailable",
         )
 
-    count = machine_state.cycle_count
+    count = counter.cycle_count
 
     if count >= alert_threshold:
         stage = "alert"
@@ -476,6 +596,160 @@ def evaluate_boolean_count_threshold(
             },
         )
 
+    return result
+
+
+def evaluate_runtime_duration(
+    session: Session,
+    rule: MonitoringRule,
+    asset: Asset,
+    state: RuleState | None,
+    evaluated_at: datetime,
+    stale_after_seconds: int,
+) -> RuleState:
+    parameters = rule.parameters or {}
+    warnings = parameters.get("warning_thresholds_seconds")
+    alert_threshold = parameters.get("alert_threshold_seconds")
+    if (
+        not isinstance(warnings, list)
+        or len(warnings) != 2
+        or not all(
+            isinstance(value, (int, float, Decimal))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            and value > 0
+            for value in [*warnings, alert_threshold]
+        )
+        or not warnings[0] < warnings[1] < alert_threshold
+    ):
+        return _transition_state(
+            session,
+            rule,
+            asset,
+            state,
+            next_status="unknown",
+            value=None,
+            message="Running-time threshold configuration is invalid.",
+            evaluated_at=evaluated_at,
+            condition_started_at=None,
+            error_message="invalid_runtime_threshold_configuration",
+        )
+
+    counter = session.scalar(
+        select(RuleCounterState)
+        .where(
+            RuleCounterState.rule_id == rule.id,
+            RuleCounterState.asset_id == asset.id,
+        )
+        .with_for_update()
+    )
+    if counter is None or counter.last_signal_at is None:
+        return _transition_state(
+            session,
+            rule,
+            asset,
+            state,
+            next_status="unknown",
+            value=None,
+            message="Waiting for a trustworthy Boolean running-state signal.",
+            evaluated_at=evaluated_at,
+            condition_started_at=None,
+            error_message="running_signal_unavailable",
+        )
+
+    stale_after = rule.stale_after_seconds or stale_after_seconds
+    running_seconds = current_rule_runtime_seconds(
+        counter, evaluated_at, stale_after
+    )
+    if evaluated_at - counter.last_signal_at > timedelta(seconds=stale_after):
+        return _transition_state(
+            session,
+            rule,
+            asset,
+            state,
+            next_status="unknown",
+            value=float(running_seconds),
+            message=(
+                f"Running-state signal is stale (older than {stale_after} seconds); "
+                "running time is paused."
+            ),
+            evaluated_at=evaluated_at,
+            condition_started_at=None,
+            error_message="stale_running_signal",
+        )
+
+    if counter.is_running is None:
+        return _transition_state(
+            session,
+            rule,
+            asset,
+            state,
+            next_status="unknown",
+            value=float(counter.accumulated_running_seconds),
+            message="Running-state signal is unknown; running time is paused.",
+            evaluated_at=evaluated_at,
+            condition_started_at=None,
+            error_message="unknown_running_signal",
+        )
+
+    running_seconds = float(running_seconds)
+    stage = (
+        "alert"
+        if running_seconds >= alert_threshold
+        else "warning_2"
+        if running_seconds >= warnings[1]
+        else "warning_1"
+        if running_seconds >= warnings[0]
+        else "normal"
+    )
+    severity = "alert" if stage == "alert" else "warning" if stage.startswith("warning") else "normal"
+    thresholds = {
+        "warning_1": warnings[0],
+        "warning_2": warnings[1],
+        "alert": alert_threshold,
+    }
+    messages = {
+        "normal": f"{'Machine running' if counter.is_running else 'Machine stopped'}. Accumulated running time: {running_seconds:.1f} seconds.",
+        "warning_1": f"Running time reached the warning threshold ({warnings[0]} seconds).",
+        "warning_2": f"Running time reached the higher warning threshold ({warnings[1]} seconds).",
+        "alert": f"Running time reached the alert threshold ({alert_threshold} seconds).",
+    }
+    previous_message = state.message if state is not None else ""
+    previous_stage = (
+        previous_message.split("[runtime-stage:", 1)[1].split("]", 1)[0]
+        if "[runtime-stage:" in previous_message
+        else None
+    )
+    message = f"{messages[stage]} [runtime-stage:{stage}]"
+    result = _transition_state(
+        session,
+        rule,
+        asset,
+        state,
+        next_status=severity,
+        value=running_seconds,
+        message=message,
+        evaluated_at=evaluated_at,
+        condition_started_at=None,
+        threshold=(
+            Decimal(str(thresholds[stage])) if stage in thresholds else None
+        ),
+    )
+    if stage != previous_stage and stage == "warning_2":
+        emit_event(
+            session,
+            event_type="warning_threshold_advanced",
+            message=messages[stage],
+            occurred_at=evaluated_at,
+            asset_id=asset.id,
+            rule_id=rule.id,
+            severity="warning",
+            metadata={
+                "running_seconds": running_seconds,
+                "threshold_seconds": warnings[1],
+                "stage": stage,
+            },
+        )
     return result
 
 
@@ -576,6 +850,32 @@ def evaluate_rule(
 
         return evaluate_boolean_count_threshold(
             session, rule, asset, state, now
+        )
+
+    if (
+        rule.rule_type == "runtime_duration"
+        and (rule.parameters or {}).get("warning_thresholds_seconds") is not None
+    ):
+        if variable.data_type != "boolean":
+            return _transition_state(
+                session,
+                rule,
+                asset,
+                state,
+                next_status="unknown",
+                value=None,
+                message="Running-time rules require a Boolean variable.",
+                evaluated_at=now,
+                condition_started_at=None,
+                error_message="invalid_running_variable_type",
+            )
+        return evaluate_runtime_duration(
+            session,
+            rule,
+            asset,
+            state,
+            now,
+            stale_after_seconds,
         )
 
     reading = session.scalar(

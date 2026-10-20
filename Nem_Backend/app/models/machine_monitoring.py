@@ -1,6 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import ForeignKey, Numeric
+from sqlalchemy import Boolean, ForeignKey, Integer, Numeric, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 from app.db.session import UTCDateTime
@@ -20,5 +20,30 @@ class MachineMonitoringState(Base):
     last_cycle_signal_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     last_running_signal_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    runtime_checkpoint_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class RuleCounterState(Base):
+    __tablename__ = "nem_rule_counter_states"
+    __table_args__ = (
+        UniqueConstraint("rule_id", "asset_id", name="uq_rule_counter_rule_asset"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    rule_id: Mapped[int] = mapped_column(
+        ForeignKey("nem_monitoring_rules.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    asset_id: Mapped[int] = mapped_column(
+        ForeignKey("assets.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    cycle_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    cycle_signal: Mapped[bool | None] = mapped_column(Boolean)
+    accumulated_running_seconds: Mapped[Decimal] = mapped_column(
+        Numeric(20, 3), default=0, nullable=False
+    )
+    is_running: Mapped[bool | None] = mapped_column(Boolean)
+    last_signal_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     runtime_checkpoint_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)

@@ -5,6 +5,36 @@ import math
 from typing import Any, Literal
 from pydantic import Field, field_validator, model_validator
 from app.schemas.common import ORMModel
+
+
+def validate_runtime_thresholds(parameters: dict[str, Any] | None) -> None:
+    if not parameters or "warning_thresholds_seconds" not in parameters:
+        return
+    warnings = parameters.get("warning_thresholds_seconds")
+    alert = parameters.get("alert_threshold_seconds")
+    if (
+        not isinstance(warnings, list)
+        or len(warnings) != 2
+    ):
+        raise ValueError(
+            "Runtime thresholds must be positive and strictly increasing"
+        )
+    thresholds = [*warnings, alert]
+    if (
+        any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float, Decimal))
+            or not math.isfinite(float(value))
+            or value <= 0
+            for value in thresholds
+        )
+        or not warnings[0] < warnings[1] < alert
+    ):
+        raise ValueError(
+            "Runtime thresholds must be positive and strictly increasing"
+        )
+
+
 #This schems defines what information a user must supply when creating a rule
 class RuleCreate(ORMModel):
     name: str = Field(min_length=1, max_length=200)
@@ -48,30 +78,42 @@ class RuleCreate(ORMModel):
         if self.rule_type == "parameter_threshold":
             if self.variable_id is None or self.operator is None or self.threshold is None:
                 raise ValueError("Parameter threshold rules require a variable, operator, and threshold")
-        if self.rule_type in {"runtime_duration", "duration"}:
+        if self.rule_type == "runtime_duration":
+            validate_runtime_thresholds(self.parameters)
+            if self.parameters and "warning_thresholds_seconds" in self.parameters:
+                if self.variable_id is None:
+                    raise ValueError(
+                        "Running-time rules require a Boolean variable"
+                    )
+            else:
+                duration = self.parameters.get("duration_seconds") if self.parameters else None
+                if not isinstance(duration, int) or isinstance(duration, bool) or duration <= 0:
+                    raise ValueError(
+                        "Legacy runtime duration rules require a positive duration_seconds"
+                    )
+        if self.rule_type == "duration":
             duration = self.parameters.get("duration_seconds") if self.parameters else None
             if not isinstance(duration, int) or isinstance(duration, bool) or duration <= 0:
                 raise ValueError("Duration rules require a positive parameters.duration_seconds")
-            if self.rule_type == "duration":
-                if self.variable_id is None:
-                    raise ValueError("Duration rules require a target variable")
-                condition = self.parameters.get("condition", "equals")
-                if condition == "threshold":
-                    if self.parameters.get("operator") not in {
-                        "<", "<=", "==", "!=", ">=", ">", "lt", "lte", "eq", "ne", "gte", "gt"
-                    } or not isinstance(self.parameters.get("threshold"), (int, float)):
-                        raise ValueError("Threshold duration rules require a supported operator and numeric threshold")
-                    threshold = self.parameters["threshold"]
-                    if isinstance(threshold, bool) or (isinstance(threshold, float) and not math.isfinite(threshold)):
-                        raise ValueError("parameters.threshold must be finite and numeric")
-                elif condition == "equals":
-                    expected_value = self.parameters.get("expected_value")
-                    if not isinstance(expected_value, (str, bool, int, float)):
-                        raise ValueError("Equals duration rules require a scalar parameters.expected_value")
-                    if isinstance(expected_value, float) and not math.isfinite(expected_value):
-                        raise ValueError("parameters.expected_value must be finite")
-                else:
-                    raise ValueError("Duration condition must be 'equals' or 'threshold'")
+            if self.variable_id is None:
+                raise ValueError("Duration rules require a target variable")
+            condition = self.parameters.get("condition", "equals")
+            if condition == "threshold":
+                if self.parameters.get("operator") not in {
+                    "<", "<=", "==", "!=", ">=", ">", "lt", "lte", "eq", "ne", "gte", "gt"
+                } or not isinstance(self.parameters.get("threshold"), (int, float)):
+                    raise ValueError("Threshold duration rules require a supported operator and numeric threshold")
+                threshold = self.parameters["threshold"]
+                if isinstance(threshold, bool) or (isinstance(threshold, float) and not math.isfinite(threshold)):
+                    raise ValueError("parameters.threshold must be finite and numeric")
+            elif condition == "equals":
+                expected_value = self.parameters.get("expected_value")
+                if not isinstance(expected_value, (str, bool, int, float)):
+                    raise ValueError("Equals duration rules require a scalar parameters.expected_value")
+                if isinstance(expected_value, float) and not math.isfinite(expected_value):
+                    raise ValueError("parameters.expected_value must be finite")
+            else:
+                raise ValueError("Duration condition must be 'equals' or 'threshold'")
         if self.rule_type == "boolean_count_threshold":
             if self.variable_id is None:
                 raise ValueError("Boolean count threshold rules require a variable_id")
@@ -97,6 +139,8 @@ class RuleCreate(ORMModel):
                 or alert_threshold <= warning_thresholds[1]
             ):
                 raise ValueError("alert_threshold must be a positive integer greater than both warnings")
+        if self.rule_type == "runtime_duration":
+            validate_runtime_thresholds(self.parameters)
         return self
 
 
@@ -156,6 +200,10 @@ class RuleTemplateCreate(ORMModel):
                     "Boolean count templates require boolean variables"
                 )
             self.required_variable_types = ["boolean"]
+        elif self.rule_type == "runtime_duration":
+            if required_types is not None and required_types != ["boolean"]:
+                raise ValueError("Running-time templates require Boolean variables")
+            self.required_variable_types = ["boolean"]
         elif self.rule_type == "duration":
             if required_types is None:
                 condition = (self.parameters or {}).get("condition", "equals")
@@ -177,6 +225,7 @@ class RuleTemplateCreate(ORMModel):
             "parameter_threshold",
             "duration",
             "boolean_count_threshold",
+            "runtime_duration",
         }
         RuleCreate.model_validate(
             {

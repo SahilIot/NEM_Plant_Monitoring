@@ -25,6 +25,7 @@ from app.models import (
     MonitoringRule,
     MonitoringRuleTemplate,
     Reading,
+    RuleCounterState,
     RuleCollection,
     RuleState,
     Variable,
@@ -40,7 +41,11 @@ from app.schemas.rule import (
 )
 from app.services.frontend_backup import create_backup, restore_backup
 from app.services.monitoring_engine import (emit_event,resolve_active_rule_alerts,set_rule_enabled_state,)
-from app.api.routes.rules import configured_cycle_signal_mapping, validate_targets
+from app.api.routes.rules import (
+    configured_cycle_signal_mapping,
+    configured_runtime_signal_mapping,
+    validate_targets,
+)
 from app.api.routes.monitoring import state_for_rule
 
 router = APIRouter(tags=["frontend compatibility"])
@@ -391,6 +396,7 @@ def _template_rule_definition(
             validated.threshold,
             validated.parameters,
             configured_cycle_signal_mapping(request, validated.variable_id),
+            configured_runtime_signal_mapping(request, validated.variable_id),
         )
         return definition
 
@@ -751,6 +757,7 @@ def frontend_copy_asset_rules(
             validated.threshold,
             validated.parameters,
             configured_cycle_signal_mapping(request, validated.variable_id),
+            configured_runtime_signal_mapping(request, validated.variable_id),
         )
         if any(_same_rule_definition(rule, definition) for rule in existing):
             already_copied.append(source.id)
@@ -793,6 +800,7 @@ def frontend_create_asset_rule(
         session, payload.target_asset_id, payload.variable_id, payload.rule_type,
         payload.operator, payload.threshold, payload.parameters,
         configured_cycle_signal_mapping(request, payload.variable_id),
+        configured_runtime_signal_mapping(request, payload.variable_id),
     )
     rule = MonitoringRule(**payload.model_dump())
     session.add(rule)
@@ -846,6 +854,7 @@ def frontend_create_usage_rule(
         rule_payload.threshold,
         rule_payload.parameters,
         configured_cycle_signal_mapping(request, rule_payload.variable_id),
+        configured_runtime_signal_mapping(request, rule_payload.variable_id),
     )
     rule = MonitoringRule(**rule_payload.model_dump())
     session.add(rule)
@@ -924,6 +933,7 @@ def frontend_bulk_rule_state(
                     rule.threshold,
                     rule.parameters,
                     configured_cycle_signal_mapping(request, rule.variable_id),
+                    configured_runtime_signal_mapping(request, rule.variable_id),
                 )
             except HTTPException as error:
                 skipped.append({"rule_id": rule.id, "name": rule.name, "reason": str(error.detail)})
@@ -1004,6 +1014,9 @@ def frontend_hard_delete_rule(
     if alert_ids:
         session.execute(delete(Alert).where(Alert.id.in_(alert_ids)))
     session.execute(delete(RuleState).where(RuleState.rule_id == rule.id))
+    session.execute(
+        delete(RuleCounterState).where(RuleCounterState.rule_id == rule.id)
+    )
     session.delete(rule)
     session.flush()
     emit_event(
@@ -1280,6 +1293,7 @@ def import_configuration(
             session, data.target_asset_id, data.variable_id, data.rule_type,
             data.operator, data.threshold, data.parameters,
             configured_cycle_signal_mapping(request, data.variable_id),
+            configured_runtime_signal_mapping(request, data.variable_id),
         )
         session.add(MonitoringRule(**data.model_dump()))
     session.commit()
