@@ -351,7 +351,7 @@ export default function AssetDetail() {
   }, [assetId]);
 
   const loadLogs = useCallback(() => {
-    api
+    return api
       .get(`/assets/${assetId}/logbook`)
       .then((items) => {
         setLogs(Array.isArray(items) ? items : []);
@@ -362,6 +362,10 @@ export default function AssetDetail() {
         );
       });
   }, [assetId]);
+
+  const refreshMaintenanceData = useCallback(async () => {
+    await Promise.all([refreshStatus?.(), loadLogs()]);
+  }, [loadLogs, refreshStatus]);
 
   
   useEffect(() => {
@@ -1366,7 +1370,7 @@ const filteredLogs = [...logs]
 
       {tab === "logbook" && (
         <>
-          <MaintenancePanel assetId={assetId} onChanged={refreshStatus} />
+          <MaintenancePanel assetId={assetId} onChanged={refreshMaintenanceData} />
           <div className="panel">
             <div className="panel-head">
               <div>
