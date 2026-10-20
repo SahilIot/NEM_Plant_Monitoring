@@ -1,11 +1,11 @@
 #main purpose is to  create,view,filter and update machine variables in the db 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models import Asset, Variable
+from app.models import Alert, Asset, MonitoringRule, Reading, RuleState, Variable
 from app.schemas.variable import VariableCreate, VariableRead, VariableUpdate
 
 router = APIRouter(tags=["variables"])
@@ -100,3 +100,54 @@ def update_variable(variable_id: int,payload: VariableUpdate,session: Session = 
 
     session.refresh(variable)
     return variable
+
+
+@router.delete("/variables/{variable_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_variable(
+    variable_id: int,
+    request: Request,
+    session: Session = Depends(get_db),
+) -> Response:
+    variable = variable_or_404(session, variable_id)
+    references = (
+        (Reading, Reading.variable_id),
+        (MonitoringRule, MonitoringRule.variable_id),
+        (RuleState, RuleState.target_variable_id),
+        (Alert, Alert.target_variable_id),
+    )
+    if any(
+        session.scalar(
+            select(column).where(column == variable.id).limit(1)
+        )
+        for model, column in references
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Cannot delete a variable referenced by readings, monitoring "
+                "rules, rule states, or alerts. Deactivate it instead."
+            ),
+        )
+
+    collector = getattr(request.app.state, "opcua_collector", None)
+    if collector is not None and any(
+        signal.variable_id == variable.id
+        for mapping in collector.mappings
+        for signal in (
+            mapping.cycle_signal,
+            mapping.running_signal,
+            *mapping.readings,
+        )
+        if signal is not None
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Cannot delete a variable used by OPC UA_MACHINE_MAPPINGS. "
+                "Remove its mapping and restart the backend first."
+            ),
+        )
+
+    session.delete(variable)
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

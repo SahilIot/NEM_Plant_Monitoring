@@ -1,7 +1,5 @@
 # NEM Plant Monitoring
 
-For a code-based walkthrough of the current runtime, data flow, live refresh
-behavior, and implementation limitations, see [CURRENT_SYSTEM_GUIDE.md](./CURRENT_SYSTEM_GUIDE.md).
 
 FastAPI + PostgreSQL backend and React dashboard for monitoring industrial
 assets. Readings arrive from the REST API or from a **read-only** OPC UA

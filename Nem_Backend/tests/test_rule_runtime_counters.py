@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -13,11 +14,14 @@ from app.api.routes.frontend_compat import (
     frontend_create_asset_rule,
     frontend_hard_delete_rule,
 )
+from app.api.routes.assets import delete_asset
 from app.api.routes.maintenance import create_maintenance_schedule
+from app.api.routes.variables import delete_variable
 from app.db.base import Base
 from app.models import (
     Alert,
     Asset,
+    MonitoringEvent,
     MonitoringRule,
     RuleCounterState,
     Variable,
@@ -25,7 +29,8 @@ from app.models import (
 from app.schemas.rule import RuleCreate
 from app.schemas.maintenance import MaintenanceScheduleCreate
 from app.schemas.opcua import OpcUaMachineMapping
-from app.services.opcua_collector import load_machine_mappings
+from app.core.config import Settings
+from app.services.opcua_collector import OpcUaCollector, load_machine_mappings
 from app.services.monitoring_engine import (
     evaluate_rule,
     update_rule_signal_states,
@@ -113,6 +118,78 @@ def test_opcua_configuration_allows_a_node_to_be_shared_across_assets():
     )
 
     assert len(mappings) == 2
+
+
+def test_running_signal_refresh_uses_good_quality_boolean_reads():
+    settings = Settings(
+        database_url="postgresql+psycopg://user:password@localhost/nem",
+        opcua_machine_mappings=json.dumps(
+            [
+                {
+                    "asset_id": 1,
+                    "running_signal": {
+                        "node_id": "ns=2;s=machine-running",
+                        "variable_id": 11,
+                    },
+                }
+            ]
+        ),
+    )
+    collector = OpcUaCollector(settings, None)
+    processed = []
+    collector._process_mapped_notification = (
+        lambda notification, mapping, role, variable_id: processed.append(
+            (notification, mapping, role, variable_id)
+        )
+    )
+
+    class GoodStatus:
+        @staticmethod
+        def is_good():
+            return True
+
+    class BadStatus:
+        @staticmethod
+        def is_good():
+            return False
+
+    class FakeNode:
+        def __init__(self, status):
+            self.status = status
+
+        async def read_data_value(self, *, raise_on_bad_status=True):
+            assert raise_on_bad_status is False
+            return SimpleNamespace(
+                StatusCode=self.status,
+                Value=SimpleNamespace(Value=True),
+            )
+
+    class FakeClient:
+        def get_node(self, node_id):
+            assert node_id == "ns=2;s=machine-running"
+            return FakeNode(GoodStatus())
+
+    class BadQualityClient:
+        def get_node(self, node_id):
+            return FakeNode(BadStatus())
+
+    asyncio.run(
+        collector._refresh_running_signals(FakeClient(), sampled_at=START)
+    )
+    asyncio.run(
+        collector._refresh_running_signals(
+            BadQualityClient(),
+            sampled_at=START + timedelta(seconds=10),
+        )
+    )
+
+    assert len(processed) == 1
+    notification, mapping, role, variable_id = processed[0]
+    assert notification.value is True
+    assert notification.recorded_at == START
+    assert mapping.asset_id == 1
+    assert role == "running"
+    assert variable_id == 11
 
 
 def test_asset_scoped_running_time_rule_creation_persists_selected_asset(
@@ -272,6 +349,90 @@ def test_recurring_maintenance_schedule_creation_remains_available(
 
     assert schedule.asset_id == asset.id
     assert schedule.first_due_date.isoformat() == "2026-11-20"
+
+
+def test_unused_variable_can_be_deleted(session: Session):
+    asset, variable = add_asset_variable(session, "Mixer")
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                opcua_collector=SimpleNamespace(mappings=[])
+            )
+        )
+    )
+
+    response = delete_variable(variable.id, request, session)
+
+    assert response.status_code == 204
+    assert session.get(Variable, variable.id) is None
+
+
+def test_variable_delete_is_rejected_if_opcua_mapping_still_uses_it(
+    session: Session,
+):
+    asset, variable = add_asset_variable(session, "Mixer")
+    mapping = OpcUaMachineMapping.model_validate(
+        {
+            "asset_id": asset.id,
+            "cycle_signal": {
+                "node_id": "ns=2;s=mixer-cycle",
+                "variable_id": variable.id,
+            },
+        }
+    )
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                opcua_collector=SimpleNamespace(mappings=[mapping])
+            )
+        )
+    )
+
+    with pytest.raises(HTTPException) as error:
+        delete_variable(variable.id, request, session)
+
+    assert error.value.status_code == 409
+
+
+def test_asset_delete_is_rejected_when_it_has_variables(session: Session):
+    asset, _ = add_asset_variable(session, "Mixer")
+
+    with pytest.raises(HTTPException) as error:
+        delete_asset(asset.id, session)
+
+    assert error.value.status_code == 409
+
+
+def test_empty_asset_can_be_deleted(session: Session):
+    asset = Asset(name="Unused machine", asset_type="machine")
+    session.add(asset)
+    session.flush()
+
+    response = delete_asset(asset.id, session)
+
+    assert response.status_code == 204
+    assert session.get(Asset, asset.id) is None
+
+
+def test_asset_delete_removes_asset_scoped_audit_events(session: Session):
+    asset = Asset(name="Unused machine", asset_type="machine")
+    session.add(asset)
+    session.flush()
+    event = MonitoringEvent(
+        event_type="rule_permanently_deleted",
+        asset_id=asset.id,
+        message="Monitoring rule permanently deleted.",
+        occurred_at=START,
+    )
+    session.add(event)
+    session.flush()
+    asset_id, event_id = asset.id, event.id
+
+    response = delete_asset(asset_id, session)
+
+    assert response.status_code == 204
+    assert session.get(Asset, asset_id) is None
+    assert session.get(MonitoringEvent, event_id) is None
 
 
 def add_rule(

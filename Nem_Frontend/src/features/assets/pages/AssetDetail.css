@@ -553,3 +553,5 @@
     min-width: 68px;
   }
 }
+.asset-page .asset-links .danger-link { color: var(--danger, #e05252); }
+.asset-page .asset-links .danger-link:disabled { opacity: 0.6; cursor: wait; }

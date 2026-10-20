@@ -162,8 +162,6 @@ def initialize_database(engine: Engine) -> None:
                 )
             )
 
- feature/add-project-documents
-
     if "nem_alerts" in table_names and "nem_maintenance_schedules" in table_names:
         alert_columns = {
             column["name"]
@@ -232,7 +230,6 @@ def initialize_database(engine: Engine) -> None:
                         "END IF; END $$"
                     )
                 )
-=======
 #converts qualifying older rules into resuable templates
 def _migrate_legacy_rule_templates(engine: Engine) -> None:
     supported_types = {

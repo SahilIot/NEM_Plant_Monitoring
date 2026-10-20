@@ -31,7 +31,11 @@ from app.core.config import Settings, get_settings
 from app.db.init_db import initialize_database
 from app.db.session import create_database_engine, create_session_factory
 from app.services.maintenance_schedule import emit_due_schedule_events
-from app.services.monitoring_engine import acquire_scheduler_lease, utc_now
+from app.services.monitoring_engine import (
+    acquire_scheduler_lease,
+    evaluate_rules,
+    utc_now,
+)
 from app.services.opcua_collector import OpcUaCollector
 
 LOGGER = logging.getLogger("nem_backend")
@@ -60,6 +64,39 @@ async def _maintenance_due_alert_loop(session_factory, owner_id: str) -> None:
             LOGGER.exception("Maintenance due-date evaluation failed")
         await asyncio.sleep(60)
 
+
+async def _monitoring_evaluation_loop(
+    session_factory,
+    owner_id: str,
+    *,
+    interval_seconds: int,
+    stale_after_seconds: int,
+) -> None:
+    while True:
+        try:
+            def evaluate_monitoring_rules() -> None:
+                with session_factory() as session:
+                    if not acquire_scheduler_lease(
+                        session,
+                        owner_id=owner_id,
+                        now=utc_now(),
+                        lease_seconds=max(90, interval_seconds * 3),
+                        name="monitoring-evaluation",
+                    ):
+                        return
+                    evaluate_rules(
+                        session,
+                        evaluated_at=utc_now(),
+                        stale_after_seconds=stale_after_seconds,
+                        respect_rule_intervals=True,
+                    )
+                    session.commit()
+
+            await asyncio.to_thread(evaluate_monitoring_rules)
+        except SQLAlchemyError:
+            LOGGER.exception("Monitoring rule evaluation failed")
+        await asyncio.sleep(interval_seconds)
+
 #Serving the frontend help serve a built React frontend
 class FrontendStaticFiles(StaticFiles):
     async def get_response(self, path: str, scope):
@@ -82,6 +119,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(application: FastAPI):
         initialize_database(engine)
         opcua_collector.start()
+        monitoring_task = None
+        if selected_settings.monitoring_scheduler_enabled:
+            monitoring_task = asyncio.create_task(
+                _monitoring_evaluation_loop(
+                    session_factory,
+                    owner_id=f"monitoring-{uuid4()}",
+                    interval_seconds=(
+                        selected_settings.monitoring_evaluation_interval_seconds
+                    ),
+                    stale_after_seconds=(
+                        selected_settings.monitoring_default_stale_after_seconds
+                    ),
+                ),
+                name="monitoring-evaluation",
+            )
         maintenance_due_task = None
         if selected_settings.maintenance_due_alerts_enabled:
             maintenance_due_task = asyncio.create_task(
@@ -90,6 +142,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            if monitoring_task is not None:
+                monitoring_task.cancel()
+                try:
+                    await monitoring_task
+                except asyncio.CancelledError:
+                    pass
             if maintenance_due_task is not None:
                 maintenance_due_task.cancel()
                 try:
