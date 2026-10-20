@@ -694,3 +694,179 @@ button:disabled { opacity: 0.55; cursor: default; }
     padding: 15px 16px;
   }
 }
+
+
+
+html[data-theme="dark"] .modal-content:has(.rule-type-options),
+html[data-theme="dark"] .modal-panel:has(.rule-type-options) {
+  background: var(--surface, #151b22) !important;
+  color: var(--ink, #e5e7eb) !important;
+  border-color: var(--line, #303945) !important;
+}
+
+/* Dark theme: Interval, Usage and Time option cards */
+html[data-theme="dark"] .rule-type-options .rule-type-option {
+  background: var(--surface-2, #1a2129) !important;
+  color: var(--ink, #e5e7eb) !important;
+  border-color: var(--line, #303945) !important;
+}
+
+html[data-theme="dark"] .rule-type-options .rule-type-option strong {
+  color: var(--ink, #f1f5f9) !important;
+}
+
+html[data-theme="dark"] .rule-type-options .rule-type-option small {
+  color: var(--ink-2, #aab6c4) !important;
+}
+
+/* Light theme */
+html[data-theme="light"] .rule-type-options .rule-type-option {
+  background: #ffffff !important;
+  color: #172033 !important;
+  border-color: #e2e8f0 !important;
+}
+
+html[data-theme="light"] .rule-type-options .rule-type-option strong {
+  color: #172033 !important;
+}
+
+html[data-theme="light"] .rule-type-options .rule-type-option small {
+  color: #64748b !important;
+}
+
+/* Hover */
+.rule-type-options .rule-type-option:hover {
+  border-color: var(--action, #3b82f6) !important;
+}
+
+
+
+html[data-theme="dark"] .prm-dialog {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .prm-header,
+html[data-theme="dark"] .prm-footer {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .prm-title,
+html[data-theme="dark"] .prm-dialog h2,
+html[data-theme="dark"] .prm-dialog h3 {
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .prm-dialog input,
+html[data-theme="dark"] .prm-dialog select {
+  background: var(--surface-2);
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+html[data-theme="dark"] .prm-dialog input::placeholder {
+  color: var(--muted);
+}
+
+html[data-theme="dark"] .prm-dialog select option {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .prm-dialog button:disabled {
+  opacity: 0.55;
+}
+
+html[data-theme="light"] .prm-dialog {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+html[data-theme="light"] .prm-header,
+html[data-theme="light"] .prm-footer {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+html[data-theme="light"] .prm-dialog input,
+html[data-theme="light"] .prm-dialog select {
+  background: #ffffff;
+  color: #172033;
+  border-color: #cbd5e1;
+}
+
+
+html[data-theme="dark"] .copy-rules-modal {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .copy-rules-modal .modal-header {
+  background: var(--surface-2);
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .copy-rules-modal .modal-header h2,
+html[data-theme="dark"] .copy-rules-modal h3,
+html[data-theme="dark"] .copy-rules-modal label {
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .copy-rules-modal .modal-body,
+html[data-theme="dark"] .copy-rules-modal .modal-actions {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .copy-rules-modal p,
+html[data-theme="dark"] .copy-rules-modal small {
+  color: var(--muted);
+}
+
+html[data-theme="dark"] .copy-rules-modal input,
+html[data-theme="dark"] .copy-rules-modal select,
+html[data-theme="dark"] .copy-rules-modal textarea {
+  background: var(--surface-2);
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+html[data-theme="dark"] .copy-rules-modal input::placeholder {
+  color: var(--muted);
+}
+
+html[data-theme="dark"] .copy-rules-modal select option {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+html[data-theme="light"] .copy-rules-modal {
+  background: #ffffff;
+  color: #172033;
+  border-color: #e2e8f0;
+}
+
+html[data-theme="light"] .copy-rules-modal .modal-header {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+
+html[data-theme="light"] .copy-rules-modal .modal-header h2,
+html[data-theme="light"] .copy-rules-modal label {
+  color: #172033;
+}
+
+html[data-theme="light"] .copy-rules-modal input,
+html[data-theme="light"] .copy-rules-modal select,
+html[data-theme="light"] .copy-rules-modal textarea {
+  background: #ffffff;
+  color: #172033;
+  border-color: #cbd5e1;
+}
