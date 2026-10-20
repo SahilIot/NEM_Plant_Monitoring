@@ -284,6 +284,7 @@ export default function AssetDetail() {
   const [list, setList] = useState("activated");
   const [rules, setRules] = useState([]);
   const [variables, setVariables] = useState([]);
+  const [allVariables, setAllVariables] = useState([]);
   const [cycleVariableIds, setCycleVariableIds] = useState([]);
   const [runtimeVariableIds, setRuntimeVariableIds] = useState([]);
   const [readings, setReadings] = useState([]);
@@ -315,6 +316,9 @@ export default function AssetDetail() {
   const [logEndDate, setLogEndDate] = useState("");
   const [events, setEvents] = useState([]);
   const [loadError, setLoadError] = useState("");
+  const [deletingAsset, setDeletingAsset] = useState(false);
+  const [deletingVariableId, setDeletingVariableId] = useState(null);
+  const [variableDeleteError, setVariableDeleteError] = useState("");
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -421,15 +425,19 @@ export default function AssetDetail() {
   const loadVariables = useCallback(async () => {
     try {
       const items = await api.getAll(
-        `/assets/${assetId}/variables?is_active=true`
+        `/assets/${assetId}/variables`
       );
 
-      setVariables(Array.isArray(items) ? items : []);
+      const loadedVariables = Array.isArray(items) ? items : [];
+      setAllVariables(loadedVariables);
+      setVariables(
+        loadedVariables.filter((variable) => variable.is_active)
+      );
 
       setVarNames((prev) => {
         const next = new Map(prev);
 
-        (Array.isArray(items) ? items : []).forEach((v) => {
+        loadedVariables.forEach((v) => {
           next.set(v.id, v.name);
         });
 
@@ -437,6 +445,7 @@ export default function AssetDetail() {
       });
     } catch (error) {
       setVariables([]);
+      setAllVariables([]);
       setLoadError(
         error.message || "Unable to load variables."
       );
@@ -467,6 +476,8 @@ export default function AssetDetail() {
     setFilter("");
     setReadings([]);
     setRules([]);
+    setAllVariables([]);
+    setVariables([]);
     setMachine(null);
     setPlcConnection(null);
     setCycleMapping(null);
@@ -856,6 +867,47 @@ const filteredLogs = [...logs]
     await loadVariables();
   };
 
+  const deleteAsset = async () => {
+    if (deletingAsset) return;
+    const confirmed = window.confirm(
+      `Permanently delete asset "${asset.name}" and its asset-scoped event history? This cannot be undone. Deletion is blocked if it still has child assets, variables, readings, rules, alerts, or maintenance records.`
+    );
+    if (!confirmed) return;
+
+    setDeletingAsset(true);
+    setLoadError("");
+    try {
+      await api.del(`/assets/${assetId}`);
+      await reload();
+      navigate("/assets", { replace: true });
+    } catch (error) {
+      setLoadError(error.message || "Could not delete the asset.");
+    } finally {
+      setDeletingAsset(false);
+    }
+  };
+
+  const deleteVariable = async (variable) => {
+    if (deletingVariableId !== null) return;
+    const confirmed = window.confirm(
+      `Permanently delete variable "${variable.name}"? Variables with readings, monitoring rules, alerts, or an OPC UA mapping cannot be deleted.`
+    );
+    if (!confirmed) return;
+
+    setDeletingVariableId(variable.id);
+    setVariableDeleteError("");
+    try {
+      await api.del(`/variables/${variable.id}`);
+      await loadVariables();
+    } catch (error) {
+      setVariableDeleteError(
+        error.message || "Could not delete this variable."
+      );
+    } finally {
+      setDeletingVariableId(null);
+    }
+  };
+
   if (!asset) {
     return assetsLoaded ? (
       <div className="panel">
@@ -936,6 +988,15 @@ const filteredLogs = [...logs]
             onClick={() => setModal("settings")}
           >
             <GearIcon size={17} /> Asset settings
+          </button>
+
+          <button
+            className="link-btn danger-link"
+            onClick={deleteAsset}
+            disabled={deletingAsset}
+            title="Permanently delete this asset if it has no related records"
+          >
+            {deletingAsset ? "Deleting asset…" : "Delete asset"}
           </button>
 
           <button
@@ -1706,9 +1767,19 @@ const filteredLogs = [...logs]
       {modal === "variables" && (
         <Modal
           title="Variables"
-          onClose={() => setModal(null)}
+          onClose={() => {
+            if (deletingVariableId === null) {
+              setModal(null);
+              setVariableDeleteError("");
+            }
+          }}
         >
-          {variables.length ? (
+          {variableDeleteError && (
+            <p className="notice error" role="alert">
+              {variableDeleteError}
+            </p>
+          )}
+          {allVariables.length ? (
             <table className="table">
               <thead>
                 <tr>
@@ -1716,23 +1787,38 @@ const filteredLogs = [...logs]
                   <th>Key</th>
                   <th>Type</th>
                   <th>Unit</th>
+                  <th>Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
 
               <tbody>
-                {variables.map((variable) => (
+                {allVariables.map((variable) => (
                   <tr key={variable.id}>
                     <td>{variable.name}</td>
                     <td>{variable.key}</td>
                     <td>{variable.data_type}</td>
                     <td>{variable.unit || "—"}</td>
+                    <td>{variable.is_active ? "Active" : "Inactive"}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn-danger"
+                        onClick={() => deleteVariable(variable)}
+                        disabled={deletingVariableId !== null}
+                      >
+                        {deletingVariableId === variable.id
+                          ? "Deleting…"
+                          : "Delete"}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           ) : (
             <p className="muted">
-              No active variables are configured for this asset.
+              No variables are configured for this asset.
             </p>
           )}
 
@@ -1740,6 +1826,7 @@ const filteredLogs = [...logs]
             <button
               className="btn-outline"
               onClick={() => setModal("addVariable")}
+              disabled={deletingVariableId !== null}
             >
               Add variable
             </button>
@@ -1747,6 +1834,7 @@ const filteredLogs = [...logs]
             <button
               className="btn-primary"
               onClick={() => setModal(null)}
+              disabled={deletingVariableId !== null}
             >
               Close
             </button>

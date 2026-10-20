@@ -401,6 +401,7 @@ class OpcUaCollector:
                 last_error=None,
             )
             try:
+                last_runtime_checkpoint = time.monotonic()
                 while not self._stop_event.is_set():
                     try:
                         notification = await asyncio.wait_for(
@@ -411,10 +412,12 @@ class OpcUaCollector:
                         if self._stop_event.is_set():
                             break
                         await client.check_connection()
+                        await self._refresh_running_signals(client)
                         if not await asyncio.to_thread(self._renew_lease):
                             raise ConnectionError("OPC UA collector lease was lost")
                         last_lease_renewal = time.monotonic()
                         await asyncio.to_thread(self._checkpoint_runtime, utc_now())
+                        last_runtime_checkpoint = time.monotonic()
                         continue
                     if notification is None:
                         break
@@ -426,12 +429,76 @@ class OpcUaCollector:
                             raise ConnectionError("OPC UA collector lease was lost")
                         last_lease_renewal = time.monotonic()
                     await asyncio.to_thread(self._process_notification, notification)
+                    if (
+                        time.monotonic() - last_runtime_checkpoint
+                        >= self.settings.opcua_runtime_checkpoint_seconds
+                    ):
+                        await client.check_connection()
+                        await self._refresh_running_signals(client)
+                        await asyncio.to_thread(
+                            self._checkpoint_runtime, utc_now()
+                        )
+                        last_runtime_checkpoint = time.monotonic()
             finally:
                 await subscription.delete()
                 self.status["negotiated_publishing_interval_ms"] = None
                 await asyncio.to_thread(self._disconnect_runtime, utc_now())
                 self._queue = None
                 self.status["connected"] = False
+
+    async def _refresh_running_signals(
+        self,
+        client: Any,
+        *,
+        sampled_at: datetime | None = None,
+    ) -> None:
+        for mapping in self.mappings:
+            signal = mapping.running_signal
+            if signal is None:
+                continue
+            try:
+                data_value = await client.get_node(
+                    signal.node_id
+                ).read_data_value(raise_on_bad_status=False)
+            except Exception:
+                LOGGER.exception(
+                    "Could not refresh OPC UA running signal for asset %s",
+                    mapping.asset_id,
+                )
+                continue
+
+            status = getattr(data_value, "StatusCode", None)
+            if status is None or not callable(
+                getattr(status, "is_good", None)
+            ) or not status.is_good():
+                LOGGER.warning(
+                    "Ignoring OPC UA running-signal read with bad or missing quality "
+                    "for asset %s",
+                    mapping.asset_id,
+                )
+                continue
+
+            value = getattr(getattr(data_value, "Value", None), "Value", None)
+            if not isinstance(value, bool):
+                LOGGER.warning(
+                    "Ignoring non-boolean OPC UA running-signal read for asset %s",
+                    mapping.asset_id,
+                )
+                continue
+
+            notification = OpcUaNotification(
+                node_id=signal.node_id,
+                value=value,
+                recorded_at=sampled_at or utc_now(),
+            )
+            await asyncio.to_thread(
+                self._process_mapped_notification,
+                notification,
+                mapping,
+                "running",
+                signal.variable_id,
+            )
+
 #ensuring configuration matches the database
     def _validate_mappings(self) -> None:
         with self.session_factory() as session:
