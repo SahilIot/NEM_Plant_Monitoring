@@ -1,4 +1,4 @@
-#FastApi router that connects your react frontend to your backend and postgreSQL database
+﻿#FastApi router that connects your react frontend to your backend and postgreSQL database
 
 from datetime import datetime, timezone
 from pathlib import Path

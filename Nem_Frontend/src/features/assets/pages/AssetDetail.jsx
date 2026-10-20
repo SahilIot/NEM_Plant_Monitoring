@@ -1,4 +1,4 @@
-
+﻿
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useOutletContext, useParams } from "react-router-dom";
 import CopyRulesModal from "../components/CopyRulesModal.jsx";
@@ -235,6 +235,12 @@ export default function AssetDetail() {
   const [showPredefinedRules, setShowPredefinedRules] = useState(false);
   const [addRuleMenu, setAddRuleMenu] = useState(false);
   const [logs, setLogs] = useState([]);
+  const [logSearch, setLogSearch] = useState("");
+  const [logSort, setLogSort] = useState("newest");
+  const [logTypeFilter, setLogTypeFilter] = useState("all");
+  const [showLogFilter, setShowLogFilter] = useState(false);
+  const [logStartDate, setLogStartDate] = useState("");
+  const [logEndDate, setLogEndDate] = useState("");
   const [events, setEvents] = useState([]);
   const [loadError, setLoadError] = useState("");
   const navigate = useNavigate();
@@ -530,6 +536,53 @@ export default function AssetDetail() {
       : (ORDER[a.status] ?? 3) -
         (ORDER[b.status] ?? 3)
   );
+
+  
+const filteredLogs = [...logs]
+  .filter((entry) => {
+    const search = logSearch.trim().toLowerCase();
+
+    const matchesSearch =
+      !search ||
+      String(entry.text || "").toLowerCase().includes(search) ||
+      String(entry.maintenance_type || "unknown")
+        .toLowerCase()
+        .includes(search);
+
+    const matchesType =
+      logTypeFilter === "all" ||
+      (entry.maintenance_type || "unknown") === logTypeFilter;
+
+    const rawDate = entry.time || entry.created_at;
+    const date = new Date(rawDate);
+
+    const matchesStart =
+      !logStartDate ||
+      (Number.isFinite(date.getTime()) &&
+        date >= new Date(`${logStartDate}T00:00:00`));
+
+    const matchesEnd =
+      !logEndDate ||
+      (Number.isFinite(date.getTime()) &&
+        date <= new Date(`${logEndDate}T23:59:59.999`));
+
+    return (
+      matchesSearch &&
+      matchesType &&
+      matchesStart &&
+      matchesEnd
+    );
+  })
+  .sort((a, b) => {
+    const dateA =
+      new Date(a.time || a.created_at).getTime() || 0;
+    const dateB =
+      new Date(b.time || b.created_at).getTime() || 0;
+
+    return logSort === "newest"
+      ? dateB - dateA
+      : dateA - dateB;
+  });
 
  
   const refreshAll = async () => {
@@ -1236,12 +1289,124 @@ export default function AssetDetail() {
             </button>
           </div>
 
-          {logs.length === 0 ? (
+                    <div className="maintenance-logbook__toolbar">
+            <button
+              type="button"
+              onClick={() => setShowLogFilter((value) => !value)}
+            >
+              Filter
+            </button>
+
+            <input
+              type="search"
+              placeholder="Search"
+              value={logSearch}
+              onChange={(event) => setLogSearch(event.target.value)}
+            />
+
+            <label>
+              Sort:
+              <select
+                value={logSort}
+                onChange={(event) => setLogSort(event.target.value)}
+              >
+                <option value="newest">Creation date: Newest → Oldest</option>
+                <option value="oldest">Creation date: Oldest → Newest</option>
+              </select>
+            </label>
+
+            <button type="button" onClick={() => setModal("log")}>
+              Unplanned maintenance
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const headers = ["Date", "Maintenance Type", "Details"];
+                const rows = filteredLogs.map((entry) => [
+                  entry.time || entry.created_at || "",
+                  entry.maintenance_type || "unknown",
+                  entry.text || "",
+                ]);
+
+                const csvCell = (value) =>
+                  `"${String(value).replace(/"/g, '""')}"`;
+
+                const csv = [headers, ...rows]
+                  .map((row) => row.map(csvCell).join(","))
+                  .join("\r\n");
+
+                const blob = new Blob(["\uFEFF" + csv], {
+                  type: "text/csv;charset=utf-8;",
+                });
+
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = "maintenance-logbook.csv";
+                link.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              Export
+            </button>
+          </div>
+
+          {showLogFilter && (
+            <div className="maintenance-logbook__filters">
+              <label>
+                Maintenance type
+                <select
+                  value={logTypeFilter}
+                  onChange={(event) => setLogTypeFilter(event.target.value)}
+                >
+                  <option value="all">All types</option>
+                  <option value="planned">Planned maintenance</option>
+                  <option value="unplanned">Unplanned maintenance</option>
+                  <option value="unknown">Unknown</option>
+                </select>
+              </label>
+
+              <label>
+                From
+                <input
+                  type="date"
+                  value={logStartDate}
+                  onChange={(event) => setLogStartDate(event.target.value)}
+                />
+              </label>
+
+              <label>
+                To
+                <input
+                  type="date"
+                  value={logEndDate}
+                  onChange={(event) => setLogEndDate(event.target.value)}
+                />
+              </label>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setLogTypeFilter("all");
+                  setLogStartDate("");
+                  setLogEndDate("");
+                  setLogSearch("");
+                }}
+              >
+                Clear filters
+              </button>
+            </div>
+          )}
+
+          {filteredLogs.length === 0 ? (
             <EmptyState
               art={false}
-              title="No logbook entries"
+              title="No matching logbook entries"
               lines={[
-                "Record inspections, repairs and observations here.",
+                logs.length === 0
+                  ? "Record inspections, repairs and observations here."
+                  : "Try changing your search or filters.",
               ]}
             />
           ) : (
@@ -1249,16 +1414,18 @@ export default function AssetDetail() {
               <thead>
                 <tr>
                   <th className="col-time">Time</th>
+                  <th>Maintenance Type</th>
                   <th>Entry</th>
                 </tr>
               </thead>
 
               <tbody>
-                {logs.map((entry) => (
+                {filteredLogs.map((entry) => (
                   <tr key={entry.id}>
                     <td className="col-time">
-                      {formatTime(entry.time)}
+                      {formatTime(entry.time || entry.created_at)}
                     </td>
+                    <td>{entry.maintenance_type || "unknown"}</td>
                     <td>{entry.text}</td>
                   </tr>
                 ))}
