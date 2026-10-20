@@ -350,10 +350,7 @@ def get_maintenance_schedule(
     return _schedule_read(_schedule_or_404(session, schedule_id))
 
 
-@router.delete(
-    "/schedules/{schedule_id}/permanent",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
+@router.delete("/schedules/{schedule_id}/permanent",status_code=status.HTTP_204_NO_CONTENT,)
 def permanently_delete_maintenance_schedule(
     schedule_id: int,
     session: Session = Depends(get_db),
@@ -364,10 +361,7 @@ def permanently_delete_maintenance_schedule(
         .with_for_update()
     )
     if schedule is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Maintenance schedule {schedule_id} was not found",
-        )
+        raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
 
     records = session.scalars(
         select(MaintenanceRecord)
@@ -375,16 +369,10 @@ def permanently_delete_maintenance_schedule(
         .with_for_update()
     ).all()
     if any(record.status == "in_progress" for record in records):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "This schedule has maintenance currently in progress and cannot be deleted. "
-                "Complete or cancel that work first."
-            ),
-        )
+        raise HTTPException(status_code=409,detail=("This schedule has maintenance currently in progress and cannot be deleted. "
+                "Complete or cancel that work first."),)
 
-    alert_ids = session.scalars(
-        select(Alert.id).where(Alert.maintenance_schedule_id == schedule.id)
+    alert_ids = session.scalars(select(Alert.id).where(Alert.maintenance_schedule_id == schedule.id)
     ).all()
     if alert_ids and session.scalar(
         select(MaintenanceRecord.id)
@@ -397,13 +385,8 @@ def permanently_delete_maintenance_schedule(
         )
         .limit(1)
     ):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "A maintenance record outside this schedule references one of its alerts. "
-                "Remove that alert link before deleting this schedule."
-            ),
-        )
+        raise HTTPException(status_code=409,detail=("A maintenance record outside this schedule references one of its alerts. "
+                "Remove that alert link before deleting this schedule."),)
 
     schedule_title = schedule.title
     asset_id = schedule.asset_id
@@ -412,8 +395,7 @@ def permanently_delete_maintenance_schedule(
         session.delete(record)
     session.flush()
     if alert_ids:
-        session.execute(
-            delete(MonitoringEvent).where(
+        session.execute(delete(MonitoringEvent).where(
                 MonitoringEvent.alert_id.in_(alert_ids)
             )
         )
@@ -445,59 +427,66 @@ def update_maintenance_schedule(
     schedule = _schedule_or_404(session, schedule_id)
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
-        raise HTTPException(status_code=422, detail="Provide at least one field to update")
+        raise HTTPException(status_code=422,detail="Provide at least one field to update",)
+
     previous_due_date = schedule.current_due_date
-    if (
-        "first_due_date" in changes
-        and changes["first_due_date"] != schedule.first_due_date
-        and (
-            schedule.approval_status == "pending"
-            or schedule.last_completed_at is not None
-        )
-    ):
+    # Do not allow the first due date to change after completion
+    # or while a proposed next occurrence is awaiting approval.
+    if ("first_due_date" in changes and changes["first_due_date"] != schedule.first_due_date
+        and (schedule.approval_status == "pending" or schedule.last_completed_at is not None)):
         raise HTTPException(status_code=409,detail="The first due date cannot change after an occurrence has been completed",)
+
+    # Validate schedule-start-date changes before applying them.
     if "schedule_start_date" in changes:
         if schedule.last_completed_at is not None:
             raise HTTPException(status_code=409,detail="The schedule anchor cannot change after an occurrence has been completed",)
+
         if schedule.current_occurrence_id is not None:
-            current_occurrence = session.get(
-                MaintenanceRecord, schedule.current_occurrence_id
-            )
-            if current_occurrence is None or current_occurrence.status != "planned":
-                raise HTTPException(
-                    status_code=409,
-                    detail="The schedule start date cannot change after maintenance starts",
-                )
+            current_occurrence = session.get(MaintenanceRecord,schedule.current_occurrence_id,)
+
+            if (current_occurrence is None or current_occurrence.status != "planned"):
+                raise HTTPException(status_code=409,detail="The schedule start date cannot change after maintenance starts",)
+
+    # Apply the fields supplied by the user.
     for field, value in changes.items():
         setattr(schedule, field, value)
+
     if "schedule_start_date" in changes:
         schedule.current_period_start_date = schedule.schedule_start_date
+
+    # Validate the resulting schedule dates.
     if schedule.first_due_date < schedule.schedule_start_date:
         raise HTTPException(status_code=422,detail="first_due_date must not precede schedule_start_date",)
-    if schedule.recurrence_enabled and (
-        schedule.recurrence_interval is None or schedule.recurrence_unit is None
-    ):
+
+    if schedule.recurrence_enabled and (schedule.recurrence_interval is None or schedule.recurrence_unit is None):
         raise HTTPException(status_code=422,detail="recurrence_interval and recurrence_unit are required",)
+
+    # If recurrence is disabled, remove any pending next occurrence.
     if not schedule.recurrence_enabled:
         schedule.recurrence_interval = None
         schedule.recurrence_unit = None
+
         if schedule.approval_status == "pending":
             schedule.proposed_due_date = None
             schedule.approval_status = "declined"
+
             if schedule.status == "awaiting_approval":
                 schedule.status = "completed"
-    if (
-        "first_due_date" in changes
-        and schedule.approval_status != "pending"
-        and schedule.last_completed_at is None
-        and schedule.current_occurrence_id is not None
-    ):
-        occurrence = session.get(MaintenanceRecord, schedule.current_occurrence_id)
+
+    # If the first due date changes before maintenance starts,
+    # update the existing planned occurrence as well.
+    if ("first_due_date" in changes and schedule.approval_status != "pending"
+        and schedule.last_completed_at is None and schedule.current_occurrence_id is not None):
+        occurrence = session.get(MaintenanceRecord,schedule.current_occurrence_id,)
+
         if occurrence is None or occurrence.status != "planned":
             raise HTTPException(status_code=409,detail="The first due date can only change before maintenance starts",)
+
         occurrence.planned_due_date = schedule.first_due_date
-        occurrence.planned_end_at = datetime.combine(schedule.first_due_date, time.max, tzinfo=timezone.utc)
+        occurrence.planned_end_at = datetime.combine(schedule.first_due_date,time.max,tzinfo=timezone.utc,)
+
         schedule.current_period_start_date = schedule.schedule_start_date
+
         if previous_due_date is not None:
             alerts = session.scalars(
                 select(Alert).where(
@@ -506,38 +495,55 @@ def update_maintenance_schedule(
                     Alert.status == "active",
                 )
             ).all()
+
             now = utc_now()
             for alert in alerts:
                 alert.status = "resolved"
                 alert.resolved_at = now
                 alert.last_updated_at = now
+
         schedule.current_due_date = schedule.first_due_date
         schedule.due_alerted_for = None
-    if schedule.status == "cancelled":
-        schedule.proposed_due_date = None
-        schedule.approval_status = "declined"
-        now = utc_now()
-        active_due_alerts = session.scalars(
-            select(Alert).where(
-                Alert.maintenance_schedule_id == schedule.id,
-                Alert.status == "active",
-            )
-        ).all()
-        for alert in active_due_alerts:
-            alert.status = "resolved"
-            alert.resolved_at = now
-            alert.last_updated_at = now
-        _emit_schedule_event(
-            session,
-            schedule,
-            event_type="maintenance_schedule_cancelled",
-            message=f"Maintenance schedule cancelled: {schedule.title}.",
-        )
-    session.commit()
-    session.refresh(schedule)
-    return _schedule_read(schedule)
 
-#Confirming the next occurrence -> approval step for recurring maintenance
+    # NEW: Recalculate the proposed next due date when the user changes
+    # the interval or unit while a next occurrence is awaiting approval.
+    if (schedule.recurrence_enabled and schedule.approval_status == "pending"
+        and ("recurrence_interval" in changes or "recurrence_unit" in changes)):
+        if schedule.current_due_date is None:
+            raise HTTPException(status_code=409,detail="The current maintenance due date is missing",)
+
+        schedule.proposed_due_date = next_due_date(
+            schedule.first_due_date,
+            interval=schedule.recurrence_interval or 1,
+            unit=schedule.recurrence_unit or "months",
+            after=schedule.current_due_date,
+        )
+    # Cancelled schedules must not retain active due alerts or proposals.
+        if schedule.status == "cancelled":
+            schedule.proposed_due_date = None
+            schedule.approval_status = "declined"
+
+            now = utc_now()
+            active_due_alerts = session.scalars(
+                select(Alert).where(Alert.maintenance_schedule_id == schedule.id,
+                    Alert.status == "active",
+                )
+            ).all()
+
+            for alert in active_due_alerts:
+                alert.status = "resolved"
+                alert.resolved_at = now
+                alert.last_updated_at = now
+
+            _emit_schedule_event(session,schedule,
+                event_type="maintenance_schedule_cancelled",
+                message=f"Maintenance schedule cancelled: {schedule.title}.",
+            )
+            session.commit()
+            session.refresh(schedule)
+        return  _schedule_read(schedule)
+
+# Confirm the proposed date or save a replacement date selected by the user.
 @router.post("/schedules/{schedule_id}/confirm-next",response_model=MaintenanceScheduleRead,)
 def confirm_next_occurrence(
     schedule_id: int,
@@ -549,58 +555,102 @@ def confirm_next_occurrence(
         .where(MaintenanceSchedule.id == schedule_id)
         .with_for_update()
     )
+
     if schedule is None:
         raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
-    if schedule.approval_status == "approved" and schedule.current_occurrence_id:
+
+    # Make repeated requests safe after an occurrence has been created.
+    if (schedule.approval_status == "approved"and schedule.current_occurrence_id):
         return _schedule_read(schedule)
-    if schedule.approval_status != "pending" or schedule.proposed_due_date is None:
-        raise HTTPException(status_code=409, detail="No proposed occurrence awaits approval")
-    if payload.due_date <= schedule.schedule_start_date:
+
+    # A proposal can be confirmed while pending.
+    # A declined proposal can be replaced with a new date.
+    if schedule.approval_status not in {"pending", "declined"}:
+        raise HTTPException(status_code=409,detail="No proposed date or declined proposal is awaiting confirmation",)
+
+    if schedule.status in {"cancelled", "completed"}:
+        raise HTTPException(status_code=409,detail="A cancelled or completed schedule cannot receive another occurrence",)
+
+    if not schedule.recurrence_enabled:
+        raise HTTPException(status_code=409,detail="This schedule is not configured for recurrence",)
+
+    selected_date = payload.due_date
+
+    # When a proposal is pending, accept either the latest proposed date
+    # or a replacement date selected by the user.
+    if schedule.approval_status == "pending":
+        if schedule.proposed_due_date is None:
+            raise HTTPException(status_code=409,detail="There is no proposed next due date to confirm",)
+
+    # Validate the date selected by the user.
+    if selected_date <= schedule.schedule_start_date:
         raise HTTPException(status_code=422,detail="Next due date must be after the schedule start date",)
-    if schedule.last_completed_at and payload.due_date <= schedule.last_completed_at.date():
+
+    if (schedule.last_completed_at is not None and selected_date <= schedule.last_completed_at.date()):
         raise HTTPException(status_code=422,detail="Next due date must be after the last completion date",)
-    if schedule.current_due_date and payload.due_date <= schedule.current_due_date:
+
+    if (schedule.current_due_date is not None and selected_date <= schedule.current_due_date):
         raise HTTPException(status_code=422,detail="Next due date must be after the previous scheduled due date",)
+
     previous_due_date = schedule.current_due_date
-    schedule.current_due_date = payload.due_date
+
+    # Save the confirmed or replacement date.
+    schedule.current_due_date = selected_date
     schedule.proposed_due_date = None
     schedule.approval_status = "approved"
     schedule.status = "active"
-    occurrence = _create_occurrence(session, schedule, due_date=payload.due_date)
+
+    # Create the next planned maintenance occurrence.
+    _create_occurrence(
+        session,
+        schedule,
+        due_date=selected_date,
+    )
     if previous_due_date is not None:
         schedule.current_period_start_date = previous_due_date + timedelta(days=1)
+    
     _emit_schedule_event(
         session,
         schedule,
         event_type="maintenance_next_occurrence_approved",
-        message=f"Next maintenance approved for {payload.due_date}.",
-        due_date=payload.due_date,
+        message=f"Next maintenance confirmed for {selected_date}.",
+        due_date=selected_date,
     )
+
     session.commit()
     session.refresh(schedule)
-    schedule.current_occurrence_id = occurrence.id
-    return _schedule_read(schedule)
 
-#allow user to decline the proposed next occurrence
+    return _schedule_read(schedule)
+# Decline the proposed date without ending the recurring schedule.
 @router.post("/schedules/{schedule_id}/decline-next",response_model=MaintenanceScheduleRead,)
-def decline_next_occurrence(
-    schedule_id: int,
+def decline_next_occurrence(schedule_id: int,
     session: Session = Depends(get_db),
 ) -> MaintenanceScheduleRead:
-    schedule = _schedule_or_404(session, schedule_id)
-    if schedule.approval_status == "declined":
+    schedule = session.scalar(
+        select(MaintenanceSchedule)
+        .where(MaintenanceSchedule.id == schedule_id)
+        .with_for_update()
+    )
+    if schedule is None:
+        raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
+    # A repeated decline is safe if the proposal has already been cleared.
+    if (schedule.approval_status == "declined" and schedule.proposed_due_date is None):
         return _schedule_read(schedule)
-    if schedule.approval_status != "pending":
-        raise HTTPException(status_code=409, detail="No proposed occurrence awaits approval")
+
+    if (schedule.approval_status != "pending" or schedule.proposed_due_date is None):
+        raise HTTPException(status_code=409,detail="No proposed occurrence awaits approval",)
+
+    rejected_date = schedule.proposed_due_date
+    # Clear only the proposed date. Keep the recurring schedule available.
     schedule.proposed_due_date = None
     schedule.approval_status = "declined"
-    schedule.status = "completed"
-    _emit_schedule_event(
-        session,
+    schedule.status = "active"
+
+    _emit_schedule_event(session,
         schedule,
         event_type="maintenance_next_occurrence_declined",
-        message="No further maintenance occurrence was scheduled.",
-    )
+        message=( f"Proposed maintenance date {rejected_date} was declined. A replacement date must be selected."),
+        due_date=rejected_date,)
     session.commit()
     session.refresh(schedule)
     return _schedule_read(schedule)
@@ -619,10 +669,7 @@ def list_maintenance_records(
 ) -> dict[str, object]:
     start, end = _normalized(start_time), _normalized(end_time)
     if start is not None and end is not None and start > end:
-        raise HTTPException(
-            status_code=422,
-            detail="start_time must not be later than end_time",
-        )
+        raise HTTPException(status_code=422,detail="start_time must not be later than end_time",)
 
     conditions = []
     if not include_archived:
@@ -678,15 +725,9 @@ def archive_completed_maintenance_record(
         .with_for_update()
     )
     if record is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Maintenance record {record_id} was not found",
-        )
+        raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
     if record.status != "completed":
-        raise HTTPException(
-            status_code=409,
-            detail="Only completed maintenance can be removed from the active list",
-        )
+        raise HTTPException(status_code=409,detail="Only completed maintenance can be removed from the active list",)
     if record.archived_at is not None:
         return None
     record.archived_at = utc_now()
@@ -727,20 +768,14 @@ def permanently_delete_archived_maintenance_record(
         .with_for_update()
     )
     if record is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Maintenance record {record_id} was not found",
-        )
+        raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
     if record.schedule_id is not None and not (
         record.status == "completed" and record.archived_at is not None
     ):
         permanently_delete_maintenance_schedule(record.schedule_id, session)
         return None
     if record.status == "in_progress":
-        raise HTTPException(
-            status_code=409,
-            detail="Maintenance currently in progress cannot be permanently deleted.",
-        )
+        raise HTTPException(status_code=409,detail="Maintenance currently in progress cannot be permanently deleted.",)
 
     if record.status == "completed" and record.archived_at is not None:
         schedule_id = record.schedule_id
@@ -758,10 +793,7 @@ def permanently_delete_archived_maintenance_record(
     elif record.schedule_id is None:
         schedule_id = None
     else:
-        raise HTTPException(
-            status_code=409,
-            detail="This maintenance record cannot be permanently deleted.",
-        )
+        raise HTTPException(status_code=409, detail="This maintenance record cannot be permanently deleted.",)
 
     deleted_title = record.title
     deleted_asset_id = record.asset_id
@@ -795,18 +827,12 @@ def update_maintenance_record(
     if not changes:
         raise HTTPException(status_code=422, detail="Provide at least one field to update")
     if record.status == "completed" or record.archived_at is not None:
-        raise HTTPException(
-            status_code=409,
-            detail="Completed or archived maintenance cannot be edited",
-        )
+        raise HTTPException(status_code=409,detail="Completed or archived maintenance cannot be edited",)
     if record.schedule_id is not None and {
         "planned_start_at",
         "planned_end_at",
     }.intersection(changes):
-        raise HTTPException(
-            status_code=409,
-            detail="Change the due date through the maintenance schedule",
-        )
+        raise HTTPException( status_code=409,detail="Change the due date through the maintenance schedule",)
     if "alert_id" in changes:
         _validate_alert(
             session,
@@ -822,10 +848,7 @@ def update_maintenance_record(
     if record.status in {"planned", "in_progress"} and (
         record.planned_start_at is None or record.planned_end_at is None
     ):
-        raise HTTPException(
-            status_code=422,
-            detail="planned_start_at and planned_end_at are required",
-        )
+        raise HTTPException(status_code=422,detail="planned_start_at and planned_end_at are required", )
     _validate_record_dates(record)
     session.commit()
     session.refresh(record)
@@ -867,15 +890,9 @@ def complete_maintenance_record(
         .with_for_update()
     )
     if record is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Maintenance record {record_id} was not found",
-        )
+        raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
     if record.status in {"completed", "cancelled"}:
-        raise HTTPException(
-            status_code=409,
-            detail="Completed or cancelled maintenance cannot be completed",
-        )
+        raise HTTPException(status_code=409,detail="Completed or cancelled maintenance cannot be completed",)
     completed_at = record.actual_completed_at or utc_now()
     record.actual_completed_at = completed_at
     _validate_record_dates(record)
@@ -945,10 +962,7 @@ def cancel_maintenance_record(
 ) -> MaintenanceRecord:
     record = _record_or_404(session, record_id)
     if record.status == "completed":
-        raise HTTPException(
-            status_code=409,
-            detail="Completed maintenance cannot be cancelled",
-        )
+        raise HTTPException(status_code=409,detail="Completed maintenance cannot be cancelled",)
     if record.status != "cancelled":
         record.status = "cancelled"
         if record.schedule_id is not None:
