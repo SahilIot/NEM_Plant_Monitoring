@@ -679,27 +679,52 @@ export default function ConfigSub() {
         <BackIcon size={14} /> Back
       </button>
 
-      <div className="page-head">
-        <h1 className="page-title">{cfg.title}</h1>
-        
-<button
-  className="btn-primary"
-  onClick={() => {
-    setEditingRule(null);
-    setMsg({ text: "", error: false });
+    
+<div className="page-head">
+  <h1 className="page-title">{cfg.title}</h1>
 
-    if (sub === "documents") {
-      nav("/configuration/documents/new");
-      return;
-    }
+  <div
+    style={{
+      display: "flex",
+      flexWrap: "wrap",
+      gap: 10,
+      alignItems: "center",
+    }}
+  >
+    {sub === "documents" && (
+      <button
+        type="button"
+        className="btn-secondary"
+        onClick={() =>
+          nav("/configuration/instructions/new")
+        }
+      >
+        <PlusCircle size={17} />
+        Create New Instruction
+      </button>
+    )}
 
-    setOpen(true);
-  }}
->
-  <PlusCircle size={17} /> {cfg.button}
-</button>
+    <button
+      type="button"
+      className="btn-primary"
+      onClick={() => {
+        setEditingRule(null);
+        setMsg({ text: "", error: false });
 
-      </div>
+        if (sub === "documents") {
+          nav("/configuration/documents/new");
+          return;
+        }
+
+        setOpen(true);
+      }}
+    >
+      <PlusCircle size={17} />
+      {cfg.button}
+    </button>
+  </div>
+</div>
+
 
       <div className="panel">
         {msg.text && (

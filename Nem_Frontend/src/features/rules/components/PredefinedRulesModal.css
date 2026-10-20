@@ -195,59 +195,6 @@
 }
 
 
-/* Theme-aware predefined monitoring rules popup */
-.prm-dialog {
-  background: var(--panel, var(--surface, #ffffff));
-  color: var(--text, #1f2937);
-  border-color: var(--border, #e5e7eb);
-}
-
-.prm-header,
-.prm-footer {
-  background: var(--panel, var(--surface, #ffffff));
-  border-color: var(--border, #e5e7eb);
-}
-
-.prm-header h2,
-.prm-rule-copy strong {
-  color: var(--text, #1f2937);
-}
-
-.prm-tools {
-  background: var(--input, #f8fafc);
-}
-
-.prm-tools input {
-  background: var(--input, #ffffff);
-  color: var(--text, #1f2937);
-  border-color: var(--border, #d1d5db);
-}
-
-.prm-tools span,
-.prm-note,
-.prm-rule-copy small,
-.prm-empty,
-.prm-severity {
-  color: var(--muted, #64748b);
-}
-
-.prm-rule {
-  border-color: var(--border, #e5e7eb);
-}
-
-.prm-severity {
-  background: rgba(128, 145, 165, 0.14);
-}
-
-.prm-close {
-  color: var(--text, #1f2937);
-}
-
-.prm-error {
-  color: #b91c1c;
-  background: #fef2f2;
-}
-
 /* Icons for Predefined Monitoring Rules popup */
 .prm-title {
   display: flex;

@@ -113,3 +113,73 @@ def initialize_database(engine: Engine) -> None:
                     "WHERE status = 'completed' AND actual_completed_at IS NULL"
                 )
             )
+
+
+    if "nem_alerts" in table_names and "nem_maintenance_schedules" in table_names:
+        alert_columns = {
+            column["name"]
+            for column in inspect(engine).get_columns("nem_alerts")
+        }
+
+        with engine.begin() as connection:
+            if "maintenance_schedule_id" not in alert_columns:
+                connection.execute(
+                    text(
+                        "ALTER TABLE nem_alerts "
+                        "ADD COLUMN maintenance_schedule_id INTEGER"
+                    )
+                )
+
+            if "maintenance_due_date" not in alert_columns:
+                connection.execute(
+                    text(
+                        "ALTER TABLE nem_alerts "
+                        "ADD COLUMN maintenance_due_date DATE"
+                    )
+                )
+
+            if engine.dialect.name == "postgresql":
+                connection.execute(
+                    text(
+                        "DO $$ BEGIN "
+                        "IF NOT EXISTS (SELECT 1 FROM pg_constraint "
+                        "WHERE conname = 'fk_nem_alerts_maintenance_schedule') "
+                        "THEN ALTER TABLE nem_alerts "
+                        "ADD CONSTRAINT fk_nem_alerts_maintenance_schedule "
+                        "FOREIGN KEY (maintenance_schedule_id) "
+                        "REFERENCES nem_maintenance_schedules(id) "
+                        "ON DELETE RESTRICT; END IF; END $$"
+                    )
+                )
+
+                connection.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS "
+                        "ix_nem_alerts_maintenance_schedule_id "
+                        "ON nem_alerts (maintenance_schedule_id)"
+                    )
+                )
+
+                connection.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS "
+                        "uq_nem_alerts_active_maintenance_due "
+                        "ON nem_alerts (maintenance_schedule_id, maintenance_due_date) "
+                        "WHERE status = 'active' "
+                        "AND maintenance_schedule_id IS NOT NULL"
+                    )
+                )
+
+                connection.execute(
+                    text(
+                        "DO $$ BEGIN "
+                        "IF NOT EXISTS (SELECT 1 FROM pg_constraint "
+                        "WHERE conname = 'ck_nem_alerts_source') "
+                        "THEN ALTER TABLE nem_alerts "
+                        "ADD CONSTRAINT ck_nem_alerts_source CHECK ("
+                        "(rule_id IS NOT NULL AND maintenance_schedule_id IS NULL) "
+                        "OR (rule_id IS NULL AND maintenance_schedule_id IS NOT NULL "
+                        "AND maintenance_due_date IS NOT NULL)); "
+                        "END IF; END $$"
+                    )
+                )
