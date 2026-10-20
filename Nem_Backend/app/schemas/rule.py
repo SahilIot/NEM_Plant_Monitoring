@@ -178,3 +178,47 @@ class RuleRead(ORMModel):
     stale_after_seconds: int | None
     created_at: datetime
     updated_at: datetime
+
+
+class FrontendRuleCreate(ORMModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+    severity: Literal["warning", "alert"]
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Rule name cannot be empty")
+        return value
+
+
+class UsageRuleCreate(FrontendRuleCreate):
+    variable_id: int = Field(gt=0)
+    usage_limit: float = Field(gt=0)
+
+    @field_validator("usage_limit")
+    @classmethod
+    def finite_usage_limit(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("Usage limit must be finite")
+        return value
+
+
+class RuleSelection(ORMModel):
+    rule_ids: list[int] = Field(min_length=1, max_length=100)
+
+    @field_validator("rule_ids")
+    @classmethod
+    def unique_rule_ids(cls, value: list[int]) -> list[int]:
+        if any(rule_id <= 0 for rule_id in value):
+            raise ValueError("Rule IDs must be positive")
+        if len(value) != len(set(value)):
+            raise ValueError("Rule IDs must be unique")
+        return value
+
+
+class RuleCopyRequest(RuleSelection):
+    source_asset_id: int = Field(gt=0)
+    include_disabled: bool = True

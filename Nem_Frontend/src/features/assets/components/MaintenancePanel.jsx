@@ -114,6 +114,8 @@ export default function MaintenancePanel({ assetId, onChanged }) {
   const [schedules, setSchedules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [deletingRecordId, setDeletingRecordId] = useState(null);
+  const [deletingScheduleId, setDeletingScheduleId] = useState(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [dialog, setDialog] = useState(null);
@@ -141,6 +143,75 @@ export default function MaintenancePanel({ assetId, onChanged }) {
     } catch (requestError) {
       setError(requestError.message || "Could not archive completed maintenance.");
     } finally {
+      setBusy(false);
+    }
+  };
+
+  const permanentlyDeleteRecord = async (record) => {
+    if (busy) return;
+    const scheduled =
+      Boolean(record.schedule_id) &&
+      !(record.status === "completed" && record.archived_at);
+    const plannedDate = record.planned_start_at
+      ? formatTime(record.planned_start_at)
+      : null;
+    const confirmation = scheduled
+      ? `Delete the entire schedule "${record.title}"${plannedDate ? `, scheduled for ${plannedDate}` : ""}, including its linked maintenance entries?`
+      : `Permanently delete maintenance "${record.title}"${plannedDate ? `, scheduled for ${plannedDate}` : ""}?`;
+    if (!window.confirm(confirmation)) return;
+    if (
+      (scheduled || (record.planned_start_at && new Date(record.planned_start_at) > new Date())) &&
+      !window.confirm(
+        `Confirm again: permanently delete "${record.title}"${plannedDate ? ` scheduled for ${plannedDate}` : ""}? This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setDeletingRecordId(record.id);
+    setError("");
+    setNotice("");
+    try {
+      await api.del(`/maintenance/${record.id}/permanent`);
+      setNotice("Maintenance was permanently deleted.");
+      await Promise.all([loadRecords(), loadArchivedRecords(), loadSchedules()]);
+      await onChanged?.();
+    } catch (requestError) {
+      setError(
+        requestError.message || "Could not permanently delete maintenance."
+      );
+    } finally {
+      setDeletingRecordId(null);
+      setBusy(false);
+    }
+  };
+
+  const permanentlyDeleteSchedule = async (schedule) => {
+    if (busy) return;
+    const dueDate = schedule.current_due_date
+      ? displayDate(schedule.current_due_date)
+      : null;
+    if (!window.confirm(
+      `Delete maintenance schedule "${schedule.title}"${dueDate ? `, due ${dueDate}` : ""}, including its linked maintenance entries?`
+    )) return;
+    if (!window.confirm(
+      `Confirm again: permanently delete schedule "${schedule.title}"${dueDate ? ` due ${dueDate}` : ""}? This cannot be undone.`
+    )) return;
+    setBusy(true);
+    setDeletingScheduleId(schedule.id);
+    setError("");
+    setNotice("");
+    try {
+      await api.del(`/maintenance/schedules/${schedule.id}/permanent`);
+      setNotice("Maintenance schedule was permanently deleted.");
+      await Promise.all([loadRecords(), loadArchivedRecords(), loadSchedules()]);
+      await onChanged?.();
+    } catch (requestError) {
+      setError(
+        requestError.message || "Could not permanently delete maintenance schedule."
+      );
+    } finally {
+      setDeletingScheduleId(null);
       setBusy(false);
     }
   };
@@ -557,23 +628,51 @@ export default function MaintenancePanel({ assetId, onChanged }) {
                           View Details
                         </button>
                         {record.status === "completed" ? (
-                          <button
-                            type="button"
-                            className="btn-danger"
-                            onClick={() => archiveCompleted(record)}
-                            disabled={busy}
-                          >
-                            Delete
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              className="btn-danger"
+                              onClick={() => archiveCompleted(record)}
+                              disabled={busy}
+                            >
+                              Archive
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-danger"
+                              onClick={() => permanentlyDeleteRecord(record)}
+                              disabled={busy}
+                            >
+                              {deletingRecordId === record.id
+                                ? "Deleting…"
+                                : "Delete permanently"}
+                            </button>
+                          </>
                         ) : (
-                          <button
-                            type="button"
-                            className="btn-outline"
-                            onClick={() => openEdit(record)}
-                            disabled={busy}
-                          >
-                            Edit
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              className="btn-outline"
+                              onClick={() => openEdit(record)}
+                              disabled={busy}
+                            >
+                              Edit
+                            </button>
+                            {record.status !== "in_progress" && (
+                              <button
+                                type="button"
+                                className="btn-danger"
+                                onClick={() => permanentlyDeleteRecord(record)}
+                                disabled={busy}
+                              >
+                                {deletingRecordId === record.id
+                                  ? "Deleting…"
+                                  : record.schedule_id
+                                    ? "Delete schedule"
+                                    : "Delete permanently"}
+                              </button>
+                            )}
+                          </>
                         )}
                         {record.status === "planned" && (
                           <button
@@ -629,6 +728,7 @@ export default function MaintenancePanel({ assetId, onChanged }) {
                     <th>Due date</th>
                     <th>Completed</th>
                     <th>Archived</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -639,6 +739,18 @@ export default function MaintenancePanel({ assetId, onChanged }) {
                       <td>{displayDate(record.planned_due_date)}</td>
                       <td>{record.actual_completed_at ? formatTime(record.actual_completed_at) : "—"}</td>
                       <td>{formatTime(record.archived_at)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn-danger"
+                          onClick={() => permanentlyDeleteRecord(record)}
+                          disabled={busy}
+                        >
+                          {deletingRecordId === record.id
+                            ? "Deleting…"
+                            : "Delete permanently"}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -707,6 +819,16 @@ export default function MaintenancePanel({ assetId, onChanged }) {
                             disabled={busy}
                           >
                             Edit schedule
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-danger"
+                            onClick={() => permanentlyDeleteSchedule(schedule)}
+                            disabled={busy}
+                          >
+                            {deletingScheduleId === schedule.id
+                              ? "Deleting…"
+                              : "Delete schedule"}
                           </button>
                           {schedule.approval_status === "pending" && (
                             <>

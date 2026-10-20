@@ -135,6 +135,9 @@ def test_maintenance_job_lifecycle_is_persisted_and_asset_scoped(client):
     assert record["assigned_technician"] == "Alex"
     assert record["actual_started_at"] is None
     assert client.delete(f"/api/v1/maintenance/{record['id']}").status_code == 409
+    assert client.delete(
+        f"/api/v1/maintenance/{record['id']}/permanent"
+    ).status_code == 409
     assert client.get(
         f"/api/v1/maintenance?asset_id={asset_id}"
     ).json()["total"] == 1
@@ -234,6 +237,149 @@ def test_completed_maintenance_can_be_archived_without_deleting_history(client):
     )
     assert events.status_code == 200
     assert events.json()["total"] == 1
+    assert client.delete(
+        f"/api/v1/maintenance/{record_id}/permanent"
+    ).status_code == 204
+    assert client.get(f"/api/v1/maintenance/{record_id}").status_code == 404
+    assert client.get(
+        f"/api/v1/maintenance?asset_id={asset_id}&include_archived=true"
+    ).json()["total"] == 0
+    permanent_events = client.get(
+        f"/api/v1/events?asset_id={asset_id}&event_type=maintenance_record_permanently_deleted"
+    )
+    assert permanent_events.status_code == 200
+    assert permanent_events.json()["total"] == 1
+    assert permanent_events.json()["items"][0]["metadata"]["deleted_record_id"] == record_id
+
+
+def test_unstarted_maintenance_can_be_permanently_deleted(client):
+    asset_id = create_asset(client, "Unstarted deletion asset")
+    created = client.post(
+        "/api/v1/maintenance",
+        json={
+            "asset_id": asset_id,
+            "title": "Unstarted inspection",
+            "maintenance_type": "inspection",
+            "status": "planned",
+            "planned_start_at": "2026-11-01T08:00:00Z",
+            "planned_end_at": "2026-11-01T10:00:00Z",
+            "notes": "Not started yet",
+        },
+    )
+    assert created.status_code == 201, created.text
+    record_id = created.json()["id"]
+
+    started = client.post(f"/api/v1/maintenance/{record_id}/start")
+    assert started.status_code == 200, started.text
+    assert client.delete(
+        f"/api/v1/maintenance/{record_id}/permanent"
+    ).status_code == 409
+
+    cancelled = client.post(f"/api/v1/maintenance/{record_id}/cancel")
+    assert cancelled.status_code == 200, cancelled.text
+    deleted = client.delete(f"/api/v1/maintenance/{record_id}/permanent")
+    assert deleted.status_code == 204, deleted.text
+    assert client.get(f"/api/v1/maintenance/{record_id}").status_code == 404
+    assert client.get(
+        f"/api/v1/maintenance?asset_id={asset_id}"
+    ).json()["total"] == 0
+    events = client.get(
+        f"/api/v1/events?asset_id={asset_id}&event_type=maintenance_record_permanently_deleted"
+    )
+    assert events.status_code == 200
+    assert events.json()["items"][0]["metadata"]["deleted_record_id"] == record_id
+
+
+def test_schedule_can_be_deleted_when_no_occurrence_is_in_progress(client):
+    asset_id = create_asset(client, "Unstarted schedule deletion asset")
+    created = client.post(
+        "/api/v1/maintenance/schedules",
+        json={
+            "asset_id": asset_id,
+            "title": "Unstarted schedule",
+            "maintenance_type": "preventive",
+            "schedule_start_date": "2026-10-20",
+            "first_due_date": "2026-11-20",
+            "recurrence_enabled": True,
+            "recurrence_interval": 1,
+            "recurrence_unit": "months",
+        },
+    )
+    assert created.status_code == 201, created.text
+    schedule_id = created.json()["id"]
+    occurrence_id = created.json()["current_occurrence_id"]
+
+    deleted = client.delete(
+        f"/api/v1/maintenance/schedules/{schedule_id}/permanent"
+    )
+    assert deleted.status_code == 204, deleted.text
+    assert client.get(
+        f"/api/v1/maintenance/schedules/{schedule_id}"
+    ).status_code == 404
+    assert client.get(f"/api/v1/maintenance/{occurrence_id}").status_code == 404
+    events = client.get(
+        f"/api/v1/events?asset_id={asset_id}&event_type=maintenance_schedule_permanently_deleted"
+    )
+    assert events.status_code == 200
+    assert events.json()["items"][0]["metadata"]["deleted_schedule_id"] == schedule_id
+
+    completed_schedule = client.post(
+        "/api/v1/maintenance/schedules",
+        json={
+            "asset_id": asset_id,
+            "title": "Schedule with completed history",
+            "maintenance_type": "inspection",
+            "schedule_start_date": "2026-10-20",
+            "first_due_date": "2026-11-20",
+        },
+    )
+    assert completed_schedule.status_code == 201, completed_schedule.text
+    history_id = completed_schedule.json()["current_occurrence_id"]
+    completed = client.post(f"/api/v1/maintenance/{history_id}/complete")
+    assert completed.status_code == 200, completed.text
+    deleted_with_history = client.delete(
+        f"/api/v1/maintenance/schedules/{completed_schedule.json()['id']}/permanent"
+    )
+    assert deleted_with_history.status_code == 204, deleted_with_history.text
+    assert client.get(f"/api/v1/maintenance/{history_id}").status_code == 404
+
+    in_progress_schedule = client.post(
+        "/api/v1/maintenance/schedules",
+        json={
+            "asset_id": asset_id,
+            "title": "Schedule with active work",
+            "maintenance_type": "inspection",
+            "schedule_start_date": "2026-10-20",
+            "first_due_date": "2026-11-20",
+        },
+    )
+    assert in_progress_schedule.status_code == 201, in_progress_schedule.text
+    active_occurrence_id = in_progress_schedule.json()["current_occurrence_id"]
+    started = client.post(
+        f"/api/v1/maintenance/{active_occurrence_id}/start"
+    )
+    assert started.status_code == 200, started.text
+    blocked = client.delete(
+        f"/api/v1/maintenance/schedules/{in_progress_schedule.json()['id']}/permanent"
+    )
+    assert blocked.status_code == 409
+    assert client.get(
+        f"/api/v1/maintenance/schedules/{in_progress_schedule.json()['id']}"
+    ).status_code == 200
+    cancelled = client.post(
+        f"/api/v1/maintenance/{active_occurrence_id}/cancel"
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    deleted_from_job = client.delete(
+        f"/api/v1/maintenance/{active_occurrence_id}/permanent"
+    )
+    assert deleted_from_job.status_code == 204, deleted_from_job.text
+    assert client.get(
+        f"/api/v1/maintenance/schedules/{in_progress_schedule.json()['id']}"
+    ).status_code == 404
+    assert client.get(
+        f"/api/v1/maintenance/{active_occurrence_id}"
+    ).status_code == 404
 
 
 def test_schedule_day_progress_is_inclusive_and_tracks_current_due_date(client):
