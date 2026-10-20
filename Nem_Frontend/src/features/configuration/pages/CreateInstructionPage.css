@@ -1,0 +1,130 @@
+.create-instruction-page {
+  width: 100%;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding-bottom: 32px;
+  color: var(--ink);
+}
+
+.instruction-page-heading {
+  margin: 22px 0;
+}
+
+.instruction-page-heading p {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.instruction-form {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 24px;
+}
+
+.instruction-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.instruction-field label {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.instruction-field input,
+.instruction-field textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 11px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
+
+.instruction-field input:focus,
+.instruction-field textarea:focus {
+  outline: 2px solid var(--action-bg);
+  outline-offset: 1px;
+}
+
+.instruction-field textarea {
+  min-height: 160px;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.instruction-field small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.instruction-label-entry {
+  display: flex;
+  gap: 10px;
+}
+
+.instruction-label-entry input {
+  flex: 1;
+}
+
+.instruction-label-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.instruction-label-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.instruction-label-chip button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.instruction-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.instruction-form-actions button {
+  min-height: 40px;
+}
+
+@media (max-width: 600px) {
+  .instruction-form {
+    padding: 16px;
+  }
+
+  .instruction-label-entry,
+  .instruction-form-actions {
+    flex-direction: column;
+  }
+
+  .instruction-form-actions button {
+    width: 100%;
+  }
+}
+

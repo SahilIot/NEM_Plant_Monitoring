@@ -12,7 +12,11 @@ import Plc from "../features/plc/pages/Plc.jsx";
 import Settings from "../features/settings/pages/Settings.jsx";
 import SettingsSub from "../features/settings/pages/SettingsSub.jsx";
 import DocumentCreatePage from "../features/configuration/pages/DocumentCreatePage.jsx";
+
+import CreateInstructionPage from "../features/configuration/pages/CreateInstructionPage.jsx";
+
 import RuleLibrary from "../features/configuration/pages/RuleLibrary.jsx";
+
 
 export default function App() {
   return (
@@ -27,6 +31,7 @@ export default function App() {
         <Route path="/configuration" element={<Configuration />} />
         <Route path="/configuration/rules" element={<RuleLibrary />} />
         <Route path="/configuration/:sub" element={<ConfigSub />} />
+        <Route path="/configuration/instructions/new"element={<CreateInstructionPage />}/>
         <Route path="/settings" element={<Settings />} />
         <Route path="/settings/:sub" element={<SettingsSub />} />
         <Route path="/plc" element={<Plc />} />
