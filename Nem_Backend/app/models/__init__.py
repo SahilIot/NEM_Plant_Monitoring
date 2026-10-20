@@ -9,11 +9,18 @@ from app.models.frontend_data import (
     RuleCollection,
 )
 from app.models.reading import Reading
-from app.models.rule import Alert, MonitoringEvent, MonitoringRule, RuleState, SchedulerLease
+from app.models.rule import (
+    Alert,
+    MonitoringEvent,
+    MonitoringRule,
+    MonitoringRuleTemplate,
+    RuleState,
+    SchedulerLease,
+)
 from app.models.variable import Variable
 
 __all__ = [
-    "Asset", "Variable", "Reading", "MonitoringRule", "RuleState", "MaintenanceRecord",
+    "Asset", "Variable", "Reading", "MonitoringRule", "MonitoringRuleTemplate", "RuleState", "MaintenanceRecord",
     "MaintenanceSchedule",
     "Alert", "MonitoringEvent", "SchedulerLease",
     "MachineMonitoringState",

@@ -12,6 +12,7 @@ import Plc from "../features/plc/pages/Plc.jsx";
 import Settings from "../features/settings/pages/Settings.jsx";
 import SettingsSub from "../features/settings/pages/SettingsSub.jsx";
 import DocumentCreatePage from "../features/configuration/pages/DocumentCreatePage.jsx";
+import RuleLibrary from "../features/configuration/pages/RuleLibrary.jsx";
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="/assets/:id/rules/new/:kind"element={<RuleCreatePage />} />
         <Route path="/configuration/documents/new"element={<DocumentCreatePage />}/>
         <Route path="/configuration" element={<Configuration />} />
+        <Route path="/configuration/rules" element={<RuleLibrary />} />
         <Route path="/configuration/:sub" element={<ConfigSub />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/settings/:sub" element={<SettingsSub />} />

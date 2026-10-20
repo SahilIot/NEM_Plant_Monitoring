@@ -23,6 +23,7 @@ from app.models import (
     MaintenanceRecord,
     MonitoringEvent,
     MonitoringRule,
+    MonitoringRuleTemplate,
     Reading,
     RuleCollection,
     RuleState,
@@ -33,6 +34,7 @@ SNAPSHOT_MODELS = (
     Asset,
     Variable,
     Reading,
+    MonitoringRuleTemplate,
     MonitoringRule,
     RuleState,
     Alert,
@@ -135,7 +137,10 @@ def restore_backup(
         raise HTTPException(status_code=404, detail="Backup file was not found") from error
     except (OSError, json.JSONDecodeError) as error:
         raise HTTPException(status_code=422, detail="Backup file could not be read") from error
-    if not isinstance(content, dict) or any(
+    if not isinstance(content, dict):
+        raise HTTPException(status_code=422, detail="Backup file has an invalid format")
+    content.setdefault(MonitoringRuleTemplate.__tablename__, [])
+    if any(
         not isinstance(content.get(model.__tablename__), list) for model in SNAPSHOT_MODELS
     ):
         raise HTTPException(status_code=422, detail="Backup file has an invalid format")
@@ -163,6 +168,9 @@ def restore_backup(
                         {"table_name": model.__table__.name},
                     )
         session.commit()
+        from app.db.init_db import _migrate_legacy_rule_templates
+
+        _migrate_legacy_rule_templates(engine)
     except Exception:
         session.rollback()
         raise

@@ -99,6 +99,138 @@ class RuleCreate(ORMModel):
                 raise ValueError("alert_threshold must be a positive integer greater than both warnings")
         return self
 
+
+class RuleTemplateCreate(ORMModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+    rule_type: Literal[
+        "parameter_threshold",
+        "runtime_duration",
+        "duration",
+        "boolean_count_threshold",
+    ]
+    required_variable_types: list[
+        Literal["number", "integer", "boolean", "string"]
+    ] | None = None
+    variable_key: str | None = Field(default=None, max_length=100)
+    operator: Literal["<", "<=", "==", "!=", ">=", ">", "lt", "lte", "eq", "ne", "gte", "gt"] | None = None
+    threshold: Decimal | None = None
+    parameters: dict[str, Any] | None = None
+    severity: Literal["warning", "alert"]
+    is_enabled: bool = True
+    evaluation_interval_seconds: int | None = Field(default=None, ge=1, le=31_536_000)
+    stale_after_seconds: int | None = Field(default=None, ge=1, le=31_536_000)
+
+    @field_validator("name")
+    @classmethod
+    def strip_template_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Template name cannot be empty")
+        return value
+
+    @field_validator("required_variable_types")
+    @classmethod
+    def unique_variable_types(
+        cls, value: list[str] | None
+    ) -> list[str] | None:
+        if value is not None and len(value) != len(set(value)):
+            raise ValueError("Required variable types must be unique")
+        return value
+
+    @model_validator(mode="after")
+    def validate_template_definition(self):
+        required_types = self.required_variable_types
+        if self.rule_type == "parameter_threshold":
+            if required_types is None:
+                self.required_variable_types = ["number", "integer"]
+            elif not required_types or any(
+                item not in {"number", "integer"} for item in required_types
+            ):
+                raise ValueError(
+                    "Parameter threshold templates require number or integer variables"
+                )
+        elif self.rule_type == "boolean_count_threshold":
+            if required_types is not None and required_types != ["boolean"]:
+                raise ValueError(
+                    "Boolean count templates require boolean variables"
+                )
+            self.required_variable_types = ["boolean"]
+        elif self.rule_type == "duration":
+            if required_types is None:
+                condition = (self.parameters or {}).get("condition", "equals")
+                expected = (self.parameters or {}).get("expected_value")
+                if condition == "threshold":
+                    self.required_variable_types = ["number", "integer"]
+                elif isinstance(expected, bool):
+                    self.required_variable_types = ["boolean"]
+                elif isinstance(expected, str):
+                    self.required_variable_types = ["string"]
+                else:
+                    self.required_variable_types = ["number", "integer"]
+        elif required_types:
+            raise ValueError(
+                "This rule type does not support a required variable type"
+            )
+
+        needs_variable = self.rule_type in {
+            "parameter_threshold",
+            "duration",
+            "boolean_count_threshold",
+        }
+        RuleCreate.model_validate(
+            {
+                "name": self.name,
+                "description": self.description,
+                "rule_type": self.rule_type,
+                "target_asset_id": 1,
+                "variable_id": 1 if needs_variable else None,
+                "operator": self.operator,
+                "threshold": self.threshold,
+                "parameters": self.parameters,
+                "severity": self.severity,
+                "is_enabled": self.is_enabled,
+                "evaluation_interval_seconds": self.evaluation_interval_seconds,
+                "stale_after_seconds": self.stale_after_seconds,
+            }
+        )
+        return self
+
+
+class RuleTemplateRead(RuleTemplateCreate):
+    id: int
+    legacy_rule_id: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class RuleTemplateAssetAssignment(ORMModel):
+    asset_ids: list[int] = Field(min_length=1, max_length=100)
+    variable_mappings: dict[int, int] = Field(default_factory=dict)
+
+    @field_validator("asset_ids")
+    @classmethod
+    def unique_asset_ids(cls, value: list[int]) -> list[int]:
+        if any(asset_id <= 0 for asset_id in value):
+            raise ValueError("Asset IDs must be positive")
+        if len(value) != len(set(value)):
+            raise ValueError("Asset IDs must be unique")
+        return value
+
+    @field_validator("variable_mappings")
+    @classmethod
+    def positive_variable_mappings(cls, value: dict[int, int]) -> dict[int, int]:
+        if any(asset_id <= 0 or variable_id <= 0 for asset_id, variable_id in value.items()):
+            raise ValueError("Asset and variable IDs must be positive")
+        return value
+
+    @model_validator(mode="after")
+    def mappings_must_match_selected_assets(self):
+        if set(self.variable_mappings) - set(self.asset_ids):
+            raise ValueError("Variable mappings may only reference selected assets")
+        return self
+
+
 #Modifying an existing rule
 class RuleUpdate(ORMModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
@@ -168,6 +300,7 @@ class RuleRead(ORMModel):
     description: str | None
     rule_type: str
     target_asset_id: int | None
+    source_template_id: int | None = None
     variable_id: int | None
     operator: str | None
     threshold: Decimal | None
@@ -208,6 +341,7 @@ class UsageRuleCreate(FrontendRuleCreate):
 
 class RuleSelection(ORMModel):
     rule_ids: list[int] = Field(min_length=1, max_length=100)
+    variable_mappings: dict[int, int] = Field(default_factory=dict)
 
     @field_validator("rule_ids")
     @classmethod
@@ -217,6 +351,19 @@ class RuleSelection(ORMModel):
         if len(value) != len(set(value)):
             raise ValueError("Rule IDs must be unique")
         return value
+
+    @field_validator("variable_mappings")
+    @classmethod
+    def positive_variable_mappings(cls, value: dict[int, int]) -> dict[int, int]:
+        if any(template_id <= 0 or variable_id <= 0 for template_id, variable_id in value.items()):
+            raise ValueError("Template and variable IDs must be positive")
+        return value
+
+    @model_validator(mode="after")
+    def mappings_must_match_selected_templates(self):
+        if set(self.variable_mappings) - set(self.rule_ids):
+            raise ValueError("Variable mappings may only reference selected templates")
+        return self
 
 
 class RuleCopyRequest(RuleSelection):

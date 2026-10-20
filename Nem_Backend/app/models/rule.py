@@ -1,3 +1,4 @@
+#reusable monitoring rule templates separate from assest-specific monitoring rules
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -20,6 +21,34 @@ from app.db.base import Base
 from app.db.session import UTCDateTime
 
 
+class MonitoringRuleTemplate(Base):
+    __tablename__ = "nem_monitoring_rule_templates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    rule_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    required_variable_types: Mapped[list[str] | None] = mapped_column(JSON)
+    variable_key: Mapped[str | None] = mapped_column(String(200))
+    operator: Mapped[str | None] = mapped_column(String(10))
+    threshold: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    parameters: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    evaluation_interval_seconds: Mapped[int | None] = mapped_column()
+    stale_after_seconds: Mapped[int | None] = mapped_column()
+    legacy_rule_id: Mapped[int | None] = mapped_column(unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
 class MonitoringRule(Base):
     __tablename__ = "nem_monitoring_rules"
     __table_args__ = (
@@ -37,6 +66,10 @@ class MonitoringRule(Base):
     description: Mapped[str | None] = mapped_column(Text)
     rule_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     target_asset_id: Mapped[int | None] = mapped_column(ForeignKey("assets.id", ondelete="RESTRICT"), index=True)
+    source_template_id: Mapped[int | None] = mapped_column(
+        ForeignKey("nem_monitoring_rule_templates.id", ondelete="RESTRICT"),
+        index=True,
+    )
     variable_id: Mapped[int | None] = mapped_column(ForeignKey("variables.id", ondelete="RESTRICT"), index=True)
     operator: Mapped[str | None] = mapped_column(String(10))
     threshold: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
