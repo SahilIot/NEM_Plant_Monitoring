@@ -1,6 +1,6 @@
 from app.models.asset import Asset
 from app.models.maintenance import MaintenanceRecord, MaintenanceSchedule
-from app.models.machine_monitoring import MachineMonitoringState
+from app.models.machine_monitoring import MachineMonitoringState, RuleCounterState
 from app.models.frontend_data import (
     BackupRecord,
     FrontendConfig,
@@ -24,5 +24,6 @@ __all__ = [
     "MaintenanceSchedule",
     "Alert", "MonitoringEvent", "SchedulerLease",
     "MachineMonitoringState",
+    "RuleCounterState",
     "FrontendConfig", "RuleCollection", "InstructionDocument", "BackupRecord", "InstructionDocumentFile",
 ]

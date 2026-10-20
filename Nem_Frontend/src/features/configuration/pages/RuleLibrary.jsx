@@ -45,6 +45,9 @@ const FIELDS = [
   { key: "warning_1", label: "First warning cycle count", type: "number", required: true, default: 9000, showWhen: { key: "rule_type", equals: "boolean_count_threshold" } },
   { key: "warning_2", label: "Second warning cycle count", type: "number", required: true, default: 9500, showWhen: { key: "rule_type", equals: "boolean_count_threshold" } },
   { key: "alert_threshold", label: "Alert cycle count", type: "number", required: true, default: 10000, showWhen: { key: "rule_type", equals: "boolean_count_threshold" } },
+  { key: "runtime_warning_hours", label: "Warning threshold (hours)", type: "number", required: true, showWhen: { key: "rule_type", equals: "runtime_duration" } },
+  { key: "runtime_warning_2_hours", label: "Higher warning threshold (hours)", type: "number", required: true, showWhen: { key: "rule_type", equals: "runtime_duration" } },
+  { key: "runtime_alert_hours", label: "Alert threshold (hours)", type: "number", required: true, showWhen: { key: "rule_type", equals: "runtime_duration" } },
   { key: "duration_seconds", label: "Duration (seconds)", type: "number", required: true, showWhen: { key: "rule_type", equals: "duration" } },
   { key: "runtime_duration_seconds", label: "Runtime duration (seconds)", type: "number", required: true, showWhen: { key: "rule_type", equals: "runtime_duration" } },
   { key: "duration_condition", label: "Duration condition", type: "select", default: "equals", options: [["equals", "Value equals"], ["threshold", "Value crosses threshold"]], showWhen: { key: "rule_type", equals: "duration" } },
@@ -100,6 +103,15 @@ function templatePayload(values) {
     parameters = {
       warning_thresholds: [Number(values.warning_1), Number(values.warning_2)],
       alert_threshold: Number(values.alert_threshold),
+    };
+  } else if (type === "runtime_duration") {
+    required_variable_types = ["boolean"];
+    parameters = {
+      warning_thresholds_seconds: [
+        Number(values.runtime_warning_hours) * 3600,
+        Number(values.runtime_warning_2_hours) * 3600,
+      ],
+      alert_threshold_seconds: Number(values.runtime_alert_hours) * 3600,
     };
   } else if (type === "duration") {
     required_variable_types = [values.variable_type];

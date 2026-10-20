@@ -24,6 +24,23 @@ def configured_cycle_signal_mapping(request: Request,variable_id: int | None,) -
         None,
     )
 
+
+def configured_runtime_signal_mapping(
+    request: Request,
+    variable_id: int | None,
+) -> tuple[int, int] | None:
+    collector = request.app.state.opcua_collector
+    return next(
+        (
+            (mapping.asset_id, mapping.running_signal.variable_id)
+            for mapping in collector.mappings
+            if mapping.running_signal is not None
+            and mapping.running_signal.variable_id == variable_id
+        ),
+        None,
+    )
+
+
 #Find the rule safely
 def rule_or_404(session: Session, rule_id: int) -> MonitoringRule:
     rule = session.get(MonitoringRule, rule_id)
@@ -41,6 +58,7 @@ def validate_targets(
     threshold,
     parameters: dict | None,
     cycle_signal_mapping: tuple[int, int] | None,
+    runtime_signal_mapping: tuple[int, int] | None = None,
 ) -> None:
     #Check that asset exits
     asset = session.get(Asset, target_asset_id) if target_asset_id is not None else None
@@ -62,7 +80,29 @@ def validate_targets(
             raise HTTPException(status_code=422, detail="Parameter threshold rules require an operator and threshold",)
     if rule_type in {"runtime_duration", "duration"}:
         duration = parameters.get("duration_seconds") if parameters else None
-        if not isinstance(duration, int) or isinstance(duration, bool) or duration <= 0:
+        if rule_type == "runtime_duration" and parameters and (
+            "warning_thresholds_seconds" in parameters
+        ):
+            if (
+                asset is None
+                or not asset.is_active
+                or variable is None
+                or not variable.is_active
+                or variable.data_type != "boolean"
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Running-time rules require an active Boolean variable on an active asset",
+                )
+            if runtime_signal_mapping != (target_asset_id, variable_id):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Running-time rules must target this asset's configured "
+                        "OPC UA running signal"
+                    ),
+                )
+        elif not isinstance(duration, int) or isinstance(duration, bool) or duration <= 0:
             raise HTTPException(status_code=422,detail="Runtime rules require a positive parameters.duration_seconds",)
     if rule_type == "boolean_count_threshold":
         if (
@@ -114,6 +154,7 @@ def create_rule(
         session, payload.target_asset_id, payload.variable_id, payload.rule_type,
         payload.operator, payload.threshold, payload.parameters,
         configured_cycle_signal_mapping(request, payload.variable_id),
+        configured_runtime_signal_mapping(request, payload.variable_id),
     )
     rule = MonitoringRule(**payload.model_dump())
     session.add(rule)
@@ -203,6 +244,7 @@ def update_rule(
         session, validated.target_asset_id, validated.variable_id, validated.rule_type,
         validated.operator, validated.threshold, validated.parameters,
         configured_cycle_signal_mapping(request, validated.variable_id),
+        configured_runtime_signal_mapping(request, validated.variable_id),
     )
     # prevent changing targets after evaluation state exits
     target_fields = {"target_asset_id", "variable_id"}

@@ -49,6 +49,13 @@ const OPERATOR_SYMBOL = {
 };
 
 export function conditionText(rule, variableName) {
+  if (rule.rule_type === "runtime_duration") {
+    const warnings = rule.parameters?.warning_thresholds_seconds;
+    const alert = rule.parameters?.alert_threshold_seconds;
+    if (Array.isArray(warnings) && warnings.length === 2 && alert != null) {
+      return `Running time · warning at ${(Number(warnings[0]) / 3600).toFixed(2)} h / ${(Number(warnings[1]) / 3600).toFixed(2)} h, alert at ${(Number(alert) / 3600).toFixed(2)} h`;
+    }
+  }
   if (rule.rule_type === "boolean_count_threshold") {
     const warnings = rule.parameters?.warning_thresholds;
     const alert = rule.parameters?.alert_threshold;
@@ -67,4 +74,3 @@ export function conditionText(rule, variableName) {
   const symbol = OPERATOR_SYMBOL[rule.operator] || rule.operator || "";
   return `${variableName || "Value"} ${symbol} ${rule.threshold}`;
 }
-

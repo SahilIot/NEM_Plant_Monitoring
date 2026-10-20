@@ -80,7 +80,7 @@ def load_machine_mappings(raw: str) -> list[OpcUaMachineMapping]:
         ) from error
 
     assets: set[int] = set()
-    node_ids: set[str] = set()
+    node_ids: set[tuple[int, str]] = set()
     for mapping in mappings:
         if mapping.asset_id in assets:
             raise OpcUaConfigurationError(
@@ -95,11 +95,13 @@ def load_machine_mappings(raw: str) -> list[OpcUaMachineMapping]:
         for signal in signals:
             if signal is None:
                 continue
-            if signal.node_id in node_ids:
+            node_key = (mapping.asset_id, signal.node_id)
+            if node_key in node_ids:
                 raise OpcUaConfigurationError(
-                    "OPCUA_MACHINE_MAPPINGS must not map one NodeId more than once."
+                    "OPCUA_MACHINE_MAPPINGS must not map one NodeId more than once "
+                    "for the same asset."
                 )
-            node_ids.add(signal.node_id)
+            node_ids.add(node_key)
     return mappings
 
 #calculating machine running time
@@ -192,29 +194,35 @@ class OpcUaCollector:
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._owner_id = uuid.uuid4().hex
-        self._node_mappings: dict[str, tuple[OpcUaMachineMapping, str, int]] = {}
+        self._node_mappings: dict[
+            str, list[tuple[OpcUaMachineMapping, str, int]]
+        ] = {}
         self._queue_size = max(len(self.mappings) * 20, 100)
         self._queue: asyncio.Queue[OpcUaNotification | None] | None = None
 
         for mapping in self.mappings:
             if mapping.cycle_signal is not None:
-                self._node_mappings[mapping.cycle_signal.node_id] = (
+                self._node_mappings.setdefault(
+                    mapping.cycle_signal.node_id, []
+                ).append((
                     mapping,
                     "cycle",
                     mapping.cycle_signal.variable_id,
-                )
+                ))
             if mapping.running_signal is not None:
-                self._node_mappings[mapping.running_signal.node_id] = (
+                self._node_mappings.setdefault(
+                    mapping.running_signal.node_id, []
+                ).append((
                     mapping,
                     "running",
                     mapping.running_signal.variable_id,
-                )
+                ))
             for signal in mapping.readings:
-                self._node_mappings[signal.node_id] = (
+                self._node_mappings.setdefault(signal.node_id, []).append((
                     mapping,
                     "reading",
                     signal.variable_id,
-                )
+                ))
 #Checking mapping information for display
     def configured_mapping_rows(self, session: Session) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
@@ -449,18 +457,37 @@ class OpcUaCollector:
                         raise OpcUaConfigurationError("OPC UA NodeIds must map to active variables belonging to "
                             "their configured asset; cycle and running signals must be boolean."
                         )
-#From plc updates to database
+# From PLC updates to database
     def _process_notification(self, notification: OpcUaNotification) -> None:
-        mapped = self._node_mappings.get(notification.node_id)
-        if mapped is None:
+        mappings = self._node_mappings.get(notification.node_id)
+        if not mappings:
             LOGGER.warning("Ignoring OPC UA notification for an unmapped NodeId")
             return
-        mapping, role, variable_id = mapped
-        if role in {"cycle", "running"} and not isinstance(notification.value, bool):
-            LOGGER.warning("Ignoring non-boolean OPC UA %s signal for asset %s",role,mapping.asset_id,)
+        for mapping, role, variable_id in mappings:
+            self._process_mapped_notification(
+                notification, mapping, role, variable_id
+            )
+
+    def _process_mapped_notification(
+        self,
+        notification: OpcUaNotification,
+        mapping: OpcUaMachineMapping,
+        role: str,
+        variable_id: int,
+    ) -> None:
+        if role in {"cycle", "running"} and not isinstance(
+            notification.value, bool
+        ):
+            LOGGER.warning(
+                "Ignoring non-boolean OPC UA %s signal for asset %s",
+                role,
+                mapping.asset_id,
+            )
             return
 
-        recorded_at = _normalize_notification_timestamp(notification.recorded_at,notification.node_id,)
+        recorded_at = _normalize_notification_timestamp(
+            notification.recorded_at, notification.node_id
+        )
 
         try:
             payload = ReadingCreate(
@@ -469,7 +496,12 @@ class OpcUaCollector:
                 value=notification.value,
                 recorded_at=recorded_at,
                 source_id="opcua_subscription",
-                metadata={"protocol": "opc.tcp","node_id": notification.node_id,"signal": role,},)
+                metadata={
+                    "protocol": "opc.tcp",
+                    "node_id": notification.node_id,
+                    "signal": role,
+                },
+            )
             with self.session_factory() as session:
                 state = session.get(MachineMonitoringState, mapping.asset_id)
                 if state is None:
@@ -482,8 +514,10 @@ class OpcUaCollector:
                     session.add(state)
                     session.flush()
                 signal_at = (
-                    state.last_cycle_signal_at if role == "cycle"
-                    else state.last_running_signal_at if role == "running"
+                    state.last_cycle_signal_at
+                    if role == "cycle"
+                    else state.last_running_signal_at
+                    if role == "running"
                     else None
                 )
                 if signal_at is not None and recorded_at < signal_at:
@@ -502,20 +536,27 @@ class OpcUaCollector:
                 ingest_reading(
                     session,
                     payload,
-                    stale_after_seconds=self.settings.monitoring_default_stale_after_seconds,
+                    stale_after_seconds=(
+                        self.settings.monitoring_default_stale_after_seconds
+                    ),
                     commit=False,
                 )
                 state.cycle_limit = mapping.cycle_limit
                 state.runtime_limit_seconds = mapping.runtime_limit_seconds
-                state.last_seen_at = max(state.last_seen_at or recorded_at, recorded_at)
+                state.last_seen_at = max(
+                    state.last_seen_at or recorded_at, recorded_at
+                )
                 state.updated_at = recorded_at
 
                 if role == "cycle":
                     previous_cycle_count = state.cycle_count
                     state.last_cycle_signal_at = recorded_at
-                    self._apply_cycle_signal(session, state, notification.value, recorded_at)
+                    self._apply_cycle_signal(
+                        session, state, notification.value, recorded_at
+                    )
                     if state.cycle_count > previous_cycle_count:
-                        evaluate_reading_rules(session,
+                        evaluate_reading_rules(
+                            session,
                             asset_id=mapping.asset_id,
                             variable_id=variable_id,
                             evaluated_at=recorded_at,
@@ -525,7 +566,9 @@ class OpcUaCollector:
                         )
                 elif role == "running":
                     state.last_running_signal_at = recorded_at
-                    self._apply_running_signal(session, state, notification.value, recorded_at)
+                    self._apply_running_signal(
+                        session, state, notification.value, recorded_at
+                    )
                 session.commit()
         except (HTTPException, ValidationError, ValueError) as error:
             LOGGER.warning(
