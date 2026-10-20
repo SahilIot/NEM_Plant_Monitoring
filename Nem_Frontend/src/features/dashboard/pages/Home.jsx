@@ -59,8 +59,7 @@ export default function Home() {
     }
   }, []);
 
-  // Load dashboard data once when the page opens.
-  // No background polling or setInterval.
+
   useEffect(() => {
     loadSummary();
   }, [loadSummary]);
@@ -250,92 +249,6 @@ export default function Home() {
           Showing the last known values. Refresh failed: {error}
         </p>
       )}
-
-      <section className="panel wide">
-        <div className="panel-head">
-          <h2>Live cycle monitoring</h2>
-          <span className="muted">
-            {plcStatus?.connection?.connected
-              ? "OPC UA connected"
-              : plcStatus?.connection?.state || "Connecting"}
-            {" · "}refreshes twice per second
-          </span>
-        </div>
-
-        {liveStatusError && (
-          <p className="notice error" role="status">
-            Live refresh failed; showing the last received values:{" "}
-            {liveStatusError}
-          </p>
-        )}
-
-        {!plcStatus && !liveStatusError ? (
-          <p className="muted" role="status">
-            Loading live cycle monitoring…
-          </p>
-        ) : cycleMappings.length === 0 ? (
-          <p className="muted">
-            No active Boolean cycle-signal mappings are available. Configure
-            the cycle signal in backend OPCUA_MACHINE_MAPPINGS.
-          </p>
-        ) : (
-          <div className="values-grid">
-            {cycleMappings.map((mapping) => {
-              const machine = machinesByAsset.get(mapping.asset_id);
-              const cycleRule = rules.find(
-                (rule) =>
-                  rule.rule_type === "boolean_count_threshold" &&
-                  rule.is_enabled !== false &&
-                  (rule.target_asset_id ?? rule.asset_id) === mapping.asset_id &&
-                  rule.variable_id === mapping.variable_id
-              );
-              const ruleState = cycleRule
-                ? ruleStatesById.get(cycleRule.id)
-                : null;
-              const warningThresholds =
-                cycleRule?.parameters?.warning_thresholds;
-              const alertThreshold =
-                cycleRule?.parameters?.alert_threshold;
-
-              return (
-                <Link
-                  className="value-cell"
-                  key={`${mapping.asset_id}-${mapping.variable_id}`}
-                  to={`/assets/${mapping.asset_id}`}
-                >
-                  <span className="value-name">
-                    {mapping.asset_name} · {mapping.variable_name}
-                  </span>
-                  <span className="value-num">
-                    {machine?.cycle_count ?? "—"} cycles
-                  </span>
-                  <span className="value-age">
-                    {mapping.node_id}
-                    {machine?.last_seen_at
-                      ? ` · signal ${timeAgo(machine.last_seen_at)}`
-                      : ""}
-                  </span>
-                  <span className="value-age">
-                    Running time:{" "}
-                    {formatDuration(machine?.running_seconds ?? 0)}
-                  </span>
-                  <span className="value-age">
-                    {cycleRule
-                      ? `${cycleRule.name}: ${
-                          ruleState?.status || cycleRule.status || "unknown"
-                        }`
-                      : "No enabled cycle-count threshold rule"}
-                    {Array.isArray(warningThresholds) &&
-                    alertThreshold != null
-                      ? ` · warning ${warningThresholds[0].toLocaleString()} / ${warningThresholds[1].toLocaleString()}, alert ${alertThreshold.toLocaleString()}`
-                      : ""}
-                  </span>
-                </Link>
-              );
-            })}
-          </div>
-        )}
-      </section>
 
       <section className="annunciator" aria-label="Current status">
         <Tile

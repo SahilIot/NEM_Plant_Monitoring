@@ -380,3 +380,79 @@
     flex: 1;
   }
 }
+
+/* Dark theme support for document creation */
+html[data-theme="dark"] .document-create-page {
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .document-create-page .document-back,
+html[data-theme="dark"] .document-create-page .document-hero-copy p,
+html[data-theme="dark"] .document-create-page .document-form-heading p,
+html[data-theme="dark"] .document-create-page .document-upload-subtitle,
+html[data-theme="dark"] .document-create-page .document-selected-file-size,
+html[data-theme="dark"] .document-create-page .document-footer-note {
+  color: var(--muted);
+}
+
+html[data-theme="dark"] .document-create-page .document-hero-icon {
+  background: linear-gradient(145deg, #1c2b3d, #223b58);
+  border-color: #344b65;
+  color: #a9ceff;
+}
+
+html[data-theme="dark"] .document-create-page .document-form-card {
+  background: var(--surface);
+  border-color: var(--line);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+}
+
+html[data-theme="dark"] .document-create-page .document-form-heading {
+  background: linear-gradient(110deg, var(--surface-2), var(--surface));
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .document-create-page .document-section-icon,
+html[data-theme="dark"] .document-create-page .document-upload-icon,
+html[data-theme="dark"] .document-create-page .document-selected-file-icon {
+  background: #20334a;
+  color: #a9ceff;
+}
+
+html[data-theme="dark"] .document-create-page .document-fields-grid .field input:not([type="file"]),
+html[data-theme="dark"] .document-create-page .document-fields-grid .field select,
+html[data-theme="dark"] .document-create-page .document-fields-grid .field textarea {
+  background: var(--surface-2);
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+html[data-theme="dark"] .document-create-page .document-fields-grid .field input::placeholder,
+html[data-theme="dark"] .document-create-page .document-fields-grid .field textarea::placeholder {
+  color: #93a0ad;
+}
+
+html[data-theme="dark"] .document-create-page .document-fields-grid .field select option {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .document-create-page .document-upload-zone {
+  background: linear-gradient(145deg, #151f2b, #192635);
+  border-color: #405b7b;
+}
+
+html[data-theme="dark"] .document-create-page .document-upload-zone:hover,
+html[data-theme="dark"] .document-create-page .document-upload-zone:focus-within {
+  background: #1b2b3d;
+  border-color: #75a9e8;
+}
+
+html[data-theme="dark"] .document-create-page .document-selected-file {
+  background: var(--surface-2);
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .document-create-page .document-form-footer {
+  border-color: var(--line);
+}

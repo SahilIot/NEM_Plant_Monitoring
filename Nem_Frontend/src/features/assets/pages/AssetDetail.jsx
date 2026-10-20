@@ -1,4 +1,4 @@
-
+﻿
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import CopyRulesModal from "../components/CopyRulesModal.jsx";
@@ -225,6 +225,12 @@ export default function AssetDetail() {
   const [showPredefinedRules, setShowPredefinedRules] = useState(false);
   const [addRuleMenu, setAddRuleMenu] = useState(false);
   const [logs, setLogs] = useState([]);
+  const [logSearch, setLogSearch] = useState("");
+  const [logSort, setLogSort] = useState("newest");
+  const [logTypeFilter, setLogTypeFilter] = useState("all");
+  const [showLogFilter, setShowLogFilter] = useState(false);
+  const [logStartDate, setLogStartDate] = useState("");
+  const [logEndDate, setLogEndDate] = useState("");
   const [events, setEvents] = useState([]);
   const [loadError, setLoadError] = useState("");
   const navigate = useNavigate();
@@ -526,6 +532,53 @@ export default function AssetDetail() {
       : (ORDER[a.status] ?? 3) -
         (ORDER[b.status] ?? 3)
   );
+
+  
+const filteredLogs = [...logs]
+  .filter((entry) => {
+    const search = logSearch.trim().toLowerCase();
+
+    const matchesSearch =
+      !search ||
+      String(entry.text || "").toLowerCase().includes(search) ||
+      String(entry.maintenance_type || "unknown")
+        .toLowerCase()
+        .includes(search);
+
+    const matchesType =
+      logTypeFilter === "all" ||
+      (entry.maintenance_type || "unknown") === logTypeFilter;
+
+    const rawDate = entry.time || entry.created_at;
+    const date = new Date(rawDate);
+
+    const matchesStart =
+      !logStartDate ||
+      (Number.isFinite(date.getTime()) &&
+        date >= new Date(`${logStartDate}T00:00:00`));
+
+    const matchesEnd =
+      !logEndDate ||
+      (Number.isFinite(date.getTime()) &&
+        date <= new Date(`${logEndDate}T23:59:59.999`));
+
+    return (
+      matchesSearch &&
+      matchesType &&
+      matchesStart &&
+      matchesEnd
+    );
+  })
+  .sort((a, b) => {
+    const dateA =
+      new Date(a.time || a.created_at).getTime() || 0;
+    const dateB =
+      new Date(b.time || b.created_at).getTime() || 0;
+
+    return logSort === "newest"
+      ? dateB - dateA
+      : dateA - dateB;
+  });
 
  
   const refreshAll = async () => {
