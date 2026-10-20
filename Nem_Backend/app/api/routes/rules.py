@@ -143,11 +143,17 @@ def list_rules(
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
     #Build the database queries
-    query = select(MonitoringRule).where(MonitoringRule.is_archived.is_(False))
+    query = select(MonitoringRule).where(
+        MonitoringRule.is_archived.is_(False),
+        MonitoringRule.target_asset_id.is_not(None),
+    )
     count_query = (
         select(func.count())
         .select_from(MonitoringRule)
-        .where(MonitoringRule.is_archived.is_(False))
+        .where(
+            MonitoringRule.is_archived.is_(False),
+            MonitoringRule.target_asset_id.is_not(None),
+        )
     )
     for condition, column in (
         (target_asset_id, MonitoringRule.target_asset_id),

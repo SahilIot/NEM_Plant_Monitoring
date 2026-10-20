@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../../../services/api.js";
 import "./PredefinedRulesModal.css";
 import {
@@ -12,8 +13,10 @@ import {
 } from "lucide-react";
 
 export default function PredefinedRulesModal({ assetId, onClose, onAssigned }) {
+  const navigate = useNavigate();
   const [rules, setRules] = useState([]);
   const [selected, setSelected] = useState(() => new Set());
+  const [variableMappings, setVariableMappings] = useState({});
   const [search, setSearch] = useState("");
   const [severity, setSeverity] = useState("all");
   const [loading, setLoading] = useState(true);
@@ -69,6 +72,11 @@ export default function PredefinedRulesModal({ assetId, onClose, onAssigned }) {
     try {
       const result = await api.post(`/assets/${assetId}/rules/assign`, {
         rule_ids: [...selected],
+        variable_mappings: Object.fromEntries(
+          [...selected]
+            .filter((id) => variableMappings[id])
+            .map((id) => [id, Number(variableMappings[id])])
+        ),
       });
       await onAssigned?.(result);
       onClose();
@@ -82,6 +90,10 @@ export default function PredefinedRulesModal({ assetId, onClose, onAssigned }) {
   const availableCount = rules.filter((rule) =>
     !rule.assigned && !rule.unavailable_reason
   ).length;
+  const mappingsComplete = [...selected].every((id) => {
+    const rule = rules.find((item) => item.id === id);
+    return !rule?.variable_mapping_required || Boolean(variableMappings[id]);
+  });
 
   return (
     <div
@@ -139,22 +151,40 @@ export default function PredefinedRulesModal({ assetId, onClose, onAssigned }) {
             <p className="prm-empty">
               {rules.length
                 ? "No rules match your search and filters."
-                : "No predefined rules are available. Create unassigned rules in Configuration first."}
+                : (
+                  <>
+                    No reusable templates are available.
+                    {" "}
+                    <button
+                      type="button"
+                      className="link-btn"
+                      onClick={() => {
+                        onClose();
+                        navigate("/configuration/rules");
+                      }}
+                    >
+                      Open the Monitoring Rule Library
+                    </button>
+                  </>
+                )}
             </p>
           ) : visibleRules.map((rule) => {
             const unavailable = Boolean(rule.unavailable_reason);
             const disabled = saving || rule.assigned || unavailable;
+            const mappingRequired = rule.variable_mapping_required;
             return (
-              <label
+              <div
                 className={`prm-rule${disabled ? " prm-rule-disabled" : ""}`}
                 key={rule.id}
               >
-                <input
-                  type="checkbox"
-                  checked={selected.has(rule.id)}
-                  disabled={disabled}
-                  onChange={() => toggle(rule.id)}
-                />
+                <label className="prm-rule-select">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(rule.id)}
+                    disabled={disabled}
+                    onChange={() => toggle(rule.id)}
+                  />
+                </label>
                 <Activity size={19} className="prm-rule-icon" />
                 <span className="prm-rule-copy">
                   <strong>{rule.name}</strong>
@@ -164,6 +194,27 @@ export default function PredefinedRulesModal({ assetId, onClose, onAssigned }) {
                   </small>
                   {unavailable && <small className="prm-unavailable">{rule.unavailable_reason}</small>}
                 </span>
+                {mappingRequired && (
+                  <select
+                    aria-label={`Variable mapping for ${rule.name}`}
+                    value={variableMappings[rule.id] || ""}
+                    disabled={disabled}
+                    onChange={(event) => {
+                      setVariableMappings((current) => ({
+                        ...current,
+                        [rule.id]: event.target.value,
+                      }));
+                      setSelected((current) => new Set(current).add(rule.id));
+                    }}
+                  >
+                    <option value="">Choose variable</option>
+                    {(rule.compatible_variables || []).map((variable) => (
+                      <option value={variable.id} key={variable.id}>
+                        {variable.name} · {variable.key} ({variable.data_type})
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <span className={`prm-severity prm-severity-${(rule.severity || "warning").toLowerCase()}`}>
                   {(rule.severity || "warning").toLowerCase() === "critical"
                     ? <CircleAlert size={15} />
@@ -174,7 +225,7 @@ export default function PredefinedRulesModal({ assetId, onClose, onAssigned }) {
                       ? "Unavailable"
                       : rule.severity || "warning"}
                 </span>
-              </label>
+              </div>
             );
           })}
         </div>
@@ -208,7 +259,7 @@ export default function PredefinedRulesModal({ assetId, onClose, onAssigned }) {
               if (reviewing) assign();
               else setReviewing(true);
             }}
-            disabled={saving || loading || selected.size === 0}
+            disabled={saving || loading || selected.size === 0 || !mappingsComplete}
           >
             {!saving && <Check size={17} />}
             {saving
