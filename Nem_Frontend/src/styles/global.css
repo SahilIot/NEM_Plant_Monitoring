@@ -140,6 +140,7 @@ h3 { margin: 0; }
 .banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; margin-bottom: 16px; border-radius: var(--r-panel); border: 1px solid var(--line); background: var(--surface); }
 .banner p { margin: 0; }
 .banner.error { background: var(--alert-soft); border-color: var(--alert); color: var(--ink); }
+.banner.success { background: var(--ok-soft); border-color: var(--ok); color: var(--ink); }
 
 
 .tree { width: 310px; flex-shrink: 0; margin: 0 0 20px 20px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
@@ -340,8 +341,10 @@ button:disabled { opacity: 0.55; cursor: default; }
 .dropdown { position: relative; }
 .menu { position: absolute; top: calc(100% + 4px); left: 0; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: var(--shadow); z-index: 20; min-width: 190px; padding: 4px; }
 .menu.right { left: auto; right: 0; }
-.menu div { padding: 9px 12px; cursor: pointer; border-radius: 4px; }
-.menu div:hover { background: var(--action-soft); color: var(--action); }
+.menu div, .menu button { padding: 9px 12px; cursor: pointer; border-radius: 4px; }
+.menu button { display: block; width: 100%; border: 0; background: transparent; color: inherit; text-align: left; font: inherit; }
+.menu div:hover, .menu button:hover:not(:disabled), .menu button:focus-visible { background: var(--action-soft); color: var(--action); }
+.menu button:disabled { opacity: .55; cursor: not-allowed; }
 
 .rule-list { display: flex; flex-direction: column; gap: 8px; max-width: 1120px; }
 .rule-row { display: flex; align-items: center; gap: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); padding: 12px 16px 12px 12px; }
@@ -691,4 +694,3 @@ button:disabled { opacity: 0.55; cursor: default; }
     padding: 15px 16px;
   }
 }
-

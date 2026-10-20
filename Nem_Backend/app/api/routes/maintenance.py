@@ -1,11 +1,17 @@
 # Maintenance records and schedules
 from datetime import date, datetime, time, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models import Alert, Asset, MaintenanceRecord, MaintenanceSchedule
+from app.models import (
+    Alert,
+    Asset,
+    MaintenanceRecord,
+    MaintenanceSchedule,
+    MonitoringEvent,
+)
 from app.schemas.maintenance import (
     MaintenanceCreate,
     MaintenanceRead,
@@ -343,6 +349,92 @@ def get_maintenance_schedule(
 ) -> MaintenanceScheduleRead:
     return _schedule_read(_schedule_or_404(session, schedule_id))
 
+
+@router.delete(
+    "/schedules/{schedule_id}/permanent",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def permanently_delete_maintenance_schedule(
+    schedule_id: int,
+    session: Session = Depends(get_db),
+) -> None:
+    schedule = session.scalar(
+        select(MaintenanceSchedule)
+        .where(MaintenanceSchedule.id == schedule_id)
+        .with_for_update()
+    )
+    if schedule is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Maintenance schedule {schedule_id} was not found",
+        )
+
+    records = session.scalars(
+        select(MaintenanceRecord)
+        .where(MaintenanceRecord.schedule_id == schedule.id)
+        .with_for_update()
+    ).all()
+    if any(record.status == "in_progress" for record in records):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This schedule has maintenance currently in progress and cannot be deleted. "
+                "Complete or cancel that work first."
+            ),
+        )
+
+    alert_ids = session.scalars(
+        select(Alert.id).where(Alert.maintenance_schedule_id == schedule.id)
+    ).all()
+    if alert_ids and session.scalar(
+        select(MaintenanceRecord.id)
+        .where(
+            MaintenanceRecord.alert_id.in_(alert_ids),
+            or_(
+                MaintenanceRecord.schedule_id.is_(None),
+                MaintenanceRecord.schedule_id != schedule.id,
+            ),
+        )
+        .limit(1)
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A maintenance record outside this schedule references one of its alerts. "
+                "Remove that alert link before deleting this schedule."
+            ),
+        )
+
+    schedule_title = schedule.title
+    asset_id = schedule.asset_id
+    deleted_occurrence_ids = [record.id for record in records]
+    for record in records:
+        session.delete(record)
+    session.flush()
+    if alert_ids:
+        session.execute(
+            delete(MonitoringEvent).where(
+                MonitoringEvent.alert_id.in_(alert_ids)
+            )
+        )
+        session.execute(delete(Alert).where(Alert.id.in_(alert_ids)))
+    session.delete(schedule)
+    session.flush()
+    emit_event(
+        session,
+        event_type="maintenance_schedule_permanently_deleted",
+        message=f"Maintenance schedule '{schedule_title}' was permanently deleted.",
+        occurred_at=utc_now(),
+        asset_id=asset_id,
+        metadata={
+            "deleted_schedule_id": schedule_id,
+            "deleted_schedule_title": schedule_title,
+            "deleted_occurrence_ids": deleted_occurrence_ids,
+        },
+    )
+    session.commit()
+
+
 #User can change selected fields without sending the entire schedule again
 @router.patch("/schedules/{schedule_id}", response_model=MaintenanceScheduleRead)
 def update_maintenance_schedule(
@@ -622,6 +714,74 @@ def archive_completed_maintenance_record(
     )
     session.commit()
     return None
+
+#used to delete the maintenance record permanently
+@router.delete("/{record_id}/permanent", status_code=status.HTTP_204_NO_CONTENT)
+def permanently_delete_archived_maintenance_record(
+    record_id: int,
+    session: Session = Depends(get_db),
+) -> None:
+    record = session.scalar(
+        select(MaintenanceRecord)
+        .where(MaintenanceRecord.id == record_id)
+        .with_for_update()
+    )
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Maintenance record {record_id} was not found",
+        )
+    if record.schedule_id is not None and not (
+        record.status == "completed" and record.archived_at is not None
+    ):
+        permanently_delete_maintenance_schedule(record.schedule_id, session)
+        return None
+    if record.status == "in_progress":
+        raise HTTPException(
+            status_code=409,
+            detail="Maintenance currently in progress cannot be permanently deleted.",
+        )
+
+    if record.status == "completed" and record.archived_at is not None:
+        schedule_id = record.schedule_id
+        schedule = (
+            session.scalar(
+                select(MaintenanceSchedule)
+                .where(MaintenanceSchedule.id == schedule_id)
+                .with_for_update()
+            )
+            if schedule_id is not None
+            else None
+        )
+        if schedule is not None and schedule.current_occurrence_id == record.id:
+            schedule.current_occurrence_id = None
+    elif record.schedule_id is None:
+        schedule_id = None
+    else:
+        raise HTTPException(
+            status_code=409,
+            detail="This maintenance record cannot be permanently deleted.",
+        )
+
+    deleted_title = record.title
+    deleted_asset_id = record.asset_id
+    record_id_value = record.id
+    session.delete(record)
+    session.flush()
+    emit_event(
+        session,
+        event_type="maintenance_record_permanently_deleted",
+        message=f"Maintenance '{deleted_title}' was permanently deleted.",
+        occurred_at=utc_now(),
+        asset_id=deleted_asset_id,
+        metadata={
+            "deleted_record_id": record_id_value,
+            "deleted_record_title": deleted_title,
+            "schedule_id": schedule_id,
+        },
+    )
+    session.commit()
+
 
 #Modifies a maintenance record,but not allow completed or archived records to be edited 
 @router.patch("/{record_id}", response_model=MaintenanceRead)
