@@ -1,54 +1,101 @@
-#responsible for creating database tables and updating older db schemas when your application starts
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
-import app.models  
+from sqlalchemy.orm import Session
+import app.models
 from app.db.base import Base
-#SQLAlchemy`s connection interface to your db -> engine 
-#application starts,create missing table,inspect existing tables and columns , apply required sql changes
+from app.models import (
+    FrontendConfig,
+    MachineMonitoringState,
+    MonitoringRule,
+    MonitoringRuleTemplate,
+    RuleCounterState,
+    Variable,
+)
+
+#creates tables defined in SQLAlchemy models if they do not exist
 def initialize_database(engine: Engine) -> None:
     Base.metadata.create_all(bind=engine)
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
     if "variables" in table_names:
-        variable_columns = {
-            column["name"]
-            for column in inspector.get_columns("variables")
+        variable_columns = {column["name"] for column in inspector.get_columns("variables")
         }
         if "opcua_node_id" not in variable_columns:
             with engine.begin() as connection:
                 connection.execute(
-                    text(
-                        "ALTER TABLE variables "
+                    text("ALTER TABLE variables "
                         "ADD COLUMN opcua_node_id VARCHAR(512)"
                     )
                 )
-
+        with engine.begin() as connection:
+            connection.execute(text("DROP INDEX IF EXISTS ix_variables_opcua_node_id"))
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_variables_opcua_node_id "
+                    "ON variables (opcua_node_id)"
+                )
+            )
     if "nem_monitoring_rules" in table_names:
         rule_columns = {
             column["name"]
             for column in inspector.get_columns("nem_monitoring_rules")
         }
-        if "is_archived" not in rule_columns:
-            with engine.begin() as connection:
+        with engine.begin() as connection:
+            if "is_archived" not in rule_columns:
                 if engine.dialect.name == "postgresql":
-                    add_column = (
-                        "ALTER TABLE nem_monitoring_rules "
-                        "ADD COLUMN IF NOT EXISTS is_archived "
-                        "BOOLEAN NOT NULL DEFAULT FALSE"
+                    connection.execute(
+                        text(
+                            "ALTER TABLE nem_monitoring_rules "
+                            "ADD COLUMN IF NOT EXISTS is_archived "
+                            "BOOLEAN NOT NULL DEFAULT FALSE"
+                        )
                     )
                 else:
-                    add_column = (
-                        "ALTER TABLE nem_monitoring_rules "
-                        "ADD COLUMN is_archived "
-                        "BOOLEAN NOT NULL DEFAULT FALSE"
+                    connection.execute(
+                        text(
+                            "ALTER TABLE nem_monitoring_rules "
+                            "ADD COLUMN is_archived "
+                            "BOOLEAN NOT NULL DEFAULT FALSE"
+                        )
                     )
+            if "source_template_id" not in rule_columns:
+                if engine.dialect.name == "postgresql":
+                    connection.execute(
+                        text(
+                            "ALTER TABLE nem_monitoring_rules "
+                            "ADD COLUMN IF NOT EXISTS source_template_id INTEGER "
+                            "REFERENCES nem_monitoring_rule_templates(id) "
+                            "ON DELETE RESTRICT"
+                        )
+                    )
+                else:
+                    connection.execute(
+                        text(
+                            "ALTER TABLE nem_monitoring_rules "
+                            "ADD COLUMN source_template_id INTEGER "
+                            "REFERENCES nem_monitoring_rule_templates(id) "
+                            "ON DELETE RESTRICT"
+                        )
+                    )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS "
+                    "ix_nem_monitoring_rules_source_template_id "
+                    "ON nem_monitoring_rules (source_template_id)"
+                )
+            )
 
-                connection.execute(text(add_column))
+    _migrate_legacy_rule_templates(engine)
+    _migrate_existing_rule_counters(engine)
 
     if "nem_maintenance_schedules" in table_names:
         schedule_columns = {
             column["name"]
-            for column in inspect(engine).get_columns("nem_maintenance_schedules")
+            for column in inspect(engine).get_columns(
+                "nem_maintenance_schedules"
+            )
         }
         if "current_period_start_date" not in schedule_columns:
             with engine.begin() as connection:
@@ -72,11 +119,12 @@ def initialize_database(engine: Engine) -> None:
                             "ALTER COLUMN current_period_start_date SET NOT NULL"
                         )
                     )
-
     if "nem_maintenance_records" in table_names:
         record_columns = {
             column["name"]
-            for column in inspect(engine).get_columns("nem_maintenance_records")
+            for column in inspect(engine).get_columns(
+                "nem_maintenance_records"
+            )
         }
         record_column_definitions = {
             "maintenance_type": "VARCHAR(30) NOT NULL DEFAULT 'inspection'",
@@ -113,73 +161,3 @@ def initialize_database(engine: Engine) -> None:
                     "WHERE status = 'completed' AND actual_completed_at IS NULL"
                 )
             )
-
-
-    if "nem_alerts" in table_names and "nem_maintenance_schedules" in table_names:
-        alert_columns = {
-            column["name"]
-            for column in inspect(engine).get_columns("nem_alerts")
-        }
-
-        with engine.begin() as connection:
-            if "maintenance_schedule_id" not in alert_columns:
-                connection.execute(
-                    text(
-                        "ALTER TABLE nem_alerts "
-                        "ADD COLUMN maintenance_schedule_id INTEGER"
-                    )
-                )
-
-            if "maintenance_due_date" not in alert_columns:
-                connection.execute(
-                    text(
-                        "ALTER TABLE nem_alerts "
-                        "ADD COLUMN maintenance_due_date DATE"
-                    )
-                )
-
-            if engine.dialect.name == "postgresql":
-                connection.execute(
-                    text(
-                        "DO $$ BEGIN "
-                        "IF NOT EXISTS (SELECT 1 FROM pg_constraint "
-                        "WHERE conname = 'fk_nem_alerts_maintenance_schedule') "
-                        "THEN ALTER TABLE nem_alerts "
-                        "ADD CONSTRAINT fk_nem_alerts_maintenance_schedule "
-                        "FOREIGN KEY (maintenance_schedule_id) "
-                        "REFERENCES nem_maintenance_schedules(id) "
-                        "ON DELETE RESTRICT; END IF; END $$"
-                    )
-                )
-
-                connection.execute(
-                    text(
-                        "CREATE INDEX IF NOT EXISTS "
-                        "ix_nem_alerts_maintenance_schedule_id "
-                        "ON nem_alerts (maintenance_schedule_id)"
-                    )
-                )
-
-                connection.execute(
-                    text(
-                        "CREATE UNIQUE INDEX IF NOT EXISTS "
-                        "uq_nem_alerts_active_maintenance_due "
-                        "ON nem_alerts (maintenance_schedule_id, maintenance_due_date) "
-                        "WHERE status = 'active' "
-                        "AND maintenance_schedule_id IS NOT NULL"
-                    )
-                )
-
-                connection.execute(
-                    text(
-                        "DO $$ BEGIN "
-                        "IF NOT EXISTS (SELECT 1 FROM pg_constraint "
-                        "WHERE conname = 'ck_nem_alerts_source') "
-                        "THEN ALTER TABLE nem_alerts "
-                        "ADD CONSTRAINT ck_nem_alerts_source CHECK ("
-                        "(rule_id IS NOT NULL AND maintenance_schedule_id IS NULL) "
-                        "OR (rule_id IS NULL AND maintenance_schedule_id IS NOT NULL "
-                        "AND maintenance_due_date IS NOT NULL)); "
-                        "END IF; END $$"
-                    )
-                )

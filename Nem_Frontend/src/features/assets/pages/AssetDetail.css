@@ -1,0 +1,555 @@
+.asset-page {
+  --bg: #0d1217;
+  --surface: #151b22;
+  --surface-2: #1b232c;
+  --line: #27313c;
+  --line-strong: #3b4856;
+  --ink: #e7ecf1;
+  --ink-2: #b3bdc8;
+  --muted: #93a0ad;
+  --action: #8bb8f7;
+  --action-bg: #2f6bc2;
+  --action-hover: #3a79d6;
+  --action-soft: #182739;
+  --on-action: #ffffff;
+  --ok: #44d19c;
+  --ok-soft: #12332a;
+  --warn: #f2b94a;
+  --warn-lamp: #f2b233;
+  --warn-soft: #382c10;
+  --alert: #ff7a80;
+  --alert-soft: #3a1a1d;
+  --off: #6b7785;
+  width: 100%;
+  min-height: 100%;
+  padding: 14px 16px 32px;
+  color: var(--ink);
+  background: var(--bg);
+  border-radius: 8px;
+}
+
+.asset-page .asset-head,
+.asset-page .tabs,
+.asset-page .machine-strip,
+.asset-page .values-panel,
+.asset-page .toolbar,
+.asset-page .rule-list {
+  width: 100%;
+  max-width: none;
+}
+
+.asset-page .asset-head {
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.asset-page .asset-head .page-title {
+  color: var(--ink);
+  font-size: 28px;
+  margin: 0 0 7px;
+}
+
+.asset-page .asset-sub {
+  color: var(--muted);
+}
+
+.asset-page .asset-links {
+  gap: 20px;
+}
+
+.asset-page .tabs {
+  gap: 10px;
+  margin-bottom: 18px;
+  border-bottom-color: var(--line);
+}
+
+.asset-page .tabs button {
+  height: 46px;
+  padding: 0 18px;
+  border-bottom-width: 3px;
+  color: var(--ink-2);
+}
+
+.asset-page .tabs button.active {
+  color: var(--action);
+}
+
+.status-caption {
+  margin: 0 0 14px;
+  font-size: 14px;
+}
+
+.asset-page .machine-strip.status-summary {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) minmax(90px, .75fr) minmax(160px, 1.3fr) minmax(115px, .9fr) minmax(120px, 1fr) minmax(220px, 2fr);
+  align-items: stretch;
+  margin-bottom: 18px;
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+.asset-page .machine-strip.status-summary > * {
+  min-width: 0;
+  min-height: 82px;
+  justify-content: center;
+  padding: 12px 18px;
+  border-right: 1px solid var(--line);
+  border-bottom: 0;
+}
+
+.asset-page .machine-strip.status-summary > *:last-child {
+  border-right: 0;
+}
+
+.asset-page .machine-state {
+  font-size: 17px;
+}
+
+.asset-page .machine-state.running {
+  color: var(--ok);
+}
+
+.asset-page .machine-state.stopped {
+  color: var(--alert);
+}
+
+.asset-page .machine-fig {
+  gap: 3px;
+}
+
+.asset-page .machine-fig > span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.asset-page .machine-fig b {
+  color: var(--ink);
+  font-size: 21px;
+  overflow-wrap: anywhere;
+}
+
+.asset-page .machine-fig b.plain {
+  font-size: 15px;
+}
+
+.asset-page .cycle-signal-fig b {
+  font-size: 14px;
+}
+
+.asset-page .values-panel {
+  margin-bottom: 18px;
+  padding: 18px 20px 20px;
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+.asset-page .values-panel .panel-head {
+  align-items: baseline;
+  margin-bottom: 16px;
+}
+
+.asset-page .values-panel h2 {
+  color: var(--ink);
+  font-size: 18px;
+}
+
+.asset-page .values-panel .panel-head > .muted {
+  text-align: right;
+}
+
+.asset-page .values-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
+  gap: 0;
+  background: var(--line);
+  border-color: var(--line);
+  border-radius: 7px;
+}
+
+.asset-page .value-cell {
+  min-height: 132px;
+  padding: 16px 18px;
+  background: var(--surface);
+}
+
+.asset-page .value-name {
+  color: var(--ink-2);
+}
+
+.asset-page .value-num {
+  color: var(--ink);
+  font-size: 34px;
+}
+
+.asset-page .value-age {
+  line-height: 1.45;
+}
+
+.asset-page .toolbar.rule-toolbar {
+  gap: 10px;
+  max-width: none;
+  padding: 12px;
+  margin: 0 0 12px;
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+.asset-page .rule-toolbar .mini-input {
+  width: min(220px, 100%);
+  background: var(--bg);
+  border-color: var(--line-strong);
+}
+
+.asset-page .rule-toolbar .segment {
+  border-color: var(--line-strong);
+}
+
+.asset-page .rule-toolbar .segment button {
+  background: var(--surface);
+  color: var(--ink-2);
+}
+
+.asset-page .rule-toolbar .segment button.active {
+  background: var(--action-soft);
+  color: var(--action);
+}
+
+.asset-page .rule-toolbar .switch-label {
+  color: var(--ink-2);
+}
+
+.asset-page .rule-toolbar .dropdown > .link-btn {
+  color: var(--action);
+  padding: 0 4px;
+}
+
+.asset-page .rule-list {
+  gap: 10px;
+}
+
+.asset-page .rule-card.rule-row {
+  display: grid;
+  grid-template-columns: 5px minmax(220px, 1.4fr) minmax(180px, 1fr) minmax(210px, 1.2fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 92px;
+  padding: 14px 16px 14px 10px;
+  background: var(--surface);
+  border-color: var(--line);
+  transition: border-color .15s ease, background-color .15s ease;
+}
+
+.asset-page .rule-card.rule-row:hover {
+  background: var(--surface-2);
+  border-color: var(--line-strong);
+}
+
+.asset-page .rule-card .sev {
+  min-height: 56px;
+}
+
+.asset-page .rule-card.alert .sev,
+.asset-page .rule-card .sev.alert {
+  background: var(--alert);
+}
+
+.asset-page .rule-card.warning .sev,
+.asset-page .rule-card .sev.warning {
+  background: var(--warn-lamp);
+}
+
+.asset-page .rule-name.rule-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.asset-page .rule-card-main > strong {
+  color: var(--ink);
+  font-size: 15.5px;
+  font-weight: 650;
+}
+
+.asset-page .rule-name .rule-context,
+.asset-page .rule-name .rule-description {
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.asset-page .rule-name .rule-description {
+  color: var(--ink-2);
+}
+
+.asset-page .rule-evaluation {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.asset-page .rule-evaluation > small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.asset-page .rule-evaluation .badge {
+  min-width: 88px;
+  text-align: center;
+}
+
+.asset-page .rule-evaluation .badge.ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.asset-page .rule-evaluation .badge.warning {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.asset-page .rule-evaluation .badge.alert,
+.asset-page .rule-evaluation .badge.overdue {
+  background: var(--alert-soft);
+  color: var(--alert);
+}
+
+.asset-page .rule-card-metrics {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+}
+
+.asset-page .rule-current-value {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.asset-page .rule-current-value b {
+  color: var(--ink);
+  font-family: var(--font-num);
+  font-size: 23px;
+  font-variant-numeric: tabular-nums;
+}
+
+.asset-page .rule-limits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.asset-page .rule-limits > span {
+  display: flex;
+  min-width: 76px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-2);
+}
+
+.asset-page .rule-limits small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.asset-page .rule-limits b {
+  color: var(--ink-2);
+  font-family: var(--font-num);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.asset-page .rule-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.asset-page .rule-actions-menu .menu {
+  z-index: 30;
+}
+
+.asset-page .rule-card-actions .btn-outline {
+  min-width: 104px;
+}
+
+.asset-page .rule-actions-menu .icon-outline {
+  background: transparent;
+}
+
+.asset-page .menu {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.asset-page .menu button:hover:not(:disabled) {
+  background: var(--action-soft);
+  color: var(--action);
+}
+
+.asset-page .panel {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+@media (max-width: 1100px) {
+  .asset-page .machine-strip.status-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .asset-page .machine-strip.status-summary > *:nth-child(3n) {
+    border-right: 0;
+  }
+
+  .asset-page .machine-strip.status-summary > *:nth-child(-n + 3) {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .asset-page .rule-card.rule-row {
+    grid-template-columns: 5px minmax(180px, 1.2fr) minmax(160px, 1fr) minmax(190px, 1.2fr) auto;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 800px) {
+  .asset-page {
+    padding: 12px 10px 24px;
+  }
+
+  .asset-page .asset-head {
+    align-items: flex-start;
+  }
+
+  .asset-page .asset-links {
+    width: 100%;
+    gap: 12px;
+  }
+
+  .asset-page .tabs {
+    gap: 0;
+    overflow-x: auto;
+  }
+
+  .asset-page .tabs button {
+    flex: 0 0 auto;
+    padding: 0 12px;
+  }
+
+  .asset-page .machine-strip.status-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .asset-page .machine-strip.status-summary > * {
+    min-height: 72px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .asset-page .machine-strip.status-summary > *:nth-child(3n) {
+    border-right: 1px solid var(--line);
+  }
+
+  .asset-page .machine-strip.status-summary > *:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .asset-page .machine-strip.status-summary > *:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+
+  .asset-page .values-panel {
+    padding: 15px 12px;
+  }
+
+  .asset-page .values-panel .panel-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .asset-page .values-panel .panel-head > .muted {
+    text-align: left;
+  }
+
+  .asset-page .toolbar.rule-toolbar {
+    gap: 8px;
+  }
+
+  .asset-page .rule-toolbar .spacer {
+    display: none;
+  }
+
+  .asset-page .rule-card.rule-row {
+    grid-template-columns: 5px minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px 12px;
+    padding: 12px;
+  }
+
+  .asset-page .rule-card .sev {
+    grid-row: 1 / span 3;
+  }
+
+  .asset-page .rule-name.rule-card-main {
+    grid-column: 2 / 4;
+  }
+
+  .asset-page .rule-evaluation {
+    grid-column: 2;
+  }
+
+  .asset-page .rule-card-metrics {
+    grid-column: 2 / 4;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .asset-page .rule-card-actions {
+    grid-column: 3;
+    grid-row: 2;
+  }
+}
+
+@media (max-width: 520px) {
+  .asset-page .asset-head .page-title {
+    font-size: 25px;
+  }
+
+  .asset-page .machine-fig b {
+    font-size: 18px;
+  }
+
+  .asset-page .machine-fig b.plain,
+  .asset-page .cycle-signal-fig b {
+    font-size: 12px;
+  }
+
+  .asset-page .rule-toolbar .segment button {
+    padding: 0 9px;
+    font-size: 13px;
+  }
+
+  .asset-page .rule-toolbar .switch-label {
+    flex-basis: 100%;
+  }
+
+  .asset-page .rule-card-actions .btn-outline {
+    min-width: 0;
+    padding: 0 10px;
+  }
+
+  .asset-page .rule-limits > span {
+    min-width: 68px;
+  }
+}

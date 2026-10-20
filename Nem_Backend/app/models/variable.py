@@ -16,7 +16,7 @@ class Variable(Base):
     __table_args__ = (
         UniqueConstraint("asset_id", "key", name="uq_variables_asset_key"),
         Index("ix_variables_asset_active", "asset_id", "is_active"),
-        Index("ix_variables_opcua_node_id", "opcua_node_id", unique=True),
+        Index("ix_variables_opcua_node_id", "opcua_node_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

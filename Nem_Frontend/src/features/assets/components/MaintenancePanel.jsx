@@ -1,7 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../../../services/api.js";
 import { EmptyState, Modal } from "../../../components/common/UI.jsx";
 import { formatTime } from "../../../utils/format.js";
+import {
+  LEGACY_RULE_CHOICES,
+  legacyRulePath,
+} from "../rules/monitoringRuleFlow.js";
 import "./MaintenancePanel.css";
 
 const TYPES = ["preventive", "corrective", "inspection", "unplanned"];
@@ -109,6 +114,7 @@ function validateForm(values, requirePlannedDates) {
 }
 
 export default function MaintenancePanel({ assetId, onChanged }) {
+  const navigate = useNavigate();
   const [records, setRecords] = useState([]);
   const [archivedRecords, setArchivedRecords] = useState([]);
   const [schedules, setSchedules] = useState([]);
@@ -119,6 +125,7 @@ export default function MaintenancePanel({ assetId, onChanged }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [dialog, setDialog] = useState(null);
+  const [legacyRuleOptionsOpen, setLegacyRuleOptionsOpen] = useState(false);
   const [values, setValues] = useState(() => formValues(null));
   const [scheduleValues, setScheduleValues] = useState(null);
   const [approvalDate, setApprovalDate] = useState("");
@@ -560,14 +567,24 @@ export default function MaintenancePanel({ assetId, onChanged }) {
               Schedule, track and review work for this asset.
             </p>
           </div>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={openCreate}
-            disabled={busy}
-          >
-            Add Maintenance
-          </button>
+          <div className="maintenance-heading-actions">
+            <button
+              type="button"
+              className="btn-outline"
+              onClick={() => setLegacyRuleOptionsOpen(true)}
+              disabled={busy}
+            >
+              Other rule workflows
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={openCreate}
+              disabled={busy}
+            >
+              Add Maintenance
+            </button>
+          </div>
         </div>
 
         <div className="maintenance-summary" aria-label="Maintenance summary">
@@ -1200,6 +1217,30 @@ export default function MaintenancePanel({ assetId, onChanged }) {
               <button type="submit" className="btn-primary" disabled={busy}>{busy ? "Saving…" : dialog.kind === "create" ? "Create maintenance" : "Save changes"}</button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {legacyRuleOptionsOpen && (
+        <Modal
+          title="Additional asset rule workflows"
+          onClose={() => setLegacyRuleOptionsOpen(false)}
+        >
+          <div className="rule-type-options">
+            {LEGACY_RULE_CHOICES.map((choice) => (
+              <button
+                key={choice.kind}
+                type="button"
+                className="rule-type-option"
+                onClick={() => {
+                  setLegacyRuleOptionsOpen(false);
+                  navigate(legacyRulePath(assetId, choice.kind));
+                }}
+              >
+                <strong>{choice.label}</strong>
+                <small>{choice.description}</small>
+              </button>
+            ))}
+          </div>
         </Modal>
       )}
     </>

@@ -23,7 +23,9 @@ from app.models import (
     MaintenanceRecord,
     MonitoringEvent,
     MonitoringRule,
+    MonitoringRuleTemplate,
     Reading,
+    RuleCounterState,
     RuleCollection,
     RuleState,
     Variable,
@@ -31,13 +33,19 @@ from app.models import (
 from app.schemas.rule import (
     RuleCopyRequest,
     RuleCreate,
-    RuleRead,
     RuleSelection,
+    RuleTemplateAssetAssignment,
+    RuleTemplateCreate,
+    RuleTemplateRead,
     UsageRuleCreate,
 )
 from app.services.frontend_backup import create_backup, restore_backup
 from app.services.monitoring_engine import (emit_event,resolve_active_rule_alerts,set_rule_enabled_state,)
-from app.api.routes.rules import configured_cycle_signal_mapping, validate_targets
+from app.api.routes.rules import (
+    configured_cycle_signal_mapping,
+    configured_runtime_signal_mapping,
+    validate_targets,
+)
 from app.api.routes.monitoring import state_for_rule
 
 router = APIRouter(tags=["frontend compatibility"])
@@ -141,6 +149,7 @@ def _rule_row(session: Session, rule: MonitoringRule) -> dict[str, Any]:
             else "unknown"
         ),
         "rule_type": rule.rule_type,
+        "source_template_id": rule.source_template_id,
         "variable_id": rule.variable_id,
         "operator": rule.operator,
         "threshold": float(rule.threshold) if rule.threshold is not None else None,
@@ -198,7 +207,10 @@ def frontend_rules_by_status(kind: str, session: Session = Depends(get_db)) -> l
         raise HTTPException(status_code=422, detail="Rule status must be alert or warning")
     rows = session.scalars(
         select(MonitoringRule)
-        .where(MonitoringRule.is_archived.is_(False))
+        .where(
+            MonitoringRule.is_archived.is_(False),
+            MonitoringRule.target_asset_id.is_not(None),
+        )
         .order_by(MonitoringRule.id)
     ).all()
     return [
@@ -243,15 +255,9 @@ def _mapped_variable(
         )
     ).all()
     if len(matches) != 1:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Rule variable '{source.key}' must have exactly one active "
-                "variable with the same key and data type on the target asset"
-            ),
+        raise HTTPException(status_code=422,detail=(f"Rule variable '{source.key}' must have exactly one active variable with the same key and data type on the target asset"),
         )
     return matches[0]
-
 
 def _rule_definition(
     source: MonitoringRule,
@@ -263,6 +269,7 @@ def _rule_definition(
         "description": source.description,
         "rule_type": source.rule_type,
         "target_asset_id": target_asset_id,
+        "source_template_id": source.source_template_id,
         "variable_id": variable.id if variable else None,
         "operator": source.operator,
         "threshold": source.threshold,
@@ -272,7 +279,6 @@ def _rule_definition(
         "evaluation_interval_seconds": source.evaluation_interval_seconds,
         "stale_after_seconds": source.stale_after_seconds,
     }
-
 
 def _same_rule_definition(rule: MonitoringRule, definition: dict[str, Any]) -> bool:
     return all(
@@ -290,116 +296,93 @@ def _same_rule_definition(rule: MonitoringRule, definition: dict[str, Any]) -> b
         )
     )
 
-
-@router.get("/assets/{asset_id}/rules/predefined")
-def frontend_predefined_rules(
-    asset_id: int,
-    request: Request,
-    session: Session = Depends(get_db),
-) -> list[dict[str, Any]]:
-    if session.get(Asset, asset_id) is None:
-        raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
-    templates = session.scalars(
-        select(MonitoringRule)
-        .where(
-            MonitoringRule.target_asset_id.is_(None),
-            MonitoringRule.is_archived.is_(False),
-        )
-        .order_by(MonitoringRule.id)
-    ).all()
-    assigned = session.scalars(
-        select(MonitoringRule).where(
-            MonitoringRule.target_asset_id == asset_id,
-            MonitoringRule.is_archived.is_(False),
-        )
-    ).all()
-    result = []
-    for template in templates:
-        reason = None
-        mapped = None
-        try:
-            if template.rule_type == "generic":
-                raise HTTPException(
-                    status_code=422,
-                    detail="This rule type has no monitoring evaluator",
-                )
-            mapped = _mapped_variable(session, template.variable_id, asset_id)
-            definition = _rule_definition(template, asset_id, mapped)
-            try:
-                validated = RuleCreate.model_validate(definition)
-            except ValidationError as error:
-                raise HTTPException(status_code=422, detail=str(error)) from error
-            validate_targets(
-                session,
-                validated.target_asset_id,
-                validated.variable_id,
-                validated.rule_type,
-                validated.operator,
-                validated.threshold,
-                validated.parameters,
-                configured_cycle_signal_mapping(request, validated.variable_id),
+#Helper function for assigning templates -> finds variables on a target asset that are compatible with a template
+def _template_variables(session: Session, template: MonitoringRuleTemplate, asset_id: int
+) -> list[Variable]:
+        if not template.required_variable_types:
+            return []
+        return session.scalars(
+            select(Variable)
+            .where(
+                Variable.asset_id == asset_id,
+                Variable.is_active.is_(True),
+                Variable.data_type.in_(template.required_variable_types),
             )
-        except HTTPException as error:
-            reason = str(error.detail)
-            definition = None
-        except ValidationError as error:
-            reason = str(error)
-            definition = None
-        duplicate = bool(
-            definition
-            and any(_same_rule_definition(rule, definition) for rule in assigned)
-        )
-        result.append(
-            {
-                **RuleRead.model_validate(template).model_dump(mode="json"),
-                "assigned": duplicate,
-                "unavailable_reason": reason,
-                "mapped_variable_name": mapped.name if mapped else None,
-            }
-        )
-    return result
+            .order_by(Variable.name, Variable.id)
+        ).all()
 
+#Function decides which compatible variable to use
+def _mapped_template_variable(
+        template: MonitoringRuleTemplate,
+        candidates: list[Variable],
+        requested_variable_id: int | None,
+) -> Variable | None:
+        if not template.required_variable_types:
+            if requested_variable_id is not None:
+                raise HTTPException(status_code=422,detail=f"Rule '{template.name}' does not require a variable",)
+            return None
+        if requested_variable_id is not None:
+            mapped = next((item for item in candidates if item.id == requested_variable_id), None)
+            if mapped is None:
+                raise HTTPException(status_code=422,detail=(f"Variable {requested_variable_id} is not an active compatible "
+                        f"variable on the target asset for '{template.name}'"),)
+            return mapped
 
-@router.post("/assets/{asset_id}/rules/assign", status_code=201)
-def frontend_assign_predefined_rules(
-    asset_id: int,
-    payload: RuleSelection,
-    request: Request,
-    session: Session = Depends(get_db),
+        if template.variable_key:
+            key_matches = [item
+                for item in candidates
+                if item.key.casefold() == template.variable_key.casefold()
+            ]
+            if len(key_matches) == 1:
+                return key_matches[0]
+        if len(candidates) == 1:
+            return candidates[0]
+        if not candidates:
+            raise HTTPException(status_code=422,detail=(f"No active compatible variable is available for "
+                    f"'{template.name}' on the target asset"),)
+        raise HTTPException(status_code=422,detail=f"Choose a variable for '{template.name}' on the target asset",)
+
+#used to suggest a variable rather than requie a final selection
+def _suggested_template_variable(template: MonitoringRuleTemplate, candidates: list[Variable]) -> Variable | None:
+        if not template.required_variable_types:
+            return None
+        if template.variable_key:
+            key_matches = [
+                item
+                for item in candidates
+                if item.key.casefold() == template.variable_key.casefold()
+            ]
+            if len(key_matches) == 1:
+                return key_matches[0]
+        return candidates[0] if len(candidates) == 1 else None
+
+#function converts a reusable template into the definition of a rule for a specific asset
+def _template_rule_definition(
+        session: Session,
+        template: MonitoringRuleTemplate,
+        asset_id: int,
+        request: Request,
+        requested_variable_id: int | None,
 ) -> dict[str, Any]:
-    if session.get(Asset, asset_id) is None:
-        raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
-    templates = session.scalars(
-        select(MonitoringRule)
-        .where(
-            MonitoringRule.id.in_(payload.rule_ids),
-            MonitoringRule.target_asset_id.is_(None),
-            MonitoringRule.is_archived.is_(False),
-        )
-        .order_by(MonitoringRule.id)
-        .with_for_update()
-    ).all()
-    if len(templates) != len(payload.rule_ids):
-        raise HTTPException(
-            status_code=404,
-            detail="One or more selected predefined rules are unavailable",
-        )
-    existing = session.scalars(
-        select(MonitoringRule).where(
-            MonitoringRule.target_asset_id == asset_id,
-            MonitoringRule.is_archived.is_(False),
-        )
-    ).all()
-    prepared: list[tuple[MonitoringRule, dict[str, Any]]] = []
-    already_assigned = []
-    for template in templates:
-        if template.rule_type == "generic":
-            raise HTTPException(
-                status_code=422,
-                detail=f"Rule '{template.name}' has no monitoring evaluator",
-            )
-        mapped = _mapped_variable(session, template.variable_id, asset_id)
-        definition = _rule_definition(template, asset_id, mapped)
+        if not template.is_enabled:
+            raise HTTPException(status_code=422, detail=f"Rule template '{template.name}' is disabled")
+        candidates = _template_variables(session, template, asset_id)
+        variable = _mapped_template_variable(template, candidates, requested_variable_id)
+        definition = {
+            "name": template.name,
+            "description": template.description,
+            "rule_type": template.rule_type,
+            "target_asset_id": asset_id,
+            "variable_id": variable.id if variable else None,
+            "operator": template.operator,
+            "threshold": template.threshold,
+            "parameters": template.parameters,
+            "severity": template.severity,
+            "is_enabled": False,
+            "evaluation_interval_seconds": template.evaluation_interval_seconds,
+            "stale_after_seconds": template.stale_after_seconds,
+            "source_template_id": template.id,
+        }
         try:
             validated = RuleCreate.model_validate(definition)
         except ValidationError as error:
@@ -413,8 +396,279 @@ def frontend_assign_predefined_rules(
             validated.threshold,
             validated.parameters,
             configured_cycle_signal_mapping(request, validated.variable_id),
+            configured_runtime_signal_mapping(request, validated.variable_id),
         )
-        if any(_same_rule_definition(rule, definition) for rule in existing):
+        return definition
+
+#LIsting templates - builds a db query and optionally filters by name,type,status
+@router.get("/rule-templates", response_model=list[RuleTemplateRead])
+def list_rule_templates(
+        search: str | None = None,
+        rule_type: str | None = None,
+        is_enabled: bool | None = None,
+        session: Session = Depends(get_db),
+) -> list[MonitoringRuleTemplate]:
+        query = select(MonitoringRuleTemplate)
+        if search and search.strip():
+            pattern = f"%{search.strip()}%"
+            query = query.where(
+                or_(
+                    MonitoringRuleTemplate.name.ilike(pattern),
+                    MonitoringRuleTemplate.description.ilike(pattern),
+                )
+            )
+        if rule_type:
+            query = query.where(MonitoringRuleTemplate.rule_type == rule_type)
+        if is_enabled is not None:
+            query = query.where(MonitoringRuleTemplate.is_enabled.is_(is_enabled))
+        return session.scalars(
+            query.order_by(MonitoringRuleTemplate.name, MonitoringRuleTemplate.id)
+        ).all()
+
+#Creating a template not an asset-specific rule - templates are reusable definitions that can be assigned to multiple assets
+@router.post("/rule-templates", response_model=RuleTemplateRead, status_code=201)
+def create_rule_template(
+        payload: RuleTemplateCreate, session: Session = Depends(get_db)
+) -> MonitoringRuleTemplate:
+        template = MonitoringRuleTemplate(**payload.model_dump())
+        session.add(template)
+        session.commit()
+        session.refresh(template)
+        return template
+
+
+@router.get("/rule-templates/{template_id}", response_model=RuleTemplateRead)
+def get_rule_template(
+        template_id: int, session: Session = Depends(get_db)
+) -> MonitoringRuleTemplate:
+        template = session.get(MonitoringRuleTemplate, template_id)
+        if template is None:
+            raise HTTPException(status_code=404, detail="Rule template was not found")
+        return template
+
+#Retrieves the template and replaces its fields with the values in the request
+@router.put("/rule-templates/{template_id}", response_model=RuleTemplateRead)
+def update_rule_template(
+        template_id: int,
+        payload: RuleTemplateCreate,
+        session: Session = Depends(get_db),
+) -> MonitoringRuleTemplate:
+        template = session.get(MonitoringRuleTemplate, template_id)
+        if template is None:
+            raise HTTPException(status_code=404, detail="Rule template was not found")
+        for field, value in payload.model_dump().items():
+            setattr(template, field, value)
+        session.commit()
+        session.refresh(template)
+        return template
+
+#if template has assigned rules,it cannot be deleted 
+@router.delete("/rule-templates/{template_id}", status_code=204)
+def delete_rule_template(
+        template_id: int, session: Session = Depends(get_db)
+) -> None:
+        template = session.get(MonitoringRuleTemplate, template_id)
+        if template is None:
+            raise HTTPException(status_code=404, detail="Rule template was not found")
+        assigned_count = session.scalar(
+            select(func.count())
+            .select_from(MonitoringRule)
+            .where(MonitoringRule.source_template_id == template_id)
+        )
+        if assigned_count:
+            raise HTTPException(status_code=409,detail="This template has assigned rules; disable it instead of deleting it",)
+        session.delete(template)
+        session.commit()
+
+#this endpoint assigns one template to multiple assets, load -> check reqest-> validate -> 
+# resolve the variable mapping -> create missing assest-specific rules -> emit a rule_created -> commit the transaction -> return the created rule 
+@router.post("/rule-templates/{template_id}/assign", status_code=201)
+def assign_template_to_assets(
+        template_id: int,
+        payload: RuleTemplateAssetAssignment,
+        request: Request,
+        session: Session = Depends(get_db),
+) -> dict[str, Any]:
+        template = session.get(MonitoringRuleTemplate, template_id)
+        if template is None:
+            raise HTTPException(status_code=404, detail="Rule template was not found")
+        prepared = []
+        already_assigned = []
+        for asset_id in sorted(payload.asset_ids):
+            asset = session.scalar(select(Asset).where(Asset.id == asset_id).with_for_update())
+            if asset is None:
+                raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+            definition = _template_rule_definition(
+                session,
+                template,
+                asset_id,
+                request,
+                payload.variable_mappings.get(asset_id),
+            )
+            existing = session.scalars(
+                select(MonitoringRule)
+                .where(
+                    MonitoringRule.target_asset_id == asset_id,
+                    MonitoringRule.is_archived.is_(False),
+                )
+                .with_for_update()
+            ).all()
+            if any(
+                rule.source_template_id == template.id
+                or _same_rule_definition(rule, definition)
+                for rule in existing
+            ):
+                already_assigned.append(asset_id)
+            else:
+                prepared.append((asset_id, definition))
+
+        created = []
+        for asset_id, definition in prepared:
+            rule = MonitoringRule(**definition)
+            session.add(rule)
+            session.flush()
+            emit_event(
+                session,
+                event_type="rule_created",
+                message=f"Rule '{rule.name}' assigned to asset {asset_id}.",
+                occurred_at=datetime.now(timezone.utc),
+                asset_id=asset_id,
+                rule_id=rule.id,
+            )
+            created.append({"asset_id": asset_id, "id": rule.id, "name": rule.name})
+        session.commit()
+        return {"created": created, "already_assigned": already_assigned}
+
+#endpoint loads the templates library for a particular asset and provides info. needed by assignment dialog
+@router.get("/assets/{asset_id}/rules/predefined")
+def frontend_predefined_rules(
+    asset_id: int,
+    request: Request,
+    session: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    if session.get(Asset, asset_id) is None:
+        raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+    templates = session.scalars(
+        select(MonitoringRuleTemplate).order_by(
+            MonitoringRuleTemplate.name, MonitoringRuleTemplate.id
+        )
+    ).all()
+    assigned = session.scalars(
+        select(MonitoringRule).where(
+            MonitoringRule.target_asset_id == asset_id,
+            MonitoringRule.is_archived.is_(False),
+        )
+    ).all()
+    result = []
+    for template in templates:
+        reason = None
+        candidates = _template_variables(session, template, asset_id)
+        mapped = _suggested_template_variable(template, candidates)
+        definition = None
+        mapping_required = bool(
+            template.required_variable_types and candidates and mapped is None
+        )
+        try:
+            if not template.is_enabled:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Rule template '{template.name}' is disabled",
+                )
+            if template.required_variable_types and not candidates:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"No active compatible variable is available for "
+                        f"'{template.name}' on the target asset"
+                    ),
+                )
+            if not mapping_required:
+                definition = _template_rule_definition(
+                    session,
+                    template,
+                    asset_id,
+                    request,
+                    mapped.id if mapped else None,
+                )
+            else:
+                _template_rule_definition(
+                    session, template, asset_id, request, candidates[0].id
+                )
+        except HTTPException as error:
+            reason = str(error.detail)
+        duplicate = bool(
+            definition
+            and any(
+                rule.source_template_id == template.id
+                or _same_rule_definition(rule, definition)
+                for rule in assigned
+            )
+        )
+        result.append(
+            {**RuleTemplateRead.model_validate(template).model_dump(mode="json"),
+                "assigned": duplicate,
+                "unavailable_reason": reason,
+                "variable_mapping_required": mapping_required,
+                "mapped_variable_name": mapped.name if mapped else None,
+                "compatible_variables": [
+                    {
+                        "id": variable.id,
+                        "name": variable.name,
+                        "key": variable.key,
+                        "data_type": variable.data_type,
+                    }
+                    for variable in candidates
+                ],
+            }
+        )
+    return result
+
+
+@router.post("/assets/{asset_id}/rules/assign", status_code=201)
+def frontend_assign_predefined_rules(
+    asset_id: int,
+    payload: RuleSelection,
+    request: Request,
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    if session.scalar(
+        select(Asset).where(Asset.id == asset_id).with_for_update()
+    ) is None:
+        raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+    templates = session.scalars(
+        select(MonitoringRuleTemplate)
+        .where(
+            MonitoringRuleTemplate.id.in_(payload.rule_ids),
+        )
+        .order_by(MonitoringRuleTemplate.id)
+        .with_for_update()
+    ).all()
+    if len(templates) != len(payload.rule_ids):
+        raise HTTPException(
+            status_code=404,
+            detail="One or more selected rule templates are unavailable",
+        )
+    existing = session.scalars(
+        select(MonitoringRule).where(
+            MonitoringRule.target_asset_id == asset_id,
+            MonitoringRule.is_archived.is_(False),
+        )
+    ).all()
+    prepared: list[tuple[MonitoringRuleTemplate, dict[str, Any]]] = []
+    already_assigned = []
+    for template in templates:
+        definition = _template_rule_definition(
+            session,
+            template,
+            asset_id,
+            request,
+            payload.variable_mappings.get(template.id),
+        )
+        if any(
+            rule.source_template_id == template.id
+            or _same_rule_definition(rule, definition)
+            for rule in existing
+        ):
             already_assigned.append(template.id)
             continue
         prepared.append((template, definition))
@@ -437,7 +691,7 @@ def frontend_assign_predefined_rules(
     session.commit()
     return {"created": created, "already_assigned": already_assigned}
 
-
+#This endpoint copies selected asset-specific rules to another asset.
 @router.post("/assets/{asset_id}/rules/copy", status_code=201)
 def frontend_copy_asset_rules(
     asset_id: int,
@@ -503,6 +757,7 @@ def frontend_copy_asset_rules(
             validated.threshold,
             validated.parameters,
             configured_cycle_signal_mapping(request, validated.variable_id),
+            configured_runtime_signal_mapping(request, validated.variable_id),
         )
         if any(_same_rule_definition(rule, definition) for rule in existing):
             already_copied.append(source.id)
@@ -545,6 +800,7 @@ def frontend_create_asset_rule(
         session, payload.target_asset_id, payload.variable_id, payload.rule_type,
         payload.operator, payload.threshold, payload.parameters,
         configured_cycle_signal_mapping(request, payload.variable_id),
+        configured_runtime_signal_mapping(request, payload.variable_id),
     )
     rule = MonitoringRule(**payload.model_dump())
     session.add(rule)
@@ -561,7 +817,7 @@ def frontend_create_asset_rule(
     session.refresh(rule)
     return _rule_row(session, rule)
 
-
+#created a usage -threshold rule for a variable
 @router.post("/assets/{asset_id}/rules/usage", status_code=201)
 def frontend_create_usage_rule(
     asset_id: int,
@@ -598,6 +854,7 @@ def frontend_create_usage_rule(
         rule_payload.threshold,
         rule_payload.parameters,
         configured_cycle_signal_mapping(request, rule_payload.variable_id),
+        configured_runtime_signal_mapping(request, rule_payload.variable_id),
     )
     rule = MonitoringRule(**rule_payload.model_dump())
     session.add(rule)
@@ -676,6 +933,7 @@ def frontend_bulk_rule_state(
                     rule.threshold,
                     rule.parameters,
                     configured_cycle_signal_mapping(request, rule.variable_id),
+                    configured_runtime_signal_mapping(request, rule.variable_id),
                 )
             except HTTPException as error:
                 skipped.append({"rule_id": rule.id, "name": rule.name, "reason": str(error.detail)})
@@ -756,6 +1014,9 @@ def frontend_hard_delete_rule(
     if alert_ids:
         session.execute(delete(Alert).where(Alert.id.in_(alert_ids)))
     session.execute(delete(RuleState).where(RuleState.rule_id == rule.id))
+    session.execute(
+        delete(RuleCounterState).where(RuleCounterState.rule_id == rule.id)
+    )
     session.delete(rule)
     session.flush()
     emit_event(
@@ -1032,6 +1293,7 @@ def import_configuration(
             session, data.target_asset_id, data.variable_id, data.rule_type,
             data.operator, data.threshold, data.parameters,
             configured_cycle_signal_mapping(request, data.variable_id),
+            configured_runtime_signal_mapping(request, data.variable_id),
         )
         session.add(MonitoringRule(**data.model_dump()))
     session.commit()
