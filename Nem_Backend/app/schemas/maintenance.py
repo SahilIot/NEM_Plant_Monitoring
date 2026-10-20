@@ -15,7 +15,7 @@ class MaintenanceCreate(ORMModel):
     performed_by: str | None = Field(default=None, min_length=1, max_length=200)
     performed_at: datetime | None = None
     next_due_at: datetime | None = None
-    due_date: date
+    due_date: date | None = None
     maintenance_type: Literal["preventive", "corrective", "inspection", "unplanned"] = "inspection"
     status: Literal["planned", "in_progress", "completed", "cancelled"] = "planned"
     planned_start_at: datetime | None = None

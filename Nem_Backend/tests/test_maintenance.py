@@ -1,8 +1,9 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import re
 
 from tests.test_api import create_asset, create_reading, create_variable
+from app.models import MaintenanceRecord
 from app.services.maintenance_schedule import (
     due_status,
     emit_due_schedule_events,
@@ -61,6 +62,35 @@ def test_maintenance_records_are_persisted_and_filterable(client):
     assert maintenance_events["items"][0]["metadata"]["maintenance_record_id"] == record["id"]
     assert client.get(f"/api/v1/assets/{asset_id}").status_code == 200
     assert client.delete(f"/api/v1/assets/{asset_id}").status_code == 409
+
+
+def test_standalone_planned_due_date_is_persisted_and_returned(client):
+    asset_id = create_asset(client, "Planned due date asset")
+    due_date = date(2026, 11, 20)
+    created = client.post(
+        "/api/v1/maintenance",
+        json={
+            "asset_id": asset_id,
+            "summary": "Routine equipment inspection",
+            "title": "Monthly inspection",
+            "notes": "Inspect equipment condition and safety",
+            "due_date": due_date.isoformat(),
+            "maintenance_type": "inspection",
+            "status": "planned",
+            "priority": "medium",
+            "assigned_technician": "Technician 1",
+            "planned_start_at": "2026-11-20T09:00:00Z",
+            "planned_end_at": "2026-11-20T10:00:00Z",
+        },
+    )
+
+    assert created.status_code == 201, created.text
+    assert created.json()["planned_due_date"] == due_date.isoformat()
+
+    with client.app.state.session_factory() as session:
+        saved = session.get(MaintenanceRecord, created.json()["id"])
+        assert saved is not None
+        assert saved.planned_due_date == due_date
 
 
 def test_maintenance_rejects_unrelated_alert_and_invalid_dates(client):

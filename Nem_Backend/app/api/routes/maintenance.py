@@ -82,10 +82,8 @@ def _create_occurrence(
         performed_at=utc_now(),
         maintenance_type=schedule.maintenance_type,
         status="planned",
-        planned_start_at=datetime.combine(
-            due_date, time.min, tzinfo=timezone.utc
-        ),
-        planned_end_at=due_at,
+        planned_start_at=datetime.combine(due_date, time.min, tzinfo=timezone.utc),
+        planned_end_at=datetime.combine(due_date, time.max, tzinfo=timezone.utc),
         planned_due_date=due_date,
         priority=schedule.priority,
         assigned_technician=schedule.assigned_technician,
@@ -241,6 +239,7 @@ def create_maintenance_record(
         ),
         performed_at=performed_at,
         next_due_at=payload.next_due_at,
+        planned_due_date=payload.due_date,
         maintenance_type=(
             "inspection" if legacy_record else payload.maintenance_type
         ),
@@ -417,51 +416,45 @@ def permanently_delete_maintenance_schedule(
     session.commit()
 
 
-#User can change selected fields without sending the entire schedule again
+# User can change selected fields without sending the entire schedule again.
 @router.patch("/schedules/{schedule_id}", response_model=MaintenanceScheduleRead)
-def update_maintenance_schedule(
-    schedule_id: int,
-    payload: MaintenanceScheduleUpdate,
-    session: Session = Depends(get_db),
-) -> MaintenanceScheduleRead:
+def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpdate,session: Session = Depends(get_db),) -> MaintenanceScheduleRead:
     schedule = _schedule_or_404(session, schedule_id)
+
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status_code=422,detail="Provide at least one field to update",)
 
     previous_due_date = schedule.current_due_date
-    # Do not allow the first due date to change after completion
-    # or while a proposed next occurrence is awaiting approval.
+
     if ("first_due_date" in changes and changes["first_due_date"] != schedule.first_due_date
         and (schedule.approval_status == "pending" or schedule.last_completed_at is not None)):
         raise HTTPException(status_code=409,detail="The first due date cannot change after an occurrence has been completed",)
 
-    # Validate schedule-start-date changes before applying them.
     if "schedule_start_date" in changes:
         if schedule.last_completed_at is not None:
             raise HTTPException(status_code=409,detail="The schedule anchor cannot change after an occurrence has been completed",)
 
         if schedule.current_occurrence_id is not None:
             current_occurrence = session.get(MaintenanceRecord,schedule.current_occurrence_id,)
-
             if (current_occurrence is None or current_occurrence.status != "planned"):
                 raise HTTPException(status_code=409,detail="The schedule start date cannot change after maintenance starts",)
 
-    # Apply the fields supplied by the user.
     for field, value in changes.items():
         setattr(schedule, field, value)
 
     if "schedule_start_date" in changes:
         schedule.current_period_start_date = schedule.schedule_start_date
 
-    # Validate the resulting schedule dates.
     if schedule.first_due_date < schedule.schedule_start_date:
         raise HTTPException(status_code=422,detail="first_due_date must not precede schedule_start_date",)
 
-    if schedule.recurrence_enabled and (schedule.recurrence_interval is None or schedule.recurrence_unit is None):
+    if schedule.recurrence_enabled and (
+        schedule.recurrence_interval is None
+        or schedule.recurrence_unit is None
+    ):
         raise HTTPException(status_code=422,detail="recurrence_interval and recurrence_unit are required",)
 
-    # If recurrence is disabled, remove any pending next occurrence.
     if not schedule.recurrence_enabled:
         schedule.recurrence_interval = None
         schedule.recurrence_unit = None
@@ -473,20 +466,29 @@ def update_maintenance_schedule(
             if schedule.status == "awaiting_approval":
                 schedule.status = "completed"
 
-    # If the first due date changes before maintenance starts,
-    # update the existing planned occurrence as well.
-    if ("first_due_date" in changes and schedule.approval_status != "pending"
-        and schedule.last_completed_at is None and schedule.current_occurrence_id is not None):
+    if (
+        "first_due_date" in changes
+        and schedule.approval_status != "pending"
+        and schedule.last_completed_at is None
+        and schedule.current_occurrence_id is not None
+    ):
         occurrence = session.get(MaintenanceRecord,schedule.current_occurrence_id,)
 
         if occurrence is None or occurrence.status != "planned":
             raise HTTPException(status_code=409,detail="The first due date can only change before maintenance starts",)
 
         occurrence.planned_due_date = schedule.first_due_date
-        occurrence.planned_end_at = datetime.combine(schedule.first_due_date,time.max,tzinfo=timezone.utc,)
-
+        occurrence.planned_start_at = datetime.combine(
+            schedule.first_due_date,
+            time.min,
+            tzinfo=timezone.utc,
+        )
+        occurrence.planned_end_at = datetime.combine(
+            schedule.first_due_date,
+            time.max,
+            tzinfo=timezone.utc,
+        )
         schedule.current_period_start_date = schedule.schedule_start_date
-
         if previous_due_date is not None:
             alerts = session.scalars(
                 select(Alert).where(
@@ -505,10 +507,15 @@ def update_maintenance_schedule(
         schedule.current_due_date = schedule.first_due_date
         schedule.due_alerted_for = None
 
-    # NEW: Recalculate the proposed next due date when the user changes
-    # the interval or unit while a next occurrence is awaiting approval.
-    if (schedule.recurrence_enabled and schedule.approval_status == "pending"
-        and ("recurrence_interval" in changes or "recurrence_unit" in changes)):
+    # Recalculate the proposed date when the user changes the interval.
+    if (
+        schedule.recurrence_enabled
+        and schedule.approval_status == "pending"
+        and (
+            "recurrence_interval" in changes
+            or "recurrence_unit" in changes
+        )
+    ):
         if schedule.current_due_date is None:
             raise HTTPException(status_code=409,detail="The current maintenance due date is missing",)
 
@@ -518,30 +525,32 @@ def update_maintenance_schedule(
             unit=schedule.recurrence_unit or "months",
             after=schedule.current_due_date,
         )
-    # Cancelled schedules must not retain active due alerts or proposals.
-        if schedule.status == "cancelled":
-            schedule.proposed_due_date = None
-            schedule.approval_status = "declined"
 
-            now = utc_now()
-            active_due_alerts = session.scalars(
-                select(Alert).where(Alert.maintenance_schedule_id == schedule.id,
-                    Alert.status == "active",
-                )
-            ).all()
+    # Cancelled schedules must not retain proposals or active due alerts.
+    if schedule.status == "cancelled":
+        schedule.proposed_due_date = None
+        schedule.approval_status = "declined"
 
-            for alert in active_due_alerts:
-                alert.status = "resolved"
-                alert.resolved_at = now
-                alert.last_updated_at = now
-
-            _emit_schedule_event(session,schedule,
-                event_type="maintenance_schedule_cancelled",
-                message=f"Maintenance schedule cancelled: {schedule.title}.",
+        now = utc_now()
+        active_due_alerts = session.scalars(
+            select(Alert).where(
+                Alert.maintenance_schedule_id == schedule.id,
+                Alert.status == "active",
             )
-            session.commit()
-            session.refresh(schedule)
-        return  _schedule_read(schedule)
+        ).all()
+
+        for alert in active_due_alerts:
+            alert.status = "resolved"
+            alert.resolved_at = now
+            alert.last_updated_at = now
+
+        _emit_schedule_event(session,schedule,
+            event_type="maintenance_schedule_cancelled",
+            message=f"Maintenance schedule cancelled: {schedule.title}.",
+        )
+    session.commit()
+    session.refresh(schedule)
+    return _schedule_read(schedule)
 
 # Confirm the proposed date or save a replacement date selected by the user.
 @router.post("/schedules/{schedule_id}/confirm-next",response_model=MaintenanceScheduleRead,)
