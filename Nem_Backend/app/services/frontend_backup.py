@@ -25,6 +25,7 @@ from app.models import (
     MonitoringRule,
     MonitoringRuleTemplate,
     Reading,
+    RuleCounterState,
     RuleCollection,
     RuleState,
     Variable,
@@ -36,6 +37,7 @@ SNAPSHOT_MODELS = (
     Reading,
     MonitoringRuleTemplate,
     MonitoringRule,
+    RuleCounterState,
     RuleState,
     Alert,
     MonitoringEvent,
@@ -140,6 +142,7 @@ def restore_backup(
     if not isinstance(content, dict):
         raise HTTPException(status_code=422, detail="Backup file has an invalid format")
     content.setdefault(MonitoringRuleTemplate.__tablename__, [])
+    content.setdefault(RuleCounterState.__tablename__, [])
     if any(
         not isinstance(content.get(model.__tablename__), list) for model in SNAPSHOT_MODELS
     ):
@@ -168,9 +171,13 @@ def restore_backup(
                         {"table_name": model.__table__.name},
                     )
         session.commit()
-        from app.db.init_db import _migrate_legacy_rule_templates
+        from app.db.init_db import (
+            _migrate_existing_rule_counters,
+            _migrate_legacy_rule_templates,
+        )
 
         _migrate_legacy_rule_templates(engine)
+        _migrate_existing_rule_counters(engine)
     except Exception:
         session.rollback()
         raise

@@ -8,7 +8,10 @@ from sqlalchemy.orm import Session
 
 from app.models import Asset, Reading, Variable
 from app.schemas.reading import ReadingCreate
-from app.services.monitoring_engine import evaluate_reading_rules
+from app.services.monitoring_engine import (
+    evaluate_reading_rules,
+    update_rule_signal_states,
+)
 
 #checking the data type
 def validate_value(data_type: str, value: object) -> None:
@@ -63,6 +66,14 @@ def ingest_reading(
     reading = make_reading(payload)
     session.add(reading)
     session.flush()
+    update_rule_signal_states(
+        session,
+        asset_id=reading.asset_id,
+        variable_id=reading.variable_id,
+        value=reading.value,
+        at=reading.recorded_at,
+        stale_after_seconds=stale_after_seconds,
+    )
     evaluate_reading_rules(
         session,
         asset_id=reading.asset_id,

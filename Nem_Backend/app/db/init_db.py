@@ -1,9 +1,18 @@
 from sqlalchemy import inspect, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 import app.models
 from app.db.base import Base
-from app.models import MonitoringRule, MonitoringRuleTemplate, Variable
+from app.models import (
+    FrontendConfig,
+    MachineMonitoringState,
+    MonitoringRule,
+    MonitoringRuleTemplate,
+    RuleCounterState,
+    Variable,
+)
 
 #creates tables defined in SQLAlchemy models if they do not exist
 def initialize_database(engine: Engine) -> None:
@@ -20,6 +29,14 @@ def initialize_database(engine: Engine) -> None:
                         "ADD COLUMN opcua_node_id VARCHAR(512)"
                     )
                 )
+        with engine.begin() as connection:
+            connection.execute(text("DROP INDEX IF EXISTS ix_variables_opcua_node_id"))
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_variables_opcua_node_id "
+                    "ON variables (opcua_node_id)"
+                )
+            )
     if "nem_monitoring_rules" in table_names:
         rule_columns = {
             column["name"]
@@ -71,6 +88,7 @@ def initialize_database(engine: Engine) -> None:
             )
 
     _migrate_legacy_rule_templates(engine)
+    _migrate_existing_rule_counters(engine)
 
     if "nem_maintenance_schedules" in table_names:
         schedule_columns = {
@@ -279,4 +297,52 @@ def _migrate_legacy_rule_templates(engine: Engine) -> None:
             rule.is_enabled = False
             rule.is_archived = True
         session.commit()
- main
+
+
+def _migrate_existing_rule_counters(engine: Engine) -> None:
+    migration_key = "internal_rule_counter_state_v1"
+    insert_function = (
+        pg_insert if engine.dialect.name == "postgresql" else sqlite_insert
+    )
+    with Session(engine) as session:
+        statement = (
+            insert_function(FrontendConfig)
+            .values(key=migration_key, value={"complete": True})
+            .on_conflict_do_nothing(index_elements=[FrontendConfig.key])
+            .returning(FrontendConfig.key)
+        )
+        inserted = session.scalar(statement)
+        if inserted is None:
+            session.rollback()
+            return
+
+        rules = session.scalars(
+            select(MonitoringRule).where(
+                MonitoringRule.rule_type == "boolean_count_threshold",
+                MonitoringRule.target_asset_id.is_not(None),
+                MonitoringRule.is_archived.is_(False),
+            )
+        ).all()
+        for rule in rules:
+            machine_state = session.get(
+                MachineMonitoringState, rule.target_asset_id
+            )
+            session.add(
+                RuleCounterState(
+                    rule_id=rule.id,
+                    asset_id=rule.target_asset_id,
+                    cycle_count=machine_state.cycle_count if machine_state else 0,
+                    cycle_signal=machine_state.cycle_signal if machine_state else None,
+                    last_signal_at=(
+                        machine_state.last_cycle_signal_at
+                        if machine_state
+                        else None
+                    ),
+                    updated_at=(
+                        machine_state.updated_at
+                        if machine_state
+                        else rule.created_at
+                    ),
+                )
+            )
+        session.commit()

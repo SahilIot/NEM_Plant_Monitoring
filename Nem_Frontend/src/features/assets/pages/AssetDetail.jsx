@@ -14,6 +14,11 @@ import {
   timeAgo,
 } from "../../../utils/format.js";
 import {
+  MONITORING_RULE_CHOICES,
+  buildAssetMonitoringRule,
+  monitoringRuleFormSelection,
+} from "../rules/monitoringRuleFlow.js";
+import {
   CreateModal,
   EmptyState,
   Modal,
@@ -42,6 +47,17 @@ const HEALTH_LABEL = {
 };
 
 function thresholdMetrics(rule) {
+  if (rule.rule_type === "runtime_duration") {
+    const warnings = rule.parameters?.warning_thresholds_seconds;
+    const alert = rule.parameters?.alert_threshold_seconds;
+    if (Array.isArray(warnings) && warnings.length === 2 && alert != null) {
+      return [
+        { label: "Warning", value: `${(Number(warnings[0]) / 3600).toFixed(2)} h` },
+        { label: "Higher warning", value: `${(Number(warnings[1]) / 3600).toFixed(2)} h` },
+        { label: "Alert", value: `${(Number(alert) / 3600).toFixed(2)} h` },
+      ];
+    }
+  }
   if (rule.rule_type === "boolean_count_threshold") {
     const warnings = rule.parameters?.warning_thresholds;
     const alert = rule.parameters?.alert_threshold;
@@ -64,7 +80,7 @@ function thresholdMetrics(rule) {
   return [];
 }
 
-const ruleFields = (variables, cycleVariableIds) => [
+const ruleFields = (variables, cycleVariableIds, runtimeVariableIds) => [
   {
     key: "name",
     label: "Rule name",
@@ -85,6 +101,7 @@ const ruleFields = (variables, cycleVariableIds) => [
     options: [
       ["parameter_threshold", "Numeric value threshold"],
       ["boolean_count_threshold", "Boolean cycle-count thresholds"],
+      ["runtime_duration", "Running time"],
     ],
     hint: "Cycle counts come from this asset's configured PLC cycle signal.",
   },
@@ -113,6 +130,20 @@ const ruleFields = (variables, cycleVariableIds) => [
     hint: cycleVariableIds.length
       ? "Only Boolean variables configured as this asset's OPC UA cycle signal are available."
       : "No OPC UA cycle signal is configured for this asset. Configure it in backend OPCUA_MACHINE_MAPPINGS first.",
+  },
+  {
+    key: "runtime_variable_id",
+    label: "OPC UA Boolean running signal",
+    type: "select",
+    required: true,
+    showWhen: { key: "rule_type", equals: "runtime_duration" },
+    options: variables
+      .filter((variable) =>
+        variable.data_type === "boolean" &&
+        runtimeVariableIds.includes(variable.id)
+      )
+      .map((variable) => [variable.id, variable.name]),
+    hint: "Select a mapped Boolean OPC UA variable that is true while the machine runs.",
   },
   {
     key: "operator",
@@ -161,6 +192,30 @@ const ruleFields = (variables, cycleVariableIds) => [
     showWhen: { key: "rule_type", equals: "boolean_count_threshold" },
     requiredWhen: { key: "rule_type", equals: "boolean_count_threshold" },
     placeholder: "e.g. 10000",
+  },
+  {
+    key: "runtime_warning_hours",
+    label: "Warning threshold (hours)",
+    type: "number",
+    showWhen: { key: "rule_type", equals: "runtime_duration" },
+    requiredWhen: { key: "rule_type", equals: "runtime_duration" },
+    placeholder: "e.g. 8",
+  },
+  {
+    key: "runtime_warning_2_hours",
+    label: "Higher warning threshold (hours)",
+    type: "number",
+    showWhen: { key: "rule_type", equals: "runtime_duration" },
+    requiredWhen: { key: "rule_type", equals: "runtime_duration" },
+    placeholder: "e.g. 9",
+  },
+  {
+    key: "runtime_alert_hours",
+    label: "Alert threshold (hours)",
+    type: "number",
+    showWhen: { key: "rule_type", equals: "runtime_duration" },
+    requiredWhen: { key: "rule_type", equals: "runtime_duration" },
+    placeholder: "e.g. 10",
   },
   {
     key: "severity",
@@ -230,6 +285,7 @@ export default function AssetDetail() {
   const [rules, setRules] = useState([]);
   const [variables, setVariables] = useState([]);
   const [cycleVariableIds, setCycleVariableIds] = useState([]);
+  const [runtimeVariableIds, setRuntimeVariableIds] = useState([]);
   const [readings, setReadings] = useState([]);
   const [ruleStates, setRuleStates] = useState(new Map());
   const [varNames, setVarNames] = useState(new Map());
@@ -247,6 +303,7 @@ export default function AssetDetail() {
   const [actionNotice, setActionNotice] = useState("");
   const [sortMenu, setSortMenu] = useState(false);
   const [modal, setModal] = useState(null);
+  const [monitoringRuleSelection, setMonitoringRuleSelection] = useState(null);
   const [showPredefinedRules, setShowPredefinedRules] = useState(false);
   const [addRuleMenu, setAddRuleMenu] = useState(false);
   const [logs, setLogs] = useState([]);
@@ -314,6 +371,17 @@ export default function AssetDetail() {
         );
         setCycleVariableIds(
           activeCycleMapping ? [activeCycleMapping.variable_id] : []
+        );
+        setRuntimeVariableIds(
+          mappings
+            .filter(
+              (mapping) =>
+                mapping.asset_id === assetId &&
+                mapping.mapping_valid &&
+                mapping.data_type === "boolean" &&
+                mapping.role === "running_signal"
+            )
+            .map((mapping) => mapping.variable_id)
         );
         setCycleMapping(activeCycleMapping || null);
         setPlcConnection(plc.value?.connection || null);
@@ -531,8 +599,8 @@ export default function AssetDetail() {
 
   const availableVariables = variables;
   const ruleFormFields = useMemo(
-    () => ruleFields(availableVariables, cycleVariableIds),
-    [availableVariables, cycleVariableIds]
+    () => ruleFields(availableVariables, cycleVariableIds, runtimeVariableIds),
+    [availableVariables, cycleVariableIds, runtimeVariableIds]
   );
 
   const readingByVariable = new Map(
@@ -674,57 +742,40 @@ const filteredLogs = [...logs]
   };
 
   const addRule = async (values) => {
-    if (!availableVariables.length) {
-      throw new Error(
-        "Add an active variable to this asset before creating a rule."
-      );
-    }
-
-    const rule = {
-      name: values.name.trim(),
-      description: values.description?.trim() || null,
-      target_asset_id: assetId,
-      severity: values.severity,
-      is_enabled: true,
-      rule_type: values.rule_type,
-    };
-
-    if (values.rule_type === "boolean_count_threshold") {
-      rule.variable_id = Number(values.cycle_variable_id);
-      const warning1 = Number(values.warning_threshold_1);
-      const warning2 = Number(values.warning_threshold_2);
-      const alert = Number(values.alert_threshold);
-      if (
-        ![warning1, warning2, alert].every(
-          (value) => Number.isSafeInteger(value) && value > 0
-        ) ||
-        warning1 >= warning2 ||
-        warning2 >= alert
-      ) {
-        throw new Error(
-          "Cycle thresholds must be positive whole numbers in increasing order."
-        );
-      }
-      rule.parameters = {
-        warning_thresholds: [warning1, warning2],
-        alert_threshold: alert,
-      };
-    } else {
-      rule.variable_id = Number(values.variable_id);
-      const threshold = Number(values.threshold);
-      if (!Number.isFinite(threshold)) {
-        throw new Error("Enter a valid numeric threshold.");
-      }
-      rule.operator = values.operator;
-      rule.threshold = threshold;
-    }
-
+    const rule = buildAssetMonitoringRule(values, assetId, {
+      variables: availableVariables,
+      cycleVariableIds,
+      runtimeVariableIds,
+    });
     await api.post(`/assets/${assetId}/rules`, rule);
 
     setModal(null);
+    setMonitoringRuleSelection(null);
     setList("activated");
     await refreshAll();
   };
+
+  const openMonitoringRuleForm = (choiceId) => {
+    setMonitoringRuleSelection(monitoringRuleFormSelection(choiceId));
+    setModal("add");
+  };
+
+  const monitoringRuleFormFields = useMemo(
+    () =>
+      ruleFormFields.map((field) =>
+        field.key === "rule_type" && monitoringRuleSelection
+          ? {
+              ...field,
+              disabled: true,
+              options: field.options.filter(
+                ([ruleType]) =>
+                  ruleType === monitoringRuleSelection.ruleType
+              ),
+            }
+          : field
+      ),
+    [ruleFormFields, monitoringRuleSelection]
+  );
 
   const bulk = async (state) => {
     if (bulkRequest.current || bulkSaving) return;
@@ -1042,8 +1093,7 @@ const filteredLogs = [...logs]
                     ? rules.find(
                         (rule) =>
                           rule.rule_type === "boolean_count_threshold" &&
-                          rule.variable_id === variable.id &&
-                          rule.state === "activated"
+                          rule.variable_id === variable.id
                       )
                     : null;
                   const cycleRuleState = cycleRule
@@ -1092,15 +1142,17 @@ const filteredLogs = [...logs]
                       </span>
                       {isCycleSignal && machine && (
                         <span className="value-age">
-                            Backend cycle count:{" "}
-                            {machine.cycle_count.toLocaleString()}
-                            {cycleRule
-                              ? ` · ${cycleRule.name}: ${
-                                  cycleRuleState?.status ||
-                                  cycleRule.status ||
-                                  "unknown"
-                                }`
-                              : ""}
+                          {cycleRule
+                            ? `${cycleRule.name} count: ${
+                                cycleRuleState?.latest_value == null
+                                  ? "Waiting for first count"
+                                  : Number(
+                                      cycleRuleState.latest_value
+                                    ).toLocaleString()
+                              }`
+                            : `Machine cycle count: ${Number(
+                                machine.cycle_count
+                              ).toLocaleString()}`}
                         </span>
                       )}
                     </div>
@@ -1305,6 +1357,10 @@ const filteredLogs = [...logs]
                 const limits = thresholdMetrics(rule);
                 const currentValue =
                   state?.latest_value ?? rule.latest_value;
+                const formattedCurrentValue =
+                  rule.rule_type === "runtime_duration"
+                    ? formatDuration(currentValue)
+                    : formatValue(currentValue);
 
                 return (
                   <article
@@ -1343,8 +1399,8 @@ const filteredLogs = [...logs]
                     <div className="rule-card-metrics">
                       {currentValue !== null && currentValue !== undefined && (
                         <div className="rule-current-value">
-                          <span>Now</span>
-                          <b>{formatValue(currentValue)}</b>
+                          <span>{rule.rule_type === "runtime_duration" ? "Running time" : "Now"}</span>
+                          <b>{formattedCurrentValue}</b>
                         </div>
                       )}
                       {limits.length > 0 && (
@@ -1526,42 +1582,21 @@ const filteredLogs = [...logs]
 
 {modal === "ruleTypeOptions" && (
   <Modal
-    title="Create new rule"
+    title="Create monitoring rule"
     onClose={() => setModal(null)}
   >
     <div className="rule-type-options">
-    <button
-        type="button"
-        className="rule-type-option"
-        onClick={() =>
-          navigate(`/assets/${assetId}/rules/new/interval`)
-        }
-      >
-        <strong>Interval-based</strong>
-        <small>Create a recurring maintenance schedule with due dates</small>
-      </button>
-
-      <button
-        type="button"
-        className="rule-type-option"
-        onClick={() =>
-          navigate(`/assets/${assetId}/rules/new/usage`)
-        }
-      >
-        <strong>Usage-based</strong>
-        <small>Alert when a numeric usage metric reaches a threshold</small>
-      </button>
-
-      <button
-        type="button"
-        className="rule-type-option"
-        onClick={() =>
-          navigate(`/assets/${assetId}/rules/new/time`)
-        }
-      >
-        <strong>Time-based</strong>
-        <small>Schedule a maintenance job for a start and end date/time</small>
-      </button>
+      {MONITORING_RULE_CHOICES.map((choice) => (
+        <button
+          key={choice.id}
+          type="button"
+          className="rule-type-option"
+          onClick={() => openMonitoringRuleForm(choice.id)}
+        >
+          <strong>{choice.label}</strong>
+          <small>{choice.description}</small>
+        </button>
+      ))}
     </div>
   </Modal>
 )}
@@ -1590,16 +1625,20 @@ const filteredLogs = [...logs]
 
       {modal === "add" && (
         <CreateModal
-          title="Add rule"
-          submitLabel="Add rule"
+          title={monitoringRuleSelection?.title || "Create monitoring rule"}
+          submitLabel="Create rule"
           intro={
             availableVariables.length
               ? undefined
               : "This asset has no active variables yet. Add one under Variables, then come back to create a rule."
           }
-          fields={ruleFormFields}
+          fields={monitoringRuleFormFields}
+          initialValues={monitoringRuleSelection?.initialValues}
           onSubmit={addRule}
-          onClose={() => setModal(null)}
+          onClose={() => {
+            setModal(null);
+            setMonitoringRuleSelection(null);
+          }}
         />
       )}
 
