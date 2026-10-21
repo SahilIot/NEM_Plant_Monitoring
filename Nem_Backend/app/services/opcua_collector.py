@@ -6,7 +6,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Callable
 
@@ -107,15 +107,44 @@ def load_machine_mappings(raw: str) -> list[OpcUaMachineMapping]:
     return mappings
 
 #calculating machine running time
-def advance_runtime(state: MachineMonitoringState, at: datetime) -> None:
-    checkpoint = state.runtime_checkpoint_at
-    if state.is_running is True and checkpoint is not None and at <= checkpoint:
+def advance_runtime(
+    state: MachineMonitoringState,
+    at: datetime,
+    stale_after_seconds: int,
+    signal_at: datetime | None = None,
+) -> None:
+    """Accumulate runtime only up to the point the running signal stays trustworthy.
+
+    Time is never counted past ``signal_at + stale_after_seconds``; once that
+    deadline has passed the state becomes unknown (None) and accumulated
+    runtime is preserved.
+    """
+    if state.is_running is not True:
+        state.runtime_checkpoint_at = None
+        state.updated_at = at
         return
-    if state.is_running is True and checkpoint is not None and at > checkpoint:
+    checkpoint = state.runtime_checkpoint_at
+    if checkpoint is not None and at <= checkpoint:
+        return
+    last_signal_at = (
+        signal_at if signal_at is not None else state.last_running_signal_at
+    )
+    if last_signal_at is None:
+        state.is_running = None
+        state.runtime_checkpoint_at = None
+        state.updated_at = at
+        return
+    deadline = last_signal_at + timedelta(seconds=stale_after_seconds)
+    end = min(at, deadline)
+    if checkpoint is not None and end > checkpoint:
         state.accumulated_running_seconds = Decimal(
             state.accumulated_running_seconds
-        ) + Decimal(str((at - checkpoint).total_seconds()))
-    state.runtime_checkpoint_at = at if state.is_running is True else None
+        ) + Decimal(str((end - checkpoint).total_seconds()))
+    if at > deadline:
+        state.is_running = None
+        state.runtime_checkpoint_at = None
+    else:
+        state.runtime_checkpoint_at = at
     state.updated_at = at
 
 
@@ -699,10 +728,15 @@ class OpcUaCollector:
                 )
                 continue
 
+            # The server's read timestamp, not local receipt time, proves freshness;
+            # a constant bit's source timestamp can legitimately be old.
+            read_timestamp = getattr(
+                data_value, "ServerTimestamp", None
+            ) or getattr(data_value, "SourceTimestamp", None)
             notification = OpcUaNotification(
                 node_id=signal.node_id,
                 value=value,
-                recorded_at=sampled_at or utc_now(),
+                recorded_at=read_timestamp,
             )
             await asyncio.to_thread(
                 self._process_mapped_notification,
@@ -847,6 +881,30 @@ class OpcUaCollector:
             )
             return
 
+        stale_after = self.settings.monitoring_default_stale_after_seconds
+        if role in {"running", "reading"} and isinstance(
+            notification.value, bool
+        ):
+            if notification.recorded_at is None:
+                LOGGER.warning(
+                    "Ignoring Boolean OPC UA state sample without a source or "
+                    "server timestamp for asset %s",
+                    mapping.asset_id,
+                )
+                return
+            sample_age = utc_now() - _normalize_notification_timestamp(
+                notification.recorded_at, notification.node_id
+            )
+            if sample_age > timedelta(seconds=stale_after):
+                LOGGER.warning(
+                    "Ignoring stale Boolean OPC UA state sample for asset %s "
+                    "(age %.0f s exceeds %s s)",
+                    mapping.asset_id,
+                    sample_age.total_seconds(),
+                    stale_after,
+                )
+                return
+
         recorded_at = _normalize_notification_timestamp(
             notification.recorded_at, notification.node_id
         )
@@ -929,7 +987,12 @@ class OpcUaCollector:
                 elif role == "running":
                     state.last_running_signal_at = recorded_at
                     self._apply_running_signal(
-                        session, state, notification.value, recorded_at
+                        session,
+                        state,
+                        notification.value,
+                        recorded_at,
+                        stale_after,
+                        signal_at,
                     )
                 session.commit()
         except (HTTPException, ValidationError, ValueError) as error:
@@ -959,10 +1022,14 @@ class OpcUaCollector:
         state: MachineMonitoringState,
         value: bool,
         at: datetime,
+        stale_after_seconds: int,
+        previous_signal_at: datetime | None,
     ) -> None:
+        if state.is_running is True:
+            advance_runtime(
+                state, at, stale_after_seconds, previous_signal_at
+            )
         previous = state.is_running
-        if previous is True:
-            advance_runtime(state, at)
         state.is_running = value
         if value:
             if state.runtime_checkpoint_at is None or at > state.runtime_checkpoint_at:
@@ -991,8 +1058,16 @@ class OpcUaCollector:
                     MachineMonitoringState.is_running.is_(True)
                 )
             ).all()
+            stale_after = timedelta(
+                seconds=self.settings.monitoring_default_stale_after_seconds
+            )
             for state in states:
-                state.runtime_checkpoint_at = at
+                signal_at = state.last_running_signal_at
+                if signal_at is None or at - signal_at > stale_after:
+                    state.is_running = None
+                    state.runtime_checkpoint_at = None
+                else:
+                    state.runtime_checkpoint_at = at
                 state.updated_at = at
             session.commit()
 
@@ -1009,7 +1084,11 @@ class OpcUaCollector:
                 )
             ).all()
             for state in states:
-                advance_runtime(state, at)
+                advance_runtime(
+                    state,
+                    at,
+                    self.settings.monitoring_default_stale_after_seconds,
+                )
             session.commit()
 
     def _disconnect_runtime(self, at: datetime) -> None:
@@ -1025,7 +1104,11 @@ class OpcUaCollector:
                 )
             ).all()
             for state in states:
-                advance_runtime(state, at)
+                advance_runtime(
+                    state,
+                    at,
+                    self.settings.monitoring_default_stale_after_seconds,
+                )
                 state.runtime_checkpoint_at = None
             session.commit()
 #lease management - preventing competing collectors
@@ -1146,12 +1229,19 @@ def machine_status_rows(
         running_seconds = (
             Decimal(state.accumulated_running_seconds) if state else Decimal(0)
         )
+        signal_fresh = (
+            state is not None
+            and state.last_running_signal_at is not None
+            and current_time - state.last_running_signal_at
+            <= timedelta(seconds=stale_after_seconds)
+        )
         if (
             state is not None
             and state.is_running is True
             and state.runtime_checkpoint_at is not None
             and collector is not None
             and collector.status["connected"]
+            and signal_fresh
             and current_time > state.runtime_checkpoint_at
         ):
             running_seconds += Decimal(
@@ -1162,11 +1252,11 @@ def machine_status_rows(
                 "asset_id": mapping.asset_id,
                 "asset_name": asset.name if asset else None,
                 "status": (
-                    "running" if state and state.is_running is True
+                    "running" if state and state.is_running is True and signal_fresh
                     else "stopped" if state and state.is_running is False
                     else "unknown"
                 ),
-                "is_running": state.is_running if state else None,
+                "is_running": (state.is_running if signal_fresh or (state and state.is_running is False) else None) if state else None,
                 "cycle_count": state.cycle_count if state else 0,
                 "running_seconds": float(running_seconds),
                 "cycle_limit": mapping.cycle_limit,

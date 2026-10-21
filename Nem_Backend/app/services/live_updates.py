@@ -24,10 +24,7 @@ class LiveUpdateHub:
     def unsubscribe(self, queue: asyncio.Queue[dict[str, Any]]) -> None:
         self._subscribers.discard(queue)
 
-    def add_database_change_listener(
-        self,
-        listener: Callable[[set[str]], None],
-    ) -> None:
+    def add_database_change_listener(self,listener: Callable[[set[str]], None],) -> None:
         self._database_change_listeners.add(listener)
 
     def publish_from_session(self,changed_tables: set[str],asset_ids: set[int],) -> None:
