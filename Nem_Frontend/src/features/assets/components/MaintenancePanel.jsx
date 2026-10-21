@@ -271,39 +271,13 @@ export default function MaintenancePanel({ assetId, onChanged }) {
     setValues(formValues(dialog.record));
   }, [dialog]);
 
-  const counts = useMemo(() => {
-    return records.reduce(
-      (result, record) => {
-        if (record.status === "in_progress") result.inProgress += 1;
-        if (record.status === "completed") result.completed += 1;
-        return result;
-      },
-      {
-        upcoming: schedules.filter((item) => item.due_status === "upcoming").length,
-        dueToday: schedules.filter((item) => item.due_status === "due_today").length,
-        inProgress: 0,
-        overdue: schedules.filter((item) => item.due_status === "overdue").length,
-        completed: 0,
-      }
-    );
-  }, [records, schedules]);
-
   const openCreate = () => {
-    setError("");
-    setNotice("");
-    setScheduleValues({
-      title: "",
-      maintenance_type: "preventive",
-      priority: "medium",
-      assigned_technician: "",
-      description: "",
-      schedule_start_date: todayDateInput(),
-      first_due_date: "",
-      recurrence_enabled: true,
-      recurrence_interval: "1",
-      recurrence_unit: "months",
-    });
-    setDialog({ kind: "schedule-create", record: null });
+    navigate(`/assets/${assetId}/maintenance/schedules/new`);
+  };
+
+  // Opens the maintenance logbook for the current asset.
+  const openMaintenanceLogbook = () => {
+    navigate(`/assets/${assetId}/maintenance/logbook`);
   };
 
   const openScheduleEdit = (schedule) => {
@@ -578,6 +552,14 @@ export default function MaintenancePanel({ assetId, onChanged }) {
             </button>
             <button
               type="button"
+              className="secondary-btn"
+              onClick={openMaintenanceLogbook}
+              disabled={busy}
+            >
+              View Maintenance Logbook
+            </button>
+            <button
+              type="button"
               className="btn-primary"
               onClick={openCreate}
               disabled={busy}
@@ -585,14 +567,6 @@ export default function MaintenancePanel({ assetId, onChanged }) {
               Add Maintenance
             </button>
           </div>
-        </div>
-
-        <div className="maintenance-summary" aria-label="Maintenance summary">
-          <div><span>Upcoming</span><strong>{counts.upcoming}</strong></div>
-          <div><span>Due today</span><strong>{counts.dueToday}</strong></div>
-          <div><span>In progress</span><strong>{counts.inProgress}</strong></div>
-          <div><span>Overdue</span><strong>{counts.overdue}</strong></div>
-          <div><span>Completed</span><strong>{counts.completed}</strong></div>
         </div>
 
         {error && <p className="notice error" role="alert">{error}</p>}
@@ -637,88 +611,31 @@ export default function MaintenancePanel({ assetId, onChanged }) {
                     <td>{actualDuration(record)}</td>
                     <td>
                       <div className="maintenance-actions">
-                        <button
-                          type="button"
-                          className="btn-outline"
-                          onClick={() => setDialog({ kind: "details", record })}
-                        >
-                          View Details
-                        </button>
+                        <button type="button" className="btn-outline" onClick={() => setDialog({ kind: "details", record })}>View Details</button>
                         {record.status === "completed" ? (
                           <>
-                            <button
-                              type="button"
-                              className="btn-danger"
-                              onClick={() => archiveCompleted(record)}
-                              disabled={busy}
-                            >
-                              Archive
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-danger"
-                              onClick={() => permanentlyDeleteRecord(record)}
-                              disabled={busy}
-                            >
-                              {deletingRecordId === record.id
-                                ? "Deleting…"
-                                : "Delete permanently"}
+                            <button type="button" className="btn-danger" onClick={() => archiveCompleted(record)} disabled={busy}>Archive</button>
+                            <button type="button" className="btn-danger" onClick={() => permanentlyDeleteRecord(record)} disabled={busy}>
+                              {deletingRecordId === record.id ? "Deleting…" : "Delete permanently"}
                             </button>
                           </>
                         ) : (
                           <>
-                            <button
-                              type="button"
-                              className="btn-outline"
-                              onClick={() => openEdit(record)}
-                              disabled={busy}
-                            >
-                              Edit
-                            </button>
+                            <button type="button" className="btn-outline" onClick={() => openEdit(record)} disabled={busy}>Edit</button>
                             {record.status !== "in_progress" && (
-                              <button
-                                type="button"
-                                className="btn-danger"
-                                onClick={() => permanentlyDeleteRecord(record)}
-                                disabled={busy}
-                              >
-                                {deletingRecordId === record.id
-                                  ? "Deleting…"
-                                  : record.schedule_id
-                                    ? "Delete schedule"
-                                    : "Delete permanently"}
+                              <button type="button" className="btn-danger" onClick={() => permanentlyDeleteRecord(record)} disabled={busy}>
+                                {deletingRecordId === record.id ? "Deleting…" : record.schedule_id ? "Delete schedule" : "Delete permanently"}
                               </button>
                             )}
                           </>
                         )}
                         {record.status === "planned" && (
-                          <button
-                            type="button"
-                            className="btn-outline"
-                            onClick={() => runAction(record, "start")}
-                            disabled={busy}
-                          >
-                            Start
-                          </button>
+                          <button type="button" className="btn-outline" onClick={() => runAction(record, "start")} disabled={busy}>Start</button>
                         )}
                         {!["completed", "cancelled"].includes(record.status) && (
                           <>
-                            <button
-                              type="button"
-                              className="btn-primary"
-                              onClick={() => runAction(record, "complete")}
-                              disabled={busy}
-                            >
-                              Complete
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-danger"
-                              onClick={() => runAction(record, "cancel")}
-                              disabled={busy}
-                            >
-                              Cancel
-                            </button>
+                            <button type="button" className="btn-primary" onClick={() => runAction(record, "complete")} disabled={busy}>Complete</button>
+                            <button type="button" className="btn-danger" onClick={() => runAction(record, "cancel")} disabled={busy}>Cancel</button>
                           </>
                         )}
                       </div>
@@ -739,14 +656,7 @@ export default function MaintenancePanel({ assetId, onChanged }) {
             <div className="maintenance-table-wrap">
               <table className="table maintenance-table">
                 <thead>
-                  <tr>
-                    <th>Title</th>
-                    <th>Type</th>
-                    <th>Due date</th>
-                    <th>Completed</th>
-                    <th>Archived</th>
-                    <th>Actions</th>
-                  </tr>
+                  <tr><th>Title</th><th>Type</th><th>Due date</th><th>Completed</th><th>Archived</th><th>Actions</th></tr>
                 </thead>
                 <tbody>
                   {archivedRecords.map((record) => (
@@ -757,15 +667,8 @@ export default function MaintenancePanel({ assetId, onChanged }) {
                       <td>{record.actual_completed_at ? formatTime(record.actual_completed_at) : "—"}</td>
                       <td>{formatTime(record.archived_at)}</td>
                       <td>
-                        <button
-                          type="button"
-                          className="btn-danger"
-                          onClick={() => permanentlyDeleteRecord(record)}
-                          disabled={busy}
-                        >
-                          {deletingRecordId === record.id
-                            ? "Deleting…"
-                            : "Delete permanently"}
+                        <button type="button" className="btn-danger" onClick={() => permanentlyDeleteRecord(record)} disabled={busy}>
+                          {deletingRecordId === record.id ? "Deleting…" : "Delete permanently"}
                         </button>
                       </td>
                     </tr>
@@ -783,153 +686,65 @@ export default function MaintenancePanel({ assetId, onChanged }) {
               <table className="table maintenance-table">
                 <thead>
                   <tr>
-                    <th>Schedule</th>
-                    <th>Recurrence</th>
-                    <th>Current due</th>
-                    <th>Day count (elapsed / total)</th>
-                    <th>Due state</th>
-                    <th>Last completed</th>
-                    <th>Next proposed</th>
-                    <th>Approval</th>
-                    <th>Actions</th>
+                    <th>Schedule</th><th>Recurrence</th><th>Current due</th><th>Day count (elapsed / total)</th><th>Due state</th><th>Last completed</th><th>Next proposed</th><th>Approval</th><th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {schedules.map((schedule) => (
                     <tr key={schedule.id}>
                       <td>{schedule.title}</td>
-                      <td>
-                        {schedule.recurrence_enabled
-                          ? `Every ${schedule.recurrence_interval} ${schedule.recurrence_unit}`
-                          : "One-time"}
-                      </td>
+                      <td>{schedule.recurrence_enabled ? `Every ${schedule.recurrence_interval} ${schedule.recurrence_unit}` : "One-time"}</td>
                       <td>{displayDate(schedule.current_due_date)}</td>
-                      <td>
-                        {schedule.current_day_count}/{schedule.total_days}
-                      </td>
-                      <td>
-                        <span className={`maintenance-status ${schedule.due_status}`}>
-                          {schedule.due_status.replaceAll("_", " ")}
-                        </span>
-                      </td>
-                      <td>
-                        {schedule.last_completed_at
-                          ? formatTime(schedule.last_completed_at)
-                          : "—"}
-                      </td>
+                      <td>{schedule.current_day_count}/{schedule.total_days}</td>
+                      <td><span className={`maintenance-status ${schedule.due_status}`}>{schedule.due_status.replaceAll("_", " ")}</span></td>
+                      <td>{schedule.last_completed_at ? formatTime(schedule.last_completed_at) : "—"}</td>
                       <td>{displayDate(schedule.proposed_due_date)}</td>
                       <td>{schedule.approval_status.replaceAll("_", " ")}</td>
                       <td>
                         <div className="maintenance-actions">
-                          <button
-                            type="button"
-                            className="btn-outline"
-                            onClick={() => setDialog({ kind: "schedule-details", record: schedule })}
-                            disabled={busy}
-                          >
-                            View schedule
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-outline"
-                            onClick={() => openScheduleEdit(schedule)}
-                            disabled={busy}
-                          >
-                            Edit schedule
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-danger"
-                            onClick={() => permanentlyDeleteSchedule(schedule)}
-                            disabled={busy}
-                          >
-                            {deletingScheduleId === schedule.id
-                              ? "Deleting…"
-                              : "Delete schedule"}
+                          <button type="button" className="btn-outline" onClick={() => setDialog({ kind: "schedule-details", record: schedule })} disabled={busy}>View schedule</button>
+                          <button type="button" className="btn-outline" onClick={() => openScheduleEdit(schedule)} disabled={busy}>Edit schedule</button>
+                          <button type="button" className="btn-danger" onClick={() => permanentlyDeleteSchedule(schedule)} disabled={busy}>
+                            {deletingScheduleId === schedule.id ? "Deleting…" : "Delete schedule"}
                           </button>
                           {schedule.approval_status === "pending" && (
                             <>
-                              <button
-                                type="button"
-                                className="btn-primary"
-                                onClick={() => {
-                                  setApprovalDate(schedule.proposed_due_date);
-                                  setDialog({ kind: "approval", record: schedule });
-                                }}
-                                disabled={busy}
-                              >
-                                Review next date
-                              </button>
-                              <button
-                                type="button"
-                                className="btn-outline"
-                                onClick={() => {
-                                  setApprovalDate(schedule.proposed_due_date);
-                                  setDialog({ kind: "approval", record: schedule });
-                                }}
-                                disabled={busy}
-                              >
-                                Change date
-                              </button>
+                              <button type="button" className="btn-primary" onClick={() => { setApprovalDate(schedule.proposed_due_date); setDialog({ kind: "approval", record: schedule }); }} disabled={busy}>Review next date</button>
+                              <button type="button" className="btn-outline" onClick={() => { setApprovalDate(schedule.proposed_due_date); setDialog({ kind: "approval", record: schedule }); }} disabled={busy}>Change date</button>
+                              <button type="button" className="btn-danger" onClick={() => declineNextOccurrence(schedule)} disabled={busy}>Do not schedule</button>
+                            </>
+                          )}
+                          {schedule.recurrence_enabled && schedule.status === "active" && (
+                            <>
+                              <button type="button" className="btn-outline" onClick={() => changeScheduleStatus(schedule, "paused")} disabled={busy}>Pause recurrence</button>
                               <button
                                 type="button"
                                 className="btn-danger"
-                                onClick={() => declineNextOccurrence(schedule)}
+                                onClick={async () => {
+                                  if (!window.confirm(`Cancel recurrence for "${schedule.title}"?`)) return;
+                                  setBusy(true);
+                                  try {
+                                    await api.patch(`/maintenance/schedules/${schedule.id}`, {
+                                      recurrence_enabled: false,
+                                      recurrence_interval: null,
+                                      recurrence_unit: null,
+                                      status: "cancelled",
+                                    });
+                                    setNotice("Recurrence cancelled; existing maintenance history was retained.");
+                                    await loadSchedules();
+                                  } catch (requestError) {
+                                    setError(requestError.message || "Could not cancel recurrence.");
+                                  } finally {
+                                    setBusy(false);
+                                  }
+                                }}
                                 disabled={busy}
-                              >
-                                Do not schedule
-                              </button>
+                              >Cancel recurrence</button>
                             </>
                           )}
-                          {schedule.recurrence_enabled &&
-                            schedule.status === "active" && (
-                              <>
-                                <button
-                                  type="button"
-                                  className="btn-outline"
-                                  onClick={() => changeScheduleStatus(schedule, "paused")}
-                                  disabled={busy}
-                                >
-                                  Pause recurrence
-                                </button>
-                                <button
-                                  type="button"
-                                  className="btn-danger"
-                                  onClick={async () => {
-                                    if (!window.confirm(`Cancel recurrence for "${schedule.title}"?`)) return;
-                                    setBusy(true);
-                                    try {
-                                      await api.patch(`/maintenance/schedules/${schedule.id}`, {
-                                        recurrence_enabled: false,
-                                        recurrence_interval: null,
-                                        recurrence_unit: null,
-                                        status: "cancelled",
-                                      });
-                                      setNotice("Recurrence cancelled; existing maintenance history was retained.");
-                                      await loadSchedules();
-                                    } catch (requestError) {
-                                      setError(requestError.message || "Could not cancel recurrence.");
-                                    } finally {
-                                      setBusy(false);
-                                    }
-                                  }}
-                                  disabled={busy}
-                                >
-                                  Cancel recurrence
-                                </button>
-                              </>
-                            )}
-                          {schedule.recurrence_enabled &&
-                            schedule.status === "paused" && (
-                              <button
-                                type="button"
-                                className="btn-outline"
-                                onClick={() => changeScheduleStatus(schedule, "active")}
-                                disabled={busy}
-                              >
-                                Resume recurrence
-                              </button>
-                            )}
+                          {schedule.recurrence_enabled && schedule.status === "paused" && (
+                            <button type="button" className="btn-outline" onClick={() => changeScheduleStatus(schedule, "active")} disabled={busy}>Resume recurrence</button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -942,51 +757,38 @@ export default function MaintenancePanel({ assetId, onChanged }) {
       </section>
 
       {(dialog?.kind === "schedule-create" || dialog?.kind === "schedule-edit") && (
-        <Modal
-          title={dialog.kind === "schedule-create" ? "Add maintenance schedule" : "Edit maintenance schedule"}
-          onClose={() => { if (!busy) setDialog(null); }}
-          wide
-        >
+        <Modal title={dialog.kind === "schedule-create" ? "Add maintenance schedule" : "Edit maintenance schedule"} onClose={() => { if (!busy) setDialog(null); }} wide>
           <form className="maintenance-form" onSubmit={save}>
             {error && <p className="notice error" role="alert">{error}</p>}
             <div className="maintenance-form-grid">
-              <label className="field">
-                Maintenance title <span className="req">*</span>
+              <label className="field">Maintenance title <span className="req">*</span>
                 <input name="title" value={scheduleValues.title} onChange={updateScheduleValue} maxLength={200} required disabled={busy} />
               </label>
-              <label className="field">
-                Maintenance type
+              <label className="field">Maintenance type
                 <select name="maintenance_type" value={scheduleValues.maintenance_type} onChange={updateScheduleValue} disabled={busy}>
                   {TYPES.map((item) => <option key={item} value={item}>{item[0].toUpperCase() + item.slice(1)}</option>)}
                 </select>
               </label>
-              <label className="field">
-                Priority
+              <label className="field">Priority
                 <select name="priority" value={scheduleValues.priority} onChange={updateScheduleValue} disabled={busy}>
                   {PRIORITIES.map((item) => <option key={item} value={item}>{item[0].toUpperCase() + item.slice(1)}</option>)}
                 </select>
               </label>
-              <label className="field">
-                Assigned technician
+              <label className="field">Assigned technician
                 <input name="assigned_technician" value={scheduleValues.assigned_technician} onChange={updateScheduleValue} maxLength={200} disabled={busy} />
               </label>
-              <label className="field">
-                Schedule start date <span className="req">*</span>
+              <label className="field">Schedule start date <span className="req">*</span>
                 <input type="date" name="schedule_start_date" value={scheduleValues.schedule_start_date} onChange={updateScheduleValue} required disabled={busy} />
                 <small className="muted">The date this maintenance plan becomes effective.</small>
               </label>
-              <label className="field">
-                First maintenance due date <span className="req">*</span>
+              <label className="field">First maintenance due date <span className="req">*</span>
                 <input type="date" name="first_due_date" value={scheduleValues.first_due_date} onChange={updateScheduleValue} required disabled={busy} />
                 <small className="muted">The date by which the first maintenance occurrence must be completed.</small>
               </label>
               {dialog.kind === "schedule-edit" && (
-                <label className="field">
-                  Schedule status
+                <label className="field">Schedule status
                   <select name="status" value={scheduleValues.status} onChange={updateScheduleValue} disabled={busy}>
-                    {["active", "paused", "cancelled", "completed"].map((item) => (
-                      <option key={item} value={item}>{item.replaceAll("_", " ")}</option>
-                    ))}
+                    {["active", "paused", "cancelled", "completed"].map((item) => <option key={item} value={item}>{item.replaceAll("_", " ")}</option>)}
                   </select>
                 </label>
               )}
@@ -996,20 +798,17 @@ export default function MaintenancePanel({ assetId, onChanged }) {
               </label>
               {scheduleValues.recurrence_enabled && (
                 <>
-                  <label className="field">
-                    Repeat every
+                  <label className="field">Repeat every
                     <input type="number" name="recurrence_interval" min="1" max="3650" step="1" value={scheduleValues.recurrence_interval} onChange={updateScheduleValue} required disabled={busy} />
                   </label>
-                  <label className="field">
-                    Recurrence unit
+                  <label className="field">Recurrence unit
                     <select name="recurrence_unit" value={scheduleValues.recurrence_unit} onChange={updateScheduleValue} disabled={busy}>
                       {RECURRENCE_UNITS.map((item) => <option key={item} value={item}>{item[0].toUpperCase() + item.slice(1)}</option>)}
                     </select>
                   </label>
                 </>
               )}
-              <label className="field maintenance-form-wide">
-                Description / work details
+              <label className="field maintenance-form-wide">Description / work details
                 <textarea name="description" value={scheduleValues.description} onChange={updateScheduleValue} rows={3} maxLength={10000} disabled={busy} />
               </label>
             </div>
@@ -1029,18 +828,11 @@ export default function MaintenancePanel({ assetId, onChanged }) {
             <dt>Schedule start</dt><dd>{displayDate(dialog.record.schedule_start_date)}</dd>
             <dt>First due date</dt><dd>{displayDate(dialog.record.first_due_date)}</dd>
             <dt>Current due date</dt><dd>{displayDate(dialog.record.current_due_date)}</dd>
-            <dt>Recurrence</dt>
-            <dd>
-              {dialog.record.recurrence_enabled
-                ? `Every ${dialog.record.recurrence_interval} ${dialog.record.recurrence_unit}`
-                : "Disabled"}
-            </dd>
-            <dt>Schedule status / due state</dt>
-            <dd>{dialog.record.status.replaceAll("_", " ")} / {dialog.record.due_status.replaceAll("_", " ")}</dd>
+            <dt>Recurrence</dt><dd>{dialog.record.recurrence_enabled ? `Every ${dialog.record.recurrence_interval} ${dialog.record.recurrence_unit}` : "Disabled"}</dd>
+            <dt>Schedule status / due state</dt><dd>{dialog.record.status.replaceAll("_", " ")} / {dialog.record.due_status.replaceAll("_", " ")}</dd>
             <dt>Approval</dt><dd>{dialog.record.approval_status.replaceAll("_", " ")}</dd>
             <dt>Proposed next due date</dt><dd>{displayDate(dialog.record.proposed_due_date)}</dd>
-            <dt>Last completed</dt>
-            <dd>{dialog.record.last_completed_at ? formatTime(dialog.record.last_completed_at) : "—"}</dd>
+            <dt>Last completed</dt><dd>{dialog.record.last_completed_at ? formatTime(dialog.record.last_completed_at) : "—"}</dd>
             <dt>Assigned technician</dt><dd>{dialog.record.assigned_technician || "—"}</dd>
             <dt>Description</dt><dd>{dialog.record.description || "—"}</dd>
           </dl>
@@ -1056,28 +848,17 @@ export default function MaintenancePanel({ assetId, onChanged }) {
           <p>The previous maintenance was due on <strong>{displayDate(dialog.record.current_due_date)}</strong>.</p>
           <p>
             Based on the existing schedule
-            {dialog.record.recurrence_interval
-              ? ` (every ${dialog.record.recurrence_interval} ${dialog.record.recurrence_unit})`
-              : ""}
-            , the next maintenance is proposed for{" "}
+            {dialog.record.recurrence_interval ? ` (every ${dialog.record.recurrence_interval} ${dialog.record.recurrence_unit})` : ""},
+            the next maintenance is proposed for{" "}
             <strong>{displayDate(dialog.record.proposed_due_date)}</strong>.
           </p>
           <p>
             Confirm the next occurrence for{" "}
             <strong>{displayDate(approvalDate || dialog.record.proposed_due_date)}</strong>
-            {dialog.record.recurrence_interval
-              ? ` with a recurrence of every ${dialog.record.recurrence_interval} ${dialog.record.recurrence_unit}.`
-              : "."}
+            {dialog.record.recurrence_interval ? ` with a recurrence of every ${dialog.record.recurrence_interval} ${dialog.record.recurrence_unit}.` : "."}
           </p>
-          <label className="field">
-            Confirmed next due date
-            <input
-              type="date"
-              value={approvalDate}
-              min={dialog.record.schedule_start_date}
-              onChange={(event) => setApprovalDate(event.target.value)}
-              disabled={busy}
-            />
+          <label className="field">Confirmed next due date
+            <input type="date" value={approvalDate} min={dialog.record.schedule_start_date} onChange={(event) => setApprovalDate(event.target.value)} disabled={busy} />
           </label>
           <p className="muted">Review the date and interval before approving the next occurrence.</p>
           <div className="modal-actions">
@@ -1088,19 +869,12 @@ export default function MaintenancePanel({ assetId, onChanged }) {
       )}
 
       {dialog?.kind === "details" && (
-        <Modal
-          title="Maintenance details"
-          onClose={() => setDialog(null)}
-          wide
-        >
+        <Modal title="Maintenance details" onClose={() => setDialog(null)} wide>
           <dl className="maintenance-details">
             <dt>Title</dt><dd>{dialog.record.title}</dd>
-            <dt>Type / status / priority</dt>
-            <dd>{dialog.record.maintenance_type} / {dialog.record.status.replace("_", " ")} / {dialog.record.priority}</dd>
-            <dt>Planned start / end</dt>
-            <dd>{formatTime(dialog.record.planned_start_at)} – {formatTime(dialog.record.planned_end_at)}</dd>
-            <dt>Actual start / completion</dt>
-            <dd>{formatTime(dialog.record.actual_started_at)} – {formatTime(dialog.record.actual_completed_at)}</dd>
+            <dt>Type / status / priority</dt><dd>{dialog.record.maintenance_type} / {dialog.record.status.replace("_", " ")} / {dialog.record.priority}</dd>
+            <dt>Planned start / end</dt><dd>{formatTime(dialog.record.planned_start_at)} – {formatTime(dialog.record.planned_end_at)}</dd>
+            <dt>Actual start / completion</dt><dd>{formatTime(dialog.record.actual_started_at)} – {formatTime(dialog.record.actual_completed_at)}</dd>
             <dt>Assigned technician</dt><dd>{dialog.record.assigned_technician || "—"}</dd>
             <dt>Description / work details</dt><dd>{dialog.record.notes || "—"}</dd>
             <dt>Completion notes</dt><dd>{dialog.record.completion_notes || "—"}</dd>
@@ -1108,11 +882,7 @@ export default function MaintenancePanel({ assetId, onChanged }) {
             <dt>Next maintenance</dt><dd>{formatTime(dialog.record.next_due_at)}</dd>
             <dt>Related alert</dt><dd>{dialog.record.alert_id || "—"}</dd>
             <dt>Checklist</dt>
-            <dd>
-              {dialog.record.checklist?.length
-                ? dialog.record.checklist.map((item) => `${item.completed ? "✓" : "○"} ${item.item}`).join(", ")
-                : "—"}
-            </dd>
+            <dd>{dialog.record.checklist?.length ? dialog.record.checklist.map((item) => `${item.completed ? "✓" : "○"} ${item.item}`).join(", ") : "—"}</dd>
           </dl>
           <div className="modal-actions">
             <button type="button" className="btn-outline" onClick={() => setDialog(null)}>Close</button>
@@ -1121,94 +891,61 @@ export default function MaintenancePanel({ assetId, onChanged }) {
       )}
 
       {dialog?.kind === "edit" && (
-        <Modal
-          title="Edit maintenance occurrence"
-          onClose={() => { if (!busy) setDialog(null); }}
-          wide
-        >
+        <Modal title="Edit maintenance occurrence" onClose={() => { if (!busy) setDialog(null); }} wide>
           <form className="maintenance-form" onSubmit={save}>
             {error && <p className="notice error" role="alert">{error}</p>}
             <div className="maintenance-form-grid">
-              <label className="field">
-                Title <span className="req">*</span>
+              <label className="field">Title <span className="req">*</span>
                 <input name="title" value={values.title} onChange={updateValue} required maxLength={200} disabled={busy} />
               </label>
-              <label className="field">
-                Type <span className="req">*</span>
+              <label className="field">Type <span className="req">*</span>
                 <select name="maintenance_type" value={values.maintenance_type} onChange={updateValue} required disabled={busy}>
                   {TYPES.map((item) => <option key={item} value={item}>{item[0].toUpperCase() + item.slice(1)}</option>)}
                 </select>
               </label>
               {dialog.kind === "create" && (
-                <label className="field">
-                  Status <span className="req">*</span>
+                <label className="field">Status <span className="req">*</span>
                   <select name="status" value={values.status} onChange={updateValue} required disabled={busy}>
                     {STATUSES.map((item) => <option key={item} value={item}>{item.replace("_", " ")}</option>)}
                   </select>
                 </label>
               )}
-              <label className="field">
-                Priority <span className="req">*</span>
+              <label className="field">Priority <span className="req">*</span>
                 <select name="priority" value={values.priority} onChange={updateValue} required disabled={busy}>
                   {PRIORITIES.map((item) => <option key={item} value={item}>{item[0].toUpperCase() + item.slice(1)}</option>)}
                 </select>
               </label>
-              <label className="field">
-                Planned start {plannedDatesRequired && <span className="req">*</span>}
-                <input
-                  type="datetime-local"
-                  name="planned_start_at"
-                  value={values.planned_start_at}
-                  onChange={updateValue}
-                  required={plannedDatesRequired}
-                  disabled={busy}
-                />
+              <label className="field">Planned start {plannedDatesRequired && <span className="req">*</span>}
+                <input type="datetime-local" name="planned_start_at" value={values.planned_start_at} onChange={updateValue} required={plannedDatesRequired} disabled={busy} />
               </label>
-              <label className="field">
-                Planned end {plannedDatesRequired && <span className="req">*</span>}
-                <input
-                  type="datetime-local"
-                  name="planned_end_at"
-                  value={values.planned_end_at}
-                  onChange={updateValue}
-                  required={plannedDatesRequired}
-                  disabled={busy}
-                />
+              <label className="field">Planned end {plannedDatesRequired && <span className="req">*</span>}
+                <input type="datetime-local" name="planned_end_at" value={values.planned_end_at} onChange={updateValue} required={plannedDatesRequired} disabled={busy} />
               </label>
-              <label className="field">
-                Assigned technician
+              <label className="field">Assigned technician
                 <input name="assigned_technician" value={values.assigned_technician} onChange={updateValue} maxLength={200} disabled={busy} />
               </label>
-              <label className="field">
-                Related alert ID
+              <label className="field">Related alert ID
                 <input type="number" min="1" name="alert_id" value={values.alert_id} onChange={updateValue} disabled={busy} />
               </label>
-              <label className="field">
-                Actual start
+              <label className="field">Actual start
                 <input type="datetime-local" name="actual_started_at" value={values.actual_started_at} onChange={updateValue} disabled={busy} />
               </label>
-              <label className="field">
-                Actual completion
+              <label className="field">Actual completion
                 <input type="datetime-local" name="actual_completed_at" value={values.actual_completed_at} onChange={updateValue} disabled={busy} />
               </label>
-              <label className="field">
-                Next maintenance date
+              <label className="field">Next maintenance date
                 <input type="datetime-local" name="next_due_at" value={values.next_due_at} onChange={updateValue} disabled={busy} />
               </label>
-              <label className="field">
-                Parts replaced or used
+              <label className="field">Parts replaced or used
                 <textarea name="parts_used" value={values.parts_used} onChange={updateValue} rows={2} disabled={busy} />
               </label>
-              <label className="field maintenance-form-wide">
-                Description / work details
+              <label className="field maintenance-form-wide">Description / work details
                 <textarea name="notes" value={values.notes} onChange={updateValue} rows={3} maxLength={10000} disabled={busy} />
               </label>
-              <label className="field maintenance-form-wide">
-                Completion notes
+              <label className="field maintenance-form-wide">Completion notes
                 <textarea name="completion_notes" value={values.completion_notes} onChange={updateValue} rows={3} disabled={busy} />
               </label>
-              <label className="field maintenance-form-wide">
-                Checklist (one item per line)
+              <label className="field maintenance-form-wide">Checklist (one item per line)
                 <textarea name="checklist" value={values.checklist} onChange={updateValue} rows={3} disabled={busy} />
               </label>
             </div>
@@ -1221,10 +958,7 @@ export default function MaintenancePanel({ assetId, onChanged }) {
       )}
 
       {legacyRuleOptionsOpen && (
-        <Modal
-          title="Additional asset rule workflows"
-          onClose={() => setLegacyRuleOptionsOpen(false)}
-        >
+        <Modal title="Additional asset rule workflows" onClose={() => setLegacyRuleOptionsOpen(false)}>
           <div className="rule-type-options">
             {LEGACY_RULE_CHOICES.map((choice) => (
               <button

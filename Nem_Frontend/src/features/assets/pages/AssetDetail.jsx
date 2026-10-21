@@ -651,9 +651,11 @@ const filteredLogs = [...logs]
   };
 
   const openMonitoringRuleForm = (choiceId) => {
-    setMonitoringRuleSelection(monitoringRuleFormSelection(choiceId));
-    setModal("add");
-  };
+  setModal(null);
+  setMonitoringRuleSelection(null);
+
+  navigate(`/assets/${assetId}/monitoring-rules/new/${choiceId}`);
+};
 
   const monitoringRuleFormFields = useMemo(
     () =>
@@ -1229,57 +1231,140 @@ const filteredLogs = [...logs]
         </>
       )}
 
-      {tab === "logbook" && (
-        <>
-          <MaintenancePanel assetId={assetId} onChanged={refreshMaintenanceData} />
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <h2>Maintenance log notes</h2>
-                <span className="muted">
-                  {logs.length} {logs.length === 1 ? "entry" : "entries"}
-                </span>
-              </div>
-              <button
-                className="btn-primary"
-                onClick={() => setModal("log")}
-              >
-                <PlusCircle size={17} /> Add note
-              </button>
-            </div>
+{tab === "logbook" && (
+  <>
+    <MaintenancePanel
+      assetId={assetId}
+      onChanged={refreshMaintenanceData}
+    />
 
-            {logs.length === 0 ? (
-              <EmptyState
-                art={false}
-                title="No logbook notes"
-                lines={[
-                  "Record brief observations separately from maintenance jobs.",
-                ]}
-              />
-            ) : (
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th className="col-time">Time</th>
-                    <th>Entry</th>
+    <div className="panel maintenance-log-notes">
+      <div className="panel-head maintenance-log-head">
+        <div>
+          <h2>Maintenance log notes</h2>
+          <span className="muted">
+            {filteredLogs.length} of {logs.length}{" "}
+            {logs.length === 1 ? "entry" : "entries"}
+          </span>
+        </div>
+
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={() => setModal("log")}
+        >
+          <PlusCircle size={17} /> Add note
+        </button>
+      </div>
+
+      <div className="maintenance-log-toolbar">
+        <input
+          type="search"
+          className="maintenance-log-search"
+          placeholder="Search notes..."
+          aria-label="Search maintenance notes"
+          value={logSearch}
+          onChange={(event) => setLogSearch(event.target.value)}
+        />
+
+        <label className="maintenance-log-filter">
+          <span>From</span>
+          <input
+            type="date"
+            value={logStartDate}
+            onChange={(event) => setLogStartDate(event.target.value)}
+            aria-label="Filter notes from date"
+          />
+        </label>
+
+        <label className="maintenance-log-filter">
+          <span>To</span>
+          <input
+            type="date"
+            value={logEndDate}
+            min={logStartDate || undefined}
+            onChange={(event) => setLogEndDate(event.target.value)}
+            aria-label="Filter notes to date"
+          />
+        </label>
+
+        <label className="maintenance-log-filter">
+          <span>Sort</span>
+          <select
+            value={logSort}
+            onChange={(event) => setLogSort(event.target.value)}
+            aria-label="Sort maintenance notes"
+          >
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+          </select>
+        </label>
+
+        {(logSearch || logStartDate || logEndDate) && (
+          <button
+            type="button"
+            className="btn-outline"
+            onClick={() => {
+              setLogSearch("");
+              setLogStartDate("");
+              setLogEndDate("");
+            }}
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      {logs.length === 0 ? (
+        <EmptyState
+          art={false}
+          title="No logbook notes"
+          lines={[
+            "Record brief observations separately from maintenance jobs.",
+            "Use Add note to record your first observation."
+          ]}
+        />
+      ) : filteredLogs.length === 0 ? (
+        <EmptyState
+          art={false}
+          title="No matching notes"
+          lines={[
+            "Try changing your search text or date range."
+          ]}
+        />
+      ) : (
+        <div className="maintenance-table-wrap">
+          <table className="table maintenance-notes-table">
+            <thead>
+              <tr>
+                <th className="col-time">Date and time</th>
+                <th>Entry</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {filteredLogs.map((entry) => {
+                const timestamp = entry.time || entry.created_at;
+
+                return (
+                  <tr key={entry.id}>
+                    <td className="col-time">
+                      {timestamp ? formatTime(timestamp) : "—"}
+                    </td>
+                    <td className="maintenance-note-text">
+                      {entry.text}
+                    </td>
                   </tr>
-                </thead>
-
-                <tbody>
-                  {logs.map((entry) => (
-                    <tr key={entry.id}>
-                      <td className="col-time">
-                        {formatTime(entry.time)}
-                      </td>
-                      <td>{entry.text}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
+    </div>
+  </>
+)}
+
 
       {tab === "events" && (
         <div className="panel">

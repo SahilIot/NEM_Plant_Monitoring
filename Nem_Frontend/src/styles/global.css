@@ -882,3 +882,22 @@ html[data-theme="light"] .copy-rules-modal textarea {
   color: #172033;
   border-color: #cbd5e1;
 }
+
+
+
+.asset-page .machine-strip.status-summary {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.asset-page .machine-strip.status-summary > * {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.asset-page .machine-strip.status-summary .muted,
+.asset-page .machine-strip.status-summary .machine-fig > span {
+  color: var(--muted);
+}
