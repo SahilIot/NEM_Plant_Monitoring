@@ -80,9 +80,7 @@ def get_rule_asset(
         if rule.variable_id is not None
         else None
     )
-    asset_id = rule.target_asset_id or (
-        variable.asset_id if variable else None
-    )
+    asset_id = rule.target_asset_id or (variable.asset_id if variable else None)
     asset = session.get(Asset, asset_id) if asset_id is not None else None
     return asset, variable
 
@@ -113,13 +111,8 @@ def _condition_holds(rule: MonitoringRule, value: Any) -> bool:
                 "expected_value" not in parameters
                 and "equals" not in parameters
             ):
-                raise ValueError(
-                    "Duration equals condition has no configured expected_value"
-                )
-            return value == parameters.get(
-                "expected_value",
-                parameters.get("equals"),
-            )
+                raise ValueError("Duration equals condition has no configured expected_value")
+            return value == parameters.get("expected_value", parameters.get("equals"),)
 
         if condition != "threshold":
             raise ValueError("Unsupported duration condition")
@@ -130,13 +123,10 @@ def _condition_holds(rule: MonitoringRule, value: Any) -> bool:
     if comparison not in OPERATORS or threshold is None:
         raise ValueError("Rule has an invalid comparison configuration")
 
-    if isinstance(value, bool) or not isinstance(
-        value, (int, float, Decimal)
-    ):
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
         raise ValueError("Rule requires a numeric reading")
 
     return OPERATORS[comparison](value, threshold)
-
 
 def _valid_value(variable: Variable, value: Any) -> bool:
     return (
@@ -168,9 +158,7 @@ def advance_rule_runtime(
 ) -> None:
     if counter.is_running is not True or counter.last_signal_at is None:
         return
-    latest_trustworthy_time = counter.last_signal_at + timedelta(
-        seconds=stale_after_seconds
-    )
+    latest_trustworthy_time = counter.last_signal_at + timedelta(seconds=stale_after_seconds)
     end = min(at, latest_trustworthy_time)
     checkpoint = counter.runtime_checkpoint_at
     if checkpoint is not None and end > checkpoint:
@@ -447,9 +435,7 @@ def _transition_state(
             rule_id=rule.id,
             metadata={"reason": error_message},
         )
-
     return state
-
 
 def evaluate_boolean_count_threshold(
     session: Session,
@@ -542,10 +528,7 @@ def evaluate_boolean_count_threshold(
     previous_stage = None
 
     if "[count-stage:" in previous_message:
-        previous_stage = (
-            previous_message.split("[count-stage:", 1)[1]
-            .split("]", 1)[0]
-        )
+        previous_stage = (previous_message.split("[count-stage:", 1)[1].split("]", 1)[0])
 
     if stage == "normal":
         return _transition_state(
@@ -599,7 +582,6 @@ def evaluate_boolean_count_threshold(
         )
 
     return result
-
 
 def evaluate_runtime_duration(
     session: Session,
@@ -1005,9 +987,7 @@ def evaluate_rule(
         if condition_started is None:
             condition_started = reading.recorded_at
 
-        duration_seconds = int(
-            (rule.parameters or {}).get("duration_seconds", 0)
-        )
+        duration_seconds = int((rule.parameters or {}).get("duration_seconds", 0))
 
         if now - condition_started < timedelta(seconds=duration_seconds):
             return _transition_state(
@@ -1017,24 +997,19 @@ def evaluate_rule(
                 state,
                 next_status="normal",
                 value=reading.value,
-                message=(
-                    "Condition is active but has not met its "
-                    "configured duration."
-                ),
+                message=("Condition is active but has not met its configured duration.",),
                 evaluated_at=now,
                 condition_started_at=condition_started,
             )
 
         severity = rule.severity
-        message = (
-            f"Condition remained true for at least {duration_seconds} "
+        message = (f"Condition remained true for at least {duration_seconds} "
             f"seconds (since {condition_started.isoformat()})."
         )
         threshold = None
     else:
         severity = rule.severity
-        message = (
-            f"Rule '{rule.name}' condition met: value {reading.value} "
+        message = (f"Rule '{rule.name}' condition met: value {reading.value} "
             f"{rule.operator} {rule.threshold}."
         )
         threshold = rule.threshold
@@ -1051,7 +1026,6 @@ def evaluate_rule(
         condition_started_at=condition_started,
         threshold=threshold,
     )
-
 
 def evaluate_rules(
     session: Session,
@@ -1130,7 +1104,6 @@ def evaluate_rules(
 
     session.flush()
     return counts
-
 
 def acquire_scheduler_lease(
     session: Session,
