@@ -9,7 +9,6 @@ from app.services.monitoring_engine import emit_event
 
 RECURRENCE_UNITS = {"days", "weeks", "months", "years"}
 
-
 def due_status(
     due_date: date | None,
     *,
@@ -58,7 +57,6 @@ def next_due_date(
     month = month_index + 1
     return date(year, month, min(anchor.day, monthrange(year, month)[1]))
 
-
 def emit_due_schedule_events(session: Session, *, today: date) -> int:
     due_schedules = session.scalars(
         select(MaintenanceSchedule)
@@ -85,9 +83,7 @@ def emit_due_schedule_events(session: Session, *, today: date) -> int:
         alert_message = f"{schedule.title} was due {schedule.current_due_date}."
         already_alerted = schedule.due_alerted_for == schedule.current_due_date
         if already_alerted and alert is not None:
-            if (
-                alert.title != alert_title or alert.message != alert_message
-            ):
+            if (alert.title != alert_title or alert.message != alert_message):
                 alert.title = alert_title
                 alert.message = alert_message
                 alert.last_updated_at = now

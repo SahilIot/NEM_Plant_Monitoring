@@ -81,8 +81,7 @@ async def read_opcua_node(settings: Settings, node_id: str) -> OpcUaRead:
     variant = data_value.Value
     if variant is None:
         raise OpcUaConnectionError("The OPC UA node returned no value.")
-    return OpcUaRead(
-        value=variant.Value,
+    return OpcUaRead(value=variant.Value,
         source_timestamp=data_value.SourceTimestamp,
         server_timestamp=data_value.ServerTimestamp,
     )
