@@ -76,14 +76,23 @@ export default function App() {
         <Route path="/plc" element={<Plc />} />
 
         {/* Maintenance */}
+
+{/* Maintenance */}
 <Route
   path="/assets/:id/maintenance/schedules/new"
   element={<CreateMaintenanceSchedulePage />}
 />
+
+<Route
+  path="/assets/:id/maintenance/schedules/:scheduleId/edit"
+  element={<CreateMaintenanceSchedulePage />}
+/>
+
 <Route
   path="/assets/:id/maintenance/logbook"
   element={<MaintenanceLogbookPage />}
 />
+
 
 {/* Monitoring Rules */}
 <Route

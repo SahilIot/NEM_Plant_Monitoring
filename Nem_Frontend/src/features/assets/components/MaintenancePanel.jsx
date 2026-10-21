@@ -281,28 +281,24 @@ const openMaintenanceLogbook = () => {
   navigate(`/assets/${assetId}/maintenance/logbook`);
 };
 
-  const openScheduleEdit = (schedule) => {
-    setScheduleValues({
-      title: schedule.title,
-      maintenance_type: schedule.maintenance_type,
-      priority: schedule.priority,
-      assigned_technician: schedule.assigned_technician || "",
-      description: schedule.description || "",
-      schedule_start_date: schedule.schedule_start_date,
-      first_due_date: schedule.first_due_date,
-      recurrence_enabled: schedule.recurrence_enabled,
-      recurrence_interval: String(schedule.recurrence_interval || 1),
-      recurrence_unit: schedule.recurrence_unit || "months",
-      status: schedule.status,
-    });
-    setDialog({ kind: "schedule-edit", record: schedule });
-  };
+const openScheduleEdit = (schedule) => {
+  navigate(
+    `/assets/${assetId}/maintenance/schedules/${schedule.id}/edit`
+  );
+};
 
   const openEdit = (record) => {
-    setError("");
-    setNotice("");
-    setDialog({ kind: "edit", record });
-  };
+  if (record.schedule_id) {
+    navigate(
+      `/assets/${assetId}/maintenance/schedules/${record.schedule_id}/edit`
+    );
+    return;
+  }
+
+  setError("");
+  setNotice("");
+  setDialog({ kind: "edit", record });
+};
 
   const save = async (event) => {
     event.preventDefault();
@@ -636,7 +632,6 @@ const openMaintenanceLogbook = () => {
                         {!["completed", "cancelled"].includes(record.status) && (
                           <>
                             <button type="button" className="btn-primary" onClick={() => runAction(record, "complete")} disabled={busy}>Complete</button>
-                            <button type="button" className="btn-danger" onClick={() => runAction(record, "cancel")} disabled={busy}>Cancel</button>
                           </>
                         )}
                       </div>
@@ -716,33 +711,12 @@ const openMaintenanceLogbook = () => {
                             </>
                           )}
                           {schedule.recurrence_enabled && schedule.status === "active" && (
-                            <>
-                              <button type="button" className="btn-outline" onClick={() => changeScheduleStatus(schedule, "paused")} disabled={busy}>Pause recurrence</button>
-                              <button
-                                type="button"
-                                className="btn-danger"
-                                onClick={async () => {
-                                  if (!window.confirm(`Cancel recurrence for "${schedule.title}"?`)) return;
-                                  setBusy(true);
-                                  try {
-                                    await api.patch(`/maintenance/schedules/${schedule.id}`, {
-                                      recurrence_enabled: false,
-                                      recurrence_interval: null,
-                                      recurrence_unit: null,
-                                      status: "cancelled",
-                                    });
-                                    setNotice("Recurrence cancelled; existing maintenance history was retained.");
-                                    await loadSchedules();
-                                  } catch (requestError) {
-                                    setError(requestError.message || "Could not cancel recurrence.");
-                                  } finally {
-                                    setBusy(false);
-                                  }
-                                }}
-                                disabled={busy}
-                              >Cancel recurrence</button>
-                            </>
-                          )}
+                            <button
+                            type="button"
+                            className="btn-outline"
+                            onClick={() => changeScheduleStatus(schedule, "paused")}
+                            disabled={busy}
+                            >Pause recurrence</button>)}
                           {schedule.recurrence_enabled && schedule.status === "paused" && (
                             <button type="button" className="btn-outline" onClick={() => changeScheduleStatus(schedule, "active")} disabled={busy}>Resume recurrence</button>
                           )}
@@ -892,7 +866,7 @@ const openMaintenanceLogbook = () => {
       )}
 
       {dialog?.kind === "edit" && (
-        <Modal title="Edit maintenance occurrence" onClose={() => { if (!busy) setDialog(null); }} wide>
+        <Modal title="Edit maintenance" onClose={() => { if (!busy) setDialog(null); }} wide>
           <form className="maintenance-form" onSubmit={save}>
             {error && <p className="notice error" role="alert">{error}</p>}
             <div className="maintenance-form-grid">
@@ -905,11 +879,20 @@ const openMaintenanceLogbook = () => {
                 </select>
               </label>
               {dialog.kind === "create" && (
-                <label className="field">Status <span className="req">*</span>
-                  <select name="status" value={values.status} onChange={updateValue} required disabled={busy}>
-                    {STATUSES.map((item) => <option key={item} value={item}>{item.replace("_", " ")}</option>)}
+               <label className="field">Status <span className="req">*</span>
+               <select
+               name="status"
+               value={values.status}
+               onChange={updateValue}
+               required
+               disabled={busy}>
+                {STATUSES.map((item) => (
+                  <option key={item} value={item}>
+                    {item.replace("_", " ")}
+                    </option>
+                  ))}
                   </select>
-                </label>
+                  </label>
               )}
               <label className="field">Priority <span className="req">*</span>
                 <select name="priority" value={values.priority} onChange={updateValue} required disabled={busy}>
