@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, matchPath } from "react-router-dom";
 import { api } from "../../services/api.js";
+import { subscribeLiveUpdates } from "../../services/liveUpdates.js";
 import { APP_TITLE } from "../../utils/config.js";
 import Brand from "./Brand.jsx";
 import AssetTree from "../../features/assets/components/AssetTree.jsx";
@@ -230,6 +231,29 @@ export default function Layout() {
       
     });
   }, [reload]);
+
+  useEffect(() => {
+    return subscribeLiveUpdates((update) => {
+      const changedTables = new Set(update.changed_tables || []);
+      if (update.type === "connected") {
+        reload().catch(() => {});
+        return;
+      }
+      if (changedTables.has("assets") || changedTables.has("variables")) {
+        loadAssets().catch(() => {});
+      }
+      if (
+        [
+          "nem_monitoring_rules",
+          "nem_rule_states",
+          "nem_alerts",
+          "nem_maintenance_schedules",
+        ].some((table) => changedTables.has(table))
+      ) {
+        refreshStatus();
+      }
+    });
+  }, [loadAssets, refreshStatus, reload]);
 
   const health = useMemo(
     () => computeHealth(rawAssets, alerts),

@@ -191,25 +191,30 @@ export default function CreateMonitoringRulePage() {
           ? plcResult.mappings
           : [];
 
-        const cycleMapping = mappings.find(
+        const bypassEnabled = plcResult?.mapping_bypass_enabled === true;
+        const booleanMappings = mappings.filter(
           (mapping) =>
             Number(mapping.asset_id) === assetId &&
-            mapping.role === "cycle_signal" &&
             mapping.mapping_valid &&
             mapping.data_type === "boolean"
         );
+        const isDeclared = (mapping) =>
+          bypassEnabled && mapping.role === "declared_variable";
 
-        const runningMappings = mappings.filter(
-          (mapping) =>
-            Number(mapping.asset_id) === assetId &&
-            mapping.role === "running_signal" &&
-            mapping.mapping_valid &&
-            mapping.data_type === "boolean"
+        const cycleMapping = booleanMappings.find(
+          (mapping) => mapping.role === "cycle_signal"
+        );
+
+        const runningMappings = booleanMappings.filter(
+          (mapping) => mapping.role === "running_signal" || isDeclared(mapping)
         );
 
         setAssetName(assetResult?.name || `Asset ${assetId}`);
         setVariables(activeVariables);
-        setCycleVariableIds(cycleMapping ? [cycleMapping.variable_id] : []);
+        setCycleVariableIds([
+          ...(cycleMapping ? [cycleMapping.variable_id] : []),
+          ...booleanMappings.filter(isDeclared).map((m) => m.variable_id),
+        ]);
         setRuntimeVariableIds(
           runningMappings.map((mapping) => mapping.variable_id)
         );
@@ -412,14 +417,16 @@ export default function CreateMonitoringRulePage() {
 
                 {field.key === "cycle_variable_id" && cycleVariableIds.length === 0 && (
                   <small>
-                    No OPC UA cycle signal is configured for this asset.
-                    Configure it in backend OPCUA_MACHINE_MAPPINGS first.
+                    No Boolean OPC UA variable is available for this asset.
+                    Add one with an OPC UA NodeId in the asset's Variables
+                    dialog (or configure OPCUA_MACHINE_MAPPINGS).
                   </small>
                 )}
 
                 {field.key === "runtime_variable_id" && runtimeVariableIds.length === 0 && (
                   <small>
-                    No mapped Boolean running signal is configured for this asset.
+                    No Boolean OPC UA variable is available for this asset.
+                    Add one with an OPC UA NodeId in the asset's Variables dialog.
                   </small>
                 )}
               </label>

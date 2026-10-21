@@ -6,9 +6,9 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import HTTPException
 from pydantic import ValidationError # type: ignore
@@ -107,15 +107,44 @@ def load_machine_mappings(raw: str) -> list[OpcUaMachineMapping]:
     return mappings
 
 #calculating machine running time
-def advance_runtime(state: MachineMonitoringState, at: datetime) -> None:
-    checkpoint = state.runtime_checkpoint_at
-    if state.is_running is True and checkpoint is not None and at <= checkpoint:
+def advance_runtime(
+    state: MachineMonitoringState,
+    at: datetime,
+    stale_after_seconds: int,
+    signal_at: datetime | None = None,
+) -> None:
+    """Accumulate runtime only up to the point the running signal stays trustworthy.
+
+    Time is never counted past ``signal_at + stale_after_seconds``; once that
+    deadline has passed the state becomes unknown (None) and accumulated
+    runtime is preserved.
+    """
+    if state.is_running is not True:
+        state.runtime_checkpoint_at = None
+        state.updated_at = at
         return
-    if state.is_running is True and checkpoint is not None and at > checkpoint:
+    checkpoint = state.runtime_checkpoint_at
+    if checkpoint is not None and at <= checkpoint:
+        return
+    last_signal_at = (
+        signal_at if signal_at is not None else state.last_running_signal_at
+    )
+    if last_signal_at is None:
+        state.is_running = None
+        state.runtime_checkpoint_at = None
+        state.updated_at = at
+        return
+    deadline = last_signal_at + timedelta(seconds=stale_after_seconds)
+    end = min(at, deadline)
+    if checkpoint is not None and end > checkpoint:
         state.accumulated_running_seconds = Decimal(
             state.accumulated_running_seconds
-        ) + Decimal(str((at - checkpoint).total_seconds()))
-    state.runtime_checkpoint_at = at if state.is_running is True else None
+        ) + Decimal(str((end - checkpoint).total_seconds()))
+    if at > deadline:
+        state.is_running = None
+        state.runtime_checkpoint_at = None
+    else:
+        state.runtime_checkpoint_at = at
     state.updated_at = at
 
 
@@ -179,9 +208,16 @@ class _SubscriptionHandler:
 
 #preparing the collector
 class OpcUaCollector:
-    def __init__(self, settings: Settings, session_factory: sessionmaker[Session]) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        session_factory: sessionmaker[Session],
+        *,
+        status_changed: Callable[[], None] | None = None,
+    ) -> None:
         self.settings = settings
         self.session_factory = session_factory
+        self.status_changed = status_changed
         self.mappings = load_machine_mappings(settings.opcua_machine_mappings)
         self.status: dict[str, Any] = {
             "configured": bool(self.mappings) or settings.opc_ua_mapping_bypass_enabled,
@@ -198,6 +234,7 @@ class OpcUaCollector:
             "negotiated_publishing_interval_ms": None,
         }
         self._stop_event = asyncio.Event()
+        self._configuration_refresh_requested = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._owner_id = uuid.uuid4().hex
         self._node_mappings: dict[
@@ -236,9 +273,24 @@ class OpcUaCollector:
             mapping_bypass_enabled=settings.opc_ua_mapping_bypass_enabled,
             declared_variable_count=0,
         )
+
+    def _notify_status_changed(self) -> None:
+        if self.status_changed is not None:
+            self.status_changed()
+
+    def request_configuration_refresh(self, changed_tables: set[str]) -> None:
+        if changed_tables.intersection(
+            {"assets", "variables", "nem_monitoring_rules"}
+        ):
+            self._configuration_refresh_requested.set()
 #Checking mapping information for display
     def configured_mapping_rows(self, session: Session) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
+        subscribed_variables = {
+            (mapping.asset_id, variable_id, node_id)
+            for node_id, mappings in self._node_mappings.items()
+            for mapping, _, variable_id in mappings
+        }
         for mapping in self.mappings:
             asset = session.get(Asset, mapping.asset_id)
             signals = [
@@ -275,6 +327,12 @@ class OpcUaCollector:
                             variable.is_active if variable else False
                         ),
                         "mapping_valid": mapping_is_valid,
+                        "subscribed": (
+                            mapping.asset_id,
+                            signal.variable_id,
+                            signal.node_id,
+                        )
+                        in subscribed_variables,
                         "variable_opcua_node_id": (
                             variable.opcua_node_id if variable else None
                         ),
@@ -320,6 +378,12 @@ class OpcUaCollector:
                         "asset_active": True,
                         "variable_active": True,
                         "mapping_valid": True,
+                        "subscribed": (
+                            variable.asset_id,
+                            variable.id,
+                            variable.opcua_node_id,
+                        )
+                        in subscribed_variables,
                         "variable_opcua_node_id": variable.opcua_node_id,
                     }
                 )
@@ -361,6 +425,7 @@ class OpcUaCollector:
             self.status["connected"] = False
             if self.mappings or self.settings.opc_ua_mapping_bypass_enabled:
                 self.status["state"] = "disconnected"
+            self._notify_status_changed()
 
     async def _run(self) -> None:
         while not self._stop_event.is_set():
@@ -371,6 +436,7 @@ class OpcUaCollector:
                         connected=False,
                         last_error="Another application instance owns the OPC UA collector.",
                     )
+                    self._notify_status_changed()
                     await self._wait_before_retry()
                     continue
                 await asyncio.to_thread(self.prepare_startup)
@@ -392,6 +458,7 @@ class OpcUaCollector:
                     connected=False,
                     last_error=f"OPC UA collector unavailable ({type(error).__name__}).",
                 )
+                self._notify_status_changed()
                 await asyncio.to_thread(self._release_lease)
                 await self._wait_before_retry()
 
@@ -403,8 +470,10 @@ class OpcUaCollector:
                 connected=False,
                 last_error=None,
             )
+            self._notify_status_changed()
             return False
         self.status.update(state="connecting", connected=False, last_error=None)
+        self._notify_status_changed()
         self.status["negotiated_publishing_interval_ms"] = None
         client = await create_configured_opcua_client(self.settings)
         async with client:
@@ -470,25 +539,31 @@ class OpcUaCollector:
                 last_connected_at=now,
                 last_error=None,
             )
+            self._notify_status_changed()
             try:
                 last_runtime_checkpoint = time.monotonic()
                 while not self._stop_event.is_set():
-                    try:
-                        notification = await asyncio.wait_for(
-                            queue.get(),
-                            timeout=self.settings.opcua_runtime_checkpoint_seconds,
+                    notification, configuration_changed = (
+                        await self._wait_for_notification_or_configuration_change(
+                            queue
                         )
-                    except asyncio.TimeoutError:
+                    )
+                    if configuration_changed:
+                        LOGGER.info(
+                            "Active OPC UA rule usage changed; refreshing subscription."
+                        )
+                        return True
+                    if notification is None:
                         if self._stop_event.is_set():
                             break
-                        await client.check_connection()
                         if await asyncio.to_thread(
-                            self._declared_variable_configuration_changed
+                            self._subscription_configuration_changed
                         ):
                             LOGGER.info(
-                                "Declared OPC UA variables changed; refreshing subscription."
+                                "Active OPC UA rule usage changed; refreshing subscription."
                             )
                             return True
+                        await client.check_connection()
                         await self._refresh_running_signals(client)
                         if not await asyncio.to_thread(self._renew_lease):
                             raise ConnectionError("OPC UA collector lease was lost")
@@ -496,8 +571,6 @@ class OpcUaCollector:
                         await asyncio.to_thread(self._checkpoint_runtime, utc_now())
                         last_runtime_checkpoint = time.monotonic()
                         continue
-                    if notification is None:
-                        break
                     if (
                         time.monotonic() - last_lease_renewal
                         >= lease_renewal_interval
@@ -510,14 +583,14 @@ class OpcUaCollector:
                         time.monotonic() - last_runtime_checkpoint
                         >= self.settings.opcua_runtime_checkpoint_seconds
                     ):
-                        await client.check_connection()
                         if await asyncio.to_thread(
-                            self._declared_variable_configuration_changed
+                            self._subscription_configuration_changed
                         ):
                             LOGGER.info(
-                                "Declared OPC UA variables changed; refreshing subscription."
+                                "Active OPC UA rule usage changed; refreshing subscription."
                             )
                             return True
+                        await client.check_connection()
                         await self._refresh_running_signals(client)
                         await asyncio.to_thread(
                             self._checkpoint_runtime, utc_now()
@@ -531,50 +604,57 @@ class OpcUaCollector:
                 self.status["connected"] = False
         return False
 
-    def _declared_variable_configuration_changed(self) -> bool:
-        if not self.settings.opc_ua_mapping_bypass_enabled:
-            return False
+    async def _wait_for_notification_or_configuration_change(
+        self,
+        queue: asyncio.Queue[OpcUaNotification | None],
+    ) -> tuple[OpcUaNotification | None, bool]:
+        notification_task = asyncio.create_task(queue.get())
+        configuration_task = asyncio.create_task(
+            self._configuration_refresh_requested.wait()
+        )
+        done, pending = await asyncio.wait(
+            {notification_task, configuration_task},
+            timeout=self.settings.opcua_runtime_checkpoint_seconds,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
 
-        explicit_variable_ids = {
-            signal.variable_id
-            for mapping in self.mappings
-            for signal in (
-                mapping.cycle_signal,
-                mapping.running_signal,
-                *mapping.readings,
-            )
-            if signal is not None
-        }
-        current_signature = {
-            (mapping.asset_id, signal.variable_id, signal.node_id)
-            for mapping, signal in self._declared_variable_mappings
+        if configuration_task in done:
+            self._configuration_refresh_requested.clear()
+            if await asyncio.to_thread(
+                self._subscription_configuration_changed
+            ):
+                notification_task.cancel()
+                await asyncio.gather(notification_task, return_exceptions=True)
+                return None, True
+
+        if notification_task in done:
+            configuration_task.cancel()
+            await asyncio.gather(configuration_task, return_exceptions=True)
+            return notification_task.result(), False
+
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        return None, False
+
+    @staticmethod
+    def _subscription_signature(
+        node_mappings: dict[str, list[tuple[OpcUaMachineMapping, str, int]]],
+    ) -> set[tuple[int, int, str]]:
+        return {
+            (mapping.asset_id, variable_id, node_id)
+            for node_id, mappings in node_mappings.items()
+            for mapping, _, variable_id in mappings
         }
 
+    def _subscription_configuration_changed(self) -> bool:
+        current_signature = self._subscription_signature(self._node_mappings)
         with self.session_factory() as session:
-            variables = session.scalars(
-                select(Variable)
-                .join(Asset, Asset.id == Variable.asset_id)
-                .where(
-                    Variable.is_active.is_(True),
-                    Variable.opcua_node_id.is_not(None),
-                    Asset.is_active.is_(True),
-                )
-                .order_by(Variable.id)
-            ).all()
-
-        discovered_signature: set[tuple[int, int, str]] = set()
-        for variable in variables:
-            if variable.id in explicit_variable_ids:
-                continue
-            node_id = variable.opcua_node_id
-            try:
-                ua.NodeId.from_string(node_id)
-            except (TypeError, ValueError, UaStringParsingError):
-                continue
-            discovered_signature.add(
-                (variable.asset_id, variable.id, node_id)
-            )
-        return discovered_signature != current_signature
+            expected_node_mappings, _ = self._build_subscription_mappings(session)
+        return current_signature != self._subscription_signature(
+            expected_node_mappings
+        )
 
     async def _refresh_running_signals(
         self,
@@ -648,10 +728,15 @@ class OpcUaCollector:
                 )
                 continue
 
+            # The server's read timestamp, not local receipt time, proves freshness;
+            # a constant bit's source timestamp can legitimately be old.
+            read_timestamp = getattr(
+                data_value, "ServerTimestamp", None
+            ) or getattr(data_value, "SourceTimestamp", None)
             notification = OpcUaNotification(
                 node_id=signal.node_id,
                 value=value,
-                recorded_at=sampled_at or utc_now(),
+                recorded_at=read_timestamp,
             )
             await asyncio.to_thread(
                 self._process_mapped_notification,
@@ -662,100 +747,112 @@ class OpcUaCollector:
             )
 
 #ensuring configuration matches the database
-    def _validate_mappings(self) -> None:
-        self._declared_variable_mappings = []
-        self._node_mappings = {}
-        for mapping in self.mappings:
-            if mapping.cycle_signal is not None:
-                self._node_mappings.setdefault(
-                    mapping.cycle_signal.node_id, []
-                ).append((
-                    mapping,
-                    "cycle",
-                    mapping.cycle_signal.variable_id,
-                ))
-            if mapping.running_signal is not None:
-                self._node_mappings.setdefault(
-                    mapping.running_signal.node_id, []
-                ).append((
-                    mapping,
-                    "running",
-                    mapping.running_signal.variable_id,
-                ))
-            for signal in mapping.readings:
-                self._node_mappings.setdefault(signal.node_id, []).append((
-                    mapping,
-                    "reading",
-                    signal.variable_id,
-                ))
-        with self.session_factory() as session:
-            for mapping in self.mappings:
-                asset = session.get(Asset, mapping.asset_id)
-                if asset is None or not asset.is_active:
-                    raise OpcUaConfigurationError(f"OPC UA mapping references missing or inactive asset {mapping.asset_id}.")
-                signals = [
-                    (mapping.cycle_signal, True),
-                    (mapping.running_signal, True),
-                    *((signal, False) for signal in mapping.readings),
-                ]
-                for signal, is_state_signal in signals:
-                    if signal is None:
-                        continue
-                    variable = session.get(Variable, signal.variable_id)
-                    if (
-                        variable is None
-                        or variable.asset_id != mapping.asset_id
-                        or not variable.is_active
-                        or (is_state_signal and variable.data_type != "boolean")
-                    ):
-                        raise OpcUaConfigurationError("OPC UA NodeIds must map to active variables belonging to "
-                            "their configured asset; cycle and running signals must be boolean."
-                        )
-            if self.settings.opc_ua_mapping_bypass_enabled:
-                mapped_variable_ids = {
-                    variable_id
-                    for mappings in self._node_mappings.values()
-                    for _, _, variable_id in mappings
-                }
-                declared = session.scalars(
-                    select(Variable)
-                    .join(Asset, Asset.id == Variable.asset_id)
-                    .where(
-                        Variable.is_active.is_(True),
-                        Variable.opcua_node_id.is_not(None),
-                        Asset.is_active.is_(True),
-                    )
-                    .order_by(Variable.id)
-                ).all()
-                for variable in declared:
-                    if variable.id in mapped_variable_ids:
-                        continue
-                    node_id = variable.opcua_node_id
-                    try:
-                        ua.NodeId.from_string(node_id)
-                    except (TypeError, ValueError, UaStringParsingError):
-                        LOGGER.warning(
-                            "Skipping declared OPC UA variable %s with an invalid NodeId",
-                            variable.id,
-                        )
-                        continue
-                    tag = OpcUaTagMapping(
-                        node_id=node_id,
-                        variable_id=variable.id,
-                    )
-                    mapping = OpcUaMachineMapping(
-                        asset_id=variable.asset_id,
-                        readings=[tag],
-                    )
-                    self._declared_variable_mappings.append((mapping, tag))
-                    self._node_mappings.setdefault(node_id, []).append(
-                        (mapping, "reading", variable.id)
-                    )
-                    mapped_variable_ids.add(variable.id)
-                self.status["declared_variable_count"] = len(
-                    self._declared_variable_mappings
+    def _build_subscription_mappings(
+        self,
+        session: Session,
+    ) -> tuple[
+        dict[str, list[tuple[OpcUaMachineMapping, str, int]]],
+        list[tuple[OpcUaMachineMapping, OpcUaTagMapping]],
+    ]:
+        node_mappings: dict[
+            str, list[tuple[OpcUaMachineMapping, str, int]]
+        ] = {}
+        declared_mappings: list[
+            tuple[OpcUaMachineMapping, OpcUaTagMapping]
+        ] = []
+        active_variable_ids = set(
+            session.scalars(
+                select(MonitoringRule.variable_id).where(
+                    MonitoringRule.is_enabled.is_(True),
+                    MonitoringRule.is_archived.is_(False),
+                    MonitoringRule.variable_id.is_not(None),
                 )
-                self.status["subscribed_node_count"] = len(self._node_mappings)
+            ).all()
+        )
+
+        for mapping in self.mappings:
+            asset = session.get(Asset, mapping.asset_id)
+            if asset is None or not asset.is_active:
+                raise OpcUaConfigurationError(
+                    f"OPC UA mapping references missing or inactive asset {mapping.asset_id}."
+                )
+            signals = [
+                (mapping.cycle_signal, True, "cycle"),
+                (mapping.running_signal, True, "running"),
+                *((signal, False, "reading") for signal in mapping.readings),
+            ]
+            for signal, is_state_signal, role in signals:
+                if signal is None:
+                    continue
+                variable = session.get(Variable, signal.variable_id)
+                if (
+                    variable is None
+                    or variable.asset_id != mapping.asset_id
+                    or not variable.is_active
+                    or (is_state_signal and variable.data_type != "boolean")
+                ):
+                    raise OpcUaConfigurationError(
+                        "OPC UA NodeIds must map to active variables belonging to "
+                        "their configured asset; cycle and running signals must be boolean."
+                    )
+                if variable.id in active_variable_ids:
+                    node_mappings.setdefault(signal.node_id, []).append(
+                        (mapping, role, signal.variable_id)
+                    )
+
+        if self.settings.opc_ua_mapping_bypass_enabled and active_variable_ids:
+            mapped_variable_ids = {
+                variable_id
+                for mappings in node_mappings.values()
+                for _, _, variable_id in mappings
+            }
+            declared = session.scalars(
+                select(Variable)
+                .join(Asset, Asset.id == Variable.asset_id)
+                .where(
+                    Variable.id.in_(active_variable_ids),
+                    Variable.is_active.is_(True),
+                    Variable.opcua_node_id.is_not(None),
+                    Asset.is_active.is_(True),
+                )
+                .order_by(Variable.id)
+            ).all()
+            for variable in declared:
+                if variable.id in mapped_variable_ids:
+                    continue
+                node_id = variable.opcua_node_id
+                try:
+                    ua.NodeId.from_string(node_id)
+                except (TypeError, ValueError, UaStringParsingError):
+                    LOGGER.warning(
+                        "Skipping declared OPC UA variable %s with an invalid NodeId",
+                        variable.id,
+                    )
+                    continue
+                tag = OpcUaTagMapping(
+                    node_id=node_id,
+                    variable_id=variable.id,
+                )
+                mapping = OpcUaMachineMapping(
+                    asset_id=variable.asset_id,
+                    readings=[tag],
+                )
+                declared_mappings.append((mapping, tag))
+                node_mappings.setdefault(node_id, []).append(
+                    (mapping, "reading", variable.id)
+                )
+
+        return node_mappings, declared_mappings
+
+    def _validate_mappings(self) -> None:
+        with self.session_factory() as session:
+            self._node_mappings, self._declared_variable_mappings = (
+                self._build_subscription_mappings(session)
+            )
+        self.status["declared_variable_count"] = len(
+            self._declared_variable_mappings
+        )
+        self.status["subscribed_node_count"] = len(self._node_mappings)
 # From PLC updates to database
     def _process_notification(self, notification: OpcUaNotification) -> None:
         mappings = self._node_mappings.get(notification.node_id)
@@ -783,6 +880,30 @@ class OpcUaCollector:
                 mapping.asset_id,
             )
             return
+
+        stale_after = self.settings.monitoring_default_stale_after_seconds
+        if role in {"running", "reading"} and isinstance(
+            notification.value, bool
+        ):
+            if notification.recorded_at is None:
+                LOGGER.warning(
+                    "Ignoring Boolean OPC UA state sample without a source or "
+                    "server timestamp for asset %s",
+                    mapping.asset_id,
+                )
+                return
+            sample_age = utc_now() - _normalize_notification_timestamp(
+                notification.recorded_at, notification.node_id
+            )
+            if sample_age > timedelta(seconds=stale_after):
+                LOGGER.warning(
+                    "Ignoring stale Boolean OPC UA state sample for asset %s "
+                    "(age %.0f s exceeds %s s)",
+                    mapping.asset_id,
+                    sample_age.total_seconds(),
+                    stale_after,
+                )
+                return
 
         recorded_at = _normalize_notification_timestamp(
             notification.recorded_at, notification.node_id
@@ -866,7 +987,12 @@ class OpcUaCollector:
                 elif role == "running":
                     state.last_running_signal_at = recorded_at
                     self._apply_running_signal(
-                        session, state, notification.value, recorded_at
+                        session,
+                        state,
+                        notification.value,
+                        recorded_at,
+                        stale_after,
+                        signal_at,
                     )
                 session.commit()
         except (HTTPException, ValidationError, ValueError) as error:
@@ -896,10 +1022,14 @@ class OpcUaCollector:
         state: MachineMonitoringState,
         value: bool,
         at: datetime,
+        stale_after_seconds: int,
+        previous_signal_at: datetime | None,
     ) -> None:
+        if state.is_running is True:
+            advance_runtime(
+                state, at, stale_after_seconds, previous_signal_at
+            )
         previous = state.is_running
-        if previous is True:
-            advance_runtime(state, at)
         state.is_running = value
         if value:
             if state.runtime_checkpoint_at is None or at > state.runtime_checkpoint_at:
@@ -928,8 +1058,16 @@ class OpcUaCollector:
                     MachineMonitoringState.is_running.is_(True)
                 )
             ).all()
+            stale_after = timedelta(
+                seconds=self.settings.monitoring_default_stale_after_seconds
+            )
             for state in states:
-                state.runtime_checkpoint_at = at
+                signal_at = state.last_running_signal_at
+                if signal_at is None or at - signal_at > stale_after:
+                    state.is_running = None
+                    state.runtime_checkpoint_at = None
+                else:
+                    state.runtime_checkpoint_at = at
                 state.updated_at = at
             session.commit()
 
@@ -946,7 +1084,11 @@ class OpcUaCollector:
                 )
             ).all()
             for state in states:
-                advance_runtime(state, at)
+                advance_runtime(
+                    state,
+                    at,
+                    self.settings.monitoring_default_stale_after_seconds,
+                )
             session.commit()
 
     def _disconnect_runtime(self, at: datetime) -> None:
@@ -962,7 +1104,11 @@ class OpcUaCollector:
                 )
             ).all()
             for state in states:
-                advance_runtime(state, at)
+                advance_runtime(
+                    state,
+                    at,
+                    self.settings.monitoring_default_stale_after_seconds,
+                )
                 state.runtime_checkpoint_at = None
             session.commit()
 #lease management - preventing competing collectors
@@ -1023,7 +1169,21 @@ def machine_status_rows(
     now: datetime | None = None,
 ) -> list[dict[str, Any]]:
     current_time = now or utc_now()
-    mappings = collector.mappings if collector is not None else []
+    active_machine_asset_ids = (
+        {
+            mapping.asset_id
+            for node_mappings in collector._node_mappings.values()
+            for mapping, role, _ in node_mappings
+            if role in {"cycle", "running"}
+        }
+        if collector is not None
+        else set()
+    )
+    mappings = [
+        mapping
+        for mapping in (collector.mappings if collector is not None else [])
+        if mapping.asset_id in active_machine_asset_ids
+    ]
     asset_ids = [mapping.asset_id for mapping in mappings]
     if not asset_ids:
         return []
@@ -1069,12 +1229,19 @@ def machine_status_rows(
         running_seconds = (
             Decimal(state.accumulated_running_seconds) if state else Decimal(0)
         )
+        signal_fresh = (
+            state is not None
+            and state.last_running_signal_at is not None
+            and current_time - state.last_running_signal_at
+            <= timedelta(seconds=stale_after_seconds)
+        )
         if (
             state is not None
             and state.is_running is True
             and state.runtime_checkpoint_at is not None
             and collector is not None
             and collector.status["connected"]
+            and signal_fresh
             and current_time > state.runtime_checkpoint_at
         ):
             running_seconds += Decimal(
@@ -1085,11 +1252,11 @@ def machine_status_rows(
                 "asset_id": mapping.asset_id,
                 "asset_name": asset.name if asset else None,
                 "status": (
-                    "running" if state and state.is_running is True
+                    "running" if state and state.is_running is True and signal_fresh
                     else "stopped" if state and state.is_running is False
                     else "unknown"
                 ),
-                "is_running": state.is_running if state else None,
+                "is_running": (state.is_running if signal_fresh or (state and state.is_running is False) else None) if state else None,
                 "cycle_count": state.cycle_count if state else 0,
                 "running_seconds": float(running_seconds),
                 "cycle_limit": mapping.cycle_limit,
