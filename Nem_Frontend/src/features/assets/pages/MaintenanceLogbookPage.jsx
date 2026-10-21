@@ -75,11 +75,15 @@ export default function MaintenanceLogbookPage({
         </div>
 
         <button
-          type="button"
-          onClick={() => navigate(`/assets/${id}`)}
-        >
-          Back to Asset
-        </button>
+  type="button"
+  onClick={() =>
+    navigate(`/assets/${id}`, {
+      state: { activeTab: "logbook" },
+    })
+  }
+>
+  Back to Maintanance log
+</button>
       </header>
 
       <section className="maintenance-logbook-grid">

@@ -331,7 +331,7 @@ export default function CreateMonitoringRulePage() {
       <main className="monitoring-rule-page">
         <p role="alert">{error || "Invalid monitoring rule selection."}</p>
         <button type="button" className="btn-outline" onClick={() => navigate(`/assets/${id}`)}>
-          Back to asset
+          Back to Maintenance log 
         </button>
       </main>
     );

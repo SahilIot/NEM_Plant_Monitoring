@@ -276,9 +276,10 @@ export default function MaintenancePanel({ assetId, onChanged }) {
   };
 
   // Opens the maintenance logbook for the current asset.
-  const openMaintenanceLogbook = () => {
-    navigate(`/assets/${assetId}/maintenance/logbook`);
-  };
+ 
+const openMaintenanceLogbook = () => {
+  navigate(`/assets/${assetId}/maintenance/logbook`);
+};
 
   const openScheduleEdit = (schedule) => {
     setScheduleValues({
@@ -551,13 +552,13 @@ export default function MaintenancePanel({ assetId, onChanged }) {
               Other rule workflows
             </button>
             <button
-              type="button"
-              className="secondary-btn"
-              onClick={openMaintenanceLogbook}
-              disabled={busy}
-            >
-              View Maintenance Logbook
-            </button>
+  type="button"
+  className="btn-primary"
+  onClick={openMaintenanceLogbook}
+  disabled={busy}
+>
+  View Maintenance Logbook
+</button>
             <button
               type="button"
               className="btn-primary"
