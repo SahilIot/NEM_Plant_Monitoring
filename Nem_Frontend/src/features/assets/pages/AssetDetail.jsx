@@ -294,13 +294,18 @@ const VARIABLE_FIELDS = [
 
 export default function AssetDetail() {
   const { id } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+
   const { assets, assetsLoaded, reload, refreshStatus } =
     useOutletContext();
 
   const assetId = Number(id);
   const asset = assets.find((a) => a.id === assetId);
 
-  const [tab, setTab] = useState("status");
+  const [tab, setTab] = useState(
+    location.state?.activeTab === "logbook" ? "logbook" : "status"
+  );
   const [list, setList] = useState("activated");
   const [rules, setRules] = useState([]);
   const [variables, setVariables] = useState([]);
@@ -338,9 +343,6 @@ export default function AssetDetail() {
   const [deletingAsset, setDeletingAsset] = useState(false);
   const [deletingVariableId, setDeletingVariableId] = useState(null);
   const [variableDeleteError, setVariableDeleteError] = useState("");
-  const navigate = useNavigate();
-  const location = useLocation();
-
   
   const seq = useRef(0);
   const bulkRequest = useRef(false);
@@ -495,9 +497,9 @@ export default function AssetDetail() {
     setEvents([]);
     setLoadError("");
 
-    loadVariables();
-    loadLogs();
-    loadLive();
+  loadVariables();
+  loadLogs();
+  loadLive();
 
     return () => {
       seq.current += 1;
@@ -537,12 +539,27 @@ export default function AssetDetail() {
     };
   }, [hasRuntimeRules]);
 
+
   useEffect(() => {
-    const notice = location.state?.createdNotice;
-    if (!notice) return;
-    setActionNotice(notice);
-    setTab("logbook");
-    navigate(location.pathname, { replace: true, state: null });
+    const navigationState = location.state;
+
+    if (navigationState?.activeTab === "logbook") {
+      setTab("logbook");
+    }
+
+    if (navigationState?.createdNotice) {
+      setActionNotice(navigationState.createdNotice);
+    }
+
+    if (
+      navigationState?.activeTab ||
+      navigationState?.createdNotice
+    ) {
+      navigate(location.pathname, {
+        replace: true,
+        state: null,
+      });
+    }
   }, [location.pathname, location.state, navigate]);
 
 
@@ -1429,8 +1446,8 @@ const filteredLogs = [...logs]
       onChanged={refreshMaintenanceData}
     />
 
-    <div className="panel maintenance-log-notes">
-      <div className="panel-head maintenance-log-head">
+   <div className="panel maintenance-log-notes-panel">
+    <div className="panel-head maintenance-log-notes-head">
         <div>
           <h2>Maintenance log notes</h2>
           <span className="muted">

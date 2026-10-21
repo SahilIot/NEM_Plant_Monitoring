@@ -436,13 +436,13 @@ export default function Home() {
             <ul className="state-grid">
               {ruleStats.map(([label, key]) => (
                 <li key={key}>
-                  <Link to="/configuration/rules">
-                    <span>{label}</span>
-                    <b>{num(stats[key])}</b>
+                  <Link to="/assets">
+                  <span>{label}</span>
+                  <b>{num(stats[key])}</b>
                   </Link>
-                </li>
-              ))}
-            </ul>
+                  </li>
+                ))}
+                </ul>
           </section>
         </div>
 

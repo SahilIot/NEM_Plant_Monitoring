@@ -94,8 +94,11 @@ export default function CreateMaintenanceSchedulePage() {
       });
 
       navigate(`/assets/${id}`, {
-        state: { maintenanceNotice: "Maintenance schedule created." },
-      });
+  state: {
+    activeTab: "logbook",
+    createdNotice: "Maintenance schedule created.",
+  },
+});
     } catch (requestError) {
       setError(
         requestError.message || "Could not create maintenance schedule."
@@ -120,10 +123,14 @@ export default function CreateMaintenanceSchedulePage() {
         <button
           type="button"
           className="btn-outline"
-          onClick={() => navigate(`/assets/${id}`)}
+          onClick={() =>
+  navigate(`/assets/${id}`, {
+    state: { activeTab: "logbook" },
+  })
+}
           disabled={busy}
         >
-          Back to asset
+          Back to Maintenance log
         </button>
       </div>
 
@@ -312,7 +319,11 @@ export default function CreateMaintenanceSchedulePage() {
           <button
             type="button"
             className="btn-outline"
-            onClick={() => navigate(`/assets/${id}`)}
+    onClick={() =>
+  navigate(`/assets/${id}`, {
+    state: { activeTab: "logbook" },
+  })
+}
             disabled={busy}
           >
             Cancel

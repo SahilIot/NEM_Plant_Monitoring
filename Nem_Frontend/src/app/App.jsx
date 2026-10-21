@@ -75,11 +75,24 @@ export default function App() {
         {/* PLC */}
         <Route path="/plc" element={<Plc />} />
 
-        {/* Fallback */}
-        <Route path="*" element={<Home />} />
-        <Route path="/assets/:id/maintenance/schedules/new"element={<CreateMaintenanceSchedulePage />}/>
-        <Route path="/assets/:id/maintenance/logbook"element={<MaintenanceLogbookPage />}/>
-        <Route path="/assets/:id/monitoring-rules/new/:choiceId"element={<CreateMonitoringRulePage />}/>
+        {/* Maintenance */}
+<Route
+  path="/assets/:id/maintenance/schedules/new"
+  element={<CreateMaintenanceSchedulePage />}
+/>
+<Route
+  path="/assets/:id/maintenance/logbook"
+  element={<MaintenanceLogbookPage />}
+/>
+
+{/* Monitoring Rules */}
+<Route
+  path="/assets/:id/monitoring-rules/new/:choiceId"
+  element={<CreateMonitoringRulePage />}
+/>
+
+{/* Fallback — keep this last */}
+<Route path="*" element={<Home />} />
       </Route>
     </Routes>
   );
