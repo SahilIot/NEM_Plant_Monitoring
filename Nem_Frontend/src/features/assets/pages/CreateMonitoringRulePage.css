@@ -1,0 +1,95 @@
+
+.monitoring-rule-page {
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 28px 24px 40px;
+  color: var(--text, inherit);
+}
+
+.monitoring-rule-header {
+  margin-bottom: 24px;
+}
+
+.monitoring-rule-header h1 {
+  margin: 18px 0 8px;
+  font-size: 28px;
+}
+
+.monitoring-rule-card {
+  overflow: hidden;
+  border: 1px solid var(--border, #35404c);
+  border-radius: 14px;
+  background: var(--surface, #151b22);
+}
+
+.monitoring-rule-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+  padding: 24px;
+}
+
+.monitoring-rule-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.monitoring-rule-field > span {
+  font-size: 13px;
+  color: var(--text, inherit);
+}
+
+.monitoring-rule-field input,
+.monitoring-rule-field select,
+.monitoring-rule-field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--border, #35404c);
+  border-radius: 7px;
+  background: var(--surface, #151b22);
+  color: var(--text, inherit);
+  font: inherit;
+}
+
+.monitoring-rule-field textarea {
+  resize: vertical;
+}
+
+.monitoring-rule-field input:disabled,
+.monitoring-rule-field select:disabled {
+  opacity: 0.75;
+  cursor: not-allowed;
+}
+
+.monitoring-rule-field small {
+  color: var(--muted, #8b9aab);
+  line-height: 1.5;
+}
+
+.monitoring-rule-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 20px 24px;
+  border-top: 1px solid var(--border, #35404c);
+}
+
+@media (max-width: 700px) {
+  .monitoring-rule-page {
+    padding: 16px 12px 24px;
+  }
+
+  .monitoring-rule-fields {
+    grid-template-columns: 1fr;
+    padding: 18px 16px;
+  }
+
+  .monitoring-rule-actions {
+    padding: 16px;
+  }
+}

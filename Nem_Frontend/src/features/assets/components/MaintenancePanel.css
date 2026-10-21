@@ -70,3 +70,339 @@
   .maintenance-details { grid-template-columns: 1fr; gap: 4px; }
   .maintenance-details dd { margin-bottom: 10px; }
 }
+
+
+/* ===== Maintenance Management - Modern Dark UI ===== */
+
+.maintenance-panel {
+  color: var(--text, #e7edf5);
+}
+
+/* Main maintenance sections */
+.maintenance-panel .maintenance-card,
+.maintenance-panel .maintenance-section,
+.maintenance-panel .maintenance-logbook,
+.maintenance-panel .maintenance-management {
+  border: 1px solid var(--border, #2b3745);
+  border-radius: 14px;
+  background: var(--surface, #151c24);
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.10);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Section headings */
+.maintenance-panel h2,
+.maintenance-panel h3 {
+  color: var(--text, #e7edf5);
+  letter-spacing: -0.2px;
+}
+
+.maintenance-panel p {
+  color: var(--muted, #9aabba);
+  line-height: 1.6;
+}
+
+/* Buttons */
+.maintenance-panel button {
+  border-radius: 8px;
+  transition: background-color 0.18s ease,
+              border-color 0.18s ease,
+              transform 0.18s ease;
+}
+
+.maintenance-panel button:hover {
+  transform: translateY(-1px);
+}
+
+.maintenance-panel button:focus-visible,
+.maintenance-panel input:focus-visible,
+.maintenance-panel select:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+/* Search, date and sort controls */
+.maintenance-panel input:not([type="checkbox"]),
+.maintenance-panel input:not([type="radio"]),
+.maintenance-panel select,
+.maintenance-panel textarea {
+  box-sizing: border-box;
+  border: 1px solid var(--border, #344252);
+  border-radius: 8px;
+  background: var(--surface, #151c24);
+  color: var(--text, #e7edf5);
+}
+
+.maintenance-panel input::placeholder,
+.maintenance-panel textarea::placeholder {
+  color: var(--muted, #8999aa);
+}
+
+.maintenance-panel input:hover,
+.maintenance-panel select:hover,
+.maintenance-panel textarea:hover {
+  border-color: #647d99;
+}
+
+/* Logbook divider */
+.maintenance-panel hr {
+  border: 0;
+  border-top: 1px solid var(--border, #2b3745);
+  margin: 18px 0;
+}
+
+/* Empty states */
+.maintenance-panel .empty,
+.maintenance-panel .empty-state {
+  padding: 28px 16px;
+  text-align: center;
+  border-radius: 10px;
+}
+
+/* Light mode compatibility */
+:root:not([data-theme="dark"]) .maintenance-panel {
+  color: var(--text, #1e293b);
+}
+
+@media (max-width: 700px) {
+  .maintenance-panel {
+    min-width: 0;
+  }
+
+  .maintenance-panel input,
+  .maintenance-panel select,
+  .maintenance-panel textarea {
+    max-width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .maintenance-panel *,
+  .maintenance-panel *::before,
+  .maintenance-panel *::after {
+    transition: none !important;
+    transform: none !important;
+  }
+}
+
+
+
+/* Main management container */
+.maintenance-panel {
+  border: 1px solid var(--border, #2b3542);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+/* Header and action buttons */
+.maintenance-panel .maintenance-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 22px;
+}
+
+.maintenance-panel .maintenance-heading h2 {
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.3px;
+  margin: 0 0 7px;
+}
+
+.maintenance-panel .maintenance-heading p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.maintenance-panel .maintenance-heading-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.maintenance-panel .maintenance-heading-actions button {
+  min-height: 38px;
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-weight: 550;
+  transition: filter 0.18s ease, border-color 0.18s ease;
+}
+
+.maintenance-panel .maintenance-heading-actions button:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+/* Table container */
+.maintenance-panel .maintenance-table-wrap {
+  border: 1px solid var(--border, #2b3542);
+  border-radius: 10px;
+  overflow-x: auto;
+}
+
+.maintenance-panel .maintenance-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.maintenance-panel .maintenance-table thead th {
+  padding: 13px 14px;
+  background: var(--surface-raised, var(--surface, #1b232d));
+  border-bottom: 1px solid var(--border, #2b3542);
+  text-align: left;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.035em;
+  white-space: nowrap;
+}
+
+.maintenance-panel .maintenance-table tbody td {
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--border, #2b3542);
+  vertical-align: middle;
+}
+
+.maintenance-panel .maintenance-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.maintenance-panel .maintenance-table tbody tr {
+  transition: background-color 0.15s ease;
+}
+
+.maintenance-panel .maintenance-table tbody tr:hover {
+  background: var(--surface-hover, rgba(120, 145, 175, 0.07));
+}
+
+/* Status labels */
+.maintenance-panel .maintenance-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 9px;
+  border: 1px solid var(--border, #344252);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Action buttons in tables */
+.maintenance-panel .maintenance-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.maintenance-panel .maintenance-actions button {
+  border-radius: 7px;
+  padding: 7px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Schedule and archive sections */
+.maintenance-panel .maintenance-schedules {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border, #2b3542);
+}
+
+.maintenance-panel .maintenance-schedules h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.maintenance-panel .maintenance-schedules > .muted {
+  margin-bottom: 15px;
+  line-height: 1.6;
+}
+
+/* Form controls — preserve current theme */
+.maintenance-panel input:not([type="checkbox"]),
+.maintenance-panel select,
+.maintenance-panel textarea {
+  max-width: 100%;
+  border-radius: 8px;
+  border-color: var(--border, #354252);
+  color: var(--text, inherit);
+  background-color: var(--surface, transparent);
+}
+
+.maintenance-panel input:focus-visible,
+.maintenance-panel select:focus-visible,
+.maintenance-panel textarea:focus-visible,
+.maintenance-panel button:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+/* Responsive layout */
+@media (max-width: 850px) {
+  .maintenance-panel .maintenance-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .maintenance-panel .maintenance-heading-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+}
+
+@media (max-width: 520px) {
+  .maintenance-panel .maintenance-heading {
+    padding: 16px;
+  }
+
+  .maintenance-panel .maintenance-heading-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .maintenance-panel .maintenance-heading-actions button {
+    width: 100%;
+  }
+
+  .maintenance-panel .maintenance-table thead th,
+  .maintenance-panel .maintenance-table tbody td {
+    padding: 10px;
+  }
+}
+
+/* Maintenance panel — theme-aware text colors */
+.asset-page .maintenance-panel,
+.asset-page .maintenance-panel h1,
+.asset-page .maintenance-panel h2,
+.asset-page .maintenance-panel h3,
+.asset-page .maintenance-panel p,
+.asset-page .maintenance-panel label,
+.asset-page .maintenance-panel strong,
+.asset-page .maintenance-panel span {
+  color: var(--text);
+}
+
+.asset-page .maintenance-panel .muted,
+.asset-page .maintenance-panel .maintenance-subtitle {
+  color: var(--muted);
+}
+
+.asset-page .maintenance-panel .panel,
+.asset-page .maintenance-panel .maintenance-card {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+/* Empty-state text */
+.asset-page .maintenance-panel .empty-title {
+  color: var(--text);
+}
+
+.asset-page .maintenance-panel .empty p,
+.asset-page .maintenance-panel .empty .muted {
+  color: var(--muted);
+}

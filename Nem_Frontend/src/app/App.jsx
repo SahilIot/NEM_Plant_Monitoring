@@ -22,6 +22,9 @@ import Plc from "../features/plc/pages/Plc.jsx";
 
 import Settings from "../features/settings/pages/Settings.jsx";
 import SettingsSub from "../features/settings/pages/SettingsSub.jsx";
+import CreateMaintenanceSchedulePage from "../features/assets/pages/CreateMaintenanceSchedulePage.jsx";
+import MaintenanceLogbookPage from "../features/assets/pages/MaintenanceLogbookPage.jsx";
+import CreateMonitoringRulePage from "../features/assets/pages/CreateMonitoringRulePage.jsx";
 
 export default function App() {
   return (
@@ -74,6 +77,9 @@ export default function App() {
 
         {/* Fallback */}
         <Route path="*" element={<Home />} />
+        <Route path="/assets/:id/maintenance/schedules/new"element={<CreateMaintenanceSchedulePage />}/>
+        <Route path="/assets/:id/maintenance/logbook"element={<MaintenanceLogbookPage />}/>
+        <Route path="/assets/:id/monitoring-rules/new/:choiceId"element={<CreateMonitoringRulePage />}/>
       </Route>
     </Routes>
   );

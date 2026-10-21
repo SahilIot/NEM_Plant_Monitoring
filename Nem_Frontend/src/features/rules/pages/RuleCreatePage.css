@@ -444,3 +444,53 @@ body.light .rule-create-page .form-actions .btn-outline {
   color: #334155;
   border-color: #cbd5e1;
 }
+
+
+/* Only shrink the interval maintenance checkbox */
+.rule-create-page .rule-checkbox-field input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 14px;
+}
+
+
+/* Rule Create Page — follow the active application theme */
+.rule-create-page,
+.rule-create-page .rule-create-container {
+  color: var(--text);
+}
+
+.rule-create-page .rule-create-card {
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.rule-create-page .rule-page-title,
+.rule-create-page .rule-create-card-header h2,
+.rule-create-page .form-group label,
+.rule-create-page .rule-checkbox-field {
+  color: var(--text);
+}
+
+.rule-create-page .rule-page-subtitle,
+.rule-create-page .rule-create-card-header p {
+  color: var(--muted);
+}
+
+.rule-create-page .form-group input,
+.rule-create-page .form-group textarea,
+.rule-create-page .form-group select {
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.rule-create-page .form-group input::placeholder,
+.rule-create-page .form-group textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}

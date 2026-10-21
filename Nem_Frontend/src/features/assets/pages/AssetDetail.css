@@ -1,25 +1,4 @@
 .asset-page {
-  --bg: #0d1217;
-  --surface: #151b22;
-  --surface-2: #1b232c;
-  --line: #27313c;
-  --line-strong: #3b4856;
-  --ink: #e7ecf1;
-  --ink-2: #b3bdc8;
-  --muted: #93a0ad;
-  --action: #8bb8f7;
-  --action-bg: #2f6bc2;
-  --action-hover: #3a79d6;
-  --action-soft: #182739;
-  --on-action: #ffffff;
-  --ok: #44d19c;
-  --ok-soft: #12332a;
-  --warn: #f2b94a;
-  --warn-lamp: #f2b233;
-  --warn-soft: #382c10;
-  --alert: #ff7a80;
-  --alert-soft: #3a1a1d;
-  --off: #6b7785;
   width: 100%;
   min-height: 100%;
   padding: 14px 16px 32px;
@@ -397,5 +376,108 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+<<<<<<< Updated upstream
 .asset-page .asset-links .danger-link { color: var(--danger, #e05252); }
 .asset-page .asset-links .danger-link:disabled { opacity: 0.6; cursor: wait; }
+=======
+
+/* Maintenance log notes */
+.maintenance-log-notes {
+  margin-top: 20px;
+  min-width: 0;
+}
+
+.maintenance-log-head {
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.maintenance-log-head h2 {
+  margin: 0 0 5px;
+}
+
+.maintenance-log-toolbar {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 0;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.maintenance-log-search {
+  flex: 1 1 220px;
+  width: 100%;
+  min-width: 150px;
+  min-height: 40px;
+  padding: 9px 12px;
+  box-sizing: border-box;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.maintenance-log-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 130px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.maintenance-log-filter input,
+.maintenance-log-filter select {
+  width: 100%;
+  min-height: 40px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.maintenance-log-search:focus,
+.maintenance-log-filter input:focus,
+.maintenance-log-filter select:focus {
+  outline: 2px solid var(--accent, #6366f1);
+  outline-offset: 1px;
+}
+
+.maintenance-notes-table {
+  width: 100%;
+}
+
+.maintenance-notes-table th {
+  white-space: nowrap;
+}
+
+.maintenance-note-text {
+  min-width: 220px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+
+@media (max-width: 650px) {
+  .maintenance-log-toolbar {
+    align-items: stretch;
+  }
+
+  .maintenance-log-search,
+  .maintenance-log-filter {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .maintenance-log-head {
+    align-items: flex-start;
+  }
+}
+>>>>>>> Stashed changes
