@@ -7,11 +7,9 @@ import { api } from "../../../services/api.js";
 import MaintenancePanel from "../components/MaintenancePanel.jsx";
 import "./AssetDetail.css";
 import {
-  conditionText,
   formatDuration,
   formatTime,
   formatValue,
-  timeAgo,
 } from "../../../utils/format.js";
 import {
   MONITORING_RULE_CHOICES,
@@ -287,12 +285,7 @@ export default function AssetDetail() {
   const [allVariables, setAllVariables] = useState([]);
   const [cycleVariableIds, setCycleVariableIds] = useState([]);
   const [runtimeVariableIds, setRuntimeVariableIds] = useState([]);
-  const [readings, setReadings] = useState([]);
   const [ruleStates, setRuleStates] = useState(new Map());
-  const [varNames, setVarNames] = useState(new Map());
-  const [machine, setMachine] = useState(null);
-  const [plcConnection, setPlcConnection] = useState(null);
-  const [cycleMapping, setCycleMapping] = useState(null);
   const [children, setChildren] = useState(false);
   const [sort, setSort] = useState("severity");
   const [filter, setFilter] = useState("");
@@ -324,7 +317,6 @@ export default function AssetDetail() {
 
   
   const seq = useRef(0);
-  const readingRequest = useRef(null);
   const bulkRequest = useRef(false);
   const permanentDeleteRequest = useRef(false);
 
@@ -387,40 +379,11 @@ export default function AssetDetail() {
             )
             .map((mapping) => mapping.variable_id)
         );
-        setCycleMapping(activeCycleMapping || null);
-        setPlcConnection(plc.value?.connection || null);
-        setMachine(
-          plc.value?.machines?.find(
-            (m) => m.asset_id === assetId
-          ) || null
-        );
       }
     } catch (error) {
       setLoadError(error.message || "Unable to refresh asset monitoring.");
     }
   }, [assetId, children]);
-
-  const loadLatestReadings = useCallback(async () => {
-    if (readingRequest.current) return readingRequest.current;
-
-    let request;
-    request = (async () => {
-      try {
-        const result = await api.get(`/readings/assets/${assetId}/latest`);
-        setReadings(Array.isArray(result) ? result : []);
-      } catch (error) {
-        setLoadError(
-          error.message || "Unable to refresh latest readings."
-        );
-      } finally {
-        if (readingRequest.current === request) {
-          readingRequest.current = null;
-        }
-      }
-    })();
-    readingRequest.current = request;
-    return request;
-  }, [assetId]);
 
   const loadVariables = useCallback(async () => {
     try {
@@ -433,16 +396,6 @@ export default function AssetDetail() {
       setVariables(
         loadedVariables.filter((variable) => variable.is_active)
       );
-
-      setVarNames((prev) => {
-        const next = new Map(prev);
-
-        loadedVariables.forEach((v) => {
-          next.set(v.id, v.name);
-        });
-
-        return next;
-      });
     } catch (error) {
       setVariables([]);
       setAllVariables([]);
@@ -474,13 +427,9 @@ export default function AssetDetail() {
     setTab("status");
     setList("activated");
     setFilter("");
-    setReadings([]);
     setRules([]);
     setAllVariables([]);
     setVariables([]);
-    setMachine(null);
-    setPlcConnection(null);
-    setCycleMapping(null);
     setLogs([]);
     setEvents([]);
     setLoadError("");
@@ -488,12 +437,11 @@ export default function AssetDetail() {
     loadVariables();
     loadLogs();
     loadLive();
-    loadLatestReadings();
 
     return () => {
       seq.current += 1;
     };
-  }, [assetId, loadVariables, loadLogs, loadLive, loadLatestReadings]);
+  }, [assetId, loadVariables, loadLogs, loadLive]);
 
   useEffect(() => {
     const notice = location.state?.createdNotice;
@@ -504,26 +452,6 @@ export default function AssetDetail() {
   }, [location.pathname, location.state, navigate]);
 
 
-  useEffect(() => {
-    let active = true;
-    let timeoutId;
-
-    const pollReadings = async () => {
-      await loadLatestReadings();
-      if (active) {
-        timeoutId = window.setTimeout(pollReadings, 500);
-      }
-    };
-
-    timeoutId = window.setTimeout(pollReadings, 500);
-
-    return () => {
-      active = false;
-      window.clearTimeout(timeoutId);
-    };
-  }, [loadLatestReadings]);
-
-  
   useEffect(() => {
     let active = true;
     let timeoutId;
@@ -569,53 +497,10 @@ export default function AssetDetail() {
     };
   }, [tab, assetId]);
 
-  useEffect(() => {
-    const missing = [
-      ...new Set(
-        rules
-          .map((r) => r.variable_id)
-          .filter((v) => v != null && !varNames.has(v))
-      ),
-    ];
-
-    if (!missing.length) return;
-
-    let cancelled = false;
-
-    Promise.allSettled(
-      missing.map((vid) => api.get(`/variables/${vid}`))
-    ).then((results) => {
-      if (cancelled) return;
-
-      setVarNames((prev) => {
-        const next = new Map(prev);
-
-        results.forEach((res, i) => {
-          next.set(
-            missing[i],
-            res.status === "fulfilled"
-              ? res.value.name
-              : "Value"
-          );
-        });
-
-        return next;
-      });
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [rules, varNames]);
-
   const availableVariables = variables;
   const ruleFormFields = useMemo(
     () => ruleFields(availableVariables, cycleVariableIds, runtimeVariableIds),
     [availableVariables, cycleVariableIds, runtimeVariableIds]
-  );
-
-  const readingByVariable = new Map(
-    readings.map((r) => [r.variable_id, r])
   );
 
   const isAct = (rule) => rule.state === "activated";
@@ -692,7 +577,6 @@ const filteredLogs = [...logs]
   const refreshAll = async () => {
     await Promise.all([
       loadLive(),
-      loadLatestReadings(),
       refreshStatus?.(),
     ]);
   };
@@ -1039,190 +923,6 @@ const filteredLogs = [...logs]
 
       {tab === "status" && (
         <>
-          <p className="muted status-caption">
-            Machine status and rule evaluations refresh automatically every
-            1.5 seconds. Counts and threshold evaluation are maintained by the
-            backend.
-          </p>
-
-          <section
-            className={"machine-strip status-summary" + (machine ? "" : " unavailable")}
-            aria-label="Live machine monitoring"
-          >
-              <div className={"machine-state " + (machine?.status || "unknown")}>
-                <i
-                  className={
-                    "lamp " +
-                    (machine?.status === "running"
-                      ? "ok"
-                      : machine?.status === "stopped"
-                        ? "off"
-                        : "warning")
-                  }
-                />
-                <span className="cap">
-                  {machine?.status || "Status unavailable"}
-                </span>
-                {machine?.stale && <em>stale data</em>}
-              </div>
-
-              <div className="machine-fig">
-                <span>Cycles</span>
-                <b>
-                  {machine?.cycle_count == null
-                    ? "—"
-                    : Number(machine.cycle_count).toLocaleString()}
-                  {machine?.cycle_limit ? (
-                    <small> / {Number(machine.cycle_limit).toLocaleString()}</small>
-                  ) : null}
-                </b>
-              </div>
-
-              <div className="machine-fig">
-                <span>Running time</span>
-                <b>
-                  {machine ? formatDuration(machine.running_seconds) : "—"}
-                  {machine?.runtime_limit_seconds ? (
-                    <small>
-                      {" / "}
-                      {formatDuration(
-                        machine.runtime_limit_seconds
-                      )}
-                    </small>
-                  ) : null}
-                </b>
-              </div>
-
-              <div className="machine-fig">
-                <span>Last signal</span>
-                <b className="plain">
-                  {machine?.last_seen_at
-                    ? timeAgo(machine.last_seen_at)
-                    : "Not received"}
-                </b>
-              </div>
-
-              <div className="machine-fig">
-                <span>OPC UA</span>
-                <b className="plain">
-                  {plcConnection?.connected
-                    ? "Connected"
-                    : plcConnection?.state === "standby"
-                      ? "Standby"
-                      : "Disconnected"}
-                </b>
-              </div>
-
-                <div className="machine-fig cycle-signal-fig">
-                  <span>Cycle signal</span>
-                  <b className="plain">
-                    {cycleMapping
-                      ? `${cycleMapping.variable_name} · ${cycleMapping.node_id}`
-                      : "Not configured"}
-                  </b>
-                </div>
-          </section>
-
-          <section className="panel values-panel">
-            <div className="panel-head">
-              <h2>Live values</h2>
-              <span className="muted">
-                Latest reading for each active variable · refreshes twice per second
-              </span>
-            </div>
-
-            {variables.length === 0 ? (
-              <p className="muted">
-                No variables are configured yet.{" "}
-                <button
-                  className="link-btn inline"
-                  onClick={() => setModal("variables")}
-                >
-                  Add a variable
-                </button>{" "}
-                to start recording readings.
-              </p>
-            ) : (
-              <div className="values-grid">
-                {variables.map((variable) => {
-                  const reading = readingByVariable.get(
-                    variable.id
-                  );
-                  const isCycleSignal =
-                    cycleMapping?.variable_id === variable.id;
-                  const cycleRule = isCycleSignal
-                    ? rules.find(
-                        (rule) =>
-                          rule.rule_type === "boolean_count_threshold" &&
-                          rule.variable_id === variable.id
-                      )
-                    : null;
-                  const cycleRuleState = cycleRule
-                    ? ruleStates.get(cycleRule.id)
-                    : null;
-
-                  return (
-                    <div
-                      className={
-                        "value-cell" +
-                        (reading ? "" : " no-data")
-                      }
-                      key={variable.id}
-                    >
-                      <span className="value-name">
-                        {variable.name}
-                      </span>
-
-                      <span className="value-num">
-                        {reading
-                          ? formatValue(reading.value)
-                          : "No data"}
-                        {reading && variable.unit ? (
-                          <small>{variable.unit}</small>
-                        ) : null}
-                      </span>
-
-                      <span
-                        className="value-age"
-                        title={
-                          reading
-                            ? new Date(
-                                reading.recorded_at
-                              ).toLocaleString()
-                            : ""
-                        }
-                      >
-                        {reading
-                          ? timeAgo(reading.recorded_at)
-                          : "Waiting for first reading"}
-                        {reading?.recorded_at
-                          ? ` · ${new Date(
-                              reading.recorded_at
-                            ).toLocaleTimeString()}`
-                          : ""}
-                      </span>
-                      {isCycleSignal && machine && (
-                        <span className="value-age">
-                          {cycleRule
-                            ? `${cycleRule.name} count: ${
-                                cycleRuleState?.latest_value == null
-                                  ? "Waiting for first count"
-                                  : Number(
-                                      cycleRuleState.latest_value
-                                    ).toLocaleString()
-                              }`
-                            : `Machine cycle count: ${Number(
-                                machine.cycle_count
-                              ).toLocaleString()}`}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
           <div className="toolbar rule-toolbar">
             <button
               className={
@@ -1410,11 +1110,6 @@ const filteredLogs = [...logs]
               {shown.map((rule) => {
                 const state = ruleStates.get(rule.id);
 
-                const condition = conditionText(
-                  rule,
-                  varNames.get(rule.variable_id)
-                );
-
                 const limits = thresholdMetrics(rule);
                 const currentValue =
                   state?.latest_value ?? rule.latest_value;
@@ -1432,16 +1127,6 @@ const filteredLogs = [...logs]
 
                     <div className="rule-name rule-card-main">
                       <strong>{rule.name}</strong>
-                      <small className="rule-context">
-                        {condition ||
-                          rule.rule_type.replace("_", " ")}
-
-                        {rule.asset_id !== assetId &&
-                        rule.asset_name
-                          ? `, on ${rule.asset_name}`
-                          : ""}
-                      </small>
-
                       {rule.description && (
                         <small className="rule-description">{rule.description}</small>
                       )}
@@ -1449,12 +1134,6 @@ const filteredLogs = [...logs]
 
                     <div className="rule-evaluation">
                       <StatusBadge status={rule.status} />
-                      <small>
-                        {state?.message ||
-                          (isAct(rule)
-                            ? "Waiting for the next evaluation."
-                            : "Rule is not currently evaluating.")}
-                      </small>
                     </div>
 
                     <div className="rule-card-metrics">
