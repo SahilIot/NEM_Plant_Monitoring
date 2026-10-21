@@ -30,6 +30,9 @@ def initialize_database(engine: Engine) -> None:
                     )
                 )
         with engine.begin() as connection:
+            connection.execute(
+                text("DROP INDEX IF EXISTS uq_variables_opcua_node_id")
+            )
             connection.execute(text("DROP INDEX IF EXISTS ix_variables_opcua_node_id"))
             connection.execute(
                 text(

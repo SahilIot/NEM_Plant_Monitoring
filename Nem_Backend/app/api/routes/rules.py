@@ -1,5 +1,7 @@
 # create,view,update and filter machine monitoring rules
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from asyncua import ua
+from asyncua.ua.uaerrors import UaStringParsingError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -10,6 +12,12 @@ from app.services.monitoring_engine import emit_event, set_rule_enabled_state
 from app.services.monitoring_engine import utc_now
 
 router = APIRouter(prefix="/rules", tags=["monitoring rules"])
+
+
+def is_mapping_bypass_enabled(request: Request) -> bool:
+    settings = getattr(request.app.state, "settings", None)
+    return bool(getattr(settings, "opc_ua_mapping_bypass_enabled", False))
+
 
 #Configured PLC cycle signal
 def configured_cycle_signal_mapping(request: Request,variable_id: int | None,) -> tuple[int, int] | None:
@@ -59,6 +67,7 @@ def validate_targets(
     parameters: dict | None,
     cycle_signal_mapping: tuple[int, int] | None,
     runtime_signal_mapping: tuple[int, int] | None = None,
+    mapping_bypass_enabled: bool = False,
 ) -> None:
     #Check that asset exits
     asset = session.get(Asset, target_asset_id) if target_asset_id is not None else None
@@ -94,12 +103,29 @@ def validate_targets(
                     status_code=422,
                     detail="Running-time rules require an active Boolean variable on an active asset",
                 )
-            if runtime_signal_mapping != (target_asset_id, variable_id):
+            bypass_signal_is_valid = (
+                mapping_bypass_enabled
+                and variable is not None
+                and variable.opcua_node_id is not None
+            )
+            if bypass_signal_is_valid:
+                try:
+                    ua.NodeId.from_string(variable.opcua_node_id)
+                except (TypeError, ValueError, UaStringParsingError) as error:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Running-time rules require a valid OPC UA NodeId",
+                    ) from error
+            if (
+                runtime_signal_mapping != (target_asset_id, variable_id)
+                and not bypass_signal_is_valid
+            ):
                 raise HTTPException(
                     status_code=422,
                     detail=(
                         "Running-time rules must target this asset's configured "
-                        "OPC UA running signal"
+                        "OPC UA running signal or an asset-owned declared Boolean "
+                        "variable while mapping bypass is enabled"
                     ),
                 )
         elif not isinstance(duration, int) or isinstance(duration, bool) or duration <= 0:
@@ -114,9 +140,26 @@ def validate_targets(
         ):
             raise HTTPException(status_code=422,detail=("Boolean count threshold rules require an active Boolean variable"),
             )
-        if cycle_signal_mapping != (target_asset_id, variable_id):
+        bypass_signal_is_valid = (
+            mapping_bypass_enabled
+            and variable is not None
+            and variable.opcua_node_id is not None
+        )
+        if bypass_signal_is_valid:
+            try:
+                ua.NodeId.from_string(variable.opcua_node_id)
+            except (TypeError, ValueError, UaStringParsingError) as error:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Boolean count threshold rules require a valid OPC UA NodeId",
+                ) from error
+        if (
+            cycle_signal_mapping != (target_asset_id, variable_id)
+            and not bypass_signal_is_valid
+        ):
             raise HTTPException(status_code=422,detail=("Boolean count threshold rules must target the active Boolean "
-                    "variable configured as this asset's OPC UA cycle signal."
+                    "variable configured as this asset's OPC UA cycle signal, or "
+                    "an asset-owned declared Boolean variable while mapping bypass is enabled."
                 ),
             )
         parameters = parameters or {}
@@ -155,6 +198,7 @@ def create_rule(
         payload.operator, payload.threshold, payload.parameters,
         configured_cycle_signal_mapping(request, payload.variable_id),
         configured_runtime_signal_mapping(request, payload.variable_id),
+        is_mapping_bypass_enabled(request),
     )
     rule = MonitoringRule(**payload.model_dump())
     session.add(rule)
@@ -245,6 +289,7 @@ def update_rule(
         validated.operator, validated.threshold, validated.parameters,
         configured_cycle_signal_mapping(request, validated.variable_id),
         configured_runtime_signal_mapping(request, validated.variable_id),
+        is_mapping_bypass_enabled(request),
     )
     # prevent changing targets after evaluation state exits
     target_fields = {"target_asset_id", "variable_id"}

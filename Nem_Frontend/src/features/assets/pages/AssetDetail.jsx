@@ -78,7 +78,12 @@ function thresholdMetrics(rule) {
   return [];
 }
 
-const ruleFields = (variables, cycleVariableIds, runtimeVariableIds) => [
+const ruleFields = (
+  variables,
+  cycleVariableIds,
+  runtimeVariableIds,
+  mappingBypassEnabled
+) => [
   {
     key: "name",
     label: "Rule name",
@@ -101,7 +106,9 @@ const ruleFields = (variables, cycleVariableIds, runtimeVariableIds) => [
       ["boolean_count_threshold", "Boolean cycle-count thresholds"],
       ["runtime_duration", "Running time"],
     ],
-    hint: "Cycle counts come from this asset's configured PLC cycle signal.",
+    hint: mappingBypassEnabled
+      ? "Select a declared Boolean variable owned by this asset."
+      : "Cycle counts come from this asset's configured PLC cycle signal.",
   },
   {
     key: "variable_id",
@@ -118,7 +125,9 @@ const ruleFields = (variables, cycleVariableIds, runtimeVariableIds) => [
   },
   {
     key: "cycle_variable_id",
-    label: "Configured Boolean cycle signal",
+    label: mappingBypassEnabled
+      ? "Boolean cycle signal"
+      : "Configured Boolean cycle signal",
     type: "select",
     required: true,
     showWhen: { key: "rule_type", equals: "boolean_count_threshold" },
@@ -126,8 +135,12 @@ const ruleFields = (variables, cycleVariableIds, runtimeVariableIds) => [
       .filter((v) => cycleVariableIds.includes(v.id))
       .map((v) => [v.id, `${v.name} (#${v.id})`]),
     hint: cycleVariableIds.length
-      ? "Only Boolean variables configured as this asset's OPC UA cycle signal are available."
-      : "No OPC UA cycle signal is configured for this asset. Configure it in backend OPCUA_MACHINE_MAPPINGS first.",
+      ? mappingBypassEnabled
+        ? "Only declared Boolean variables on this asset are available."
+        : "Only Boolean variables configured as this asset's OPC UA cycle signal are available."
+      : mappingBypassEnabled
+        ? "No declared Boolean OPC UA variables are available for this asset."
+        : "No OPC UA cycle signal is configured for this asset. Configure it in backend OPCUA_MACHINE_MAPPINGS first.",
   },
   {
     key: "runtime_variable_id",
@@ -141,7 +154,9 @@ const ruleFields = (variables, cycleVariableIds, runtimeVariableIds) => [
         runtimeVariableIds.includes(variable.id)
       )
       .map((variable) => [variable.id, variable.name]),
-    hint: "Select a mapped Boolean OPC UA variable that is true while the machine runs.",
+    hint: mappingBypassEnabled
+      ? "Select a declared Boolean variable owned by this asset that is true while the machine runs."
+      : "Select a mapped Boolean OPC UA variable that is true while the machine runs.",
   },
   {
     key: "operator",
@@ -268,6 +283,12 @@ const VARIABLE_FIELDS = [
     label: "Unit",
     placeholder: "e.g. °C, rpm, cycles",
   },
+  {
+    key: "opcua_node_id",
+    label: "OPC UA NodeId",
+    placeholder: "e.g. ns=2;s=Machine.Cycle",
+    hint: "Optional. Enter the exact NodeId from the PLC. Restart the backend after changing it so the collector can subscribe.",
+  },
 ];
 
 export default function AssetDetail() {
@@ -285,6 +306,8 @@ export default function AssetDetail() {
   const [allVariables, setAllVariables] = useState([]);
   const [cycleVariableIds, setCycleVariableIds] = useState([]);
   const [runtimeVariableIds, setRuntimeVariableIds] = useState([]);
+  const [mappingBypassEnabled, setMappingBypassEnabled] = useState(false);
+  const [editingVariable, setEditingVariable] = useState(null);
   const [ruleStates, setRuleStates] = useState(new Map());
   const [children, setChildren] = useState(false);
   const [sort, setSort] = useState("severity");
@@ -359,6 +382,8 @@ export default function AssetDetail() {
         const mappings = Array.isArray(plc.value?.mappings)
           ? plc.value.mappings
           : [];
+        const bypassEnabled = plc.value?.mapping_bypass_enabled === true;
+        setMappingBypassEnabled(bypassEnabled);
         const activeCycleMapping = mappings.find(
           (mapping) =>
             mapping.asset_id === assetId &&
@@ -366,7 +391,20 @@ export default function AssetDetail() {
             mapping.mapping_valid
         );
         setCycleVariableIds(
-          activeCycleMapping ? [activeCycleMapping.variable_id] : []
+          [
+            ...(activeCycleMapping ? [activeCycleMapping.variable_id] : []),
+            ...(bypassEnabled
+              ? mappings
+                  .filter(
+                    (mapping) =>
+                      mapping.asset_id === assetId &&
+                      mapping.mapping_valid &&
+                      mapping.role === "declared_variable" &&
+                      mapping.data_type === "boolean"
+                  )
+                  .map((mapping) => mapping.variable_id)
+              : []),
+          ]
         );
         setRuntimeVariableIds(
           mappings
@@ -375,7 +413,8 @@ export default function AssetDetail() {
                 mapping.asset_id === assetId &&
                 mapping.mapping_valid &&
                 mapping.data_type === "boolean" &&
-                mapping.role === "running_signal"
+                (mapping.role === "running_signal" ||
+                  (bypassEnabled && mapping.role === "declared_variable"))
             )
             .map((mapping) => mapping.variable_id)
         );
@@ -499,8 +538,19 @@ export default function AssetDetail() {
 
   const availableVariables = variables;
   const ruleFormFields = useMemo(
-    () => ruleFields(availableVariables, cycleVariableIds, runtimeVariableIds),
-    [availableVariables, cycleVariableIds, runtimeVariableIds]
+    () =>
+      ruleFields(
+        availableVariables,
+        cycleVariableIds,
+        runtimeVariableIds,
+        mappingBypassEnabled
+      ),
+    [
+      availableVariables,
+      cycleVariableIds,
+      runtimeVariableIds,
+      mappingBypassEnabled,
+    ]
   );
 
   const isAct = (rule) => rule.state === "activated";
@@ -651,9 +701,11 @@ const filteredLogs = [...logs]
   };
 
   const openMonitoringRuleForm = (choiceId) => {
-    setMonitoringRuleSelection(monitoringRuleFormSelection(choiceId));
-    setModal("add");
-  };
+  setModal(null);
+  setMonitoringRuleSelection(null);
+
+  navigate(`/assets/${assetId}/monitoring-rules/new/${choiceId}`);
+};
 
   const monitoringRuleFormFields = useMemo(
     () =>
@@ -745,8 +797,25 @@ const filteredLogs = [...logs]
       key: values.key.trim(),
       data_type: values.data_type,
       unit: values.unit?.trim() || null,
+      opcua_node_id: values.opcua_node_id?.trim() || null,
     });
 
+    setEditingVariable(null);
+    setModal("variables");
+    await loadVariables();
+  };
+
+  const updateVariable = async (values) => {
+    if (!editingVariable) return;
+    await api.patch(`/variables/${editingVariable.id}`, {
+      name: values.name.trim(),
+      key: values.key.trim(),
+      data_type: values.data_type,
+      unit: values.unit?.trim() || null,
+      opcua_node_id: values.opcua_node_id?.trim() || null,
+    });
+
+    setEditingVariable(null);
     setModal("variables");
     await loadVariables();
   };
@@ -1229,57 +1298,140 @@ const filteredLogs = [...logs]
         </>
       )}
 
-      {tab === "logbook" && (
-        <>
-          <MaintenancePanel assetId={assetId} onChanged={refreshMaintenanceData} />
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <h2>Maintenance log notes</h2>
-                <span className="muted">
-                  {logs.length} {logs.length === 1 ? "entry" : "entries"}
-                </span>
-              </div>
-              <button
-                className="btn-primary"
-                onClick={() => setModal("log")}
-              >
-                <PlusCircle size={17} /> Add note
-              </button>
-            </div>
+{tab === "logbook" && (
+  <>
+    <MaintenancePanel
+      assetId={assetId}
+      onChanged={refreshMaintenanceData}
+    />
 
-            {logs.length === 0 ? (
-              <EmptyState
-                art={false}
-                title="No logbook notes"
-                lines={[
-                  "Record brief observations separately from maintenance jobs.",
-                ]}
-              />
-            ) : (
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th className="col-time">Time</th>
-                    <th>Entry</th>
+    <div className="panel maintenance-log-notes">
+      <div className="panel-head maintenance-log-head">
+        <div>
+          <h2>Maintenance log notes</h2>
+          <span className="muted">
+            {filteredLogs.length} of {logs.length}{" "}
+            {logs.length === 1 ? "entry" : "entries"}
+          </span>
+        </div>
+
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={() => setModal("log")}
+        >
+          <PlusCircle size={17} /> Add note
+        </button>
+      </div>
+
+      <div className="maintenance-log-toolbar">
+        <input
+          type="search"
+          className="maintenance-log-search"
+          placeholder="Search notes..."
+          aria-label="Search maintenance notes"
+          value={logSearch}
+          onChange={(event) => setLogSearch(event.target.value)}
+        />
+
+        <label className="maintenance-log-filter">
+          <span>From</span>
+          <input
+            type="date"
+            value={logStartDate}
+            onChange={(event) => setLogStartDate(event.target.value)}
+            aria-label="Filter notes from date"
+          />
+        </label>
+
+        <label className="maintenance-log-filter">
+          <span>To</span>
+          <input
+            type="date"
+            value={logEndDate}
+            min={logStartDate || undefined}
+            onChange={(event) => setLogEndDate(event.target.value)}
+            aria-label="Filter notes to date"
+          />
+        </label>
+
+        <label className="maintenance-log-filter">
+          <span>Sort</span>
+          <select
+            value={logSort}
+            onChange={(event) => setLogSort(event.target.value)}
+            aria-label="Sort maintenance notes"
+          >
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+          </select>
+        </label>
+
+        {(logSearch || logStartDate || logEndDate) && (
+          <button
+            type="button"
+            className="btn-outline"
+            onClick={() => {
+              setLogSearch("");
+              setLogStartDate("");
+              setLogEndDate("");
+            }}
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      {logs.length === 0 ? (
+        <EmptyState
+          art={false}
+          title="No logbook notes"
+          lines={[
+            "Record brief observations separately from maintenance jobs.",
+            "Use Add note to record your first observation."
+          ]}
+        />
+      ) : filteredLogs.length === 0 ? (
+        <EmptyState
+          art={false}
+          title="No matching notes"
+          lines={[
+            "Try changing your search text or date range."
+          ]}
+        />
+      ) : (
+        <div className="maintenance-table-wrap">
+          <table className="table maintenance-notes-table">
+            <thead>
+              <tr>
+                <th className="col-time">Date and time</th>
+                <th>Entry</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {filteredLogs.map((entry) => {
+                const timestamp = entry.time || entry.created_at;
+
+                return (
+                  <tr key={entry.id}>
+                    <td className="col-time">
+                      {timestamp ? formatTime(timestamp) : "—"}
+                    </td>
+                    <td className="maintenance-note-text">
+                      {entry.text}
+                    </td>
                   </tr>
-                </thead>
-
-                <tbody>
-                  {logs.map((entry) => (
-                    <tr key={entry.id}>
-                      <td className="col-time">
-                        {formatTime(entry.time)}
-                      </td>
-                      <td>{entry.text}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
+    </div>
+  </>
+)}
+
 
       {tab === "events" && (
         <div className="panel">
@@ -1433,13 +1585,17 @@ const filteredLogs = [...logs]
         />
       )}
 
-      {modal === "addVariable" && (
+      {(modal === "addVariable" || modal === "editVariable") && (
         <CreateModal
-          title="Add variable"
-          submitLabel="Add variable"
+          title={editingVariable ? "Edit variable" : "Add variable"}
+          submitLabel={editingVariable ? "Save variable" : "Add variable"}
           fields={VARIABLE_FIELDS}
-          onSubmit={addVariable}
-          onClose={() => setModal("variables")}
+          initialValues={editingVariable || {}}
+          onSubmit={editingVariable ? updateVariable : addVariable}
+          onClose={() => {
+            setEditingVariable(null);
+            setModal("variables");
+          }}
         />
       )}
 
@@ -1466,6 +1622,7 @@ const filteredLogs = [...logs]
                   <th>Key</th>
                   <th>Type</th>
                   <th>Unit</th>
+                  <th>OPC UA NodeId</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
@@ -1478,8 +1635,25 @@ const filteredLogs = [...logs]
                     <td>{variable.key}</td>
                     <td>{variable.data_type}</td>
                     <td>{variable.unit || "—"}</td>
+                    <td
+                      title={variable.opcua_node_id || undefined}
+                      style={{ maxWidth: 180, overflowWrap: "anywhere" }}
+                    >
+                      {variable.opcua_node_id || "—"}
+                    </td>
                     <td>{variable.is_active ? "Active" : "Inactive"}</td>
                     <td>
+                      <button
+                        type="button"
+                        className="btn-outline"
+                        onClick={() => {
+                          setEditingVariable(variable);
+                          setModal("editVariable");
+                        }}
+                        disabled={deletingVariableId !== null}
+                      >
+                        Edit
+                      </button>
                       <button
                         type="button"
                         className="btn-danger"
@@ -1504,7 +1678,10 @@ const filteredLogs = [...logs]
           <div className="modal-actions">
             <button
               className="btn-outline"
-              onClick={() => setModal("addVariable")}
+              onClick={() => {
+                setEditingVariable(null);
+                setModal("addVariable");
+              }}
               disabled={deletingVariableId !== null}
             >
               Add variable

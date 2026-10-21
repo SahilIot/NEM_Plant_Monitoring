@@ -44,6 +44,7 @@ from app.services.monitoring_engine import (emit_event,resolve_active_rule_alert
 from app.api.routes.rules import (
     configured_cycle_signal_mapping,
     configured_runtime_signal_mapping,
+    is_mapping_bypass_enabled,
     validate_targets,
 )
 from app.api.routes.monitoring import state_for_rule
@@ -397,6 +398,7 @@ def _template_rule_definition(
             validated.parameters,
             configured_cycle_signal_mapping(request, validated.variable_id),
             configured_runtime_signal_mapping(request, validated.variable_id),
+            is_mapping_bypass_enabled(request),
         )
         return definition
 
@@ -758,6 +760,7 @@ def frontend_copy_asset_rules(
             validated.parameters,
             configured_cycle_signal_mapping(request, validated.variable_id),
             configured_runtime_signal_mapping(request, validated.variable_id),
+            is_mapping_bypass_enabled(request),
         )
         if any(_same_rule_definition(rule, definition) for rule in existing):
             already_copied.append(source.id)
@@ -801,6 +804,7 @@ def frontend_create_asset_rule(
         payload.operator, payload.threshold, payload.parameters,
         configured_cycle_signal_mapping(request, payload.variable_id),
         configured_runtime_signal_mapping(request, payload.variable_id),
+        is_mapping_bypass_enabled(request),
     )
     rule = MonitoringRule(**payload.model_dump())
     session.add(rule)
@@ -855,6 +859,7 @@ def frontend_create_usage_rule(
         rule_payload.parameters,
         configured_cycle_signal_mapping(request, rule_payload.variable_id),
         configured_runtime_signal_mapping(request, rule_payload.variable_id),
+        is_mapping_bypass_enabled(request),
     )
     rule = MonitoringRule(**rule_payload.model_dump())
     session.add(rule)
@@ -934,6 +939,7 @@ def frontend_bulk_rule_state(
                     rule.parameters,
                     configured_cycle_signal_mapping(request, rule.variable_id),
                     configured_runtime_signal_mapping(request, rule.variable_id),
+                    is_mapping_bypass_enabled(request),
                 )
             except HTTPException as error:
                 skipped.append({"rule_id": rule.id, "name": rule.name, "reason": str(error.detail)})
@@ -1294,6 +1300,7 @@ def import_configuration(
             data.operator, data.threshold, data.parameters,
             configured_cycle_signal_mapping(request, data.variable_id),
             configured_runtime_signal_mapping(request, data.variable_id),
+            is_mapping_bypass_enabled(request),
         )
         session.add(MonitoringRule(**data.model_dump()))
     session.commit()

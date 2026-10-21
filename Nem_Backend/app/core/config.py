@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     opcua_endpoint: str = ""
     opcua_username: str = ""
     opcua_password: SecretStr = SecretStr("")
+    opc_ua_mapping_bypass_enabled: bool = False
     opcua_timeout_seconds: int = Field(default=10, ge=1, le=120)
     opcua_machine_mappings: str = ""
     opcua_reconnect_delay_seconds: int = Field(default=5, ge=1, le=300)
