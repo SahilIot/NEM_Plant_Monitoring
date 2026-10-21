@@ -10,6 +10,34 @@ from app.schemas.variable import VariableCreate, VariableRead, VariableUpdate
 
 router = APIRouter(tags=["variables"])
 
+
+def variable_integrity_conflict(error: IntegrityError) -> HTTPException | None:
+    constraint_name = getattr(
+        getattr(error.orig, "diag", None),
+        "constraint_name",
+        None,
+    )
+    if constraint_name == "uq_variables_asset_key" or (
+        "variables.asset_id, variables.key" in str(error.orig)
+    ):
+        return HTTPException(
+            status_code=409,
+            detail="Variable key already exists for this asset",
+        )
+    if constraint_name == "uq_variables_opcua_node_id" or (
+        "variables.opcua_node_id" in str(error.orig)
+    ):
+        return HTTPException(
+            status_code=409,
+            detail=(
+                "This OPC UA NodeId is already registered. "
+                "NodeIds can be shared across different assets after the "
+                "database schema has been updated."
+            ),
+        )
+    return None
+
+
 #Find a variable by its database ID
 def variable_or_404(session: Session, variable_id: int) -> Variable:
     variable = session.get(Variable, variable_id)
@@ -29,7 +57,10 @@ def create_variable(asset_id: int,payload: VariableCreate,session: Session = Dep
         session.commit()
     except IntegrityError as error:
         session.rollback()
-        raise HTTPException(status_code=409,detail=("Variable key already exists for this asset, or the OPC UA node is already registered"),) from error
+        conflict = variable_integrity_conflict(error)
+        if conflict is None:
+            raise
+        raise conflict from error
     session.refresh(variable)
     return variable
 
@@ -90,13 +121,10 @@ def update_variable(variable_id: int,payload: VariableUpdate,session: Session = 
         session.commit()
     except IntegrityError as error:
         session.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Variable key already exists for this asset, "
-                "or the OPC UA node is already registered"
-            ),
-        ) from error
+        conflict = variable_integrity_conflict(error)
+        if conflict is None:
+            raise
+        raise conflict from error
 
     session.refresh(variable)
     return variable

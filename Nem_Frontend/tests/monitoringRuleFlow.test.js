@@ -124,3 +124,52 @@ test("running-time payload requires a mapped Boolean variable on the selected as
     /configured Boolean running signal/
   );
 });
+
+test("mapping-bypass declared Boolean variables can be selected for this asset", () => {
+  const variable = {
+    id: 44,
+    asset_id: 17,
+    data_type: "boolean",
+    is_active: true,
+    opcua_node_id: "ns=2;s=declared-running",
+  };
+  const runtime = buildAssetMonitoringRule(
+    {
+      name: "Declared runtime",
+      severity: "warning",
+      rule_type: "runtime_duration",
+      runtime_variable_id: 44,
+      runtime_warning_hours: 1,
+      runtime_warning_2_hours: 2,
+      runtime_alert_hours: 3,
+    },
+    17,
+    {
+      variables: [variable],
+      cycleVariableIds: [44],
+      runtimeVariableIds: [44],
+    }
+  );
+  const cycles = buildAssetMonitoringRule(
+    {
+      name: "Declared cycles",
+      severity: "warning",
+      rule_type: "boolean_count_threshold",
+      cycle_variable_id: 44,
+      warning_threshold_1: 10,
+      warning_threshold_2: 20,
+      alert_threshold: 30,
+    },
+    17,
+    {
+      variables: [variable],
+      cycleVariableIds: [44],
+      runtimeVariableIds: [44],
+    }
+  );
+
+  assert.equal(runtime.variable_id, 44);
+  assert.equal(cycles.variable_id, 44);
+  assert.equal(runtime.target_asset_id, 17);
+  assert.equal(cycles.target_asset_id, 17);
+});

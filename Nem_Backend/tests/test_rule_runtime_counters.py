@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session
+from sqlalchemy import create_engine, inspect, select
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.api.routes.frontend_compat import (
@@ -16,21 +16,29 @@ from app.api.routes.frontend_compat import (
 )
 from app.api.routes.assets import delete_asset
 from app.api.routes.maintenance import create_maintenance_schedule
-from app.api.routes.variables import delete_variable
+from app.api.routes.rules import validate_targets
+from app.api.routes.variables import create_variable, delete_variable
 from app.db.base import Base
+from app.db.init_db import initialize_database
 from app.models import (
     Alert,
     Asset,
     MonitoringEvent,
     MonitoringRule,
     RuleCounterState,
+    RuleState,
     Variable,
 )
 from app.schemas.rule import RuleCreate
 from app.schemas.maintenance import MaintenanceScheduleCreate
 from app.schemas.opcua import OpcUaMachineMapping
+from app.schemas.variable import VariableCreate
 from app.core.config import Settings
-from app.services.opcua_collector import OpcUaCollector, load_machine_mappings
+from app.services.opcua_collector import (
+    OpcUaCollector,
+    OpcUaNotification,
+    load_machine_mappings,
+)
 from app.services.monitoring_engine import (
     evaluate_rule,
     update_rule_signal_states,
@@ -120,6 +128,260 @@ def test_opcua_configuration_allows_a_node_to_be_shared_across_assets():
     assert len(mappings) == 2
 
 
+def test_mapping_bypass_discovers_declared_variables_and_deduplicates_nodes(
+    session: Session,
+):
+    first_asset, first_variable = add_asset_variable(
+        session, "Mixer A", node_id="ns=2;s=shared-running"
+    )
+    second_asset, second_variable = add_asset_variable(
+        session, "Mixer B", node_id="ns=2;s=shared-running"
+    )
+    invalid_asset, invalid_variable = add_asset_variable(
+        session, "Invalid node", node_id="bad node id"
+    )
+    session.commit()
+    settings = Settings(
+        database_url="postgresql+psycopg://localhost/nem",
+        opcua_machine_mappings="",
+        opc_ua_mapping_bypass_enabled=True,
+    )
+    collector = OpcUaCollector(
+        settings,
+        sessionmaker(bind=session.get_bind(), expire_on_commit=False),
+    )
+
+    collector._validate_mappings()
+
+    assert list(collector._node_mappings) == ["ns=2;s=shared-running"]
+    assert len(collector._node_mappings["ns=2;s=shared-running"]) == 2
+    rows = collector.configured_mapping_rows(session)
+    assert {
+        (row["asset_id"], row["variable_id"], row["role"])
+        for row in rows
+    } == {
+        (first_asset.id, first_variable.id, "declared_variable"),
+        (second_asset.id, second_variable.id, "declared_variable"),
+    }
+    assert invalid_asset.id not in {row["asset_id"] for row in rows}
+    assert invalid_variable.id not in {
+        variable_id
+        for mapped_signals in collector._node_mappings.values()
+        for _, _, variable_id in mapped_signals
+    }
+    assert collector.status["declared_variable_count"] == 2
+
+
+def test_unmapped_declared_variable_is_not_subscribed_when_bypass_is_disabled(
+    session: Session,
+):
+    _, variable = add_asset_variable(
+        session, "Mixer", node_id="ns=2;s=unmapped-running"
+    )
+    session.commit()
+    settings = Settings(
+        database_url="postgresql+psycopg://localhost/nem",
+        opcua_machine_mappings="",
+        opc_ua_mapping_bypass_enabled=False,
+    )
+    collector = OpcUaCollector(
+        settings,
+        sessionmaker(bind=session.get_bind(), expire_on_commit=False),
+    )
+
+    collector._validate_mappings()
+
+    assert collector._node_mappings == {}
+    assert collector.configured_mapping_rows(session) == []
+    assert variable.opcua_node_id == "ns=2;s=unmapped-running"
+
+
+def test_collector_detects_declared_variables_added_while_connected(
+    session: Session,
+):
+    asset, _ = add_asset_variable(
+        session, "Mixer", node_id="ns=2;s=existing-running"
+    )
+    session.commit()
+    collector = OpcUaCollector(
+        Settings(
+            database_url="postgresql+psycopg://localhost/nem",
+            opcua_machine_mappings="",
+            opc_ua_mapping_bypass_enabled=True,
+        ),
+        sessionmaker(bind=session.get_bind(), expire_on_commit=False),
+    )
+
+    collector._validate_mappings()
+    assert not collector._declared_variable_configuration_changed()
+
+    session.add(
+        Variable(
+            asset_id=asset.id,
+            name="New running signal",
+            key="new_running_signal",
+            data_type="boolean",
+            opcua_node_id="ns=2;s=new-running",
+            is_active=True,
+        )
+    )
+    session.commit()
+
+    assert collector._declared_variable_configuration_changed()
+
+
+def test_database_migration_removes_legacy_global_node_id_uniqueness(engine):
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX uq_variables_opcua_node_id "
+            "ON variables (opcua_node_id)"
+        )
+
+    initialize_database(engine)
+
+    indexes = {
+        index["name"]: index
+        for index in inspect(engine).get_indexes("variables")
+    }
+    assert "uq_variables_opcua_node_id" not in indexes
+    assert not indexes["ix_variables_opcua_node_id"]["unique"]
+
+    with Session(engine, expire_on_commit=False) as db:
+        first_asset = Asset(name="Asset with registered node", asset_type="machine")
+        second_asset = Asset(name="Asset sharing node", asset_type="machine")
+        db.add_all([first_asset, second_asset])
+        db.flush()
+        first = create_variable(
+            first_asset.id,
+            VariableCreate(
+                name="Signal A",
+                key="signal_a",
+                data_type="boolean",
+                opcua_node_id="ns=2;s=shared-node",
+            ),
+            db,
+        )
+        second = create_variable(
+            second_asset.id,
+            VariableCreate(
+                name="Signal B",
+                key="signal_b",
+                data_type="boolean",
+                opcua_node_id="ns=2;s=shared-node",
+            ),
+            db,
+        )
+
+        assert first.opcua_node_id == second.opcua_node_id
+        assert first.asset_id != second.asset_id
+
+
+def test_duplicate_variable_key_reports_key_conflict_only(session: Session):
+    asset, _ = add_asset_variable(session, "Key conflict")
+    payload = VariableCreate(
+        name="Another signal",
+        key="run_signal",
+        data_type="boolean",
+    )
+
+    with pytest.raises(HTTPException) as error:
+        create_variable(asset.id, payload, session)
+
+    assert error.value.status_code == 409
+    assert error.value.detail == "Variable key already exists for this asset"
+
+
+def test_mapping_bypass_rule_validation_is_boolean_and_asset_scoped(
+    session: Session,
+):
+    asset, variable = add_asset_variable(
+        session, "Mixer", node_id="ns=2;s=mixer-running"
+    )
+    runtime_parameters = {
+        "warning_thresholds_seconds": [10, 20],
+        "alert_threshold_seconds": 30,
+    }
+
+    validate_targets(
+        session,
+        asset.id,
+        variable.id,
+        "runtime_duration",
+        None,
+        None,
+        runtime_parameters,
+        None,
+        mapping_bypass_enabled=True,
+    )
+    validate_targets(
+        session,
+        asset.id,
+        variable.id,
+        "boolean_count_threshold",
+        None,
+        None,
+        {"warning_thresholds": [10, 20], "alert_threshold": 30},
+        None,
+        mapping_bypass_enabled=True,
+    )
+    with pytest.raises(HTTPException):
+        validate_targets(
+            session,
+            asset.id,
+            variable.id,
+            "runtime_duration",
+            None,
+            None,
+            runtime_parameters,
+            None,
+        )
+
+    variable.data_type = "number"
+    with pytest.raises(HTTPException):
+        validate_targets(
+            session,
+            asset.id,
+            variable.id,
+            "runtime_duration",
+            None,
+            None,
+            runtime_parameters,
+            None,
+            mapping_bypass_enabled=True,
+        )
+
+    variable.data_type = "boolean"
+    variable.opcua_node_id = "bad node id"
+    with pytest.raises(HTTPException) as error:
+        validate_targets(
+            session,
+            asset.id,
+            variable.id,
+            "runtime_duration",
+            None,
+            None,
+            runtime_parameters,
+            None,
+            mapping_bypass_enabled=True,
+        )
+    assert error.value.status_code == 422
+
+    other_asset, _ = add_asset_variable(session, "Other mixer")
+    with pytest.raises(HTTPException) as error:
+        validate_targets(
+            session,
+            other_asset.id,
+            variable.id,
+            "runtime_duration",
+            None,
+            None,
+            runtime_parameters,
+            None,
+            mapping_bypass_enabled=True,
+        )
+    assert error.value.status_code == 422
+
+
 def test_running_signal_refresh_uses_good_quality_boolean_reads():
     settings = Settings(
         database_url="postgresql+psycopg://user:password@localhost/nem",
@@ -192,6 +454,70 @@ def test_running_signal_refresh_uses_good_quality_boolean_reads():
     assert variable_id == 11
 
 
+def test_declared_cycle_signal_refresh_initializes_rule_counter(engine):
+    settings = Settings(
+        database_url="postgresql+psycopg://localhost/nem",
+        opcua_machine_mappings="",
+        opc_ua_mapping_bypass_enabled=True,
+    )
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with Session(engine, expire_on_commit=False) as session:
+        asset, variable = add_asset_variable(
+            session,
+            "Declared cycle machine",
+            node_id="ns=2;s=declared-cycle",
+        )
+        rule = MonitoringRule(
+            name="Declared cycle count",
+            rule_type="boolean_count_threshold",
+            target_asset_id=asset.id,
+            variable_id=variable.id,
+            parameters={
+                "warning_thresholds": [10, 20],
+                "alert_threshold": 30,
+            },
+            severity="warning",
+            is_enabled=True,
+        )
+        session.add(rule)
+        session.commit()
+        variable_id = variable.id
+        asset_id = asset.id
+
+    collector = OpcUaCollector(settings, session_factory)
+    collector._validate_mappings()
+    processed = []
+    collector._process_mapped_notification = (
+        lambda notification, mapping, role, variable_id: processed.append(
+            (notification, mapping, role, variable_id)
+        )
+    )
+
+    class GoodStatus:
+        @staticmethod
+        def is_good():
+            return True
+
+    class FakeNode:
+        async def read_data_value(self, *, raise_on_bad_status=True):
+            return SimpleNamespace(
+                StatusCode=GoodStatus(),
+                Value=SimpleNamespace(Value=True),
+            )
+
+    class FakeClient:
+        def get_node(self, node_id):
+            assert node_id == "ns=2;s=declared-cycle"
+            return FakeNode()
+
+    asyncio.run(collector._refresh_running_signals(FakeClient(), sampled_at=START))
+
+    assert len(processed) == 1
+    notification, mapping, role, processed_variable_id = processed[0]
+    assert notification.value is True
+    assert mapping.asset_id == asset_id
+    assert role == "reading"
+    assert processed_variable_id == variable_id
 def test_asset_scoped_running_time_rule_creation_persists_selected_asset(
     session: Session,
 ):
@@ -231,6 +557,40 @@ def test_asset_scoped_running_time_rule_creation_persists_selected_asset(
     assert result["asset_id"] == asset.id
     assert result["variable_id"] == variable.id
     assert session.get(MonitoringRule, result["id"]).parameters == payload.parameters
+
+
+def test_declared_running_signal_can_create_rule_when_bypass_is_enabled(
+    session: Session,
+):
+    asset, variable = add_asset_variable(
+        session, "Mixer", node_id="ns=2;s=mixer-running"
+    )
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                settings=SimpleNamespace(opc_ua_mapping_bypass_enabled=True),
+                opcua_collector=SimpleNamespace(mappings=[]),
+            )
+        )
+    )
+    payload = RuleCreate.model_validate(
+        {
+            "name": "Declared runtime",
+            "rule_type": "runtime_duration",
+            "target_asset_id": asset.id,
+            "variable_id": variable.id,
+            "severity": "warning",
+            "parameters": {
+                "warning_thresholds_seconds": [10, 20],
+                "alert_threshold_seconds": 30,
+            },
+        }
+    )
+
+    result = frontend_create_asset_rule(asset.id, payload, request, session)
+
+    assert result["asset_id"] == asset.id
+    assert result["variable_id"] == variable.id
 
 
 def test_asset_scoped_rule_creation_rejects_another_assets_target(
@@ -617,6 +977,65 @@ def test_runtime_thresholds_trigger_warning_higher_warning_and_alert(session: Se
     assert higher_warning_status == "warning"
     assert "higher warning threshold" in higher_warning_message
     assert alert.status == "alert"
+
+
+def test_declared_running_signal_pauses_and_triggers_runtime_thresholds(
+    session: Session,
+):
+    asset, variable = add_asset_variable(
+        session, "Mixer", node_id="ns=4;i=14"
+    )
+    rule = add_rule(
+        session,
+        asset,
+        variable,
+        parameters={
+            "warning_thresholds_seconds": [10, 20],
+            "alert_threshold_seconds": 30,
+        },
+    )
+    session.commit()
+    collector = OpcUaCollector(
+        Settings(
+            database_url="postgresql+psycopg://localhost/nem",
+            opcua_machine_mappings="",
+            opc_ua_mapping_bypass_enabled=True,
+            monitoring_default_stale_after_seconds=60,
+        ),
+        sessionmaker(bind=session.get_bind(), expire_on_commit=False),
+    )
+    collector._validate_mappings()
+
+    for value, elapsed_seconds in (
+        (True, 0),
+        (False, 10),
+        (True, 20),
+        (False, 30),
+        (True, 40),
+        (False, 50),
+    ):
+        collector._process_notification(
+            OpcUaNotification(
+                node_id=variable.opcua_node_id,
+                value=value,
+                recorded_at=START + timedelta(seconds=elapsed_seconds),
+            )
+        )
+        session.expire_all()
+        state = session.scalar(
+            select(RuleState).where(RuleState.rule_id == rule.id)
+        )
+        if elapsed_seconds == 10:
+            assert state.status == "warning"
+        elif elapsed_seconds == 30:
+            assert state.status == "warning"
+            assert "higher warning threshold" in state.message
+        elif elapsed_seconds == 50:
+            assert state.status == "alert"
+            assert state.latest_value == pytest.approx(30)
+
+    counter = counter_for(session, rule)
+    assert counter.accumulated_running_seconds == Decimal(30)
 
 
 def test_deleted_and_recreated_cycle_rule_starts_at_zero(session: Session):

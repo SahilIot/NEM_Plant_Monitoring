@@ -33,7 +33,9 @@ UTC type, startup initialization).
   inspect recent or latest readings.
 - **Live OPC UA monitoring:** read-only subscriptions, connection testing,
   node discovery, one-shot reads, mapping validation, reconnect handling, and
-  live PLC status. OPC UA mappings are configured in the backend environment.
+  live PLC status. OPC UA mappings are configured in the backend environment;
+  an opt-in mapping-bypass test mode can also subscribe to registered variables
+  with NodeIds.
 - **Monitoring rules:** create rules from an asset's Current status page,
   including Motor Rotation cycle thresholds, Running Time thresholds, Boolean
   Count Thresholds, and supported variable-condition rules. Rule templates can
@@ -62,10 +64,11 @@ Removing an otherwise empty asset also removes its asset-scoped event history.
 
 ## How it works
 
-1. **Collector** (`opcua_collector.py`) subscribes only to the NodeIds listed in
-   `OPCUA_MACHINE_MAPPINGS` and receives data-change notifications. A NodeId
-   can be fanned out to different assets; it must not be mapped more than once
-   for the same asset.
+1. **Collector** (`opcua_collector.py`) normally subscribes only to the NodeIds
+   listed in `OPCUA_MACHINE_MAPPINGS` and receives data-change notifications.
+   A NodeId can be fanned out to different assets; it must not be mapped more
+   than once for the same asset. The optional mapping-bypass mode is described
+   below.
 2. Each notification is normalized to timezone-aware UTC, checked against the
    out-of-order guard, saved as a reading, and applied to the machine state.
 3. **Cycle counting:** a cycle is counted only on a `false`-to-`true` transition
@@ -185,7 +188,8 @@ No secrets belong in source control.
 | `OPCUA_RECONNECT_DELAY_SECONDS` | Delay before reconnecting, default `5`. |
 | `OPCUA_SUBSCRIPTION_PUBLISHING_INTERVAL_MS` | Requested publishing interval, default `1000`. The server may revise it; `/api/v1/plc/status` reports requested and negotiated values. |
 | `OPCUA_RUNTIME_CHECKPOINT_SECONDS` | Running-signal refresh and running-time checkpoint interval, default `10` seconds. Does not set the subscription publishing interval. |
-| `OPCUA_MACHINE_MAPPINGS` | JSON array of NodeId mappings (below). Empty disables the collector. |
+| `OPCUA_MACHINE_MAPPINGS` | JSON array of NodeId mappings (below). Empty disables mapped collection unless mapping bypass is enabled. |
+| `OPC_UA_MAPPING_BYPASS_ENABLED` | Temporary testing mode; defaults to `false`. When `true`, also subscribes to active asset-owned variables with valid declared NodeIds. |
 | `SETTINGS_ENCRYPTION_KEY` | Fernet key for the dashboard's SMTP password. |
 | `BACKUP_DIRECTORY` | Backup snapshot location, default `Nem_Backend/backups`. |
 
@@ -225,6 +229,37 @@ stays at zero until the mapped signal reports `true`. While the collector is
 connected, it periodically re-reads the signal and only accepts good-quality
 Boolean values; failed or bad-quality reads do not refresh the signal's
 freshness.
+
+### Temporary mapping-bypass test mode
+
+Set `OPC_UA_MAPPING_BYPASS_ENABLED=true` in `Nem_Backend/.env` and restart the
+backend to enable this reversible test mode. Set it to `false` (or remove the
+setting) and restart to restore mapping-only collection. Explicit mappings
+remain active in either mode.
+
+When enabled, the collector additionally discovers active variables belonging
+to active assets when `opcua_node_id` is present and syntactically valid. Each
+declared variable is associated only with its existing `asset_id`; variables
+are not broadcast to every asset. A unique NodeId is subscribed once even if
+multiple asset-owned variables use it. Boolean declared variables become
+available for asset-scoped cycle-count and running-time rules; those rules
+still validate Boolean data type, active status, asset ownership, and NodeId
+syntax. The periodic good-quality Boolean refresh keeps stable running signals
+fresh. New, edited, deactivated, or removed declared variables are detected
+while connected and cause the collector to rebuild its subscriptions within
+the configured runtime checkpoint interval. Invalid NodeIds are skipped and
+logged. A mismatch between the declared variable type and the PLC's actual
+value is rejected by normal reading validation, so the reading does not update
+rule state. OPC UA NodeIds can be entered or edited in the asset's Variables
+dialog; restart the backend after changing `.env` mappings or bypass settings.
+
+This mode does not assign declared variables an implicit machine-state role:
+only explicit `cycle_signal` and `running_signal` mappings drive legacy
+machine-level state. Rule counters and runtime remain isolated by rule and
+asset. The variable model requires every variable to belong to one asset, so
+the mode removes the mapping prerequisite but does not support asset-free
+variables. No database migration is required; the mode uses existing asset,
+variable, and rule-counter tables.
 
 `GET /api/v1/plc/status` (read-only) returns connection state, requested and
 negotiated publishing interval, configured mappings (with validity), and per
@@ -295,8 +330,10 @@ with two increasing warning thresholds and a larger alert threshold, for
 example `9000`, `9500`, and `10000`. It must target the Boolean variable
 configured as the asset's `cycle_signal`; otherwise creation is rejected. In the
 UI, open an asset, choose **Add rule**, select **Motor Rotation** or
-**Boolean Count Threshold**, and pick the configured cycle signal. If the
-dropdown is empty, the asset has no cycle signal in `OPCUA_MACHINE_MAPPINGS`.
+**Boolean Count Threshold**, and pick the configured cycle signal. With
+mapping bypass disabled, an empty dropdown means the asset has no cycle signal
+in `OPCUA_MACHINE_MAPPINGS`. When bypass is enabled, active declared Boolean
+variables on that asset are also offered as cycle signals.
 Enabled rules are evaluated on each accepted cycle increment. Each rule has
 its own counter and initial signal state: repeated `true` readings do not
 count, and a newly created rule begins at zero even if another rule uses the
@@ -307,7 +344,9 @@ same variable or was previously archived or deleted.
 Rule type `runtime_duration` uses the asset's configured Boolean
 `running_signal`, not a momentary cycle pulse. Configure positive warning,
 higher-warning, and alert thresholds in increasing order (for example 8, 9,
-and 10 hours). The backend persists accumulated seconds per rule and asset,
+and 10 hours). With mapping bypass enabled, a declared Boolean variable on the
+asset can be selected instead of a configured `running_signal`. The backend
+persists accumulated seconds per rule and asset,
 computes elapsed time from timestamps, pauses while stopped, and periodically
 re-reads the signal while connected. Missing, stale, disconnected, bad-quality,
 or unknown signals do not cause additional run time to be inferred. The rule

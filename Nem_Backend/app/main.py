@@ -125,12 +125,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 _monitoring_evaluation_loop(
                     session_factory,
                     owner_id=f"monitoring-{uuid4()}",
-                    interval_seconds=(
-                        selected_settings.monitoring_evaluation_interval_seconds
-                    ),
-                    stale_after_seconds=(
-                        selected_settings.monitoring_default_stale_after_seconds
-                    ),
+                    interval_seconds=(selected_settings.monitoring_evaluation_interval_seconds),
+                    stale_after_seconds=(selected_settings.monitoring_default_stale_after_seconds),
                 ),
                 name="monitoring-evaluation",
             )
@@ -179,8 +175,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if content_length is not None:
             try:
                 if int(content_length) > MAX_REQUEST_BODY_BYTES:
-                    return JSONResponse(
-                        status_code=413,
+                    return JSONResponse(status_code=413,
                         content={"error": {
                                 "message": "Request body is too large",
                                 "code": 413,
@@ -231,8 +226,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request: Request,error: StarletteHTTPException,) -> JSONResponse:
         if error.status_code == 413:
-            return JSONResponse(
-                status_code=413,
+            return JSONResponse(status_code=413,
                 content={
                     "error": {
                         "message": "Request body is too large",
@@ -251,17 +245,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 session.execute(text("SELECT 1"))
         except SQLAlchemyError:
             LOGGER.exception("Database health check failed")
-            return JSONResponse(
-                status_code=503,
+            return JSONResponse(status_code=503,
                 content={
                     "status": "degraded",
                     "database": "disconnected",
                 },
             )
-
-        return JSONResponse(
-            content={"status": "ok", "database": "connected"}
-        )
+        return JSONResponse(content={"status": "ok", "database": "connected"})
 
     @application.get("/api/v1/health")
     def api_health() -> JSONResponse:
@@ -274,10 +264,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 session.execute(text("SELECT 1"))
         except SQLAlchemyError:
             LOGGER.exception("Database readiness check failed")
-            return JSONResponse(
-                status_code=503,
-                content={"status": "degraded", "database": "disconnected"},
-            )
+            return JSONResponse(status_code=503,content={"status": "degraded", "database": "disconnected"},)
         return JSONResponse(content={"status": "ready", "database": "connected"})
 
     application.include_router(frontend_compat.router, prefix="/api/v1")
@@ -291,19 +278,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(dashboard.router, prefix="/api/v1")
     frontend_directory = Path(__file__).resolve().parents[2] / "Nem_Frontend" / "dist"
     if frontend_directory.is_dir():
-        application.mount(
-            "/ui",
-            FrontendStaticFiles(directory=str(frontend_directory), html=True),
-            name="dashboard-ui",
-        )
-    application.add_api_route(
-        "/plc/test",
+        application.mount("/ui",FrontendStaticFiles(directory=str(frontend_directory), html=True),name="dashboard-ui",)
+
+    application.add_api_route("/plc/test",
         plc.plc_connection_test_compat,
         methods=["GET"],
         tags=["PLC / OPC UA"],
         include_in_schema=False,
     )
-
     @application.get("/", include_in_schema=False)
     def dashboard_home() -> RedirectResponse:
         destination = "/ui/" if frontend_directory.is_dir() else "/docs"

@@ -48,6 +48,7 @@ def plc_monitoring_status(request: Request,session: Session = Depends(get_db),) 
     connection["requested_publishing_interval_ms"] = (request.app.state.settings.opcua_subscription_publishing_interval_ms)
     return {
         "connection": connection,
+        "mapping_bypass_enabled": request.app.state.settings.opc_ua_mapping_bypass_enabled,
         "mappings": collector.configured_mapping_rows(session),
         "machines": machine_status_rows(
             session,
