@@ -2,13 +2,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext } from "react-router-dom";
 import { api } from "../../../services/api.js";
+import { subscribeLiveUpdates } from "../../../services/liveUpdates.js";
 import { formatDuration, formatValue, timeAgo } from "../../../utils/format.js";
 import { EmptyState } from "../../../components/common/UI.jsx";
 import { CheckIcon } from "../../../components/common/Icons.jsx";
 
 const num = (value) =>
   typeof value === "number" && Number.isFinite(value) ? value : 0;
-const LIVE_REFRESH_INTERVAL_MS = 500;
 
 function Tile({ tone, label, value, to, hint }) {
   const nav = useNavigate();
@@ -28,7 +28,12 @@ function Tile({ tone, label, value, to, hint }) {
 }
 
 export default function Home() {
-  const { assets = [], alerts = [], rules = [], refreshStatus } = useOutletContext();
+  const {
+    assets = [],
+    alerts = [],
+    rules = [],
+    refreshStatus,
+  } = useOutletContext();
 
   const [summary, setSummary] = useState(null);
   const [plcStatus, setPlcStatus] = useState(null);
@@ -64,52 +69,71 @@ export default function Home() {
     loadSummary();
   }, [loadSummary]);
 
-  useEffect(() => {
-    let active = true;
-    let timeoutId;
+  const refreshLiveStatus = useCallback(async () => {
+    if (liveStatusRequest.current) return;
+    liveStatusRequest.current = true;
+    try {
+      const [plc, states] = await Promise.all([
+        api.get("/plc/status"),
+        api.getAll("/monitoring/status", 500),
+      ]);
+      setPlcStatus(plc);
+      setMonitoringStates(Array.isArray(states) ? states : []);
+      setLiveStatusError("");
+    } catch (err) {
+      setLiveStatusError(
+        err.message || "Unable to refresh live cycle monitoring."
+      );
+    } finally {
+      liveStatusRequest.current = false;
+    }
+  }, []);
 
-    const refreshLiveStatus = async () => {
-      if (liveStatusRequest.current) {
-        timeoutId = window.setTimeout(
-          refreshLiveStatus,
-          LIVE_REFRESH_INTERVAL_MS
-        );
+  useEffect(() => {
+    refreshLiveStatus();
+    return subscribeLiveUpdates((update) => {
+      if (update.type === "connected") {
+        refreshLiveStatus();
+        loadSummary();
+        refreshStatus?.();
         return;
       }
-      liveStatusRequest.current = true;
-      try {
-        const [plc, states] = await Promise.all([
-          api.get("/plc/status"),
-          api.getAll("/monitoring/status", 500),
-        ]);
-        if (active) {
-          setPlcStatus(plc);
-          setMonitoringStates(Array.isArray(states) ? states : []);
-          setLiveStatusError("");
-        }
-      } catch (err) {
-        if (active) {
-          setLiveStatusError(
-            err.message || "Unable to refresh live cycle monitoring."
-          );
-        }
-      } finally {
-        liveStatusRequest.current = false;
-        if (active) {
-          timeoutId = window.setTimeout(
-            refreshLiveStatus,
-            LIVE_REFRESH_INTERVAL_MS
-          );
-        }
+      const changedTables = new Set(update.changed_tables || []);
+      const liveTables = [
+        "assets",
+        "variables",
+        "readings",
+        "nem_readings",
+        "nem_monitoring_rules",
+        "nem_rule_states",
+        "nem_rule_counter_states",
+        "nem_alerts",
+      ];
+      if (
+        update.type === "opcua_status" ||
+        liveTables.some((table) => changedTables.has(table))
+      ) {
+        refreshLiveStatus();
       }
-    };
-
-    refreshLiveStatus();
-    return () => {
-      active = false;
-      window.clearTimeout(timeoutId);
-    };
-  }, []);
+      if (
+        [
+          "assets",
+          "nem_monitoring_rules",
+          "nem_alerts",
+          "nem_maintenance_schedules",
+        ].some((table) => changedTables.has(table))
+      ) {
+        loadSummary();
+      }
+      if (
+        ["nem_monitoring_rules", "nem_rule_states", "nem_alerts"].some(
+          (table) => changedTables.has(table)
+        )
+      ) {
+        refreshStatus?.();
+      }
+    });
+  }, [loadSummary, refreshLiveStatus, refreshStatus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -439,7 +463,7 @@ export default function Home() {
               </span>
 
               <span className="muted">
-                have active variables being monitored
+                have enabled rules monitoring active variables
               </span>
             </Link>
           </section>

@@ -230,6 +230,8 @@ def update_rule_signal_states(
         .with_for_update()
     ).all()
     for rule in rules:
+        if rule.rule_type == "runtime_duration" and not rule.is_enabled:
+            continue
         counter = session.scalar(
             select(RuleCounterState)
             .where(
@@ -1245,6 +1247,27 @@ def set_rule_enabled_state(
     now = at or utc_now()
     rule.is_enabled = enabled
     asset, _ = get_rule_asset(session, rule)
+
+    if rule.rule_type == "runtime_duration":
+        counter = session.scalar(
+            select(RuleCounterState)
+            .where(
+                RuleCounterState.rule_id == rule.id,
+                RuleCounterState.asset_id == rule.target_asset_id,
+            )
+            .with_for_update()
+        )
+        if counter is not None:
+            if not enabled:
+                advance_rule_runtime(
+                    counter,
+                    now,
+                    rule.stale_after_seconds or 300,
+                )
+            counter.is_running = None
+            counter.last_signal_at = None
+            counter.runtime_checkpoint_at = None
+            counter.updated_at = now
 
     if asset is not None:
         state = current_state(session, rule, asset)

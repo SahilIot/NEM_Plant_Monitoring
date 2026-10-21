@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../../services/api.js";
+import { subscribeLiveUpdates } from "../../../services/liveUpdates.js";
 import { formatDuration, timeAgo } from "../../../utils/format.js";
 import "../styles/Plc.css";
 document.documentElement.dataset.theme
@@ -187,28 +188,45 @@ export default function Plc() {
 
 
   useEffect(() => {
-    let active = true;
-    let timeoutId;
-
-    const pollMonitoringStatus = async () => {
-      const requestStartedAt = Date.now();
-      await loadMonitoringStatus();
-      if (active) {
-        const elapsed = Date.now() - requestStartedAt;
-        timeoutId = window.setTimeout(
-          pollMonitoringStatus,
-          Math.max(0, 1500 - elapsed)
-        );
+    return subscribeLiveUpdates((update) => {
+      if (update.type === "connected") {
+        loadMonitoringStatus();
+        loadLatestReadings();
+        return;
       }
-    };
-
-    pollMonitoringStatus();
-
-    return () => {
-      active = false;
-      window.clearTimeout(timeoutId);
-    };
-  }, [loadMonitoringStatus]);
+      const changedTables = new Set(update.changed_tables || []);
+      if (
+        update.type === "opcua_status" ||
+        [
+          "readings",
+          "nem_readings",
+          "nem_rule_states",
+          "nem_rule_counter_states",
+          "nem_alerts",
+        ].some((table) => changedTables.has(table))
+      ) {
+        loadMonitoringStatus();
+      }
+      if (
+        ["readings", "nem_readings", "variables", "assets"].some((table) =>
+          changedTables.has(table)
+        )
+      ) {
+        loadLatestReadings();
+      }
+      if (changedTables.has("assets")) {
+        api
+          .getAll("/assets?is_active=true")
+          .then((items) => setAssets(Array.isArray(items) ? items : []))
+          .catch((error) => {
+            setConnection({
+              state: "error",
+              message: error.message || "Could not refresh assets.",
+            });
+          });
+      }
+    });
+  }, [loadLatestReadings, loadMonitoringStatus]);
 
  
   useEffect(() => {
@@ -507,12 +525,14 @@ export default function Plc() {
               </p>
             )}
 
-            {conn?.stale && conn?.configured && (
-              <p className="notice error" role="status">
-                PLC data is stale, or no valid subscription notification has
-                been received.
-              </p>
-            )}
+            {conn?.stale &&
+              conn?.configured &&
+              (conn?.subscribed_node_count ?? 0) > 0 && (
+                <p className="notice error" role="status">
+                  PLC data is stale, or no valid subscription notification has
+                  been received.
+                </p>
+              )}
 
             <p className="muted">
               Effective NodeId mappings come from backend
@@ -573,9 +593,11 @@ export default function Plc() {
                               ? "Invalid or inactive database target"
                               : storedNodeDiffers
                                 ? "Warning: variable NodeId differs from collector config"
-                                : conn?.connected
-                                  ? "Configured; collector connected"
-                                  : "Configured; collector disconnected"}
+                                : !mapping.subscribed
+                                  ? "Not subscribed; no enabled rule uses this variable"
+                                  : conn?.connected
+                                    ? "Configured; collector connected"
+                                    : "Configured; collector disconnected"}
                           </td>
                         </tr>
                       );
@@ -587,7 +609,7 @@ export default function Plc() {
 
             {!monitoring.machines?.length ? (
               <p className="muted">
-                No machine NodeId mappings are configured.
+                No configured machine signals are currently used by an enabled rule.
               </p>
             ) : (
               <div className="machine-cards">

@@ -39,8 +39,17 @@ def create_database_engine(database_url: str | None = None) -> Engine:
     return create_engine(url, pool_pre_ping=True)
 
 # manage db connectivity. A session is the object through which your application queries and modifies db records
-def create_session_factory(engine: Engine) -> sessionmaker[Session]:
-    return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+def create_session_factory(
+    engine: Engine,
+    *,
+    info: dict[str, object] | None = None,
+) -> sessionmaker[Session]:
+    return sessionmaker(
+        bind=engine,
+        autoflush=False,
+        expire_on_commit=False,
+        info=info,
+    )
 
 # this function provides a db session to FastAPI endpoints
 def get_db(request: Request) -> Generator[Session, None, None]:

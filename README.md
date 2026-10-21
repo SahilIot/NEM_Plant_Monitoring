@@ -35,7 +35,8 @@ UTC type, startup initialization).
   node discovery, one-shot reads, mapping validation, reconnect handling, and
   live PLC status. OPC UA mappings are configured in the backend environment;
   an opt-in mapping-bypass test mode can also subscribe to registered variables
-  with NodeIds.
+  with NodeIds. WebSocket database-change notifications keep open dashboard,
+  asset, and PLC views synchronized without rapid HTTP polling.
 - **Monitoring rules:** create rules from an asset's Current status page,
   including Motor Rotation cycle thresholds, Running Time thresholds, Boolean
   Count Thresholds, and supported variable-condition rules. Rule templates can
@@ -44,7 +45,12 @@ UTC type, startup initialization).
 - **Cycle and runtime counters:** count a cycle on a Boolean `false`-to-`true`
   transition; maintain counters independently for each rule and asset; and
   accumulate actual elapsed running time while a trustworthy Boolean running
-  signal is `true`.
+  signal is `true`. Running-time displays advance locally each second while
+  active, without polling or refreshing the page.
+  - **Real-time frontend synchronization:** the backend publishes committed
+    database changes and OPC UA connection-state changes over `/api/v1/live`
+    (WebSocket). Open dashboard, asset, and PLC pages refresh only the affected
+    data and reconnect automatically if the live connection is interrupted.
 - **Alerts and history:** evaluate warning and alert thresholds, keep a single
   active alert episode per rule condition, acknowledge alerts, and retain
   monitoring events and audit history.
@@ -189,7 +195,7 @@ No secrets belong in source control.
 | `OPCUA_SUBSCRIPTION_PUBLISHING_INTERVAL_MS` | Requested publishing interval, default `1000`. The server may revise it; `/api/v1/plc/status` reports requested and negotiated values. |
 | `OPCUA_RUNTIME_CHECKPOINT_SECONDS` | Running-signal refresh and running-time checkpoint interval, default `10` seconds. Does not set the subscription publishing interval. |
 | `OPCUA_MACHINE_MAPPINGS` | JSON array of NodeId mappings (below). Empty disables mapped collection unless mapping bypass is enabled. |
-| `OPC_UA_MAPPING_BYPASS_ENABLED` | Temporary testing mode; defaults to `false`. When `true`, also subscribes to active asset-owned variables with valid declared NodeIds. |
+| `OPC_UA_MAPPING_BYPASS_ENABLED` | Temporary testing mode; defaults to `false`. When `true`, also subscribes to active asset-owned variables with valid declared NodeIds that are used by enabled rules. |
 | `SETTINGS_ENCRYPTION_KEY` | Fernet key for the dashboard's SMTP password. |
 | `BACKUP_DIRECTORY` | Backup snapshot location, default `Nem_Backend/backups`. |
 
@@ -234,20 +240,24 @@ freshness.
 
 Set `OPC_UA_MAPPING_BYPASS_ENABLED=true` in `Nem_Backend/.env` and restart the
 backend to enable this reversible test mode. Set it to `false` (or remove the
-setting) and restart to restore mapping-only collection. Explicit mappings
-remain active in either mode.
+setting) and restart to restore mapping-only collection. Mapping configuration
+is preserved in either mode, but the collector subscribes only to configured
+or declared variables referenced by enabled, non-archived monitoring rules.
+Disabling or archiving a rule automatically removes variables no longer used by
+any enabled rule from the OPC UA subscription; a shared variable remains
+subscribed while at least one enabled rule still uses it.
 
 When enabled, the collector additionally discovers active variables belonging
-to active assets when `opcua_node_id` is present and syntactically valid. Each
+to active assets when `opcua_node_id` is present and syntactically valid and an
+enabled, non-archived rule uses the variable. Each
 declared variable is associated only with its existing `asset_id`; variables
 are not broadcast to every asset. A unique NodeId is subscribed once even if
 multiple asset-owned variables use it. Boolean declared variables become
 available for asset-scoped cycle-count and running-time rules; those rules
 still validate Boolean data type, active status, asset ownership, and NodeId
 syntax. The periodic good-quality Boolean refresh keeps stable running signals
-fresh. New, edited, deactivated, or removed declared variables are detected
-while connected and cause the collector to rebuild its subscriptions within
-the configured runtime checkpoint interval. Invalid NodeIds are skipped and
+fresh. Rule, asset, or variable changes trigger an immediate subscription
+refresh while connected. Invalid NodeIds are skipped and
 logged. A mismatch between the declared variable type and the PLC's actual
 value is rejected by normal reading validation, so the reading does not update
 rule state. OPC UA NodeIds can be entered or edited in the asset's Variables
@@ -262,7 +272,8 @@ variables. No database migration is required; the mode uses existing asset,
 variable, and rule-counter tables.
 
 `GET /api/v1/plc/status` (read-only) returns connection state, requested and
-negotiated publishing interval, configured mappings (with validity), and per
+negotiated publishing interval, configured mappings (with validity and current
+subscription state), and per
 machine: status, `cycle_count`, `running_seconds`, last signal time, staleness,
 limits, and active alerts. Alerts listed here come only from enabled,
 non-archived rules.
@@ -347,11 +358,13 @@ higher-warning, and alert thresholds in increasing order (for example 8, 9,
 and 10 hours). With mapping bypass enabled, a declared Boolean variable on the
 asset can be selected instead of a configured `running_signal`. The backend
 persists accumulated seconds per rule and asset,
-computes elapsed time from timestamps, pauses while stopped, and periodically
-re-reads the signal while connected. Missing, stale, disconnected, bad-quality,
-or unknown signals do not cause additional run time to be inferred. The rule
-status advances through normal, warning, and alert states as thresholds are
-crossed; its active alert is updated rather than recreated at every evaluation.
+computes elapsed time from timestamps, pauses while the signal is false or the
+rule is disabled, and periodically re-reads the signal while connected. After
+re-enabling a rule, the timer waits for a fresh Boolean sample before resuming.
+Missing, stale, disconnected, bad-quality, or unknown signals do not cause
+additional run time to be inferred. The rule status advances through normal,
+warning, higher-warning, and alert states as thresholds are crossed; its active
+alert is updated rather than recreated at every evaluation.
 
 ### Rule lifecycle
 

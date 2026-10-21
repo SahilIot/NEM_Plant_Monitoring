@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager #defines what happens when the app st
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import text
@@ -37,6 +37,7 @@ from app.services.monitoring_engine import (
     utc_now,
 )
 from app.services.opcua_collector import OpcUaCollector
+from app.services.live_updates import LiveUpdateHub, serve_live_updates
 
 LOGGER = logging.getLogger("nem_backend")
 MAX_REQUEST_BODY_BYTES = 25 * 1024 * 1024  
@@ -111,12 +112,24 @@ class FrontendStaticFiles(StaticFiles):
 def create_app(settings: Settings | None = None) -> FastAPI:
     selected_settings = settings or get_settings()
     engine = create_database_engine(selected_settings.database_url)
-    session_factory: sessionmaker = create_session_factory(engine)
-    opcua_collector = OpcUaCollector(selected_settings, session_factory)
+    live_updates = LiveUpdateHub()
+    session_factory: sessionmaker = create_session_factory(
+        engine,
+        info={"live_update_hub": live_updates},
+    )
+    opcua_collector = OpcUaCollector(
+        selected_settings,
+        session_factory,
+        status_changed=live_updates.publish_status,
+    )
+    live_updates.add_database_change_listener(
+        opcua_collector.request_configuration_refresh
+    )
 
 #Application startup and shutdown
     @asynccontextmanager
     async def lifespan(application: FastAPI):
+        live_updates.bind_loop(asyncio.get_running_loop())
         initialize_database(engine)
         opcua_collector.start()
         monitoring_task = None
@@ -167,6 +180,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.session_factory = session_factory
     application.state.settings = selected_settings
     application.state.opcua_collector = opcua_collector
+    application.state.live_updates = live_updates
+
+    @application.websocket("/api/v1/live")
+    async def live_updates_websocket(websocket: WebSocket) -> None:
+        await serve_live_updates(websocket, live_updates)
 
 #Checking request size
     @application.middleware("http")

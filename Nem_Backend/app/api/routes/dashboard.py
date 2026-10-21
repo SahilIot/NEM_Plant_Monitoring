@@ -37,11 +37,17 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
         )
     ) or 0
     disabled = rule_total - enabled
-    # Counting monitored assests 
+    # Count assets with at least one enabled rule using an active variable.
     monitored = session.scalar(
         select(func.count(func.distinct(Variable.asset_id)))
         .join(Asset, Asset.id == Variable.asset_id)
-        .where(Variable.is_active.is_(True), Asset.is_active.is_(True))
+        .join(MonitoringRule, MonitoringRule.variable_id == Variable.id)
+        .where(
+            Variable.is_active.is_(True),
+            Asset.is_active.is_(True),
+            MonitoringRule.is_enabled.is_(True),
+            MonitoringRule.is_archived.is_(False),
+        )
     ) or 0
     # Getting the latest reading timestamp
     latest = session.scalar(select(func.max(Reading.recorded_at)))

@@ -4,6 +4,7 @@ import { useLocation, useNavigate, useOutletContext, useParams } from "react-rou
 import CopyRulesModal from "../components/CopyRulesModal.jsx";
 import PredefinedRulesModal from "../../rules/components/PredefinedRulesModal.jsx";
 import { api } from "../../../services/api.js";
+import { subscribeLiveUpdates } from "../../../services/liveUpdates.js";
 import MaintenancePanel from "../components/MaintenancePanel.jsx";
 import "./AssetDetail.css";
 import {
@@ -304,6 +305,8 @@ export default function AssetDetail() {
   const [rules, setRules] = useState([]);
   const [variables, setVariables] = useState([]);
   const [allVariables, setAllVariables] = useState([]);
+  const [runtimeReadings, setRuntimeReadings] = useState(new Map());
+  const [clockNow, setClockNow] = useState(Date.now());
   const [cycleVariableIds, setCycleVariableIds] = useState([]);
   const [runtimeVariableIds, setRuntimeVariableIds] = useState([]);
   const [mappingBypassEnabled, setMappingBypassEnabled] = useState(false);
@@ -361,6 +364,24 @@ export default function AssetDetail() {
       if (r.status === "fulfilled") {
         setRules(Array.isArray(r.value) ? r.value : []);
         setLoadError("");
+        const runtimeRules = (Array.isArray(r.value) ? r.value : []).filter(
+          (rule) => rule.rule_type === "runtime_duration"
+        );
+        const signalReadings = await Promise.all(
+          runtimeRules.map(async (rule) => {
+            try {
+              return [
+                rule.variable_id,
+                await api.get(`/readings/variables/${rule.variable_id}/latest`),
+              ];
+            } catch (error) {
+              if (error.status === 404) return [rule.variable_id, null];
+              throw error;
+            }
+          })
+        );
+        if (mine !== seq.current) return;
+        setRuntimeReadings(new Map(signalReadings));
       } else {
         setRules([]);
         setLoadError(
@@ -468,6 +489,7 @@ export default function AssetDetail() {
     setFilter("");
     setRules([]);
     setAllVariables([]);
+    setRuntimeReadings(new Map());
     setVariables([]);
     setLogs([]);
     setEvents([]);
@@ -482,6 +504,39 @@ export default function AssetDetail() {
     };
   }, [assetId, loadVariables, loadLogs, loadLive]);
 
+  const hasRuntimeRules = rules.some(
+    (rule) => rule.rule_type === "runtime_duration"
+  );
+
+  useEffect(() => {
+    if (!hasRuntimeRules) return;
+
+    let timer;
+    const updateClock = () => {
+      setClockNow(Date.now());
+      timer = window.setTimeout(
+        updateClock,
+        1000 - (Date.now() % 1000)
+      );
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      window.clearTimeout(timer);
+      updateClock();
+    };
+
+    updateClock();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange
+      );
+    };
+  }, [hasRuntimeRules]);
+
   useEffect(() => {
     const notice = location.state?.createdNotice;
     if (!notice) return;
@@ -492,23 +547,69 @@ export default function AssetDetail() {
 
 
   useEffect(() => {
-    let active = true;
-    let timeoutId;
-
-    const poll = async () => {
-      await loadLive();
-      if (active) {
-        timeoutId = window.setTimeout(poll, 1500);
+    return subscribeLiveUpdates((update) => {
+      if (update.type === "connected") {
+        loadLive();
+        loadVariables();
+        loadLogs();
+        return;
       }
-    };
-
-    timeoutId = window.setTimeout(poll, 1500);
-
-    return () => {
-      active = false;
-      window.clearTimeout(timeoutId);
-    };
-  }, [loadLive]);
+      const changedTables = new Set(update.changed_tables || []);
+      const relevantTables = [
+        "assets",
+        "variables",
+        "readings",
+        "nem_readings",
+        "nem_monitoring_rules",
+        "nem_rule_states",
+        "nem_rule_counter_states",
+        "nem_alerts",
+        "nem_maintenance_records",
+        "nem_maintenance_schedules",
+        "nem_monitoring_events",
+      ];
+      if (
+        update.type !== "opcua_status" &&
+        !relevantTables.some((table) => changedTables.has(table))
+      ) {
+        return;
+      }
+      const affectedAssets = update.asset_ids || [];
+      const displayedAssetIds = new Set([assetId]);
+      if (children) {
+        let expanded = true;
+        while (expanded) {
+          expanded = false;
+          for (const candidate of assets) {
+            if (
+              candidate.parent_asset_id != null &&
+              displayedAssetIds.has(candidate.parent_asset_id) &&
+              !displayedAssetIds.has(candidate.id)
+            ) {
+              displayedAssetIds.add(candidate.id);
+              expanded = true;
+            }
+          }
+        }
+      }
+      if (
+        affectedAssets.length > 0 &&
+        !affectedAssets.some((id) => displayedAssetIds.has(id))
+      ) {
+        return;
+      }
+      loadLive();
+      if (changedTables.has("variables") || changedTables.has("assets")) {
+        loadVariables();
+      }
+      if (
+        changedTables.has("nem_maintenance_records") ||
+        changedTables.has("nem_maintenance_schedules")
+      ) {
+        loadLogs();
+      }
+    });
+  }, [assetId, assets, children, loadLive, loadLogs, loadVariables]);
 
  
   useEffect(() => {
@@ -1182,10 +1283,33 @@ const filteredLogs = [...logs]
                 const limits = thresholdMetrics(rule);
                 const currentValue =
                   state?.latest_value ?? rule.latest_value;
+                const runtimeReading = runtimeReadings.get(rule.variable_id);
+                const evaluatedAt = state?.last_evaluated_at
+                  ? new Date(state.last_evaluated_at).getTime()
+                  : Number.NaN;
+                const signalAt = runtimeReading?.recorded_at
+                  ? new Date(runtimeReading.recorded_at).getTime()
+                  : Number.NaN;
+                const signalIsFresh =
+                  Number.isFinite(signalAt) &&
+                  clockNow - signalAt <=
+                    (Number(rule.stale_after_seconds) || 300) * 1000;
+                const runtimeIsRunning =
+                  rule.rule_type === "runtime_duration" &&
+                  state?.status !== "unknown" &&
+                  runtimeReading?.value === true &&
+                  signalIsFresh;
+                const displayedValue =
+                  runtimeIsRunning &&
+                  Number.isFinite(currentValue) &&
+                  Number.isFinite(evaluatedAt)
+                    ? currentValue +
+                      Math.max(0, clockNow - evaluatedAt) / 1000
+                    : currentValue;
                 const formattedCurrentValue =
                   rule.rule_type === "runtime_duration"
-                    ? formatDuration(currentValue)
-                    : formatValue(currentValue);
+                    ? formatDuration(displayedValue)
+                    : formatValue(displayedValue);
 
                 return (
                   <article
@@ -1206,7 +1330,7 @@ const filteredLogs = [...logs]
                     </div>
 
                     <div className="rule-card-metrics">
-                      {currentValue !== null && currentValue !== undefined && (
+                      {displayedValue !== null && displayedValue !== undefined && (
                         <div className="rule-current-value">
                           <span>{rule.rule_type === "runtime_duration" ? "Running time" : "Now"}</span>
                           <b>{formattedCurrentValue}</b>
