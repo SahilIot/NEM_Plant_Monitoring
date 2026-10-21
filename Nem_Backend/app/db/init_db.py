@@ -1,10 +1,8 @@
-
 from sqlalchemy import inspect, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
-
 import app.models
 from app.db.base import Base
 from app.models import (
@@ -16,48 +14,34 @@ from app.models import (
     Variable,
 )
 
-
-# Creates tables defined in SQLAlchemy models if they do not exist.
+#creates tables defined in SQLAlchemy models if they do not exist
 def initialize_database(engine: Engine) -> None:
     Base.metadata.create_all(bind=engine)
-
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
-
-    # Add OPC UA node ID to existing variables tables.
     if "variables" in table_names:
-        variable_columns = {
-            column["name"]
-            for column in inspector.get_columns("variables")
+        variable_columns = {column["name"] for column in inspector.get_columns("variables")
         }
-
         if "opcua_node_id" not in variable_columns:
             with engine.begin() as connection:
                 connection.execute(
-                    text(
-                        "ALTER TABLE variables "
+                    text("ALTER TABLE variables "
                         "ADD COLUMN opcua_node_id VARCHAR(512)"
                     )
                 )
-
         with engine.begin() as connection:
-            connection.execute(
-                text("DROP INDEX IF EXISTS ix_variables_opcua_node_id")
-            )
+            connection.execute(text("DROP INDEX IF EXISTS ix_variables_opcua_node_id"))
             connection.execute(
                 text(
                     "CREATE INDEX IF NOT EXISTS ix_variables_opcua_node_id "
                     "ON variables (opcua_node_id)"
                 )
             )
-
-    # Migrate monitoring rules schema.
     if "nem_monitoring_rules" in table_names:
         rule_columns = {
             column["name"]
             for column in inspector.get_columns("nem_monitoring_rules")
         }
-
         with engine.begin() as connection:
             if "is_archived" not in rule_columns:
                 if engine.dialect.name == "postgresql":
@@ -76,7 +60,6 @@ def initialize_database(engine: Engine) -> None:
                             "BOOLEAN NOT NULL DEFAULT FALSE"
                         )
                     )
-
             if "source_template_id" not in rule_columns:
                 if engine.dialect.name == "postgresql":
                     connection.execute(
@@ -96,7 +79,6 @@ def initialize_database(engine: Engine) -> None:
                             "ON DELETE RESTRICT"
                         )
                     )
-
             connection.execute(
                 text(
                     "CREATE INDEX IF NOT EXISTS "
@@ -105,11 +87,9 @@ def initialize_database(engine: Engine) -> None:
                 )
             )
 
-    # Migrate legacy monitoring rules and existing rule counters.
     _migrate_legacy_rule_templates(engine)
     _migrate_existing_rule_counters(engine)
 
-    # Migrate maintenance schedules.
     if "nem_maintenance_schedules" in table_names:
         schedule_columns = {
             column["name"]
@@ -117,7 +97,6 @@ def initialize_database(engine: Engine) -> None:
                 "nem_maintenance_schedules"
             )
         }
-
         if "current_period_start_date" not in schedule_columns:
             with engine.begin() as connection:
                 connection.execute(
@@ -126,7 +105,6 @@ def initialize_database(engine: Engine) -> None:
                         "ADD COLUMN current_period_start_date DATE"
                     )
                 )
-
                 connection.execute(
                     text(
                         "UPDATE nem_maintenance_schedules "
@@ -134,7 +112,6 @@ def initialize_database(engine: Engine) -> None:
                         "WHERE current_period_start_date IS NULL"
                     )
                 )
-
                 if engine.dialect.name == "postgresql":
                     connection.execute(
                         text(
@@ -142,8 +119,6 @@ def initialize_database(engine: Engine) -> None:
                             "ALTER COLUMN current_period_start_date SET NOT NULL"
                         )
                     )
-
-    # Migrate maintenance records.
     if "nem_maintenance_records" in table_names:
         record_columns = {
             column["name"]
@@ -151,11 +126,8 @@ def initialize_database(engine: Engine) -> None:
                 "nem_maintenance_records"
             )
         }
-
         record_column_definitions = {
-            "maintenance_type": (
-                "VARCHAR(30) NOT NULL DEFAULT 'inspection'"
-            ),
+            "maintenance_type": "VARCHAR(30) NOT NULL DEFAULT 'inspection'",
             "status": "VARCHAR(20) NOT NULL DEFAULT 'completed'",
             "planned_start_at": "TIMESTAMP",
             "planned_end_at": "TIMESTAMP",
@@ -173,33 +145,24 @@ def initialize_database(engine: Engine) -> None:
             "planned_due_date": "DATE",
             "archived_at": "TIMESTAMP",
         }
-
         with engine.begin() as connection:
-            for column_name, definition in (
-                record_column_definitions.items()
-            ):
-                if column_name not in record_columns:
+            for name, definition in record_column_definitions.items():
+                if name not in record_columns:
                     connection.execute(
                         text(
                             "ALTER TABLE nem_maintenance_records "
-                            f"ADD COLUMN {column_name} {definition}"
+                            f"ADD COLUMN {name} {definition}"
                         )
                     )
-
             connection.execute(
                 text(
                     "UPDATE nem_maintenance_records "
                     "SET actual_completed_at = performed_at "
-                    "WHERE status = 'completed' "
-                    "AND actual_completed_at IS NULL"
+                    "WHERE status = 'completed' AND actual_completed_at IS NULL"
                 )
             )
 
-    # Migrate maintenance-related alert columns and constraints.
-    if (
-        "nem_alerts" in table_names
-        and "nem_maintenance_schedules" in table_names
-    ):
+    if "nem_alerts" in table_names and "nem_maintenance_schedules" in table_names:
         alert_columns = {
             column["name"]
             for column in inspect(engine).get_columns("nem_alerts")
@@ -222,23 +185,17 @@ def initialize_database(engine: Engine) -> None:
                     )
                 )
 
-            # PostgreSQL-specific constraints and indexes.
             if engine.dialect.name == "postgresql":
                 connection.execute(
                     text(
                         "DO $$ BEGIN "
-                        "IF NOT EXISTS ("
-                        "SELECT 1 FROM pg_constraint "
-                        "WHERE conname = "
-                        "'fk_nem_alerts_maintenance_schedule'"
-                        ") THEN "
-                        "ALTER TABLE nem_alerts "
-                        "ADD CONSTRAINT "
-                        "fk_nem_alerts_maintenance_schedule "
+                        "IF NOT EXISTS (SELECT 1 FROM pg_constraint "
+                        "WHERE conname = 'fk_nem_alerts_maintenance_schedule') "
+                        "THEN ALTER TABLE nem_alerts "
+                        "ADD CONSTRAINT fk_nem_alerts_maintenance_schedule "
                         "FOREIGN KEY (maintenance_schedule_id) "
                         "REFERENCES nem_maintenance_schedules(id) "
-                        "ON DELETE RESTRICT; "
-                        "END IF; END $$"
+                        "ON DELETE RESTRICT; END IF; END $$"
                     )
                 )
 
@@ -254,8 +211,7 @@ def initialize_database(engine: Engine) -> None:
                     text(
                         "CREATE UNIQUE INDEX IF NOT EXISTS "
                         "uq_nem_alerts_active_maintenance_due "
-                        "ON nem_alerts "
-                        "(maintenance_schedule_id, maintenance_due_date) "
+                        "ON nem_alerts (maintenance_schedule_id, maintenance_due_date) "
                         "WHERE status = 'active' "
                         "AND maintenance_schedule_id IS NOT NULL"
                     )
@@ -264,25 +220,17 @@ def initialize_database(engine: Engine) -> None:
                 connection.execute(
                     text(
                         "DO $$ BEGIN "
-                        "IF NOT EXISTS ("
-                        "SELECT 1 FROM pg_constraint "
-                        "WHERE conname = 'ck_nem_alerts_source'"
-                        ") THEN "
-                        "ALTER TABLE nem_alerts "
+                        "IF NOT EXISTS (SELECT 1 FROM pg_constraint "
+                        "WHERE conname = 'ck_nem_alerts_source') "
+                        "THEN ALTER TABLE nem_alerts "
                         "ADD CONSTRAINT ck_nem_alerts_source CHECK ("
-                        "(rule_id IS NOT NULL "
-                        "AND maintenance_schedule_id IS NULL) "
-                        "OR "
-                        "(rule_id IS NULL "
-                        "AND maintenance_schedule_id IS NOT NULL "
-                        "AND maintenance_due_date IS NOT NULL)"
-                        "); "
+                        "(rule_id IS NOT NULL AND maintenance_schedule_id IS NULL) "
+                        "OR (rule_id IS NULL AND maintenance_schedule_id IS NOT NULL "
+                        "AND maintenance_due_date IS NOT NULL)); "
                         "END IF; END $$"
                     )
                 )
-
-
-# Converts qualifying older rules into reusable templates.
+#converts qualifying older rules into resuable templates
 def _migrate_legacy_rule_templates(engine: Engine) -> None:
     supported_types = {
         "parameter_threshold",
@@ -290,14 +238,12 @@ def _migrate_legacy_rule_templates(engine: Engine) -> None:
         "duration",
         "boolean_count_threshold",
     }
-
     type_map = {
         "number": ["number"],
         "integer": ["integer"],
         "boolean": ["boolean"],
         "string": ["string"],
     }
-
     with Session(engine) as session:
         legacy_rules = session.scalars(
             select(MonitoringRule).where(
@@ -306,42 +252,26 @@ def _migrate_legacy_rule_templates(engine: Engine) -> None:
                 MonitoringRule.rule_type.in_(supported_types),
             )
         ).all()
-
         for rule in legacy_rules:
-            existing_template_id = session.scalar(
+            if session.scalar(
                 select(MonitoringRuleTemplate.id).where(
                     MonitoringRuleTemplate.legacy_rule_id == rule.id
                 )
-            )
-
-            if existing_template_id is not None:
+            ):
                 continue
-
             variable = (
                 session.get(Variable, rule.variable_id)
                 if rule.variable_id is not None
                 else None
             )
-
             required_types = (
-                type_map.get(variable.data_type)
-                if variable is not None
-                else None
+                type_map.get(variable.data_type) if variable is not None else None
             )
-
-            if (
-                rule.rule_type == "parameter_threshold"
-                and required_types is None
-            ):
+            if rule.rule_type == "parameter_threshold" and required_types is None:
                 required_types = ["number", "integer"]
-
             elif rule.rule_type == "boolean_count_threshold":
                 required_types = ["boolean"]
-
-            elif (
-                rule.rule_type == "duration"
-                and required_types is None
-            ):
+            elif rule.rule_type == "duration" and required_types is None:
                 required_types = ["number", "integer"]
 
             session.add(
@@ -356,45 +286,29 @@ def _migrate_legacy_rule_templates(engine: Engine) -> None:
                     parameters=rule.parameters,
                     severity=rule.severity,
                     is_enabled=rule.is_enabled,
-                    evaluation_interval_seconds=(
-                        rule.evaluation_interval_seconds
-                    ),
+                    evaluation_interval_seconds=rule.evaluation_interval_seconds,
                     stale_after_seconds=rule.stale_after_seconds,
                     legacy_rule_id=rule.id,
                 )
             )
-
             rule.is_enabled = False
             rule.is_archived = True
-
         session.commit()
 
 
-# Migrates existing boolean counter rules into dedicated counter state.
 def _migrate_existing_rule_counters(engine: Engine) -> None:
     migration_key = "internal_rule_counter_state_v1"
-
     insert_function = (
-        pg_insert
-        if engine.dialect.name == "postgresql"
-        else sqlite_insert
+        pg_insert if engine.dialect.name == "postgresql" else sqlite_insert
     )
-
     with Session(engine) as session:
         statement = (
             insert_function(FrontendConfig)
-            .values(
-                key=migration_key,
-                value={"complete": True},
-            )
-            .on_conflict_do_nothing(
-                index_elements=[FrontendConfig.key]
-            )
+            .values(key=migration_key, value={"complete": True})
+            .on_conflict_do_nothing(index_elements=[FrontendConfig.key])
             .returning(FrontendConfig.key)
         )
-
         inserted = session.scalar(statement)
-
         if inserted is None:
             session.rollback()
             return
@@ -406,27 +320,16 @@ def _migrate_existing_rule_counters(engine: Engine) -> None:
                 MonitoringRule.is_archived.is_(False),
             )
         ).all()
-
         for rule in rules:
             machine_state = session.get(
-                MachineMonitoringState,
-                rule.target_asset_id,
+                MachineMonitoringState, rule.target_asset_id
             )
-
             session.add(
                 RuleCounterState(
                     rule_id=rule.id,
                     asset_id=rule.target_asset_id,
-                    cycle_count=(
-                        machine_state.cycle_count
-                        if machine_state
-                        else 0
-                    ),
-                    cycle_signal=(
-                        machine_state.cycle_signal
-                        if machine_state
-                        else None
-                    ),
+                    cycle_count=machine_state.cycle_count if machine_state else 0,
+                    cycle_signal=machine_state.cycle_signal if machine_state else None,
                     last_signal_at=(
                         machine_state.last_cycle_signal_at
                         if machine_state
@@ -439,5 +342,4 @@ def _migrate_existing_rule_counters(engine: Engine) -> None:
                     ),
                 )
             )
-
         session.commit()

@@ -7,11 +7,23 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status 
 #Build SQL queries using SQLAlchemy, func provide sql functions such as count, session represents a database session
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 #get_db supplies the database session to an endpoint
 from app.db.session import get_db
-from app.models import Asset, MonitoringRule, Reading, Variable  # these are database models
+from app.models import (
+    Alert,
+    Asset,
+    MachineMonitoringState,
+    MaintenanceRecord,
+    MaintenanceSchedule,
+    MonitoringEvent,
+    MonitoringRule,
+    Reading,
+    RuleCounterState,
+    RuleState,
+    Variable,
+)
 from app.schemas.asset import AssetCreate, AssetRead, AssetTree, AssetUpdate # pydantic schema for input validation and output formatting
 
 router = APIRouter(prefix="/assets", tags=["assets"]) 
@@ -177,21 +189,35 @@ def move_asset(
 @router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_asset(asset_id: int, session: Session = Depends(get_db)) -> Response:
     asset = asset_or_404(session, asset_id)
-    has_children = session.scalar(
-        select(Asset.id).where(Asset.parent_asset_id == asset.id).limit(1)
+    references = (
+        (Asset, Asset.parent_asset_id),
+        (Variable, Variable.asset_id),
+        (Reading, Reading.asset_id),
+        (MonitoringRule, MonitoringRule.target_asset_id),
+        (RuleState, RuleState.target_asset_id),
+        (Alert, Alert.target_asset_id),
+        (MaintenanceRecord, MaintenanceRecord.asset_id),
+        (MaintenanceSchedule, MaintenanceSchedule.asset_id),
+        (MachineMonitoringState, MachineMonitoringState.asset_id),
+        (RuleCounterState, RuleCounterState.asset_id),
     )
-    has_variables = session.scalar(
-        select(Variable.id).where(Variable.asset_id == asset.id).limit(1)
-    )
-    has_readings = session.scalar(select(Reading.id).where(Reading.asset_id == asset.id).limit(1))
-    has_rules = session.scalar(
-        select(MonitoringRule.id).where(MonitoringRule.target_asset_id == asset.id).limit(1)
-    )
-    if has_children or has_variables or has_readings or has_rules:
+    if any(
+        session.scalar(
+            select(column).where(column == asset.id).limit(1)
+        )
+        for model, column in references
+    ):
         raise HTTPException(
             status_code=409,
-            detail="Cannot delete an asset with children, variables, readings, or rules; deactivate it instead",
+            detail=(
+                "Cannot delete an asset while it has child assets, variables, "
+                "monitoring data, rules, alerts, maintenance records, or history. "
+                "Deactivate it instead."
+            ),
         )
+    session.execute(
+        delete(MonitoringEvent).where(MonitoringEvent.asset_id == asset.id)
+    )
     session.delete(asset)
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

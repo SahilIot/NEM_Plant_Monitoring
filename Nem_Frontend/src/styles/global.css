@@ -250,9 +250,12 @@ button:disabled { opacity: 0.55; cursor: default; }
 .tile.lit.warning::before { background: var(--warn-lamp); }
 .tile.lit.warning .tile-value { color: var(--warn); }
 
-.home-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; max-width: 1120px; align-items: start; }
+.home-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 300px); gap: 18px; max-width: 1120px; align-items: start; }
 .home-grid .panel { max-width: none; margin-bottom: 0; }
-.side-stack { display: flex; flex-direction: column; gap: 18px; }
+.home-left-stack { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.home-right-column { min-width: 0; }
+.home-right-column > .panel { padding: 14px 20px; }
+.home-right-column > .panel .panel-head { margin-bottom: 10px; }
 
 .all-clear { display: flex; align-items: center; gap: 14px; padding: 10px 2px; }
 .all-clear p { margin: 2px 0 0; }
@@ -270,16 +273,19 @@ button:disabled { opacity: 0.55; cursor: default; }
 .alert-meta a:hover { text-decoration: underline; }
 .ack-done { color: var(--muted); font-size: 13.5px; text-align: right; max-width: 150px; }
 
-.coverage { display: flex; flex-direction: column; gap: 10px; color: inherit; text-decoration: none; }
-.coverage-num { font-family: var(--font-num); font-size: 38px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+.coverage { display: flex; flex-direction: column; gap: 8px; color: inherit; text-decoration: none; }
+.coverage-num { font-family: var(--font-num); font-size: 30px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
 .coverage-num small { font-family: var(--font); font-size: 15px; font-weight: 400; color: var(--muted); }
 .meter { display: block; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
 .meter i { display: block; height: 100%; background: var(--action-bg); border-radius: 4px; }
-.state-list { list-style: none; margin: 0; padding: 0; }
-.state-list li + li { border-top: 1px solid var(--line); }
-.state-list a { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; color: var(--ink); text-decoration: none; }
-.state-list a:hover span { color: var(--action); }
-.state-list b { font-family: var(--font-num); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.state-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); list-style: none; margin: 0; padding: 0; }
+.state-grid li + li { border-left: 1px solid var(--line); }
+.state-grid a { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; min-width: 0; height: 100%; padding: 4px 12px; color: var(--ink); text-decoration: none; }
+.state-grid li:first-child a { padding-left: 0; }
+.state-grid li:last-child a { padding-right: 0; }
+.state-grid a:hover span { color: var(--action); }
+.state-grid span { color: var(--muted); font-size: 13px; line-height: 1.25; }
+.state-grid b { font-family: var(--font-num); font-size: 30px; line-height: 1; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 
 .cards-col { display: flex; flex-direction: column; gap: 12px; max-width: 720px; }
@@ -398,10 +404,10 @@ button:disabled { opacity: 0.55; cursor: default; }
   .annunciator { grid-template-columns: repeat(2, 1fr); }
   .tile:nth-child(2) { border-right: none; }
   .tile:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
-  .home-grid { grid-template-columns: 1fr; }
   .tree { width: 260px; }
 }
 @media (max-width: 800px) {
+  .home-grid { grid-template-columns: 1fr; }
   .app-title, .link-state { display: none; }
   .rail.open { width: 56px; }
   .rail.open .rail-label { display: none; }
@@ -411,6 +417,12 @@ button:disabled { opacity: 0.55; cursor: default; }
   .rule-row { flex-wrap: wrap; }
   .machine-strip > * { border-right: none; border-bottom: 1px solid var(--line); flex: 1 1 100%; }
   .asset-links { flex-wrap: wrap; }
+}
+@media (max-width: 560px) {
+  .state-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 14px; }
+  .state-grid li:nth-child(3) { border-left: 0; }
+  .state-grid li:nth-child(n + 3) { border-top: 1px solid var(--line); padding-top: 12px; }
+  .state-grid li:nth-child(3) a { padding-left: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }

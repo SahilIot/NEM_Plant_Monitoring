@@ -285,125 +285,144 @@ export default function Home() {
       </section>
 
       <div className="home-grid">
-        <section className="panel">
-          <div className="panel-head">
-            <h2>Needs attention</h2>
+        <div className="home-left-stack">
+          <section className="panel">
+            <div className="panel-head">
+              <h2>Needs attention</h2>
 
-            <span className="muted">
-              {alerts.length === 0
-                ? "Nothing open"
-                : `${alerts.length} active ${
-                    alerts.length === 1 ? "alert" : "alerts"
-                  }`}
-            </span>
-          </div>
+              <span className="muted">
+                {alerts.length === 0
+                  ? "Nothing open"
+                  : `${alerts.length} active ${
+                      alerts.length === 1 ? "alert" : "alerts"
+                    }`}
+              </span>
+            </div>
 
-          {ackError && (
-            <p className="notice error" role="alert">
-              Could not acknowledge: {ackError}
-            </p>
-          )}
+            {ackError && (
+              <p className="notice error" role="alert">
+                Could not acknowledge: {ackError}
+              </p>
+            )}
 
-          {ordered.length === 0 ? (
-            allClear ? (
-              <div className="all-clear">
-                <span className="all-clear-mark">
-                  <CheckIcon size={22} />
-                </span>
+            {ordered.length === 0 ? (
+              allClear ? (
+                <div className="all-clear">
+                  <span className="all-clear-mark">
+                    <CheckIcon size={22} />
+                  </span>
 
-                <div>
-                  <strong>All machines are within limits</strong>
-                  <p className="muted">
-                    No rule is in alert or warning.
-                  </p>
+                  <div>
+                    <strong>All machines are within limits</strong>
+                    <p className="muted">
+                      No rule is in alert or warning.
+                    </p>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <EmptyState
+                  art={false}
+                  title="No active alerts"
+                  lines={[
+                    "Rule states above may still be changing. Open a rule list to review.",
+                  ]}
+                />
+              )
             ) : (
-              <EmptyState
-                art={false}
-                title="No active alerts"
-                lines={[
-                  "Rule states above may still be changing. Open a rule list to review.",
-                ]}
-              />
-            )
-          ) : (
-            <ul className="alert-list">
-              {ordered.map((alert) => (
-                <li
-                  key={alert.id}
-                  className={"alert-row " + alert.severity}
-                >
-                  <i
+              <ul className="alert-list">
+                {ordered.map((alert) => (
+                  <li
+                    key={alert.id}
+                    className={"alert-row " + alert.severity}
+                  >
+                    <i
                     className={"lamp " + alert.severity}
                     aria-hidden="true"
-                  />
+                    />
 
-                  <div className="alert-body">
-                    <div className="alert-title">
-                      {alert.title}
+                    <div className="alert-body">
+                      <div className="alert-title">
+                        {alert.title}
+                      </div>
+
+                      <div className="alert-msg">
+                        {alert.message}
+                      </div>
+
+                      <div className="alert-meta">
+                        <Link
+                          to={`/assets/${alert.target_asset_id}`}
+                        >
+                          {assetName.get(alert.target_asset_id) ||
+                            `Asset ${alert.target_asset_id}`}
+                        </Link>
+
+                        <span
+                          title={new Date(
+                            alert.started_at
+                          ).toLocaleString()}
+                        >
+                          Started {timeAgo(alert.started_at)}
+                        </span>
+
+                        {alert.trigger_value !== null &&
+                          alert.trigger_value !== undefined && (
+                            <span>
+                              Value {formatValue(alert.trigger_value)}
+                            </span>
+                          )}
+                      </div>
                     </div>
 
-                    <div className="alert-msg">
-                      {alert.message}
-                    </div>
-
-                    <div className="alert-meta">
-                      <Link
-                        to={`/assets/${alert.target_asset_id}`}
-                      >
-                        {assetName.get(alert.target_asset_id) ||
-                          `Asset ${alert.target_asset_id}`}
-                      </Link>
-
+                    {alert.acknowledged_at ? (
                       <span
+                        className="ack-done"
                         title={new Date(
-                          alert.started_at
+                          alert.acknowledged_at
                         ).toLocaleString()}
                       >
-                        Started {timeAgo(alert.started_at)}
+                        Acknowledged
+                        {alert.acknowledged_by
+                          ? ` by ${alert.acknowledged_by}`
+                          : ""}
                       </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn-outline"
+                        disabled={busyId === alert.id}
+                        onClick={() => acknowledge(alert)}
+                      >
+                        {busyId === alert.id
+                          ? "Saving…"
+                          : "Acknowledge"}
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
 
-                      {alert.trigger_value !== null &&
-                        alert.trigger_value !== undefined && (
-                          <span>
-                            Value {formatValue(alert.trigger_value)}
-                          </span>
-                        )}
-                    </div>
-                  </div>
+          <section className="panel">
+            <div className="panel-head">
+              <h2>Rules by state</h2>
+            </div>
 
-                  {alert.acknowledged_at ? (
-                    <span
-                      className="ack-done"
-                      title={new Date(
-                        alert.acknowledged_at
-                      ).toLocaleString()}
-                    >
-                      Acknowledged
-                      {alert.acknowledged_by
-                        ? ` by ${alert.acknowledged_by}`
-                        : ""}
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="btn-outline"
-                      disabled={busyId === alert.id}
-                      onClick={() => acknowledge(alert)}
-                    >
-                      {busyId === alert.id
-                        ? "Saving…"
-                        : "Acknowledge"}
-                    </button>
-                  )}
+            <ul className="state-grid">
+              {ruleStats.map(([label, key]) => (
+                <li key={key}>
+                  <Link to="/configuration/rules">
+                    <span>{label}</span>
+                    <b>{num(stats[key])}</b>
+                  </Link>
                 </li>
               ))}
             </ul>
-          )}
-        </section>
+          </section>
+        </div>
 
-        <aside className="side-stack">
+        <aside className="home-right-column">
           <section className="panel">
             <div className="panel-head">
               <h2>Monitoring coverage</h2>
@@ -423,23 +442,6 @@ export default function Home() {
                 have active variables being monitored
               </span>
             </Link>
-          </section>
-
-          <section className="panel">
-            <div className="panel-head">
-              <h2>Rules by state</h2>
-            </div>
-
-            <ul className="state-list">
-              {ruleStats.map(([label, key]) => (
-                <li key={key}>
-                  <Link to="/configuration/rules">
-                    <span>{label}</span>
-                    <b>{num(stats[key])}</b>
-                  </Link>
-                </li>
-              ))}
-            </ul>
           </section>
         </aside>
       </div>
