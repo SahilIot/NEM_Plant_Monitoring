@@ -69,7 +69,14 @@ export default function RuleCreatePage() {
     return () => { active = false; };
   }, [assetId, kind]);
 
-  const goBack = () => navigate(`/assets/${id}`);
+ const goBack = () => {
+  navigate(`/assets/${id}`, {
+    state: {
+      activeTab: "logbook",
+    },
+  });
+};
+
   const updateField = (event) => {
     const { name, value, type, checked } = event.target;
     setValues((current) => ({
@@ -79,16 +86,22 @@ export default function RuleCreatePage() {
     setError("");
   };
 
-  const completeCreation = async (message) => {
+    const completeCreation = async (message) => {
     let notice = message;
+
     try {
       await refreshStatus?.();
     } catch {
-      notice += " The dashboard summary could not be refreshed; the saved item is available on the asset.";
+      notice +=
+        " The dashboard summary could not be refreshed; the saved item is available on the asset.";
     }
+
     navigate(`/assets/${id}`, {
       replace: true,
-      state: { createdNotice: notice },
+      state: {
+        createdNotice: notice,
+        activeTab: "logbook",
+      },
     });
   };
 
@@ -191,7 +204,7 @@ export default function RuleCreatePage() {
       <section className="panel">
         <p>Unknown rule type.</p>
         <button type="button" className="btn-outline rule-back-btn" onClick={goBack}>
-          Back to asset
+          Back to Maintanence log
         </button>
       </section>
     );
@@ -211,9 +224,17 @@ export default function RuleCreatePage() {
   return (
     <div className="rule-create-page">
       <div className="rule-create-container">
-        <button type="button" className="btn-outline rule-back-btn" onClick={goBack}>
-          ← Back to {asset?.name || "asset"}
-        </button>
+       <button
+  type="button"
+  className="btn-outline rule-back-btn"
+  onClick={() =>
+    navigate(`/assets/${assetId}`, {
+      state: { activeTab: "logbook" },
+    })
+  }
+>
+  ← Back to Maintenance Log
+</button>
 
         <div className="page-head rule-page-head" style={{ marginTop: 20 }}>
           <h1 className="page-title rule-page-title">{titles[kind]}</h1>
