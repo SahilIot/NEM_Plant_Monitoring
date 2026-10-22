@@ -416,6 +416,34 @@ const VARIABLE_FIELDS = [
     placeholder: "e.g. ns=2;s=Machine.Cycle",
     hint: "Optional. Enter the exact NodeId from the PLC. Restart the backend after changing it so the collector can subscribe.",
   },
+    {
+  key: "data_source",
+  label: "Data source",
+  type: "select",
+  default: "none",
+  options: [
+    ["none", "No source"],
+    ["connector", "Connector"],
+  ],
+},
+  {
+  key: "connector_id",
+  label: "Select connector",
+  type: "select",
+  default: "",
+  options: [
+    ["opcua", "OPC UA Connector"],
+    ["mqtt", "MQTT Connector"],
+    ["modbus_tcp", "Modbus TCP Connector"],
+    ["http", "HTTP / REST API Connector"],
+    ["database", "Database Connector"],
+  ],
+  showWhen: {
+    key: "data_source",
+    equals: "connector",
+  },
+  hint: "Choose the connector that provides this variable's data.",
+},
 ];
 
 export default function AssetDetail() {
@@ -473,7 +501,12 @@ export default function AssetDetail() {
   const [deletingAsset, setDeletingAsset] = useState(false);
   const [deletingVariableId, setDeletingVariableId] = useState(null);
   const [variableDeleteError, setVariableDeleteError] = useState("");
-  
+  const [variableDataSource, setVariableDataSource] = useState("none");
+  const [variableConnector, setVariableConnector] = useState("");
+  const [selectedEntry, setSelectedEntry] = useState(null);
+  const [selectedEvent, setSelectedEvent] = useState(null);
+  const [showEventDetails, setShowEventDetails] = useState(false);
+
   const seq = useRef(0);
   const bulkRequest = useRef(false);
   const permanentDeleteRequest = useRef(false);
@@ -1080,12 +1113,18 @@ const filteredLogs = [...logs].sort((a, b) => {
           : null,
       unit: values.unit?.trim() || null,
       opcua_node_id: values.opcua_node_id?.trim() || null,
-    });
+    // Data source and connector
+    data_source: values.data_source || "none",
+    connector_id:
+      values.data_source === "connector"
+        ? values.connector_id || null
+        : null,
+  });
 
-    setEditingVariable(null);
-    setModal("variables");
-    await loadVariables();
-  };
+  setEditingVariable(null);
+  setModal("variables");
+  await loadVariables();
+};
 
   const updateVariable = async (values) => {
     if (!editingVariable) return;
@@ -1421,23 +1460,6 @@ const filteredLogs = [...logs].sort((a, b) => {
                       role="menuitem"
                         onClick={() => bulk("not_activated")}
                         >Deactivate all rules</button>
-                        <button
-                        type="button"
-                        disabled={bulkSaving}
-                      role="menuitem"
-                      onClick={() => {
-                        setMenu(false);
-                          setShowPredefinedRules(true);
-                        }}>Assign predefined monitoring rules</button>
-                        <button
-                        type="button"
-                        disabled={bulkSaving}
-                        role="menuitem"
-                        onClick={() => {
-                          setMenu(false);
-                          setModal("copyRules");
-                        }}
-                        >Copy from another asset</button>
                         </div>
                       )}
                     </div>
@@ -1767,14 +1789,6 @@ const filteredLogs = [...logs].sort((a, b) => {
         {filteredLogs.length} maintenance entries
       </span>
     </div>
-
-    <button
-      type="button"
-      className="btn-primary"
-      onClick={() => setModal("log")}
-    >
-      <PlusCircle size={17} /> Add note
-    </button>
   </div>
 
   {logs.length === 0 ? (
@@ -1877,6 +1891,16 @@ const filteredLogs = [...logs].sort((a, b) => {
                     >
                       Delete
                     </button>
+                    <button
+                    type="button"
+                    className="btn-outline"
+                    onClick={() => {
+                      setSelectedEntry(entry);
+                      setModal("view");
+                      }}
+                      >
+                        View
+                        </button>
                   </div>
                 </td>
               </tr>
@@ -1892,91 +1916,125 @@ const filteredLogs = [...logs].sort((a, b) => {
 
 
       
+
+{/* Event Log */}
 {tab === "events" && (
-  <div className="panel">
-    <div className="panel-head">
-      <div>
-        <h2>Event log</h2>
-        <span className="muted">
-          {events.length} events recorded
-        </span>
-      </div>
-    </div>
+  <div className="event-log-section">
+    <div className="table-responsive">
+      <table className="data-table event-log-table">
+        <thead>
+          <tr>
+            <th>Date &amp; Time</th>
+            <th>Event</th>
+            <th>Assigned Rule</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
 
-    {events.length === 0 ? (
-      <EmptyState
-        art={false}
-        title="No events recorded"
-        lines={[
-          "Alerts, acknowledgements and monitoring rule changes will appear here.",
-        ]}
-      />
-    ) : (
-      <div className="maintenance-table-wrap">
-        <table className="table maintenance-notes-table">
-          <thead>
+        <tbody>
+          {events.length === 0 ? (
             <tr>
-              <th className="col-time">Date and time</th>
-              <th>Event</th>
-              <th>Assigned rule</th>
+              <td colSpan={4} className="empty-state">
+                No events found.
+              </td>
             </tr>
-          </thead>
+          ) : (
+            events.map((event) => {
+              const assignedRule =
+                event.rule_name ||
+                event.assigned_rule ||
+                event.rule?.name ||
+                (event.rule_id != null
+                  ? `Rule #${event.rule_id}`
+                  : "Not assigned");
 
-          <tbody>
-            {[...events]
-              .sort((a, b) => {
-                const dateA = new Date(
-                  a.time || a.created_at || a.occurred_at || 0
-                ).getTime();
+              const eventTime = event.time
+                ? new Date(event.time).toLocaleString()
+                : "—";
 
-                const dateB = new Date(
-                  b.time || b.created_at || b.occurred_at || 0
-                ).getTime();
+              return (
+                <tr key={event.id}>
+                  <td>{eventTime}</td>
 
-                return dateB - dateA;
-              })
-              .map((event) => {
-                const timestamp =
-                  event.time ||
-                  event.created_at ||
-                  event.occurred_at;
+                  <td>
+                    {event.text || event.message || "—"}
+                  </td>
 
-                const assignedRule =
-                  event.rule_name ||
-                  event.assigned_rule ||
-                  event.rule?.name ||
-                  (event.rule_id != null
-                    ? `Rule #${event.rule_id}`
-                    : event.monitoring_rule_id != null
-                      ? `Rule #${event.monitoring_rule_id}`
-                      : "—");
+                  <td>{assignedRule}</td>
 
-                return (
-                  <tr key={event.id}>
-                    <td className="col-time">
-                      {timestamp ? formatTime(timestamp) : "—"}
-                    </td>
-
-                    <td className="maintenance-note-text">
-                      {event.text ||
-                        event.description ||
-                        event.event_type ||
-                        event.type ||
-                        "—"}
-                    </td>
-
-                    <td>{assignedRule}</td>
-                  </tr>
-                );
-              })}
-          </tbody>
-        </table>
-      </div>
-    )}
+                  <td>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => {
+                        setSelectedEvent(event);
+                        setShowEventDetails(true);
+                      }}
+                    >
+                      View
+                    </button>
+                  </td>
+                </tr>
+              );
+            })
+          )}
+        </tbody>
+      </table>
+    </div>
   </div>
 )}
-      
 
+
+{showEventDetails && selectedEvent && (
+  <div className="modal-overlay">
+    <div
+      className="modal-content"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="event-details-title"
+    >
+      <div className="modal-header">
+        <h3 id="event-details-title">Event Details</h3>
+
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={() => {
+            setShowEventDetails(false);
+            setSelectedEvent(null);
+          }}
+        >
+          Close
+        </button>
+      </div>
+
+      <div className="modal-body">
+        <p>
+          <strong>Date &amp; Time:</strong>{" "}
+          {selectedEvent.time
+            ? new Date(selectedEvent.time).toLocaleString()
+            : "—"}
+        </p>
+
+        <p>
+          <strong>Event:</strong>{" "}
+          {selectedEvent.text || selectedEvent.message || "—"}
+        </p>
+
+        <p>
+          <strong>Assigned Rule:</strong>{" "}
+          {selectedEvent.rule_name ||
+            selectedEvent.assigned_rule ||
+            selectedEvent.rule?.name ||
+            (selectedEvent.rule_id != null
+              ? `Rule #${selectedEvent.rule_id}`
+              : "Not assigned")}
+        </p>
+      </div>
+    </div>
+  </div>
+)}
+  
 {modal === "addRuleOptions" && (
   <Modal
     title="Add Rule"
@@ -2100,82 +2158,76 @@ const filteredLogs = [...logs].sort((a, b) => {
   </Modal>
 )}
 
-{viewRule && (
-  <Modal title="Monitoring rule details" onClose={() => setViewRule(null)} wide>
+{tab === "logbook" && modal === "view" && selectedEntry && (
+  <Modal
+    title="Maintenance Logbook Entry"
+    onClose={() => {
+      setModal(null);
+      setSelectedEntry(null);
+    }}
+    wide
+  >
     <dl className="rule-detail-grid">
-      <div><dt>Rule name</dt><dd>{viewRule.name}</dd></div>
-      <div><dt>Rule type</dt><dd>{viewRule.rule_type.replaceAll("_", " ")}</dd></div>
-      {viewRule.description && <div><dt>Description</dt><dd>{viewRule.description}</dd></div>}
-      <div><dt>Asset</dt><dd>{viewRule.asset_name || asset?.name || `Asset ${viewRule.asset_id}`}</dd></div>
-      {viewRule.variable_id && (
-        <div>
-          <dt>Monitored variable</dt>
-          <dd>
-            {viewRule.variable_name ||
-              variables.find((item) => item.id === viewRule.variable_id)?.name ||
-              `Variable ${viewRule.variable_id}`}
-          </dd>
-        </div>
-      )}
-      {viewRule.variable_key && <div><dt>Variable key</dt><dd>{viewRule.variable_key}</dd></div>}
-      {viewRule.variable_data_type && <div><dt>Variable type</dt><dd>{viewRule.variable_data_type}</dd></div>}
-      {viewRule.variable_unit && <div><dt>Variable unit</dt><dd>{viewRule.variable_unit}</dd></div>}
-      <div><dt>Lifecycle</dt><dd>{lifecycleLabel(viewRule)}</dd></div>
-      <div><dt>Configured severity</dt><dd>{viewRule.severity}</dd></div>
-      <div><dt>Current status</dt><dd>{viewRule.current_status || viewRule.status || "Not evaluated"}</dd></div>
       <div>
-        <dt>Last evaluated</dt>
-        <dd>{viewRule.last_evaluated_at ? formatTime(viewRule.last_evaluated_at) : "Not evaluated yet"}</dd>
+        <dt>Date and time</dt>
+        <dd>
+          {selectedEntry.time || selectedEntry.created_at
+            ? formatTime(selectedEntry.time || selectedEntry.created_at)
+            : "—"}
+        </dd>
       </div>
-      <div><dt>Evaluation result</dt><dd>{viewRule.evaluation_status || "unknown"}</dd></div>
+
       <div>
-        <dt>Evaluation details</dt>
-        <dd>{viewRule.evaluation_message || "No evaluation details are available."}</dd>
+        <dt>Entry</dt>
+        <dd>
+          {selectedEntry.text ||
+            selectedEntry.title ||
+            selectedEntry.summary ||
+            "—"}
+        </dd>
       </div>
-      {viewRule.evaluation_error && (
-        <div><dt>Evaluation issue</dt><dd>{viewRule.evaluation_error}</dd></div>
-      )}
-      {viewRule.latest_value !== null && viewRule.latest_value !== undefined && (
+
+      <div>
+        <dt>Entry type</dt>
+        <dd>{selectedEntry.maintenance_type || "Note"}</dd>
+      </div>
+
+      <div>
+        <dt>Assigned rule</dt>
+        <dd>
+          {selectedEntry.assigned_rule ||
+            selectedEntry.rule_name ||
+            selectedEntry.alert_id ||
+            "—"}
+        </dd>
+      </div>
+
+      {selectedEntry.notes && (
         <div>
-          <dt>Current value</dt>
-          <dd>
-            {viewRule.rule_type === "runtime_duration"
-              ? formatDuration(viewRule.latest_value)
-              : `${formatValue(viewRule.latest_value)}${viewRule.variable_unit ? ` ${viewRule.variable_unit}` : ""}`}
-          </dd>
+          <dt>Notes</dt>
+          <dd>{selectedEntry.notes}</dd>
         </div>
       )}
-      {thresholdMetrics(viewRule).map((item) => (
-        <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>
-      ))}
-      {viewRule.operator && <div><dt>Operator</dt><dd>{viewRule.operator}</dd></div>}
-      {viewRule.parameters && Object.entries(viewRule.parameters).map(([key, value]) => (
-        <div key={key}>
-          <dt>{key.replaceAll("_", " ")}</dt>
-          <dd>
-            {Array.isArray(value)
-              ? value.join(", ")
-              : value !== null && typeof value === "object"
-                ? JSON.stringify(value)
-                : String(value)}
-          </dd>
+
+      {selectedEntry.id != null && (
+        <div>
+          <dt>Entry ID</dt>
+          <dd>{selectedEntry.id}</dd>
         </div>
-      ))}
-      {viewRule.evaluation_interval_seconds && (
-        <div><dt>Evaluation interval</dt><dd>{viewRule.evaluation_interval_seconds} seconds</dd></div>
       )}
-      {viewRule.stale_after_seconds && (
-        <div><dt>Stale after</dt><dd>{viewRule.stale_after_seconds} seconds</dd></div>
-      )}
-      {viewRule.source_template_id && (
-        <div><dt>Template ID</dt><dd>{viewRule.source_template_id}</dd></div>
-      )}
-      {viewRule.created_at && <div><dt>Created</dt><dd>{formatTime(viewRule.created_at)}</dd></div>}
-      {viewRule.updated_at && <div><dt>Updated</dt><dd>{formatTime(viewRule.updated_at)}</dd></div>}
-      {viewRule.completed_at && <div><dt>Completed</dt><dd>{formatTime(viewRule.completed_at)}</dd></div>}
     </dl>
+
     <div className="modal-actions">
-      <button type="button" className="btn-outline" onClick={() => setViewRule(null)}>Close</button>
+      <button
+        type="button"
+        className="btn-primary"
+        onClick={() => {
+          setModal(null);
+          setSelectedEntry(null);
+        }}
+      >
+        Close
+      </button>
     </div>
   </Modal>
 )}

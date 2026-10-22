@@ -29,9 +29,9 @@ export const LEGACY_RULE_CHOICES = [
     description: "Track running time while a Boolean signal is ON and alert at runtime thresholds.",
   },
   {
-    kind: "usage",
-    label: "Usage-based",
-    description: "Count complete cycles from a Boolean OFF/ON signal and alert at cycle thresholds.",
+  kind: "usage",
+  label: "Usage-based",
+  description: "Create a rule using a variable from this asset.",
   },
   {
     kind: "time",
@@ -157,16 +157,19 @@ export function buildAssetMonitoringRule(
     return rule;
   }
 
-  const variableId = Number(values.variable_id);
-  const threshold = Number(values.threshold);
-  if (!variableIsActiveForAsset(variableId, ["number", "integer"])) {
-    throw new Error("Select an active numeric variable on this asset.");
-  }
-  if (!Number.isFinite(threshold)) {
-    throw new Error("Enter a valid numeric threshold.");
-  }
-  rule.variable_id = variableId;
-  rule.operator = values.operator;
-  rule.threshold = threshold;
-  return rule;
+const variableId = Number(values.variable_id);
+const threshold = Number(values.threshold);
+
+if (!variableIsActiveForAsset(variableId, ["number", "integer"])) {
+  throw new Error("Select an active numeric variable on this asset.");
+}
+
+if (!Number.isFinite(threshold)) {
+  throw new Error("Enter a valid numeric threshold.");
+}
+
+rule.variable_id = variableId;
+rule.operator = values.operator;
+rule.threshold = threshold;
+return rule;
 }
