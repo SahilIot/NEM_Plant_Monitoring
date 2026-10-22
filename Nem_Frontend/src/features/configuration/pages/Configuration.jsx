@@ -3,7 +3,7 @@ import { api } from "../../../services/api.js";
 import GroupedMenu from "../../../components/common/GroupedMenu.jsx";
 
 const ITEMS = [
-  { to: "/configuration/rules", icon: "rules", group: "Rules", title: "Monitoring Rule Library", desc: "Create reusable templates and assign them to assets." },
+  { to: "/configuration/rules", icon: "rules", group: "Rules", title: "Monitoring Rule Library", desc: "Create reusable monitoring rules and assign them to assets." },
   { to: "/configuration/collections", icon: "collections", group: "Rules", title: "Monitoring Rule collections", desc: "Group the individual monitoring rules, e.g. by machine type." },
   { to: "/configuration/documents", icon: "documents", group: "Content", title: "Instructions and documents", desc: "Create and manage your task descriptions for Monitoring Rules and upload supplementary documents." },
   { to: "/configuration/import", icon: "import", group: "Content", title: "Import configuration", desc: "Import monitoring rules and monitoring rule collections." },
@@ -19,7 +19,7 @@ export default function Configuration() {
     const count = (path, one, many) =>
       api.get(path).then((list) => (Array.isArray(list) ? plural(list.length, one, many) : "")).catch(() => "");
     Promise.all([
-      count("/rule-templates", "template", "templates"),
+      count("/rule-templates", "rule", "rules"),
       count("/collections", "collection", "collections"),
       count("/documents", "document", "documents"),
     ]).then(([rules, collections, documents]) =>

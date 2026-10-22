@@ -1293,6 +1293,7 @@ def frontend_asset_events(
                     "rule_created",
                     "warning_triggered",
                     "alert_triggered",
+                    "interval_elapsed",
                     "machine_stopped",
                 )
             ),

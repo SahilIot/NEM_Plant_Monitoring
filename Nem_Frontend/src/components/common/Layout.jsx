@@ -199,17 +199,26 @@ export default function Layout() {
     }
   }, []);
 
+  const refreshRules = useCallback(async () => {
+    const result = await api.getAll("/rules");
+    setRules(result);
+  }, []);
+
+  const refreshAlerts = useCallback(async () => {
+    const result = await api.getAll("/alerts/active", 500);
+    setAlerts(result);
+  }, []);
+
   const refreshStatus = useCallback(async () => {
-    const [ready, ruleList, alertList] = await Promise.allSettled([
-      api.get("/ready"),
+    const [ruleList, alertList] = await Promise.allSettled([
       api.getAll("/rules"),
       api.getAll("/alerts/active", 500),
     ]);
 
-    if (ready.status === "fulfilled") {
+    if (ruleList.status === "fulfilled" || alertList.status === "fulfilled") {
       setLink({ online: true, reason: "", at: new Date() });
     } else {
-      const status = ready.reason?.status;
+      const status = ruleList.reason?.status || alertList.reason?.status;
       setLink({
         online: false,
         reason: status === 503 ? "Database unavailable" : "API unreachable",
@@ -237,33 +246,50 @@ export default function Layout() {
 
  
   useEffect(() => {
-    reload().catch(() => {
-      
+    reload().catch((error) => {
+      console.error("Initial application data refresh failed.", error);
     });
   }, [reload]);
 
   useEffect(() => {
     return subscribeLiveUpdates((update) => {
       const changedTables = new Set(update.changed_tables || []);
-      if (update.type === "connected") {
-        reload().catch(() => {});
+      if (update.resync_required) {
+        reload().catch((error) => {
+          console.error("Live update resynchronization failed.", error);
+        });
+        return;
+      }
+      if (update.type === "disconnected") {
+        setLink({
+          online: false,
+          reason: "Live updates disconnected",
+          at: new Date(),
+        });
         return;
       }
       if (changedTables.has("assets") || changedTables.has("variables")) {
-        loadAssets().catch(() => {});
+        loadAssets().catch((error) => {
+          console.error("Asset refresh after live update failed.", error);
+        });
+      }
+      if (["nem_monitoring_rules", "nem_rule_states"].some((table) =>
+        changedTables.has(table)
+      )) {
+        refreshRules().catch((error) => {
+          console.error("Rule refresh after live update failed.", error);
+        });
       }
       if (
-        [
-          "nem_monitoring_rules",
-          "nem_rule_states",
-          "nem_alerts",
-          "nem_maintenance_schedules",
-        ].some((table) => changedTables.has(table))
+        changedTables.has("nem_alerts") ||
+        changedTables.has("nem_maintenance_schedules")
       ) {
-        refreshStatus();
+        refreshAlerts().catch((error) => {
+          console.error("Alert refresh after live update failed.", error);
+        });
       }
     });
-  }, [loadAssets, refreshStatus, reload]);
+  }, [loadAssets, refreshAlerts, refreshRules, reload]);
 
   const health = useMemo(
     () => computeHealth(rawAssets, alerts),

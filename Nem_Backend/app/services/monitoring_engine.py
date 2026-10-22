@@ -737,6 +737,132 @@ def evaluate_runtime_duration(
     return result
 
 
+def evaluate_interval_elapsed(
+    session: Session,
+    rule: MonitoringRule,
+    asset: Asset,
+    state: RuleState | None,
+    evaluated_at: datetime,
+) -> RuleState:
+    parameters = rule.parameters or {}
+    interval_seconds = parameters.get("interval_seconds")
+    if (
+        not isinstance(interval_seconds, int)
+        or isinstance(interval_seconds, bool)
+        or interval_seconds <= 0
+    ):
+        return _transition_state(
+            session,
+            rule,
+            asset,
+            state,
+            next_status="unknown",
+            value=None,
+            message="Interval rule configuration is invalid.",
+            evaluated_at=evaluated_at,
+            condition_started_at=None,
+            error_message="invalid_interval_configuration",
+        )
+
+    anchor = (
+        state.condition_started_at
+        if state is not None and state.condition_started_at is not None
+        else evaluated_at
+    )
+    elapsed_seconds = max(0, int((evaluated_at - anchor).total_seconds()))
+    elapsed_periods = elapsed_seconds // interval_seconds
+    previous_periods = (
+        state.latest_value
+        if state is not None
+        and isinstance(state.latest_value, int)
+        and not isinstance(state.latest_value, bool)
+        else 0
+    )
+
+    if elapsed_periods == 0:
+        return _transition_state(
+            session,
+            rule,
+            asset,
+            state,
+            next_status="normal",
+            value=0,
+            message=(
+                f"Next interval is due at "
+                f"{(anchor + timedelta(seconds=interval_seconds)).isoformat()}."
+            ),
+            evaluated_at=evaluated_at,
+            condition_started_at=anchor,
+        )
+
+    if elapsed_periods > previous_periods:
+        message = (
+            f"Interval elapsed for rule '{rule.name}' "
+            f"(period {elapsed_periods}, every {interval_seconds} seconds)."
+        )
+        result = _transition_state(
+            session,
+            rule,
+            asset,
+            state,
+            next_status=rule.severity,
+            value=elapsed_periods,
+            message=message,
+            evaluated_at=evaluated_at,
+            condition_started_at=anchor,
+        )
+        if previous_periods > 0:
+            alert = session.scalar(
+                select(Alert)
+                .where(
+                    Alert.rule_id == rule.id,
+                    Alert.target_asset_id == asset.id,
+                    Alert.status == "active",
+                )
+                .order_by(Alert.id.desc())
+                .limit(1)
+            )
+            if alert is not None:
+                alert.acknowledged_at = None
+                alert.acknowledged_by = None
+                alert.last_updated_at = evaluated_at
+            emit_event(
+                session,
+                event_type="interval_elapsed",
+                message=message,
+                occurred_at=evaluated_at,
+                asset_id=asset.id,
+                rule_id=rule.id,
+                alert_id=alert.id if alert is not None else None,
+                severity=rule.severity,
+                metadata={
+                    "interval_seconds": interval_seconds,
+                    "period": elapsed_periods,
+                    "missed_periods": elapsed_periods - previous_periods,
+                },
+            )
+        return result
+
+    if state is None:
+        return _transition_state(
+            session,
+            rule,
+            asset,
+            state,
+            next_status=rule.severity,
+            value=elapsed_periods,
+            message=(
+                f"Interval elapsed for rule '{rule.name}' "
+                f"(period {elapsed_periods}, every {interval_seconds} seconds)."
+            ),
+            evaluated_at=evaluated_at,
+            condition_started_at=anchor,
+        )
+
+    state.last_evaluated_at = evaluated_at
+    return state
+
+
 def evaluate_rule(
     session: Session,
     rule: MonitoringRule,
@@ -792,6 +918,18 @@ def evaluate_rule(
             message="Generic rule type has no evaluator configured.",
             evaluated_at=now,
             condition_started_at=None,
+        )
+
+    if (
+        rule.rule_type == "duration"
+        and (rule.parameters or {}).get("condition") == "interval_elapsed"
+    ):
+        return evaluate_interval_elapsed(
+            session,
+            rule,
+            asset,
+            state,
+            now,
         )
 
     if (

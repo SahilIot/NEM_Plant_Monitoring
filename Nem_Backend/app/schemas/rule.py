@@ -92,28 +92,48 @@ class RuleCreate(ORMModel):
                         "Legacy runtime duration rules require a positive duration_seconds"
                     )
         if self.rule_type == "duration":
-            duration = self.parameters.get("duration_seconds") if self.parameters else None
-            if not isinstance(duration, int) or isinstance(duration, bool) or duration <= 0:
-                raise ValueError("Duration rules require a positive parameters.duration_seconds")
-            if self.variable_id is None:
-                raise ValueError("Duration rules require a target variable")
-            condition = self.parameters.get("condition", "equals")
+            parameters = self.parameters or {}
+            condition = parameters.get("condition", "equals")
+            if condition == "interval_elapsed":
+                interval_seconds = parameters.get("interval_seconds")
+                if (
+                    not isinstance(interval_seconds, int)
+                    or isinstance(interval_seconds, bool)
+                    or interval_seconds <= 0
+                ):
+                    raise ValueError(
+                        "Interval-based rules require positive integer interval_seconds"
+                    )
+                if self.variable_id is not None:
+                    raise ValueError(
+                        "Interval-based rules do not target a variable"
+                    )
+            else:
+                duration = parameters.get("duration_seconds")
+                if not isinstance(duration, int) or isinstance(duration, bool) or duration <= 0:
+                    raise ValueError("Duration rules require a positive parameters.duration_seconds")
+                if self.variable_id is None:
+                    raise ValueError("Duration rules require a target variable")
             if condition == "threshold":
-                if self.parameters.get("operator") not in {
+                if parameters.get("operator") not in {
                     "<", "<=", "==", "!=", ">=", ">", "lt", "lte", "eq", "ne", "gte", "gt"
-                } or not isinstance(self.parameters.get("threshold"), (int, float)):
+                } or not isinstance(parameters.get("threshold"), (int, float)):
                     raise ValueError("Threshold duration rules require a supported operator and numeric threshold")
-                threshold = self.parameters["threshold"]
+                threshold = parameters["threshold"]
                 if isinstance(threshold, bool) or (isinstance(threshold, float) and not math.isfinite(threshold)):
                     raise ValueError("parameters.threshold must be finite and numeric")
             elif condition == "equals":
-                expected_value = self.parameters.get("expected_value")
+                expected_value = parameters.get("expected_value")
                 if not isinstance(expected_value, (str, bool, int, float)):
                     raise ValueError("Equals duration rules require a scalar parameters.expected_value")
                 if isinstance(expected_value, float) and not math.isfinite(expected_value):
                     raise ValueError("parameters.expected_value must be finite")
+            elif condition == "interval_elapsed":
+                pass
             else:
-                raise ValueError("Duration condition must be 'equals' or 'threshold'")
+                raise ValueError(
+                    "Duration condition must be 'equals', 'threshold', or 'interval_elapsed'"
+                )
         if self.rule_type == "boolean_count_threshold":
             if self.variable_id is None:
                 raise ValueError("Boolean count threshold rules require a variable_id")
@@ -152,6 +172,7 @@ class RuleTemplateCreate(ORMModel):
         "runtime_duration",
         "duration",
         "boolean_count_threshold",
+        "generic",
     ]
     required_variable_types: list[
         Literal["number", "integer", "boolean", "string"]
@@ -205,8 +226,14 @@ class RuleTemplateCreate(ORMModel):
                 raise ValueError("Running-time templates require Boolean variables")
             self.required_variable_types = ["boolean"]
         elif self.rule_type == "duration":
-            if required_types is None:
-                condition = (self.parameters or {}).get("condition", "equals")
+            condition = (self.parameters or {}).get("condition", "equals")
+            if condition == "interval_elapsed":
+                if required_types:
+                    raise ValueError(
+                        "Interval-based templates do not require a variable"
+                    )
+                self.required_variable_types = None
+            elif required_types is None:
                 expected = (self.parameters or {}).get("expected_value")
                 if condition == "threshold":
                     self.required_variable_types = ["number", "integer"]
@@ -233,7 +260,13 @@ class RuleTemplateCreate(ORMModel):
                 "description": self.description,
                 "rule_type": self.rule_type,
                 "target_asset_id": 1,
-                "variable_id": 1 if needs_variable else None,
+                "variable_id": (
+                    1 if needs_variable and not (
+                        self.rule_type == "duration"
+                        and (self.parameters or {}).get("condition")
+                        == "interval_elapsed"
+                    ) else None
+                ),
                 "operator": self.operator,
                 "threshold": self.threshold,
                 "parameters": self.parameters,
@@ -388,7 +421,6 @@ class UsageRuleCreate(FrontendRuleCreate):
         if not math.isfinite(value):
             raise ValueError("Usage limit must be finite")
         return value
-
 
 class RuleSelection(ORMModel):
     rule_ids: list[int] = Field(min_length=1, max_length=100)
