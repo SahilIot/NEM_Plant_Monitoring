@@ -147,3 +147,19 @@ input[type="checkbox"] {
   color-scheme: inherit;
 }
 
+
+.maintenance-note-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.maintenance-note-actions button {
+  white-space: nowrap;
+}
+
+.maintenance-notes-table th,
+.maintenance-notes-table td {
+  vertical-align: middle;
+}

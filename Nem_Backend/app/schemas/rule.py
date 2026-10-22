@@ -170,7 +170,7 @@ class RuleTemplateCreate(ORMModel):
     def strip_template_name(cls, value: str) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("Template name cannot be empty")
+            raise ValueError("Rule name cannot be empty")
         return value
 
     @field_validator("required_variable_types")

@@ -299,3 +299,215 @@
     grid-column: 1;
   }
 }
+
+
+/* =========================================
+   Professional Rule Template Modal
+   ========================================= */
+
+.rule-library-modal {
+  width: min(620px, 96vw);
+  max-height: min(88vh, 820px);
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.42),
+    0 4px 16px rgba(0, 0, 0, 0.18);
+}
+
+.rule-library-modal > header {
+  flex-shrink: 0;
+  padding: 22px 24px;
+  background: var(--surface-2);
+}
+
+.rule-library-modal > header h2 {
+  margin: 0 0 7px;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  line-height: 1.4;
+}
+
+.rule-library-modal > header p {
+  max-width: 55ch;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.rule-library-modal > header .icon-btn {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.rule-library-modal > header .icon-btn:hover {
+  background: var(--action-soft);
+  color: var(--ink);
+}
+
+.rule-library-modal > header .icon-btn:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+
+/* Keep modal content scrollable while header/footer remain visible */
+.rule-library-modal > form {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.rule-library-modal > form > div,
+.rule-library-modal > form > fieldset {
+  min-width: 0;
+}
+
+.rule-library-modal input:not([type="checkbox"]):not([type="radio"]),
+.rule-library-modal select,
+.rule-library-modal textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
+}
+
+.rule-library-modal textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.rule-library-modal input:focus,
+.rule-library-modal select:focus,
+.rule-library-modal textarea:focus {
+  border-color: var(--action);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--action-soft);
+}
+
+.rule-library-modal input::placeholder,
+.rule-library-modal textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+.rule-library-modal label {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.rule-library-modal input[type="checkbox"],
+.rule-library-modal input[type="radio"] {
+  accent-color: var(--action);
+}
+
+/* Validation and error feedback */
+.rule-library-modal input:invalid:focus,
+.rule-library-modal select:invalid:focus {
+  border-color: var(--alert);
+}
+
+/* Footer actions */
+.rule-library-modal > footer {
+  flex-shrink: 0;
+  padding: 15px 24px;
+  background: var(--surface-2);
+}
+
+.rule-library-modal > footer button {
+  min-height: 39px;
+  padding: 9px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  transition:
+    transform 140ms ease,
+    filter 140ms ease;
+}
+
+.rule-library-modal > footer button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.rule-library-modal > footer button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.rule-library-modal > footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.rule-library-modal .notice {
+  flex-shrink: 0;
+  line-height: 1.5;
+}
+
+/* Modal backdrop */
+.rule-library-backdrop {
+  padding: 20px;
+  background: rgba(3, 7, 12, 0.76);
+  backdrop-filter: blur(4px);
+}
+
+/* Responsive layout */
+@media (max-width: 520px) {
+  .rule-library-backdrop {
+    align-items: center;
+    padding: 10px;
+  }
+
+  .rule-library-modal {
+    width: 100%;
+    max-height: 92dvh;
+    border-radius: 12px;
+  }
+
+  .rule-library-modal > header {
+    padding: 17px 16px;
+  }
+
+  .rule-library-modal > header h2 {
+    font-size: 17px;
+  }
+
+  .rule-library-modal > footer {
+    padding: 12px 16px;
+    gap: 8px;
+  }
+
+  .rule-library-modal > footer button {
+    flex: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rule-library-modal *,
+  .rule-library-backdrop * {
+    transition: none !important;
+  }
+}

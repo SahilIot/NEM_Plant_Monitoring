@@ -797,22 +797,143 @@ const openScheduleEdit = (schedule) => {
       )}
 
       {dialog?.kind === "schedule-details" && (
-        <Modal title="Maintenance schedule" onClose={() => setDialog(null)} wide>
-          <dl className="maintenance-details">
-            <dt>Title</dt><dd>{dialog.record.title}</dd>
-            <dt>Schedule start</dt><dd>{displayDate(dialog.record.schedule_start_date)}</dd>
-            <dt>First due date</dt><dd>{displayDate(dialog.record.first_due_date)}</dd>
-            <dt>Current due date</dt><dd>{displayDate(dialog.record.current_due_date)}</dd>
-            <dt>Recurrence</dt><dd>{dialog.record.recurrence_enabled ? `Every ${dialog.record.recurrence_interval} ${dialog.record.recurrence_unit}` : "Disabled"}</dd>
-            <dt>Schedule status / due state</dt><dd>{dialog.record.status.replaceAll("_", " ")} / {dialog.record.due_status.replaceAll("_", " ")}</dd>
-            <dt>Approval</dt><dd>{dialog.record.approval_status.replaceAll("_", " ")}</dd>
-            <dt>Proposed next due date</dt><dd>{displayDate(dialog.record.proposed_due_date)}</dd>
-            <dt>Last completed</dt><dd>{dialog.record.last_completed_at ? formatTime(dialog.record.last_completed_at) : "—"}</dd>
-            <dt>Assigned technician</dt><dd>{dialog.record.assigned_technician || "—"}</dd>
-            <dt>Description</dt><dd>{dialog.record.description || "—"}</dd>
-          </dl>
-          <div className="modal-actions">
-            <button type="button" className="btn-outline" onClick={() => setDialog(null)}>Close</button>
+        <Modal
+          title="Maintenance schedule"
+          onClose={() => setDialog(null)}
+          wide
+        >
+          <div className="schedule-details-view">
+            <div className="schedule-details-banner">
+              <div>
+                <span className="schedule-details-eyebrow">
+                  MAINTENANCE PLAN
+                </span>
+                <h3>{dialog.record.title}</h3>
+                <p>Schedule information and maintenance progress</p>
+              </div>
+
+              <span
+                className={`schedule-detail-pill ${
+                  dialog.record.status === "active"
+                    ? "is-active"
+                    : dialog.record.status === "paused"
+                      ? "is-paused"
+                      : ""
+                }`}
+              >
+                {dialog.record.status.replaceAll("_", " ")}
+              </span>
+            </div>
+
+            <div className="schedule-details-grid">
+              <div className="schedule-detail-card">
+                <span className="schedule-detail-label">
+                  Schedule start
+                </span>
+                <strong>
+                  {displayDate(dialog.record.schedule_start_date)}
+                </strong>
+              </div>
+
+              <div className="schedule-detail-card">
+                <span className="schedule-detail-label">
+                  First due date
+                </span>
+                <strong>
+                  {displayDate(dialog.record.first_due_date)}
+                </strong>
+              </div>
+
+              <div className="schedule-detail-card schedule-detail-highlight">
+                <span className="schedule-detail-label">
+                  Current due date
+                </span>
+                <strong>
+                  {displayDate(dialog.record.current_due_date)}
+                </strong>
+              </div>
+
+              <div className="schedule-detail-card">
+                <span className="schedule-detail-label">
+                  Recurrence
+                </span>
+                <strong>
+                  {dialog.record.recurrence_enabled
+                    ? `Every ${dialog.record.recurrence_interval} ${dialog.record.recurrence_unit}`
+                    : "One-time"}
+                </strong>
+              </div>
+
+              <div className="schedule-detail-card">
+                <span className="schedule-detail-label">
+                  Due state
+                </span>
+                <span
+                  className={`schedule-detail-pill due-${dialog.record.due_status}`}
+                >
+                  {dialog.record.due_status.replaceAll("_", " ")}
+                </span>
+              </div>
+
+              <div className="schedule-detail-card">
+                <span className="schedule-detail-label">
+                  Approval
+                </span>
+                <span
+                  className={`schedule-detail-pill approval-${dialog.record.approval_status}`}
+                >
+                  {dialog.record.approval_status.replaceAll("_", " ")}
+                </span>
+              </div>
+
+              <div className="schedule-detail-card">
+                <span className="schedule-detail-label">
+                  Proposed next due date
+                </span>
+                <strong>
+                  {displayDate(dialog.record.proposed_due_date)}
+                </strong>
+              </div>
+
+              <div className="schedule-detail-card">
+                <span className="schedule-detail-label">
+                  Last completed
+                </span>
+                <strong>
+                  {dialog.record.last_completed_at
+                    ? formatTime(dialog.record.last_completed_at)
+                    : "—"}
+                </strong>
+              </div>
+
+              <div className="schedule-detail-card">
+                <span className="schedule-detail-label">
+                  Assigned technician
+                </span>
+                <strong>
+                  {dialog.record.assigned_technician || "—"}
+                </strong>
+              </div>
+
+              <div className="schedule-detail-card schedule-detail-description">
+                <span className="schedule-detail-label">
+                  Description
+                </span>
+                <p>
+                  {dialog.record.description || "No description provided."}
+                </p>
+              </div>
+            </div>
+
+            <div className="schedule-details-footer">
+              <button
+                type="button"
+                className="btn-outline"
+                onClick={() => setDialog(null)}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </Modal>
       )}
@@ -843,27 +964,137 @@ const openScheduleEdit = (schedule) => {
         </Modal>
       )}
 
-      {dialog?.kind === "details" && (
-        <Modal title="Maintenance details" onClose={() => setDialog(null)} wide>
-          <dl className="maintenance-details">
-            <dt>Title</dt><dd>{dialog.record.title}</dd>
-            <dt>Type / status / priority</dt><dd>{dialog.record.maintenance_type} / {dialog.record.status.replace("_", " ")} / {dialog.record.priority}</dd>
-            <dt>Planned start / end</dt><dd>{formatTime(dialog.record.planned_start_at)} – {formatTime(dialog.record.planned_end_at)}</dd>
-            <dt>Actual start / completion</dt><dd>{formatTime(dialog.record.actual_started_at)} – {formatTime(dialog.record.actual_completed_at)}</dd>
-            <dt>Assigned technician</dt><dd>{dialog.record.assigned_technician || "—"}</dd>
-            <dt>Description / work details</dt><dd>{dialog.record.notes || "—"}</dd>
-            <dt>Completion notes</dt><dd>{dialog.record.completion_notes || "—"}</dd>
-            <dt>Parts used</dt><dd>{dialog.record.parts_used || "—"}</dd>
-            <dt>Next maintenance</dt><dd>{formatTime(dialog.record.next_due_at)}</dd>
-            <dt>Related alert</dt><dd>{dialog.record.alert_id || "—"}</dd>
-            <dt>Checklist</dt>
-            <dd>{dialog.record.checklist?.length ? dialog.record.checklist.map((item) => `${item.completed ? "✓" : "○"} ${item.item}`).join(", ") : "—"}</dd>
-          </dl>
-          <div className="modal-actions">
-            <button type="button" className="btn-outline" onClick={() => setDialog(null)}>Close</button>
+      
+
+{dialog?.kind === "details" && (
+  <Modal
+    title="Maintenance details"
+    onClose={() => setDialog(null)}
+    wide
+  >
+    <div className="maintenance-details-view">
+      <div className="maintenance-details-banner">
+        <div>
+          <span className="maintenance-details-eyebrow">
+            MAINTENANCE RECORD
+          </span>
+          <h3>{dialog.record.title || "Maintenance details"}</h3>
+          <p>Work summary and maintenance information</p>
+        </div>
+        <span className="maintenance-details-status">
+          {dialog.record.status || "—"}
+        </span>
+      </div>
+
+      <div className="maintenance-details-grid">
+        <div className="maintenance-detail-card">
+          <span>Type / Status / Priority</span>
+          <strong>
+            {[
+              dialog.record.maintenance_type,
+              dialog.record.status,
+              dialog.record.priority,
+            ].filter(Boolean).join(" / ") || "—"}
+          </strong>
+        </div>
+
+        <div className="maintenance-detail-card">
+          <span>Planned start / end</span>
+          <strong>
+            {dialog.record.planned_start_at
+              ? formatTime(dialog.record.planned_start_at)
+              : "—"}
+            {" – "}
+            {dialog.record.planned_end_at
+              ? formatTime(dialog.record.planned_end_at)
+              : "—"}
+          </strong>
+        </div>
+
+        <div className="maintenance-detail-card">
+          <span>Actual start / completion</span>
+          <strong>
+            {dialog.record.actual_started_at
+              ? formatTime(dialog.record.actual_started_at)
+              : "—"}
+            {" – "}
+            {dialog.record.actual_completed_at
+              ? formatTime(dialog.record.actual_completed_at)
+              : "—"}
+          </strong>
+        </div>
+
+        <div className="maintenance-detail-card">
+          <span>Assigned technician</span>
+          <strong>
+            {dialog.record.assigned_technician ||
+              dialog.record.performed_by ||
+              "—"}
+          </strong>
+        </div>
+
+        <div className="maintenance-detail-card maintenance-detail-wide">
+          <span>Description / work details</span>
+          <p>{dialog.record.notes || "—"}</p>
+        </div>
+
+        <div className="maintenance-detail-card maintenance-detail-wide">
+          <span>Completion notes</span>
+          <p>{dialog.record.completion_notes || "—"}</p>
+        </div>
+
+        <div className="maintenance-detail-card">
+          <span>Parts used</span>
+          <p>{dialog.record.parts_used || "—"}</p>
+        </div>
+
+        <div className="maintenance-detail-card">
+          <span>Next maintenance</span>
+          <strong>
+            {dialog.record.next_due_at
+              ? formatTime(dialog.record.next_due_at)
+              : "—"}
+          </strong>
+        </div>
+
+        <div className="maintenance-detail-card">
+          <span>Related alert</span>
+          <strong>{dialog.record.alert_id || "—"}</strong>
+        </div>
+
+        <div className="maintenance-detail-card maintenance-detail-wide">
+          <span>Checklist</span>
+          <div>
+            {Array.isArray(dialog.record.checklist)
+              ? dialog.record.checklist.length
+                ? dialog.record.checklist.map((item, index) => (
+                    <p key={index}>
+                      {typeof item === "string"
+                        ? item
+                        : item.item || item.label || item.title || "—"}
+                      {typeof item === "object" && item?.completed
+                        ? " ✓"
+                        : ""}
+                    </p>
+                  ))
+                : "—"
+              : dialog.record.checklist || "—"}
           </div>
-        </Modal>
-      )}
+        </div>
+      </div>
+
+      <div className="maintenance-details-footer">
+        <button
+          type="button"
+          className="btn-outline"
+          onClick={() => setDialog(null)}
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  </Modal>
+)}
 
       {dialog?.kind === "edit" && (
         <Modal title="Edit maintenance" onClose={() => { if (!busy) setDialog(null); }} wide>

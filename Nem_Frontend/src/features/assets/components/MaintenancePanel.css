@@ -406,3 +406,363 @@
 .asset-page .maintenance-panel .empty .muted {
   color: var(--muted);
 }
+
+
+/* ===== Theme-aware Maintenance Schedule Details ===== */
+
+.schedule-details-view {
+  color: var(--text, var(--text-primary, #1f2937));
+}
+
+.schedule-details-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px;
+  margin-bottom: 20px;
+  border: 1px solid var(--border, #dbe2ea);
+  border-radius: 15px;
+  background: var(--surface, var(--card-bg, #ffffff));
+}
+
+.schedule-details-eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--accent, #0284c7);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+}
+
+.schedule-details-banner h3 {
+  margin: 0;
+  color: var(--text, var(--text-primary, #1f2937));
+  font-size: 23px;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.schedule-details-banner p {
+  margin: 7px 0 0;
+  color: var(--muted, var(--text-muted, #64748b));
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.schedule-details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.schedule-detail-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 84px;
+  padding: 15px 16px;
+  border: 1px solid var(--border, #dbe2ea);
+  border-radius: 12px;
+  background: var(--surface, var(--card-bg, #ffffff));
+  transition: border-color 160ms ease;
+}
+
+.schedule-detail-card:hover {
+  border-color: var(--accent, #0284c7);
+}
+
+.schedule-detail-label {
+  color: var(--muted, var(--text-muted, #64748b));
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.schedule-detail-card > strong {
+  color: var(--text, var(--text-primary, #1f2937));
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.schedule-detail-highlight {
+  border-color: var(--accent-border, #bae6fd);
+  background: var(--accent-surface, #f0f9ff);
+}
+
+.schedule-detail-highlight > strong {
+  color: var(--accent, #0369a1);
+  font-size: 17px;
+}
+
+.schedule-detail-pill {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid var(--border, #dbe2ea);
+  border-radius: 999px;
+  background: var(--surface, #f8fafc);
+  color: var(--text, var(--text-primary, #1f2937));
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.4;
+  text-transform: capitalize;
+  overflow-wrap: anywhere;
+}
+
+.schedule-detail-pill.is-active,
+.schedule-detail-pill.approval-approved {
+  color: var(--success-text, #047857);
+  border-color: var(--success-border, #a7f3d0);
+  background: var(--success-bg, #ecfdf5);
+}
+
+.schedule-detail-pill.is-paused,
+.schedule-detail-pill.approval-pending,
+.schedule-detail-pill.due-upcoming {
+  color: var(--warning-text, #92400e);
+  border-color: var(--warning-border, #fde68a);
+  background: var(--warning-bg, #fffbeb);
+}
+
+.schedule-detail-pill.due-overdue,
+.schedule-detail-pill.approval-rejected {
+  color: var(--danger-text, #be123c);
+  border-color: var(--danger-border, #fecdd3);
+  background: var(--danger-bg, #fff1f2);
+}
+
+.schedule-detail-description {
+  grid-column: 1 / -1;
+}
+
+.schedule-detail-description p {
+  margin: 0;
+  color: var(--text, var(--text-primary, #1f2937));
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.schedule-details-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border, #dbe2ea);
+}
+
+.schedule-details-footer button {
+  min-width: 105px;
+  padding: 10px 22px;
+  border-radius: 10px;
+  font-weight: 700;
+}
+
+@media (max-width: 560px) {
+  .schedule-details-banner {
+    flex-direction: column;
+    padding: 16px;
+  }
+
+  .schedule-details-banner h3 {
+    font-size: 20px;
+  }
+
+  .schedule-details-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .schedule-detail-description {
+    grid-column: auto;
+  }
+
+  .schedule-details-footer button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .schedule-detail-card {
+    transition: none;
+  }
+}
+
+
+/* Schedule details: follow the app's active theme */
+
+.schedule-details-view {
+  color: var(--text-primary, var(--text, inherit));
+}
+
+.schedule-details-banner,
+.schedule-detail-card {
+  background: var(--card-bg, var(--surface, var(--bg-secondary, transparent)));
+  color: var(--text-primary, var(--text, inherit));
+  border-color: var(--border-color, var(--border, currentColor));
+}
+
+.schedule-details-banner h3,
+.schedule-detail-card > strong,
+.schedule-detail-description p {
+  color: inherit;
+}
+
+.schedule-details-banner p,
+.schedule-detail-label {
+  color: var(--text-secondary, var(--muted, inherit));
+}
+
+.schedule-detail-highlight {
+  background: var(--card-bg, var(--surface, transparent));
+  border-color: var(--border-color, var(--border, currentColor));
+}
+
+.schedule-detail-highlight > strong {
+  color: var(--text-primary, var(--text, inherit));
+}
+
+.schedule-detail-pill {
+  color: var(--text-primary, var(--text, inherit));
+  background: var(--card-bg, var(--surface, transparent));
+  border-color: var(--border-color, var(--border, currentColor));
+}
+
+.schedule-details-footer {
+  border-color: var(--border-color, var(--border, currentColor));
+}
+
+
+/* Maintenance record details - theme aware */
+
+.maintenance-details-view {
+  color: var(--text-primary, var(--text, inherit));
+}
+
+.maintenance-details-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px;
+  margin-bottom: 18px;
+  border: 1px solid var(--border-color, var(--border, currentColor));
+  border-radius: 14px;
+  background: var(--card-bg, var(--surface, transparent));
+}
+
+.maintenance-details-eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--accent-color, var(--accent, #0284c7));
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.3px;
+}
+
+.maintenance-details-banner h3 {
+  margin: 0;
+  color: var(--text-primary, var(--text, inherit));
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+
+.maintenance-details-banner p {
+  margin: 7px 0 0;
+  color: var(--text-secondary, var(--muted, inherit));
+  font-size: 13px;
+}
+
+.maintenance-details-status {
+  padding: 6px 11px;
+  border: 1px solid var(--border-color, var(--border, currentColor));
+  border-radius: 999px;
+  color: var(--text-primary, var(--text, inherit));
+  background: var(--surface, transparent);
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+.maintenance-details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.maintenance-detail-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid var(--border-color, var(--border, currentColor));
+  border-radius: 12px;
+  background: var(--card-bg, var(--surface, transparent));
+}
+
+.maintenance-detail-card > span {
+  color: var(--text-secondary, var(--muted, inherit));
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.maintenance-detail-card > strong,
+.maintenance-detail-card > p {
+  margin: 0;
+  color: var(--text-primary, var(--text, inherit));
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.maintenance-detail-wide {
+  grid-column: 1 / -1;
+}
+
+.maintenance-details-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color, var(--border, currentColor));
+}
+
+.maintenance-details-footer button {
+  min-width: 105px;
+  padding: 10px 22px;
+  border-radius: 10px;
+}
+
+@media (max-width: 560px) {
+  .maintenance-details-banner {
+    flex-direction: column;
+    padding: 16px;
+  }
+
+  .maintenance-details-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .maintenance-detail-wide {
+    grid-column: auto;
+  }
+
+  .maintenance-details-footer button {
+    width: 100%;
+  }
+}
