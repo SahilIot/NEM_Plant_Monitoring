@@ -6,13 +6,15 @@
   color: var(--text, inherit);
 }
 
+
 .maintenance-logbook-header {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
   margin-bottom: 24px;
 }
+
 
 .maintenance-logbook-header h1 {
   margin: 0 0 8px;
