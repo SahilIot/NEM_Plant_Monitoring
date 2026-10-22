@@ -4,7 +4,10 @@ import { useLocation, useNavigate, useOutletContext, useParams } from "react-rou
 import CopyRulesModal from "../components/CopyRulesModal.jsx";
 import PredefinedRulesModal from "../../rules/components/PredefinedRulesModal.jsx";
 import { api } from "../../../services/api.js";
-import { subscribeLiveUpdates } from "../../../services/liveUpdates.js";
+import {
+  createLiveUpdateScheduler,
+  subscribeLiveUpdates,
+} from "../../../services/liveUpdates.js";
 import MaintenancePanel from "../components/MaintenancePanel.jsx";
 import "./AssetDetail.css";
 import {
@@ -349,6 +352,8 @@ export default function AssetDetail() {
   );
   const [list, setList] = useState("activated");
   const [rules, setRules] = useState([]);
+  const rulesRef = useRef(rules);
+  rulesRef.current = rules;
   const [variables, setVariables] = useState([]);
   const [allVariables, setAllVariables] = useState([]);
   const [runtimeReadings, setRuntimeReadings] = useState(new Map());
@@ -392,25 +397,31 @@ export default function AssetDetail() {
   const permanentDeleteRequest = useRef(false);
 
   
-  const loadLive = useCallback(async () => {
+  const loadLive = useCallback(async ({
+    includeRuleList = true,
+    includePlcStatus = true,
+  } = {}) => {
     const mine = ++seq.current;
 
     try {
       const [r, st, plc] = await Promise.allSettled([
-        api.get(
-          `/assets/${assetId}/rules?include_children=${children}`
-        ),
+        includeRuleList
+          ? api.get(`/assets/${assetId}/rules?include_children=${children}`)
+          : Promise.resolve(null),
         api.getAll("/monitoring/status", 500),
-        api.get("/plc/status"),
+        includePlcStatus ? api.get("/plc/status") : Promise.resolve(null),
       ]);
 
       if (mine !== seq.current) return;
 
-      if (r.status === "fulfilled") {
-        setRules(Array.isArray(r.value) ? r.value : []);
+      if (!includeRuleList || r.status === "fulfilled") {
+        const loadedRules = includeRuleList
+          ? Array.isArray(r.value) ? r.value : []
+          : rulesRef.current;
+        if (includeRuleList) setRules(loadedRules);
         setLoadError("");
-        const runtimeRules = (Array.isArray(r.value) ? r.value : []).filter(
-          (rule) => rule.rule_type === "runtime_duration"
+        const runtimeRules = loadedRules.filter((rule) =>
+          rule.rule_type === "runtime_duration"
         );
         const signalReadings = await Promise.all(
           runtimeRules.map(async (rule) => {
@@ -427,7 +438,7 @@ export default function AssetDetail() {
         );
         if (mine !== seq.current) return;
         setRuntimeReadings(new Map(signalReadings));
-      } else {
+      } else if (r.status === "rejected") {
         setRules([]);
         setLoadError(
           r.reason?.message || "Unable to load rules."
@@ -444,7 +455,7 @@ export default function AssetDetail() {
         );
       }
 
-      if (plc.status === "fulfilled") {
+      if (includePlcStatus && plc.status === "fulfilled") {
         const mappings = Array.isArray(plc.value?.mappings)
           ? plc.value.mappings
           : [];
@@ -490,6 +501,27 @@ export default function AssetDetail() {
     }
   }, [assetId, children]);
 
+  const liveScheduler = useMemo(
+    () => createLiveUpdateScheduler(() => loadLive(), 200),
+    [loadLive]
+  );
+  const statusScheduler = useMemo(
+    () =>
+      createLiveUpdateScheduler(
+        () => loadLive({ includeRuleList: false, includePlcStatus: false }),
+        250
+      ),
+    [loadLive]
+  );
+  const connectionScheduler = useMemo(
+    () =>
+      createLiveUpdateScheduler(
+        () => loadLive({ includeRuleList: false }),
+        250
+      ),
+    [loadLive]
+  );
+
   const loadVariables = useCallback(async () => {
     try {
       const items = await api.getAll(
@@ -522,6 +554,20 @@ export default function AssetDetail() {
         );
       });
   }, [assetId]);
+
+  const loadEvents = useCallback(async () => {
+    try {
+      const items = await api.get(`/assets/${assetId}/events`);
+      setEvents(Array.isArray(items) ? items : []);
+    } catch (error) {
+      setLoadError(error.message || "Unable to load events.");
+    }
+  }, [assetId]);
+
+  const eventsScheduler = useMemo(
+    () => createLiveUpdateScheduler(loadEvents, 250),
+    [loadEvents]
+  );
 
   const refreshMaintenanceData = useCallback(async () => {
     await Promise.all([refreshStatus?.(), loadLogs()]);
@@ -608,12 +654,14 @@ export default function AssetDetail() {
 
   useEffect(() => {
     return subscribeLiveUpdates((update) => {
-      if (update.type === "connected") {
-        loadLive();
+      if (update.resync_required) {
+        liveScheduler();
         loadVariables();
         loadLogs();
+        if (tab === "events") eventsScheduler();
         return;
       }
+      if (update.type === "disconnected") return;
       const changedTables = new Set(update.changed_tables || []);
       const relevantTables = [
         "assets",
@@ -623,6 +671,7 @@ export default function AssetDetail() {
         "nem_monitoring_rules",
         "nem_rule_states",
         "nem_rule_counter_states",
+        "machine_monitoring_states",
         "nem_alerts",
         "nem_maintenance_records",
         "nem_maintenance_schedules",
@@ -658,7 +707,26 @@ export default function AssetDetail() {
       ) {
         return;
       }
-      loadLive();
+      if (update.type === "opcua_status") {
+        connectionScheduler();
+        return;
+      }
+      if (["assets", "variables", "nem_monitoring_rules"].some((table) =>
+        changedTables.has(table)
+      )) {
+        liveScheduler();
+      } else if (
+        [
+          "readings",
+          "nem_readings",
+          "nem_rule_states",
+          "nem_rule_counter_states",
+          "machine_monitoring_states",
+          "nem_alerts",
+        ].some((table) => changedTables.has(table))
+      ) {
+        statusScheduler();
+      }
       if (changedTables.has("variables") || changedTables.has("assets")) {
         loadVariables();
       }
@@ -668,34 +736,44 @@ export default function AssetDetail() {
       ) {
         loadLogs();
       }
+      if (changedTables.has("nem_monitoring_events") && tab === "events") {
+        eventsScheduler();
+      }
     });
-  }, [assetId, assets, children, loadLive, loadLogs, loadVariables]);
+  }, [
+    assetId,
+    assets,
+    children,
+    connectionScheduler,
+    eventsScheduler,
+    liveScheduler,
+    loadLogs,
+    loadVariables,
+    statusScheduler,
+    tab,
+  ]);
 
  
   useEffect(() => {
     if (tab !== "events") return;
 
-    let cancelled = false;
+    loadEvents();
+  }, [tab, loadEvents]);
 
-    api
-      .get(`/assets/${assetId}/events`)
-      .then((items) => {
-        if (!cancelled) {
-          setEvents(Array.isArray(items) ? items : []);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setLoadError(
-            error.message || "Unable to load events."
-          );
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [tab, assetId]);
+  useEffect(
+    () => () => {
+      liveScheduler.dispose();
+      statusScheduler.dispose();
+      connectionScheduler.dispose();
+      eventsScheduler.dispose();
+    },
+    [
+      connectionScheduler,
+      eventsScheduler,
+      liveScheduler,
+      statusScheduler,
+    ]
+  );
 
   const availableVariables = variables;
   const ruleFormFields = useMemo(

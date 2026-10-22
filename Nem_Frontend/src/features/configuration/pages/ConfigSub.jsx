@@ -2,6 +2,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../../../services/api.js";
+import {
+  createLiveUpdateScheduler,
+  subscribeLiveUpdates,
+} from "../../../services/liveUpdates.js";
 import { conditionText } from "../../../utils/format.js";
 import { CreateModal, EmptyState } from "../../../components/common/UI.jsx";
 import { BackIcon, PlusCircle } from "../../../components/common/Icons.jsx";
@@ -319,6 +323,41 @@ export default function ConfigSub() {
     setRows(Array.isArray(items) ? items : []);
   }, [cfg, sub]);
 
+  const loadVariables = useCallback(async () => {
+    if (sub !== "rules") return;
+    const assets = await api.getAll("/assets");
+    const perAsset = await Promise.all(
+      assets.map((asset) =>
+        api.getAll(`/assets/${asset.id}/variables?is_active=true`)
+      )
+    );
+    const names = new Map(assets.map((asset) => [asset.id, asset.name]));
+    setVariables(
+      perAsset
+        .flat()
+        .filter((variable) =>
+          ["integer", "number"].includes(variable.data_type)
+        )
+        .map((variable) => ({
+          ...variable,
+          asset_name:
+            names.get(variable.asset_id) || `Asset ${variable.asset_id}`,
+        }))
+    );
+  }, [sub]);
+
+  const rulesScheduler = useMemo(
+    () =>
+      createLiveUpdateScheduler(async () => {
+        try {
+          await load();
+        } catch (error) {
+          setMsg({ text: error.message, error: true });
+        }
+      }, 250),
+    [load]
+  );
+
   useEffect(() => {
     let alive = true;
 
@@ -335,34 +374,7 @@ export default function ConfigSub() {
     });
 
     if (sub === "rules") {
-      api
-        .getAll("/assets")
-        .then(async (assets) => {
-          const perAsset = await Promise.all(
-            assets.map((asset) =>
-              api.getAll(`/assets/${asset.id}/variables?is_active=true`)
-            )
-          );
-
-          if (!alive) return;
-
-          const names = new Map(
-            assets.map((asset) => [asset.id, asset.name])
-          );
-
-          setVariables(
-            perAsset
-              .flat()
-              .filter((variable) =>
-                ["integer", "number"].includes(variable.data_type)
-              )
-              .map((variable) => ({
-                ...variable,
-                asset_name:
-                  names.get(variable.asset_id) || `Asset ${variable.asset_id}`,
-              }))
-          );
-        })
+      loadVariables()
         .catch((error) => {
           if (alive) setMsg({ text: error.message, error: true });
         });
@@ -373,7 +385,39 @@ export default function ConfigSub() {
     return () => {
       alive = false;
     };
-  }, [sub, load]);
+  }, [sub, load, loadVariables]);
+
+  useEffect(() => {
+    if (sub !== "rules") return undefined;
+    return subscribeLiveUpdates((update) => {
+      if (update.resync_required) {
+        rulesScheduler();
+        loadVariables().catch((error) =>
+          setMsg({ text: error.message, error: true })
+        );
+        return;
+      }
+      const changedTables = new Set(update.changed_tables || []);
+      if (
+        ["nem_monitoring_rules", "nem_rule_states"].some((table) =>
+          changedTables.has(table)
+        )
+      ) {
+        rulesScheduler();
+      }
+      if (["assets", "variables"].some((table) => changedTables.has(table))) {
+        rulesScheduler();
+        loadVariables().catch((error) =>
+          setMsg({ text: error.message, error: true })
+        );
+      }
+    });
+  }, [loadVariables, rulesScheduler, sub]);
+
+  useEffect(
+    () => () => rulesScheduler.dispose(),
+    [rulesScheduler]
+  );
 
   const numericVariables = useMemo(
     () =>

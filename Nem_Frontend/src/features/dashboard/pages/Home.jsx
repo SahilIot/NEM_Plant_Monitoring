@@ -2,7 +2,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext } from "react-router-dom";
 import { api } from "../../../services/api.js";
-import { subscribeLiveUpdates } from "../../../services/liveUpdates.js";
+import {
+  createLiveUpdateScheduler,
+  subscribeLiveUpdates,
+} from "../../../services/liveUpdates.js";
 import { formatDuration, formatValue, timeAgo } from "../../../utils/format.js";
 import { EmptyState, Modal } from "../../../components/common/UI.jsx";
 import { CheckIcon } from "../../../components/common/Icons.jsx";
@@ -90,13 +93,26 @@ export default function Home() {
     }
   }, []);
 
+  const refreshLiveScheduler = useMemo(
+    () => createLiveUpdateScheduler(refreshLiveStatus),
+    [refreshLiveStatus]
+  );
+  const summaryScheduler = useMemo(
+    () => createLiveUpdateScheduler(loadSummary),
+    [loadSummary]
+  );
+
   useEffect(() => {
     refreshLiveStatus();
     return subscribeLiveUpdates((update) => {
-      if (update.type === "connected") {
-        refreshLiveStatus();
-        loadSummary();
+      if (update.resync_required) {
+        refreshLiveScheduler();
+        summaryScheduler();
         refreshStatus?.();
+        return;
+      }
+      if (update.type === "disconnected") {
+        setLiveStatusError("Live updates disconnected. Reconnecting...");
         return;
       }
       const changedTables = new Set(update.changed_tables || []);
@@ -108,23 +124,27 @@ export default function Home() {
         "nem_monitoring_rules",
         "nem_rule_states",
         "nem_rule_counter_states",
+        "machine_monitoring_states",
         "nem_alerts",
       ];
       if (
         update.type === "opcua_status" ||
         liveTables.some((table) => changedTables.has(table))
       ) {
-        refreshLiveStatus();
+        refreshLiveScheduler();
       }
       if (
         [
           "assets",
+          "readings",
+          "nem_readings",
           "nem_monitoring_rules",
+          "nem_rule_states",
           "nem_alerts",
           "nem_maintenance_schedules",
         ].some((table) => changedTables.has(table))
       ) {
-        loadSummary();
+        summaryScheduler();
       }
       if (
         ["nem_monitoring_rules", "nem_rule_states", "nem_alerts"].some(
@@ -134,7 +154,15 @@ export default function Home() {
         refreshStatus?.();
       }
     });
-  }, [loadSummary, refreshLiveStatus, refreshStatus]);
+  }, [refreshLiveScheduler, refreshStatus, summaryScheduler]);
+
+  useEffect(
+    () => () => {
+      refreshLiveScheduler.dispose();
+      summaryScheduler.dispose();
+    },
+    [refreshLiveScheduler, summaryScheduler]
+  );
 
   useEffect(() => {
     let cancelled = false;

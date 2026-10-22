@@ -1,6 +1,9 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../services/api.js";
-import { subscribeLiveUpdates } from "../../../services/liveUpdates.js";
+import {
+  createLiveUpdateScheduler,
+  subscribeLiveUpdates,
+} from "../../../services/liveUpdates.js";
 import { formatDuration, timeAgo } from "../../../utils/format.js";
 import "../styles/Plc.css";
 document.documentElement.dataset.theme
@@ -66,6 +69,7 @@ export default function Plc() {
   const [monitoringError, setMonitoringError] = useState("");
   const monitoringRequest = useRef(null);
   const monitoringMounted = useRef(false);
+  const assetsMounted = useRef(false);
 
   const [latestReadings, setLatestReadings] = useState([]);
   const [latestError, setLatestError] = useState("");
@@ -140,10 +144,40 @@ export default function Plc() {
     return request;
   }, []);
 
+  const refreshLiveData = useCallback(async () => {
+    await Promise.all([loadMonitoringStatus(), loadLatestReadings()]);
+  }, [loadLatestReadings, loadMonitoringStatus]);
+  const refreshAssets = useCallback(async () => {
+    try {
+      const items = await api.getAll("/assets?is_active=true");
+      if (assetsMounted.current) {
+        setAssets(Array.isArray(items) ? items : []);
+      }
+    } catch (error) {
+      if (assetsMounted.current) {
+        setConnection({
+          state: "error",
+          message: error.message || "Could not refresh assets.",
+        });
+      }
+      throw error;
+    }
+  }, []);
+  const liveDataScheduler = useMemo(
+    () => createLiveUpdateScheduler(refreshLiveData),
+    [refreshLiveData]
+  );
+  const assetsScheduler = useMemo(
+    () => createLiveUpdateScheduler(refreshAssets, 250),
+    [refreshAssets]
+  );
+
   useEffect(() => {
     monitoringMounted.current = true;
+    assetsMounted.current = true;
     return () => {
       monitoringMounted.current = false;
+      assetsMounted.current = false;
     };
   }, []);
 
@@ -189,9 +223,9 @@ export default function Plc() {
 
   useEffect(() => {
     return subscribeLiveUpdates((update) => {
-      if (update.type === "connected") {
-        loadMonitoringStatus();
-        loadLatestReadings();
+      if (update.resync_required) {
+        liveDataScheduler();
+        assetsScheduler();
         return;
       }
       const changedTables = new Set(update.changed_tables || []);
@@ -202,31 +236,32 @@ export default function Plc() {
           "nem_readings",
           "nem_rule_states",
           "nem_rule_counter_states",
+          "machine_monitoring_states",
           "nem_alerts",
         ].some((table) => changedTables.has(table))
       ) {
-        loadMonitoringStatus();
+        liveDataScheduler();
       }
       if (
         ["readings", "nem_readings", "variables", "assets"].some((table) =>
           changedTables.has(table)
         )
       ) {
-        loadLatestReadings();
+        liveDataScheduler();
       }
       if (changedTables.has("assets")) {
-        api
-          .getAll("/assets?is_active=true")
-          .then((items) => setAssets(Array.isArray(items) ? items : []))
-          .catch((error) => {
-            setConnection({
-              state: "error",
-              message: error.message || "Could not refresh assets.",
-            });
-          });
+        assetsScheduler();
       }
     });
-  }, [loadLatestReadings, loadMonitoringStatus]);
+  }, [assetsScheduler, liveDataScheduler]);
+
+  useEffect(
+    () => () => {
+      liveDataScheduler.dispose();
+      assetsScheduler.dispose();
+    },
+    [assetsScheduler, liveDataScheduler]
+  );
 
  
   useEffect(() => {

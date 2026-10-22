@@ -4,6 +4,7 @@ import logging
 import asyncio #runs background tasks and manages async operations
 from contextlib import asynccontextmanager #defines what happens when the app starts and shuts down
 from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket
@@ -183,7 +184,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.live_updates = live_updates
 
     @application.websocket("/api/v1/live")
+    @application.websocket("/api/v1/ws/live")
     async def live_updates_websocket(websocket: WebSocket) -> None:
+        origin = websocket.headers.get("origin")
+        if origin:
+            try:
+                parsed_origin = urlsplit(origin)
+            except ValueError:
+                await websocket.close(code=1008, reason="Origin is not allowed")
+                return
+            same_origin = parsed_origin.netloc.casefold() == (
+                websocket.headers.get("host", "").casefold()
+            )
+            configured_origin = origin.rstrip("/") in {
+                configured.rstrip("/")
+                for configured in selected_settings.allowed_origins
+            }
+            if not same_origin and not configured_origin:
+                await websocket.close(code=1008, reason="Origin is not allowed")
+                return
         await serve_live_updates(websocket, live_updates)
 
 #Checking request size
