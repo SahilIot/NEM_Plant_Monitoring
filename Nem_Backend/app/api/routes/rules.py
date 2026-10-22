@@ -88,6 +88,28 @@ def validate_targets(
         if operator is None or threshold is None:
             raise HTTPException(status_code=422, detail="Parameter threshold rules require an operator and threshold",)
     if rule_type in {"runtime_duration", "duration"}:
+        interval_elapsed = (
+            rule_type == "duration"
+            and parameters is not None
+            and parameters.get("condition") == "interval_elapsed"
+        )
+        if interval_elapsed:
+            interval_seconds = parameters.get("interval_seconds")
+            if (
+                asset is None
+                or not isinstance(interval_seconds, int)
+                or isinstance(interval_seconds, bool)
+                or interval_seconds <= 0
+                or variable_id is not None
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Interval-based rules require an asset target, a positive "
+                        "interval_seconds value, and no variable target"
+                    ),
+                )
+            return
         duration = parameters.get("duration_seconds") if parameters else None
         if rule_type == "runtime_duration" and parameters and (
             "warning_thresholds_seconds" in parameters
