@@ -776,10 +776,7 @@ def evaluate_rule(
             state,
             next_status="unknown",
             value=None,
-            message=(
-                "Target asset is inactive; physical operating status "
-                "is not inferred."
-            ),
+            message=("Target asset is inactive; physical operating status is not inferred."),
             evaluated_at=now,
             condition_started_at=None,
         )
@@ -824,9 +821,7 @@ def evaluate_rule(
                 state,
                 next_status="unknown",
                 value=None,
-                message=(
-                    "Boolean count threshold requires a Boolean variable."
-                ),
+                message=("Boolean count threshold requires a Boolean variable."),
                 evaluated_at=now,
                 condition_started_at=None,
                 error_message="invalid_count_variable_type",
@@ -909,14 +904,9 @@ def evaluate_rule(
             state,
             next_status="unknown",
             value=reading.value,
-            message=(
-                f"Latest reading is stale "
-                f"(older than {stale_after} seconds)."
-            ),
+            message=(f"Latest reading is stale (older than {stale_after} seconds)."),
             evaluated_at=now,
-            condition_started_at=(
-                state.condition_started_at if state else None
-            ),
+            condition_started_at=(state.condition_started_at if state else None),
             error_message="stale_reading",
         )
 
@@ -928,10 +918,7 @@ def evaluate_rule(
             state,
             next_status="unknown",
             value=reading.value,
-            message=(
-                "Latest reading does not match the configured "
-                "variable data type."
-            ),
+            message=("Latest reading does not match the configured variable data type."),
             evaluated_at=now,
             condition_started_at=None,
             error_message="invalid_reading_type",
@@ -940,8 +927,7 @@ def evaluate_rule(
     try:
         holds = _condition_holds(rule, reading.value)
     except (TypeError, ValueError, ArithmeticError) as error:
-        LOGGER.warning(
-            "Invalid rule configuration for rule %s: %s",
+        LOGGER.warning("Invalid rule configuration for rule %s: %s",
             rule.id,
             error,
         )
@@ -952,10 +938,7 @@ def evaluate_rule(
             state,
             next_status="unknown",
             value=reading.value,
-            message=(
-                "Rule configuration or reading is invalid; "
-                "state cannot be determined."
-            ),
+            message=("Rule configuration or reading is invalid; state cannot be determined."),
             evaluated_at=now,
             condition_started_at=None,
             error_message="invalid_rule_or_reading",
@@ -1073,20 +1056,14 @@ def evaluate_rules(
         if not rule.is_enabled:
             continue
 
-        if (
-            respect_rule_intervals
-            and rule.evaluation_interval_seconds is not None
-        ):
+        if (respect_rule_intervals and rule.evaluation_interval_seconds is not None):
             asset, _ = get_rule_asset(session, rule)
-            state = (
-                current_state(session, rule, asset)
+            state = (current_state(session, rule, asset)
                 if asset is not None
                 else None
             )
 
-            if (
-                state is not None
-                and now - state.last_evaluated_at
+            if (state is not None and now - state.last_evaluated_at
                 < timedelta(seconds=rule.evaluation_interval_seconds)
             ):
                 continue
@@ -1219,6 +1196,8 @@ def set_rule_enabled_state(
 
     now = at or utc_now()
     rule.is_enabled = enabled
+    if rule.lifecycle_status != "completed":
+        rule.lifecycle_status = "in_progress" if enabled else "deactivated"
     asset, _ = get_rule_asset(session, rule)
 
     if rule.rule_type == "runtime_duration":

@@ -46,6 +46,51 @@ def initialize_database(engine: Engine) -> None:
             for column in inspector.get_columns("nem_monitoring_rules")
         }
         with engine.begin() as connection:
+            if "lifecycle_status" not in rule_columns:
+                if engine.dialect.name == "postgresql":
+                    connection.execute(
+                        text(
+                            "ALTER TABLE nem_monitoring_rules "
+                            "ADD COLUMN IF NOT EXISTS lifecycle_status "
+                            "VARCHAR(20) NOT NULL DEFAULT 'deactivated'"
+                        )
+                    )
+                else:
+                    connection.execute(
+                        text(
+                            "ALTER TABLE nem_monitoring_rules "
+                            "ADD COLUMN lifecycle_status "
+                            "VARCHAR(20) NOT NULL DEFAULT 'deactivated'"
+                        )
+                    )
+                connection.execute(
+                    text(
+                        "UPDATE nem_monitoring_rules SET lifecycle_status = "
+                        "CASE WHEN is_enabled = TRUE "
+                        "THEN 'in_progress' ELSE 'deactivated' END"
+                    )
+                )
+            if "completed_at" not in rule_columns:
+                column_type = (
+                    "TIMESTAMP WITH TIME ZONE"
+                    if engine.dialect.name == "postgresql"
+                    else "DATETIME"
+                )
+                if engine.dialect.name == "postgresql":
+                    connection.execute(
+                        text(
+                            "ALTER TABLE nem_monitoring_rules "
+                            "ADD COLUMN IF NOT EXISTS completed_at "
+                            + column_type
+                        )
+                    )
+                else:
+                    connection.execute(
+                        text(
+                            "ALTER TABLE nem_monitoring_rules "
+                            "ADD COLUMN completed_at " + column_type
+                        )
+                    )
             if "is_archived" not in rule_columns:
                 if engine.dialect.name == "postgresql":
                     connection.execute(

@@ -99,10 +99,7 @@ def validate_targets(
                 or not variable.is_active
                 or variable.data_type != "boolean"
             ):
-                raise HTTPException(
-                    status_code=422,
-                    detail="Running-time rules require an active Boolean variable on an active asset",
-                )
+                raise HTTPException(status_code=422,detail="Running-time rules require an active Boolean variable on an active asset",)
             bypass_signal_is_valid = (
                 mapping_bypass_enabled
                 and variable is not None
@@ -112,9 +109,7 @@ def validate_targets(
                 try:
                     ua.NodeId.from_string(variable.opcua_node_id)
                 except (TypeError, ValueError, UaStringParsingError) as error:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="Running-time rules require a valid OPC UA NodeId",
+                    raise HTTPException(status_code=422,detail="Running-time rules require a valid OPC UA NodeId",
                     ) from error
             if (
                 runtime_signal_mapping != (target_asset_id, variable_id)
@@ -122,8 +117,7 @@ def validate_targets(
             ):
                 raise HTTPException(
                     status_code=422,
-                    detail=(
-                        "Running-time rules must target this asset's configured "
+                    detail=("Running-time rules must target this asset's configured "
                         "OPC UA running signal or an asset-owned declared Boolean "
                         "variable while mapping bypass is enabled"
                     ),
@@ -200,7 +194,9 @@ def create_rule(
         configured_runtime_signal_mapping(request, payload.variable_id),
         is_mapping_bypass_enabled(request),
     )
-    rule = MonitoringRule(**payload.model_dump())
+    rule_data = payload.model_dump()
+    rule_data["lifecycle_status"] = ("in_progress" if payload.is_enabled else "deactivated")
+    rule = MonitoringRule(**rule_data)
     session.add(rule)
     session.flush()
 
@@ -275,6 +271,8 @@ def update_rule(
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status_code=422, detail="Provide at least one field to update")
+    if rule.lifecycle_status == "completed" and changes.get("is_enabled") is True:
+        raise HTTPException(status_code=409,detail="Completed rules cannot be reactivated. Create a new rule instead.",)
     prospective = {
         key: changes.get(key, getattr(rule, key))
         for key in (
@@ -301,10 +299,7 @@ def update_rule(
     if target_fields.intersection(changes) and session.scalar(
         select(Alert.id).where(Alert.rule_id == rule.id, Alert.status == "active").limit(1)
     ):
-        raise HTTPException(
-            status_code=409,
-            detail="Resolve active alerts before changing a rule target",
-        )
+        raise HTTPException(status_code=409,detail="Resolve active alerts before changing a rule target",)
     #Apply the changes
     for field, value in changes.items():
         if field != "is_enabled":

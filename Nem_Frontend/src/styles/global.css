@@ -265,6 +265,7 @@ button:disabled { opacity: 0.55; cursor: default; }
 .alert-row { display: flex; align-items: flex-start; gap: 14px; padding: 14px 0; border-top: 1px solid var(--line); }
 .alert-row:first-child { border-top: none; padding-top: 2px; }
 .alert-row .lamp { margin-top: 6px; }
+.alert-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .alert-body { flex: 1; min-width: 0; }
 .alert-title { font-weight: 600; }
 .alert-msg { color: var(--ink-2); margin-top: 2px; }

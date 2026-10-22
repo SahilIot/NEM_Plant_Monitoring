@@ -356,6 +356,8 @@ class RuleRead(ORMModel):
     parameters: dict[str, Any] | None
     severity: str
     is_enabled: bool
+    lifecycle_status: Literal["in_progress", "suspended", "deactivated", "completed"] = "in_progress"
+    completed_at: datetime | None = None
     evaluation_interval_seconds: int | None
     stale_after_seconds: int | None
     created_at: datetime
