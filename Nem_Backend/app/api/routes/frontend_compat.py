@@ -1,16 +1,21 @@
 #FastApi router that connects your react frontend to your backend and postgreSQL database
 from datetime import datetime, timezone
+from html import escape
+import json
 from pathlib import Path
 from uuid import uuid4
+from zipfile import BadZipFile
 from typing import Any
 
 from cryptography.fernet import Fernet # encrypts and decrypts sensitive values, such as a saved email password
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field, ValidationError, field_validator 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError # Handles database constraint failures,such as duplicate collection name
 from sqlalchemy.orm import Session 
+from docx import Document as WordDocument
+from docx.opc.exceptions import PackageNotFoundError
 
 from app.db.session import get_db
 from app.models import (
@@ -1345,6 +1350,7 @@ def list_documents(session: Session = Depends(get_db)) -> list[dict[str, Any]]:
             "labels": row.labels or [], "duration_minutes": row.duration_minutes,
             "files": [{"id": f.id, "name": f.original_name, "size_bytes": f.size_bytes,
                        "content_type": f.content_type,
+                       "view_url": f"/api/v1/documents/{row.id}/files/{f.id}/view",
                        "download_url": f"/api/v1/documents/{row.id}/files/{f.id}/download"}
                       for f in attachments],
         })
@@ -1373,6 +1379,8 @@ async def create_document_with_files(
     title: str = Form(...),
     kind: str = Form(...),
     description: str = Form(""),
+    labels: str = Form("[]"),
+    duration_minutes: int | None = Form(default=None, ge=1),
     files: list[UploadFile] = File(default=[]),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
@@ -1381,11 +1389,27 @@ async def create_document_with_files(
         raise HTTPException(status_code=422, detail="Title and type are required")
     if len(files) > MAX_FILES_PER_DOCUMENT:
         raise HTTPException(status_code=413, detail=f"Choose no more than {MAX_FILES_PER_DOCUMENT} files")
+    try:
+        parsed_labels = json.loads(labels)
+    except json.JSONDecodeError as error:
+        raise HTTPException(status_code=422, detail="Labels must be a JSON array") from error
+    if (
+        not isinstance(parsed_labels, list)
+        or len(parsed_labels) > 10
+        or any(not isinstance(label, str) or not label.strip() for label in parsed_labels)
+    ):
+        raise HTTPException(status_code=422, detail="Labels must contain up to 10 non-empty strings")
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     saved_paths: list[Path] = []
     total = 0
     try:
-        document = InstructionDocument(title=title, kind=kind, description=description.strip() or None)
+        document = InstructionDocument(
+            title=title,
+            kind=kind,
+            description=description.strip() or None,
+            labels=[label.strip() for label in parsed_labels],
+            duration_minutes=duration_minutes,
+        )
         session.add(document)
         session.flush()
         for upload in files:
@@ -1419,8 +1443,15 @@ async def create_document_with_files(
             ))
         session.commit()
         session.refresh(document)
-        return {"id": document.id, "title": document.title, "kind": document.kind,
-                "description": document.description, "file_count": len(saved_paths)}
+        return {
+            "id": document.id,
+            "title": document.title,
+            "kind": document.kind,
+            "description": document.description,
+            "labels": document.labels,
+            "duration_minutes": document.duration_minutes,
+            "file_count": len(saved_paths),
+        }
     except Exception:
         session.rollback()
         for path in saved_paths:
@@ -1429,6 +1460,75 @@ async def create_document_with_files(
     finally:
         for upload in files:
             await upload.close()
+
+
+@router.get("/documents/{document_id}/files/{file_id}/view")
+def view_document_file(
+    document_id: int,
+    file_id: int,
+    session: Session = Depends(get_db),
+):
+    attachment = session.scalar(
+        select(InstructionDocumentFile).where(
+            InstructionDocumentFile.id == file_id,
+            InstructionDocumentFile.document_id == document_id,
+        )
+    )
+    if attachment is None:
+        raise HTTPException(status_code=404, detail="Document attachment was not found")
+    path = UPLOAD_DIR / attachment.stored_name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Stored file is missing")
+
+    extension = Path(attachment.original_name).suffix.lower()
+    if extension == ".docx":
+        try:
+            word_document = WordDocument(path)
+        except (PackageNotFoundError, BadZipFile, KeyError, ValueError) as error:
+            raise HTTPException(status_code=422, detail="Word document could not be previewed") from error
+        paragraphs = "".join(
+            f"<p>{escape(paragraph.text)}</p>"
+            for paragraph in word_document.paragraphs
+            if paragraph.text.strip()
+        )
+        tables = "".join(
+            "<table>"
+            + "".join(
+                "<tr>" + "".join(f"<td>{escape(cell.text)}</td>" for cell in row.cells) + "</tr>"
+                for row in table.rows
+            )
+            + "</table>"
+            for table in word_document.tables
+        )
+        return HTMLResponse(
+            "<!doctype html><html><head><meta charset='utf-8'>"
+            "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+            f"<title>{escape(attachment.original_name)}</title>"
+            "<style>body{font:16px/1.6 system-ui,sans-serif;max-width:900px;"
+            "margin:32px auto;padding:0 20px;color:#20242a}table{border-collapse:collapse}"
+            "td{border:1px solid #aaa;padding:6px 10px}</style></head>"
+            f"<body>{paragraphs}{tables}</body></html>"
+        )
+    if extension == ".doc":
+        return HTMLResponse(
+            "<!doctype html><html><body><p>This legacy .doc file cannot be previewed "
+            "in the browser. Please upload a PDF or DOCX copy to view it here.</p></body></html>"
+        )
+    if extension == ".txt":
+        return FileResponse(
+            path,
+            media_type="text/plain; charset=utf-8",
+            filename=attachment.original_name,
+            content_disposition_type="inline",
+        )
+    if extension == ".pdf":
+        return FileResponse(
+            path,
+            media_type="application/pdf",
+            filename=attachment.original_name,
+            content_disposition_type="inline",
+        )
+    raise HTTPException(status_code=415, detail="This document type cannot be previewed")
 
 
 @router.get("/documents/{document_id}/files/{file_id}/download")

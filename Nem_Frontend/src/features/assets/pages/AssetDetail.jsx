@@ -1447,7 +1447,7 @@ const filteredLogs = [...logs]
                             : runtimeCountdown
                               ? "Due in"
                               : rule.rule_type === "boolean_count_threshold"
-                                ? "Current threshold / Targeted threshold"
+                                ? "Current / Target"
                               : rule.rule_type === "runtime_duration" &&
                                   lifecycleStatus(rule) === "in_progress" &&
                                   ["ok", "warning"].includes(rule.status)

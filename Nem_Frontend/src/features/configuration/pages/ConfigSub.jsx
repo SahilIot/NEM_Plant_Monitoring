@@ -1,6 +1,6 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../../../services/api.js";
 import { conditionText } from "../../../utils/format.js";
 import { CreateModal, EmptyState } from "../../../components/common/UI.jsx";
@@ -177,9 +177,9 @@ function cell(key, row, variableNames) {
         {files.map((file, index) => (
           <React.Fragment key={file.id}>
             {index > 0 ? ", " : ""}
-            <a href={file.download_url} target="_blank" rel="noreferrer">
+            <Link to={`/configuration/documents/${row.id}/files/${file.id}/view`}>
               {file.name}
-            </a>
+            </Link>
           </React.Fragment>
         ))}
       </span>

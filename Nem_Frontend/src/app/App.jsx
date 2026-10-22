@@ -16,6 +16,7 @@ import Configuration from "../features/configuration/pages/Configuration.jsx";
 import ConfigSub from "../features/configuration/pages/ConfigSub.jsx";
 import DocumentCreatePage from "../features/configuration/pages/DocumentCreatePage.jsx";
 import CreateInstructionPage from "../features/configuration/pages/CreateInstructionPage.jsx";
+import DocumentViewerPage from "../features/configuration/pages/DocumentViewerPage.jsx";
 import RuleLibrary from "../features/configuration/pages/RuleLibrary.jsx";
 
 import Plc from "../features/plc/pages/Plc.jsx";
@@ -57,6 +58,10 @@ export default function App() {
         <Route
           path="/configuration/instructions/new"
           element={<CreateInstructionPage />}
+        />
+        <Route
+          path="/configuration/documents/:documentId/files/:fileId/view"
+          element={<DocumentViewerPage />}
         />
 
         {/* Other configuration sections */}
