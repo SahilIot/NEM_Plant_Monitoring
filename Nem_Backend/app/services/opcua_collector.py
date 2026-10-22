@@ -230,7 +230,7 @@ class OpcUaCollector:
             str, list[tuple[OpcUaMachineMapping, str, int]]
         ] = {}
         self._declared_variable_mappings: list[
-            tuple[OpcUaMachineMapping, OpcUaTagMapping]
+            tuple[OpcUaMachineMapping, OpcUaTagMapping, str]
         ] = []
         self._queue_size = max(len(self.mappings) * 20, 100)
         self._queue: asyncio.Queue[OpcUaNotification | None] | None = None
@@ -347,6 +347,12 @@ class OpcUaCollector:
                     ua.NodeId.from_string(variable.opcua_node_id)
                 except (TypeError, ValueError, UaStringParsingError):
                     continue
+                role = (
+                    f"{variable.signal_role}_signal"
+                    if variable.data_type == "boolean"
+                    and variable.signal_role in {"cycle", "running"}
+                    else "declared_variable"
+                )
                 rows.append(
                     {
                         "asset_id": variable.asset_id,
@@ -355,7 +361,7 @@ class OpcUaCollector:
                         "variable_name": variable.name,
                         "data_type": variable.data_type,
                         "node_id": variable.opcua_node_id,
-                        "role": "declared_variable",
+                        "role": role,
                         "asset_active": True,
                         "variable_active": True,
                         "mapping_valid": True,
@@ -588,11 +594,11 @@ class OpcUaCollector:
     @staticmethod
     def _subscription_signature(
         node_mappings: dict[str, list[tuple[OpcUaMachineMapping, str, int]]],
-    ) -> set[tuple[int, int, str]]:
+    ) -> set[tuple[int, int, str, str]]:
         return {
-            (mapping.asset_id, variable_id, node_id)
+            (mapping.asset_id, variable_id, node_id, role)
             for node_id, mappings in node_mappings.items()
-            for mapping, _, variable_id in mappings
+            for mapping, role, variable_id in mappings
         }
 
     def _subscription_configuration_changed(self) -> bool:
@@ -612,7 +618,7 @@ class OpcUaCollector:
             if mapping.running_signal is not None
         ]
         declared_variable_ids = [signal.variable_id
-            for _, signal in self._declared_variable_mappings
+            for _, signal, _ in self._declared_variable_mappings
         ]
         if declared_variable_ids:
             with self.session_factory() as session:
@@ -635,9 +641,10 @@ class OpcUaCollector:
                     ).all()
                 )
             signals.extend(
-                (mapping, signal, "reading")
-                for mapping, signal in self._declared_variable_mappings
-                if signal.variable_id in monitored_variable_ids
+                (mapping, signal, role)
+                for mapping, signal, role in self._declared_variable_mappings
+                if role in {"cycle", "running"}
+                or signal.variable_id in monitored_variable_ids
             )
 
         for mapping, signal, role in signals:
@@ -683,13 +690,13 @@ class OpcUaCollector:
         session: Session,
     ) -> tuple[
         dict[str, list[tuple[OpcUaMachineMapping, str, int]]],
-        list[tuple[OpcUaMachineMapping, OpcUaTagMapping]],
+        list[tuple[OpcUaMachineMapping, OpcUaTagMapping, str]],
     ]:
         node_mappings: dict[
             str, list[tuple[OpcUaMachineMapping, str, int]]
         ] = {}
         declared_mappings: list[
-            tuple[OpcUaMachineMapping, OpcUaTagMapping]
+            tuple[OpcUaMachineMapping, OpcUaTagMapping, str]
         ] = []
         active_variable_ids = set(
             session.scalars(
@@ -700,6 +707,19 @@ class OpcUaCollector:
                 )
             ).all()
         )
+        if self.settings.opc_ua_mapping_bypass_enabled:
+            active_variable_ids.update(
+                session.scalars(
+                    select(Variable.id)
+                    .join(Asset, Asset.id == Variable.asset_id)
+                    .where(
+                        Variable.is_active.is_(True),
+                        Variable.data_type == "boolean",
+                        Variable.signal_role.in_({"cycle", "running"}),
+                        Asset.is_active.is_(True),
+                    )
+                ).all()
+            )
 
         for mapping in self.mappings:
             asset = session.get(Asset, mapping.asset_id)
@@ -757,9 +777,15 @@ class OpcUaCollector:
                     asset_id=variable.asset_id,
                     readings=[tag],
                 )
-                declared_mappings.append((mapping, tag))
+                role = (
+                    variable.signal_role
+                    if variable.data_type == "boolean"
+                    and variable.signal_role in {"cycle", "running"}
+                    else "reading"
+                )
+                declared_mappings.append((mapping, tag, role))
                 node_mappings.setdefault(node_id, []).append(
-                    (mapping, "reading", variable.id)
+                    (mapping, role, variable.id)
                 )
         return node_mappings, declared_mappings
 

@@ -249,27 +249,30 @@ subscribed while at least one enabled rule still uses it.
 
 When enabled, the collector additionally discovers active variables belonging
 to active assets when `opcua_node_id` is present and syntactically valid and an
-enabled, non-archived rule uses the variable. Each
+enabled, non-archived rule uses the variable, or when a Boolean variable has an
+explicit signal purpose. Each
 declared variable is associated only with its existing `asset_id`; variables
 are not broadcast to every asset. A unique NodeId is subscribed once even if
 multiple asset-owned variables use it. Boolean declared variables become
-available for asset-scoped cycle-count and running-time rules; those rules
-still validate Boolean data type, active status, asset ownership, and NodeId
-syntax. The periodic good-quality Boolean refresh keeps stable running signals
-fresh. Rule, asset, or variable changes trigger an immediate subscription
-refresh while connected. Invalid NodeIds are skipped and
-logged. A mismatch between the declared variable type and the PLC's actual
+available for asset-scoped rules only after their purpose is set to **Cycle
+signal** or **Machine running state** in the asset's Variables panel. Cycle
+signals count OFF-to-ON transitions; running signals update machine status and
+runtime. An unclassified Boolean variable is not offered in either selector.
+The periodic good-quality Boolean refresh keeps stable running signals fresh.
+Rule, asset, or variable changes trigger an immediate subscription refresh
+while connected. Invalid NodeIds are skipped and logged. A mismatch between
+the declared variable type and the PLC's actual
 value is rejected by normal reading validation, so the reading does not update
 rule state. OPC UA NodeIds can be entered or edited in the asset's Variables
 dialog; restart the backend after changing `.env` mappings or bypass settings.
+On startup, the database initializer adds the nullable `signal_role` column to
+existing installations; assign purposes to existing Boolean variables before
+creating new cycle or runtime rules.
 
-This mode does not assign declared variables an implicit machine-state role:
-only explicit `cycle_signal` and `running_signal` mappings drive legacy
-machine-level state. Rule counters and runtime remain isolated by rule and
-asset. The variable model requires every variable to belong to one asset, so
-the mode removes the mapping prerequisite but does not support asset-free
-variables. No database migration is required; the mode uses existing asset,
-variable, and rule-counter tables.
+Explicit `OPCUA_MACHINE_MAPPINGS` roles take precedence over the variable
+purpose. Rule counters and runtime remain isolated by rule and asset. The
+variable model requires every variable to belong to one asset, so the mode
+removes the mapping prerequisite but does not support asset-free variables.
 
 `GET /api/v1/plc/status` (read-only) returns connection state, requested and
 negotiated publishing interval, configured mappings (with validity and current
@@ -306,15 +309,19 @@ owner). Do not force-take a lease from a live owner.
 - **Configuration / Settings:** rules, collections, documents, import, profile,
   SMTP, usage, and backup/restore.
 
-On an asset's **Current status** page, **Add rule** opens the monitoring-rule
-flow (Motor Rotation, Running Time, or Boolean Count Threshold). These forms
-are scoped to the selected asset and submit to the existing monitoring-rule
-API. Motor Rotation uses the asset's configured Boolean cycle signal.
-Running Time uses its configured Boolean running signal and accepts custom
-warning, higher-warning, and alert thresholds in hours. The thresholds must be
-positive and strictly increasing. The maintenance panel has its own actions
-for creating and managing maintenance work and schedules; maintenance
-scheduling choices are separate from monitoring rules.
+On an asset's **Current status** page, **Add rule -> Create a Rule** offers
+three asset-scoped monitoring rules. **Interval-based** accumulates runtime
+while the selected Boolean running signal is ON and applies warning,
+higher-warning, and alert thresholds in hours. **Usage-based** counts complete
+OFF-to-ON transitions on the selected Boolean cycle signal and applies cycle
+count thresholds. **Time-based** waits until the configured activation date and
+time, then accumulates runtime only while its selected Boolean running signal
+is ON and applies the configured runtime thresholds. It continues monitoring
+until manually deactivated. Runtime thresholds must be positive and strictly
+increasing; cycle thresholds must be positive whole numbers in increasing
+order. These forms use the existing monitoring-rule API.
+Maintenance work and recurring maintenance schedules remain available through
+the maintenance panel as separate workflows.
 
 The asset page also provides guarded asset deletion and variable management.
 A variable cannot be deleted while referenced by readings, rules, alerts, or
@@ -343,8 +350,8 @@ configured as the asset's `cycle_signal`; otherwise creation is rejected. In the
 UI, open an asset, choose **Add rule**, select **Motor Rotation** or
 **Boolean Count Threshold**, and pick the configured cycle signal. With
 mapping bypass disabled, an empty dropdown means the asset has no cycle signal
-in `OPCUA_MACHINE_MAPPINGS`. When bypass is enabled, active declared Boolean
-variables on that asset are also offered as cycle signals.
+in `OPCUA_MACHINE_MAPPINGS`. When bypass is enabled, only active declared
+Boolean variables with the **Cycle signal** purpose are offered.
 Enabled rules are evaluated on each accepted cycle increment. Each rule has
 its own counter and initial signal state: repeated `true` readings do not
 count, and a newly created rule begins at zero even if another rule uses the
@@ -355,8 +362,9 @@ same variable or was previously archived or deleted.
 Rule type `runtime_duration` uses the asset's configured Boolean
 `running_signal`, not a momentary cycle pulse. Configure positive warning,
 higher-warning, and alert thresholds in increasing order (for example 8, 9,
-and 10 hours). With mapping bypass enabled, a declared Boolean variable on the
-asset can be selected instead of a configured `running_signal`. The backend
+and 10 hours). With mapping bypass enabled, a declared Boolean variable with
+the **Machine running state** purpose can be selected instead of a configured
+`running_signal`. The backend
 persists accumulated seconds per rule and asset,
 computes elapsed time from timestamps, pauses while the signal is false or the
 rule is disabled, and periodically re-reads the signal while connected. After

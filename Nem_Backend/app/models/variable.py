@@ -29,6 +29,7 @@ class Variable(Base):
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     key: Mapped[str] = mapped_column(String(100), nullable=False)
     data_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    signal_role: Mapped[str | None] = mapped_column(String(20))
     unit: Mapped[str | None] = mapped_column(String(50))
     description: Mapped[str | None] = mapped_column(Text)
 

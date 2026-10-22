@@ -125,6 +125,18 @@ function formatTimeUntilDue(seconds) {
   return `${days ? `${days}d ` : ""}${hours ? `${hours}h ` : ""}${minutes}m ${secondsLeft}s`;
 }
 
+function formatTimeUntilStart(milliseconds) {
+  if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "Starting now";
+  let remaining = Math.ceil(milliseconds / 1000);
+  const days = Math.floor(remaining / 86400);
+  remaining %= 86400;
+  const hours = Math.floor(remaining / 3600);
+  remaining %= 3600;
+  const minutes = Math.floor(remaining / 60);
+  const seconds = remaining % 60;
+  return `${days}d ${hours}h ${minutes}m ${seconds}s`;
+}
+
 const ruleFields = (
   variables,
   cycleVariableIds,
@@ -154,7 +166,7 @@ const ruleFields = (
       ["runtime_duration", "Running time"],
     ],
     hint: mappingBypassEnabled
-      ? "Select a declared Boolean variable owned by this asset."
+      ? "Choose a Boolean variable marked for the signal's actual purpose."
       : "Cycle counts come from this asset's configured PLC cycle signal.",
   },
   {
@@ -183,10 +195,10 @@ const ruleFields = (
       .map((v) => [v.id, `${v.name} (#${v.id})`]),
     hint: cycleVariableIds.length
       ? mappingBypassEnabled
-        ? "Only declared Boolean variables on this asset are available."
+        ? "Only variables marked as Cycle signal are available."
         : "Only Boolean variables configured as this asset's OPC UA cycle signal are available."
       : mappingBypassEnabled
-        ? "No declared Boolean OPC UA variables are available for this asset."
+        ? "Edit a Boolean variable in the asset's Variables panel and set its purpose to Cycle signal."
         : "No OPC UA cycle signal is configured for this asset. Configure it in backend OPCUA_MACHINE_MAPPINGS first.",
   },
   {
@@ -202,7 +214,9 @@ const ruleFields = (
       )
       .map((variable) => [variable.id, variable.name]),
     hint: mappingBypassEnabled
-      ? "Select a declared Boolean variable owned by this asset that is true while the machine runs."
+      ? runtimeVariableIds.length
+        ? "Only variables marked as Machine running state are available."
+        : "Edit a Boolean variable in the asset's Variables panel and set its purpose to Machine running state."
       : "Select a mapped Boolean OPC UA variable that is true while the machine runs.",
   },
   {
@@ -324,6 +338,17 @@ const VARIABLE_FIELDS = [
       ["boolean", "On / off"],
       ["string", "Text"],
     ],
+  },
+  {
+    key: "signal_role",
+    label: "Boolean purpose",
+    type: "select",
+    showWhen: { key: "data_type", equals: "boolean" },
+    options: [
+      ["running", "Machine running state (ON while running)"],
+      ["cycle", "Cycle signal (OFF-to-ON means one cycle)"],
+    ],
+    hint: "Used when OPC UA mapping bypass is enabled. Choose the signal's actual meaning.",
   },
   {
     key: "unit",
@@ -463,39 +488,26 @@ export default function AssetDetail() {
           : [];
         const bypassEnabled = plc.value?.mapping_bypass_enabled === true;
         setMappingBypassEnabled(bypassEnabled);
-        const activeCycleMapping = mappings.find(
-          (mapping) =>
-            mapping.asset_id === assetId &&
-            mapping.role === "cycle_signal" &&
-            mapping.mapping_valid
-        );
         setCycleVariableIds(
-          [
-            ...(activeCycleMapping ? [activeCycleMapping.variable_id] : []),
-            ...(bypassEnabled
-              ? mappings
-                  .filter(
-                    (mapping) =>
-                      mapping.asset_id === assetId &&
-                      mapping.mapping_valid &&
-                      mapping.role === "declared_variable" &&
-                      mapping.data_type === "boolean"
-                  )
-                  .map((mapping) => mapping.variable_id)
-              : []),
-          ]
+          mappings
+            .filter(
+              (mapping) =>
+                Number(mapping.asset_id) === assetId &&
+                mapping.role === "cycle_signal" &&
+                mapping.mapping_valid
+            )
+            .map((mapping) => Number(mapping.variable_id))
         );
         setRuntimeVariableIds(
           mappings
             .filter(
               (mapping) =>
-                mapping.asset_id === assetId &&
+                Number(mapping.asset_id) === assetId &&
                 mapping.mapping_valid &&
                 mapping.data_type === "boolean" &&
-                (mapping.role === "running_signal" ||
-                  (bypassEnabled && mapping.role === "declared_variable"))
+                mapping.role === "running_signal"
             )
-            .map((mapping) => mapping.variable_id)
+            .map((mapping) => Number(mapping.variable_id))
         );
       }
     } catch (error) {
@@ -1007,6 +1019,10 @@ const filteredLogs = [...logs].sort((a, b) => {
       name: values.name.trim(),
       key: values.key.trim(),
       data_type: values.data_type,
+      signal_role:
+        values.data_type === "boolean" && values.signal_role
+          ? values.signal_role
+          : null,
       unit: values.unit?.trim() || null,
       opcua_node_id: values.opcua_node_id?.trim() || null,
     });
@@ -1022,6 +1038,10 @@ const filteredLogs = [...logs].sort((a, b) => {
       name: values.name.trim(),
       key: values.key.trim(),
       data_type: values.data_type,
+      signal_role:
+        values.data_type === "boolean" && values.signal_role
+          ? values.signal_role
+          : null,
       unit: values.unit?.trim() || null,
       opcua_node_id: values.opcua_node_id?.trim() || null,
     });
@@ -1440,6 +1460,16 @@ const filteredLogs = [...logs].sort((a, b) => {
                     ? formatDuration(nextThreshold.value)
                     : nextThreshold.value.toLocaleString()
                   : null;
+                const scheduledActivationAt =
+                  rule.rule_type === "runtime_duration"
+                    ? Date.parse(rule.parameters?.activation_at)
+                    : Number.NaN;
+                const scheduledStartCountdown =
+                  lifecycleStatus(rule) === "in_progress" &&
+                  Number.isFinite(scheduledActivationAt) &&
+                  scheduledActivationAt > clockNow
+                    ? scheduledActivationAt - clockNow
+                    : null;
                 const runtimeCountdown =
                   rule.rule_type === "runtime_duration" &&
                   lifecycleStatus(rule) === "in_progress" &&
@@ -1476,8 +1506,10 @@ const filteredLogs = [...logs].sort((a, b) => {
                         <span>
                           {list === "not_activated"
                             ? "Last evaluated"
-                            : runtimeCountdown
-                              ? "Due in"
+                            : scheduledStartCountdown !== null
+                              ? "Start in"
+                              : runtimeCountdown
+                                ? "Due in"
                               : rule.rule_type === "boolean_count_threshold"
                                 ? "Current / Target"
                               : rule.rule_type === "runtime_duration" &&
@@ -1491,6 +1523,8 @@ const filteredLogs = [...logs].sort((a, b) => {
                             ? rule.last_evaluated_at
                               ? formatTime(rule.last_evaluated_at)
                               : "Not evaluated yet"
+                            : scheduledStartCountdown !== null
+                              ? formatTimeUntilStart(scheduledStartCountdown)
                             : runtimeCountdown
                               ? formatTimeUntilDue(
                                   runtimeCountdown.value - numericCurrentValue
@@ -2192,6 +2226,7 @@ const filteredLogs = [...logs].sort((a, b) => {
                   <th>Variable</th>
                   <th>Key</th>
                   <th>Type</th>
+                  <th>Boolean purpose</th>
                   <th>Unit</th>
                   <th>OPC UA NodeId</th>
                   <th>Status</th>
@@ -2205,6 +2240,13 @@ const filteredLogs = [...logs].sort((a, b) => {
                     <td>{variable.name}</td>
                     <td>{variable.key}</td>
                     <td>{variable.data_type}</td>
+                    <td>
+                      {variable.signal_role === "running"
+                        ? "Machine running"
+                        : variable.signal_role === "cycle"
+                          ? "Cycle signal"
+                          : "—"}
+                    </td>
                     <td>{variable.unit || "—"}</td>
                     <td
                       title={variable.opcua_node_id || undefined}

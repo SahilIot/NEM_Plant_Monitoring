@@ -26,17 +26,17 @@ export const LEGACY_RULE_CHOICES = [
   {
     kind: "interval",
     label: "Interval-based",
-    description: "Create a recurring maintenance schedule with due dates.",
+    description: "Track running time while a Boolean signal is ON and alert at runtime thresholds.",
   },
   {
     kind: "usage",
     label: "Usage-based",
-    description: "Alert when a numeric usage metric reaches a threshold.",
+    description: "Count complete cycles from a Boolean OFF/ON signal and alert at cycle thresholds.",
   },
   {
     kind: "time",
     label: "Time-based",
-    description: "Schedule maintenance for a start and end date/time.",
+    description: "Start tracking Boolean running time at a scheduled date and time.",
   },
 ];
 
@@ -100,7 +100,7 @@ export function buildAssetMonitoringRule(
     const variableId = Number(values.runtime_variable_id);
     if (!runtimeVariableIds.includes(variableId) ||
         !variableIsActiveForAsset(variableId, ["boolean"])) {
-      throw new Error("Select this asset's configured Boolean running signal.");
+      throw new Error("Select an active Boolean running signal for this asset.");
     }
     if (
       ![warning1, warning2, alert].every(
@@ -118,6 +118,13 @@ export function buildAssetMonitoringRule(
       warning_thresholds_seconds: [warning1 * 3600, warning2 * 3600],
       alert_threshold_seconds: alert * 3600,
     };
+    if (values.activation_at) {
+      const activationAt = new Date(values.activation_at);
+      if (Number.isNaN(activationAt.getTime())) {
+        throw new Error("Select a valid scheduled activation date and time.");
+      }
+      rule.parameters.activation_at = activationAt.toISOString();
+    }
     rule.stale_after_seconds = 300;
     return rule;
   }
@@ -129,7 +136,7 @@ export function buildAssetMonitoringRule(
     const variableId = Number(values.cycle_variable_id);
     if (!cycleVariableIds.includes(variableId) ||
         !variableIsActiveForAsset(variableId, ["boolean"])) {
-      throw new Error("Select this asset's configured Boolean cycle signal.");
+      throw new Error("Select an active Boolean cycle signal for this asset.");
     }
     if (
       ![warning1, warning2, alert].every(

@@ -191,32 +191,24 @@ export default function CreateMonitoringRulePage() {
           ? plcResult.mappings
           : [];
 
-        const bypassEnabled = plcResult?.mapping_bypass_enabled === true;
         const booleanMappings = mappings.filter(
           (mapping) =>
             Number(mapping.asset_id) === assetId &&
             mapping.mapping_valid &&
             mapping.data_type === "boolean"
         );
-        const isDeclared = (mapping) =>
-          bypassEnabled && mapping.role === "declared_variable";
-
-        const cycleMapping = booleanMappings.find(
+        const cycleMappings = booleanMappings.filter(
           (mapping) => mapping.role === "cycle_signal"
         );
-
         const runningMappings = booleanMappings.filter(
-          (mapping) => mapping.role === "running_signal" || isDeclared(mapping)
+          (mapping) => mapping.role === "running_signal"
         );
 
         setAssetName(assetResult?.name || `Asset ${assetId}`);
         setVariables(activeVariables);
-        setCycleVariableIds([
-          ...(cycleMapping ? [cycleMapping.variable_id] : []),
-          ...booleanMappings.filter(isDeclared).map((m) => m.variable_id),
-        ]);
+        setCycleVariableIds(cycleMappings.map((mapping) => Number(mapping.variable_id)));
         setRuntimeVariableIds(
-          runningMappings.map((mapping) => mapping.variable_id)
+          runningMappings.map((mapping) => Number(mapping.variable_id))
         );
 
         setValues({
@@ -251,13 +243,14 @@ export default function CreateMonitoringRulePage() {
       .map((v) => [v.id, `${v.name}${v.unit ? ` (${v.unit})` : ""}`]);
 
     const cycleVariables = variables
-      .filter((v) => cycleVariableIds.includes(v.id))
+      .filter((v) => cycleVariableIds.includes(Number(v.id)))
       .map((v) => [v.id, `${v.name} (#${v.id})`]);
 
     const runningVariables = variables
       .filter(
         (v) =>
-          v.data_type === "boolean" && runtimeVariableIds.includes(v.id)
+          v.data_type === "boolean" &&
+          runtimeVariableIds.includes(Number(v.id))
       )
       .map((v) => [v.id, v.name]);
 
@@ -276,11 +269,23 @@ export default function CreateMonitoringRulePage() {
       }
 
       if (field.key === "cycle_variable_id") {
-        return { ...field, options: cycleVariables };
+        return {
+          ...field,
+          options: cycleVariables,
+          hint: cycleVariables.length
+            ? field.hint
+            : "Set a Boolean variable's purpose to Cycle signal in the asset's Variables panel.",
+        };
       }
 
       if (field.key === "runtime_variable_id") {
-        return { ...field, options: runningVariables };
+        return {
+          ...field,
+          options: runningVariables,
+          hint: runningVariables.length
+            ? field.hint
+            : "Set a Boolean variable's purpose to Machine running state in the asset's Variables panel.",
+        };
       }
 
       return field;

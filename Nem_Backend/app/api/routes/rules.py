@@ -126,6 +126,7 @@ def validate_targets(
                 mapping_bypass_enabled
                 and variable is not None
                 and variable.opcua_node_id is not None
+                and variable.signal_role in {None, "running"}
             )
             if bypass_signal_is_valid:
                 try:
@@ -141,7 +142,7 @@ def validate_targets(
                     status_code=422,
                     detail=("Running-time rules must target this asset's configured "
                         "OPC UA running signal or an asset-owned declared Boolean "
-                        "variable while mapping bypass is enabled"
+                        "running signal while mapping bypass is enabled"
                     ),
                 )
         elif not isinstance(duration, int) or isinstance(duration, bool) or duration <= 0:
@@ -160,6 +161,7 @@ def validate_targets(
             mapping_bypass_enabled
             and variable is not None
             and variable.opcua_node_id is not None
+            and variable.signal_role in {None, "cycle"}
         )
         if bypass_signal_is_valid:
             try:
