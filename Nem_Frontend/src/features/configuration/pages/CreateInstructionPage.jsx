@@ -72,11 +72,12 @@ export default function CreateInstructionPage() {
     setBusy(true);
 
     try {
-      await api.post("/instructions", {
-        name: cleanName,
+      await api.post("/documents", {
+        title: cleanName,
+        kind: "Instruction",
+        description: cleanText,
         labels,
         duration_minutes: minutes,
-        text: cleanText,
       });
 
       nav("/configuration/instructions");

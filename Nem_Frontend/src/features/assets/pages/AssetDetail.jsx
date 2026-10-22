@@ -108,6 +108,18 @@ function thresholdSequence(rule) {
   return [];
 }
 
+function formatTimeUntilDue(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "Due now";
+  let remaining = Math.ceil(seconds);
+  const days = Math.floor(remaining / 86400);
+  remaining %= 86400;
+  const hours = Math.floor(remaining / 3600);
+  remaining %= 3600;
+  const minutes = Math.floor(remaining / 60);
+  const secondsLeft = remaining % 60;
+  return `${days ? `${days}d ` : ""}${hours ? `${hours}h ` : ""}${minutes}m ${secondsLeft}s`;
+}
+
 const ruleFields = (
   variables,
   cycleVariableIds,
@@ -1396,6 +1408,15 @@ const filteredLogs = [...logs]
                     ? formatDuration(nextThreshold.value)
                     : nextThreshold.value.toLocaleString()
                   : null;
+                const runtimeCountdown =
+                  rule.rule_type === "runtime_duration" &&
+                  lifecycleStatus(rule) === "in_progress" &&
+                  ["ok", "warning"].includes(rule.status) &&
+                  Number.isFinite(numericCurrentValue)
+                    ? thresholdSequence(rule).find(
+                        (threshold) => threshold.value > numericCurrentValue
+                      )
+                    : null;
 
                 return (
                   <article
@@ -1420,15 +1441,43 @@ const filteredLogs = [...logs]
 
                     <div className="rule-card-metrics">
                       <div className="rule-current-next-value">
-                        <span>Current / Next</span>
+                        <span>
+                          {list === "not_activated"
+                            ? "Last evaluated"
+                            : runtimeCountdown
+                              ? "Due in"
+                              : rule.rule_type === "boolean_count_threshold"
+                                ? "Current threshold / Targeted threshold"
+                              : rule.rule_type === "runtime_duration" &&
+                                  lifecycleStatus(rule) === "in_progress" &&
+                                  ["ok", "warning"].includes(rule.status)
+                                ? "Due"
+                                : "Current / Next"}
+                        </span>
                         <b>
-                          {displayedValue !== null && displayedValue !== undefined
-                            ? formattedCurrentValue
-                            : "—"}
-                          {" / "}
-                          {nextThreshold
-                            ? `${nextThreshold.label} at ${formattedNextThreshold}`
-                            : "—"}
+                          {list === "not_activated"
+                            ? rule.last_evaluated_at
+                              ? formatTime(rule.last_evaluated_at)
+                              : "Not evaluated yet"
+                            : runtimeCountdown
+                              ? formatTimeUntilDue(
+                                  runtimeCountdown.value - numericCurrentValue
+                                )
+                              : rule.rule_type === "runtime_duration" &&
+                                  lifecycleStatus(rule) === "in_progress" &&
+                                  ["ok", "warning"].includes(rule.status)
+                                ? "Threshold reached"
+                            : <>
+                                {displayedValue !== null && displayedValue !== undefined
+                                  ? formattedCurrentValue
+                                  : "—"}
+                                {" / "}
+                                {nextThreshold
+                                  ? rule.rule_type === "boolean_count_threshold"
+                                    ? formattedNextThreshold
+                                    : `${nextThreshold.label} at ${formattedNextThreshold}`
+                                  : "—"}
+                              </>}
                         </b>
                       </div>
                     </div>
@@ -1833,6 +1882,18 @@ const filteredLogs = [...logs]
       <div><dt>Lifecycle</dt><dd>{lifecycleLabel(viewRule)}</dd></div>
       <div><dt>Configured severity</dt><dd>{viewRule.severity}</dd></div>
       <div><dt>Current status</dt><dd>{viewRule.current_status || viewRule.status || "Not evaluated"}</dd></div>
+      <div>
+        <dt>Last evaluated</dt>
+        <dd>{viewRule.last_evaluated_at ? formatTime(viewRule.last_evaluated_at) : "Not evaluated yet"}</dd>
+      </div>
+      <div><dt>Evaluation result</dt><dd>{viewRule.evaluation_status || "unknown"}</dd></div>
+      <div>
+        <dt>Evaluation details</dt>
+        <dd>{viewRule.evaluation_message || "No evaluation details are available."}</dd>
+      </div>
+      {viewRule.evaluation_error && (
+        <div><dt>Evaluation issue</dt><dd>{viewRule.evaluation_error}</dd></div>
+      )}
       {viewRule.latest_value !== null && viewRule.latest_value !== undefined && (
         <div>
           <dt>Current value</dt>
