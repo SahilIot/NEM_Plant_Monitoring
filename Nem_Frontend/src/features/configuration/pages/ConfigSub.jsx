@@ -47,6 +47,8 @@ const CRUD = {
     cols: [
       ["title", "Title"],
       ["kind", "Type"],
+      ["labels", "Labels"],
+      ["duration_minutes", "Duration (minutes)"],
       ["description", "Description"],
       ["files", "Attachments"],
     ],
@@ -188,6 +190,12 @@ function cell(key, row, variableNames) {
 
   if (value === undefined || value === null || value === "") {
     return <span className="muted">-</span>;
+  }
+
+  if (key === "labels") {
+    return Array.isArray(value) && value.length
+      ? value.join(", ")
+      : <span className="muted">-</span>;
   }
 
   if (key === "severity") {

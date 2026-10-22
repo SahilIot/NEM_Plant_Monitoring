@@ -19,6 +19,27 @@ def initialize_database(engine: Engine) -> None:
     Base.metadata.create_all(bind=engine)
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
+    if "instruction_documents" in table_names:
+        document_columns = {
+            column["name"]
+            for column in inspector.get_columns("instruction_documents")
+        }
+        with engine.begin() as connection:
+            if "labels" not in document_columns:
+                connection.execute(
+                    text(
+                        "ALTER TABLE instruction_documents "
+                        "ADD COLUMN labels JSON NOT NULL DEFAULT '[]'"
+                    )
+                )
+            if "duration_minutes" not in document_columns:
+                connection.execute(
+                    text(
+                        "ALTER TABLE instruction_documents "
+                        "ADD COLUMN duration_minutes INTEGER"
+                    )
+                )
+
     if "variables" in table_names:
         variable_columns = {column["name"] for column in inspector.get_columns("variables")
         }

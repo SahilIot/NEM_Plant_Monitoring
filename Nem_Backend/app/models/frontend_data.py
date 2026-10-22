@@ -1,6 +1,6 @@
 #four db models these model store frontendconfig,rule collection,instruction documents,backup records
 from datetime import datetime, timezone
-from sqlalchemy import JSON, ForeignKey, String, Text
+from sqlalchemy import JSON, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 from app.db.session import UTCDateTime
@@ -28,6 +28,8 @@ class InstructionDocument(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     kind: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    labels: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 #Keeping track of backups

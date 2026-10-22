@@ -90,6 +90,8 @@ class DocumentCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     kind: str = Field(min_length=1, max_length=50)
     description: str | None = None
+    labels: list[str] = Field(default_factory=list, max_length=10)
+    duration_minutes: int | None = Field(default=None, ge=1)
 
     @field_validator("title", "kind")
     @classmethod
@@ -161,6 +163,9 @@ def _rule_row(session: Session, rule: MonitoringRule) -> dict[str, Any]:
             if rule.lifecycle_status == "completed"
             else state.status
         ),
+        "evaluation_status": state.status,
+        "evaluation_message": state.message,
+        "evaluation_error": state.error_message,
         "latest_value": state.latest_value,
         "last_evaluated_at": state.last_evaluated_at,
         "rule_type": rule.rule_type,
@@ -1337,6 +1342,7 @@ def list_documents(session: Session = Depends(get_db)) -> list[dict[str, Any]]:
         ).all()
         result.append({
             "id": row.id, "title": row.title, "kind": row.kind, "description": row.description,
+            "labels": row.labels or [], "duration_minutes": row.duration_minutes,
             "files": [{"id": f.id, "name": f.original_name, "size_bytes": f.size_bytes,
                        "content_type": f.content_type,
                        "download_url": f"/api/v1/documents/{row.id}/files/{f.id}/download"}
@@ -1348,13 +1354,18 @@ def list_documents(session: Session = Depends(get_db)) -> list[dict[str, Any]]:
 @router.post("/documents", status_code=201)
 def create_document(payload: DocumentCreate, session: Session = Depends(get_db)) -> dict[str, Any]:
     document = InstructionDocument(
-        title=payload.title.strip(), kind=payload.kind.strip(), description=payload.description
+        title=payload.title.strip(),
+        kind=payload.kind.strip(),
+        description=payload.description,
+        labels=[label.strip() for label in payload.labels if label.strip()],
+        duration_minutes=payload.duration_minutes,
     )
     session.add(document)
     session.commit()
     session.refresh(document)
     return {"id": document.id, "title": document.title, "kind": document.kind,
-            "description": document.description}
+            "description": document.description, "labels": document.labels,
+            "duration_minutes": document.duration_minutes}
 
 # Create a document and store multiple attachments in the backend uploads directory.
 @router.post("/documents/with-files", status_code=201)
