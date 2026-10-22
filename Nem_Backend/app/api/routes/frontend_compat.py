@@ -150,11 +150,17 @@ def _rule_row(session: Session, rule: MonitoringRule) -> dict[str, Any]:
         "created_at": rule.created_at,
         "updated_at": rule.updated_at,
         "status": (
-            {"normal": "ok"}.get(state.status, state.status)
+            "evaluated"
+            if rule.lifecycle_status == "completed"
+            else {"normal": "ok"}.get(state.status, state.status)
             if rule.is_enabled
             else "unknown"
         ),
-        "current_status": state.status,
+        "current_status": (
+            "evaluated"
+            if rule.lifecycle_status == "completed"
+            else state.status
+        ),
         "latest_value": state.latest_value,
         "last_evaluated_at": state.last_evaluated_at,
         "rule_type": rule.rule_type,
