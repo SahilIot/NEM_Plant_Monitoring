@@ -12,6 +12,65 @@ import {
   CircleAlert,
 } from "lucide-react";
 
+function formatRuleDuration(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  if (value % 86400 === 0) return `${value / 86400}d`;
+  if (value % 3600 === 0) return `${value / 3600}h`;
+  if (value % 60 === 0) return `${value / 60}m`;
+  return `${value}s`;
+}
+
+function ruleConditionSummary(rule) {
+  const parameters = rule.parameters || {};
+  if (rule.rule_type === "runtime_duration") {
+    const warningThresholds = parameters.warning_thresholds_seconds || [];
+    const alertThreshold = parameters.alert_threshold_seconds;
+    if (warningThresholds.length === 2 && alertThreshold != null) {
+      return `Running time · warning at ${formatRuleDuration(warningThresholds[0])} / ${formatRuleDuration(warningThresholds[1])}, alert at ${formatRuleDuration(alertThreshold)}`;
+    }
+  }
+  if (rule.rule_type === "boolean_count_threshold") {
+    const warningThresholds = parameters.warning_thresholds || [];
+    if (warningThresholds.length === 2 && parameters.alert_threshold != null) {
+      return `Cycle count · warning at ${warningThresholds[0]} / ${warningThresholds[1]}, alert at ${parameters.alert_threshold}`;
+    }
+  }
+  if (
+    rule.rule_type === "runtime_duration" &&
+    Array.isArray(parameters.warning_thresholds_seconds) &&
+    parameters.warning_thresholds_seconds.length === 2 &&
+    parameters.alert_threshold_seconds != null
+  ) {
+    return `Running time · warnings at ${formatRuleDuration(parameters.warning_thresholds_seconds[0])} / ${formatRuleDuration(parameters.warning_thresholds_seconds[1])} · alert at ${formatRuleDuration(parameters.alert_threshold_seconds)}`;
+  }
+  if (
+    rule.rule_type === "parameter_threshold" &&
+    typeof parameters.expected_value === "boolean"
+  ) {
+    return `Boolean signal ${rule.operator === "!=" || rule.operator === "ne" ? "is not" : "is"} ${parameters.expected_value ? "ON" : "OFF"}`;
+  }
+  if (rule.rule_type === "duration") {
+    if (parameters.condition === "interval_elapsed") {
+      return `Every ${formatRuleDuration(parameters.interval_seconds)}`;
+    }
+    const duration = formatRuleDuration(parameters.duration_seconds);
+    if (parameters.condition === "threshold") {
+      if ((rule.required_variable_types || []).includes("boolean")) {
+        return `Invalid definition: Boolean signals cannot be compared with ${parameters.operator || ""} ${parameters.threshold}; the signal should stay ON for ${duration || "the configured duration"}`;
+      }
+      return `Value ${parameters.operator || ""} ${parameters.threshold} for ${duration || "configured duration"}`;
+    }
+    if (typeof parameters.expected_value === "boolean") {
+      return `Signal ${parameters.expected_value ? "ON" : "OFF"} continuously for ${duration || "configured duration"}`;
+    }
+  }
+  if (rule.rule_type === "parameter_threshold" && rule.threshold != null) {
+    return `Value ${rule.operator || ""} ${rule.threshold}`.trim();
+  }
+  return rule.description || "Asset-level monitoring rule";
+}
+
 export default function PredefinedRulesModal({ assetId, onClose, onAssigned }) {
   const navigate = useNavigate();
   const [rules, setRules] = useState([]);
@@ -191,6 +250,9 @@ export default function PredefinedRulesModal({ assetId, onClose, onAssigned }) {
                   <small>
                     {rule.description || (rule.rule_type || "Monitoring rule").replaceAll("_", " ")}
                     {rule.mapped_variable_name ? ` · ${rule.mapped_variable_name}` : ""}
+                  </small>
+                  <small className="prm-condition-summary">
+                    {ruleConditionSummary(rule)}
                   </small>
                   {unavailable && <small className="prm-unavailable">{rule.unavailable_reason}</small>}
                 </span>

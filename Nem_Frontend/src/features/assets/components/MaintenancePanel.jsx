@@ -540,14 +540,6 @@ const openScheduleEdit = (schedule) => {
           </div>
           <div className="maintenance-heading-actions">
             <button
-              type="button"
-              className="btn-outline"
-              onClick={() => setLegacyRuleOptionsOpen(true)}
-              disabled={busy}
-            >
-              Other rule workflows
-            </button>
-            <button
   type="button"
   className="btn-primary"
   onClick={openMaintenanceLogbook}

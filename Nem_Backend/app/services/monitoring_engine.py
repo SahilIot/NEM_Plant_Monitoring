@@ -117,6 +117,11 @@ def _condition_holds(rule: MonitoringRule, value: Any) -> bool:
     if rule.rule_type == "parameter_threshold":
         comparison = rule.operator
         threshold: Any = rule.threshold
+        expected_value = (rule.parameters or {}).get("expected_value")
+        if isinstance(expected_value, bool):
+            if comparison not in {"==", "!=", "eq", "ne"} or not isinstance(value, bool):
+                raise ValueError("Boolean parameter threshold has an invalid comparison")
+            return value == expected_value if comparison in {"==", "eq"} else value != expected_value
     else:
         parameters = rule.parameters or {}
         condition = parameters.get("condition", "equals")
@@ -1212,9 +1217,16 @@ def evaluate_rule(
         threshold = None
     else:
         severity = rule.severity
-        message = (f"Rule '{rule.name}' condition met: value {reading.value} "
-            f"{rule.operator} {rule.threshold}."
-        )
+        expected_value = (rule.parameters or {}).get("expected_value")
+        if rule.rule_type == "parameter_threshold" and isinstance(expected_value, bool):
+            message = (
+                f"Boolean signal is {'ON' if reading.value else 'OFF'} "
+                f"({rule.operator} {'ON' if expected_value else 'OFF'})."
+            )
+        else:
+            message = (f"Rule '{rule.name}' condition met: value {reading.value} "
+                f"{rule.operator} {rule.threshold}."
+            )
         threshold = rule.threshold
 
     return _transition_state(

@@ -99,17 +99,19 @@ export function CreateModal({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const matchesConditions = (conditions) =>
+  const matchesConditions = (conditions, currentValues = values) =>
     !conditions ||
-    (Array.isArray(conditions)
-      ? conditions.every(
-          (condition) => values[condition.key] === condition.equals
-        )
-      : conditions.anyOf
-        ? conditions.anyOf.some(
-            (condition) => values[condition.key] === condition.equals
+    (typeof conditions === "function"
+      ? conditions(currentValues)
+      : Array.isArray(conditions)
+        ? conditions.every(
+            (condition) => matchesConditions(condition, currentValues)
           )
-        : values[conditions.key] === conditions.equals);
+        : conditions.anyOf
+          ? conditions.anyOf.some(
+              (condition) => matchesConditions(condition, currentValues)
+            )
+          : currentValues[conditions.key] === conditions.equals);
 
   const isVisible = (field) => matchesConditions(field.showWhen);
 
@@ -118,6 +120,11 @@ export function CreateModal({
       field.required ||
       (field.requiredWhen && matchesConditions(field.requiredWhen))
     );
+
+  const optionsFor = (field, currentValues = values) =>
+    typeof field.options === "function"
+      ? field.options(currentValues)
+      : field.options || [];
 
   useEffect(() => {
     setValues((current) => {
@@ -137,8 +144,7 @@ export function CreateModal({
           if (
             field.type === "select" &&
             value !== "" &&
-            field.options &&
-            !field.options.some(
+            !optionsFor(field, current).some(
               ([option]) => String(option) === String(value)
             )
           ) {
@@ -284,7 +290,7 @@ export function CreateModal({
                     `Select ${field.label.toLowerCase()}`}
                 </option>
 
-                {(field.options || []).map(([option, label]) => (
+                {optionsFor(field).map(([option, label]) => (
                   <option key={String(option)} value={String(option)}>
                     {label}
                   </option>

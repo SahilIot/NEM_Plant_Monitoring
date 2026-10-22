@@ -83,10 +83,27 @@ def validate_targets(
                 status_code=422, detail="Target variable does not belong to target asset"
             )
     if rule_type == "parameter_threshold":
-        if variable is None or variable.data_type not in {"number", "integer"}:
-            raise HTTPException(status_code=422,detail="Parameter threshold rules require a numeric variable",)
-        if operator is None or threshold is None:
-            raise HTTPException(status_code=422, detail="Parameter threshold rules require an operator and threshold",)
+        expected_value = (parameters or {}).get("expected_value")
+        if isinstance(expected_value, bool):
+            if (
+                variable is None
+                or not variable.is_active
+                or variable.data_type != "boolean"
+                or operator not in {"==", "!=", "eq", "ne"}
+                or threshold is not None
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Boolean parameter thresholds require an active Boolean "
+                        "variable, an equality operator, and a Boolean expected_value"
+                    ),
+                )
+        else:
+            if variable is None or variable.data_type not in {"number", "integer"}:
+                raise HTTPException(status_code=422,detail="Parameter threshold rules require a numeric variable",)
+            if operator is None or threshold is None:
+                raise HTTPException(status_code=422, detail="Parameter threshold rules require an operator and threshold",)
     if rule_type in {"runtime_duration", "duration"}:
         interval_elapsed = (
             rule_type == "duration"
@@ -145,8 +162,59 @@ def validate_targets(
                         "running signal while mapping bypass is enabled"
                     ),
                 )
-        elif not isinstance(duration, int) or isinstance(duration, bool) or duration <= 0:
-            raise HTTPException(status_code=422,detail="Runtime rules require a positive parameters.duration_seconds",)
+        else:
+            if (
+                not isinstance(duration, int)
+                or isinstance(duration, bool)
+                or duration <= 0
+            ):
+                raise HTTPException(status_code=422,detail="Runtime rules require a positive parameters.duration_seconds",)
+            if rule_type == "duration":
+                condition = (parameters or {}).get("condition", "equals")
+                expected = (parameters or {}).get("expected_value")
+                if condition == "threshold":
+                    if variable is None or variable.data_type not in {"number", "integer"}:
+                        raise HTTPException(
+                            status_code=422,
+                            detail="Threshold duration rules require a numeric variable.",
+                        )
+                elif isinstance(expected, bool):
+                    if (
+                        asset is None
+                        or not asset.is_active
+                        or variable is None
+                        or not variable.is_active
+                        or variable.data_type != "boolean"
+                    ):
+                        raise HTTPException(
+                            status_code=422,
+                            detail="Boolean duration rules require an active Boolean variable on an active asset.",
+                        )
+                    bypass_signal_is_valid = (
+                        mapping_bypass_enabled
+                        and variable.opcua_node_id is not None
+                        and variable.signal_role == "running"
+                    )
+                    if bypass_signal_is_valid:
+                        try:
+                            ua.NodeId.from_string(variable.opcua_node_id)
+                        except (TypeError, ValueError, UaStringParsingError) as error:
+                            raise HTTPException(
+                                status_code=422,
+                                detail="Boolean duration rules require a valid OPC UA NodeId.",
+                            ) from error
+                    if (
+                        runtime_signal_mapping != (target_asset_id, variable_id)
+                        and not bypass_signal_is_valid
+                    ):
+                        raise HTTPException(
+                            status_code=422,
+                            detail=(
+                                "Boolean duration rules must target this asset's "
+                                "configured running signal or a declared variable "
+                                "marked as Machine running state."
+                            ),
+                        )
     if rule_type == "boolean_count_threshold":
         if (
             asset is None

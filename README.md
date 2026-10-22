@@ -357,6 +357,14 @@ its own counter and initial signal state: repeated `true` readings do not
 count, and a newly created rule begins at zero even if another rule uses the
 same variable or was previously archived or deleted.
 
+Predefined Boolean duration rules represent a state held continuously for a
+configured duration, such as a running signal staying ON for five minutes.
+They must use the configured running signal or, in mapping-bypass mode, a
+Boolean variable marked **Machine running state**. Numeric threshold-duration
+rules require numeric variables; they cannot be assigned to a Boolean signal.
+The asset rule card shows the live Boolean state and elapsed hold time against
+the configured duration.
+
 ### Running-time threshold rules
 
 Rule type `runtime_duration` uses the asset's configured Boolean
@@ -373,6 +381,20 @@ Missing, stale, disconnected, bad-quality, or unknown signals do not cause
 additional run time to be inferred. The rule status advances through normal,
 warning, higher-warning, and alert states as thresholds are crossed; its active
 alert is updated rather than recreated at every evaluation.
+
+### Reusable monitoring rules
+
+The Monitoring Rule Library's **Interval based** type uses the same
+`runtime_duration` behavior: select an asset's Boolean machine-running signal
+and configure warning, higher-warning, and alert thresholds in hours. Automatic
+assignment offers only compatible running signals. **Parameter threshold**
+rules can target numeric/integer values with numeric comparisons. Boolean
+templates can either check the current ON/OFF state or accumulate running time
+while ON; the latter uses the same three thresholds and countdown behavior as
+an asset-created running-time rule. Saving a template's definition updates
+existing rules assigned from that template, while preserving their activation
+state. Existing variable-free elapsed-interval templates retain their original
+behavior.
 
 ### Rule lifecycle
 

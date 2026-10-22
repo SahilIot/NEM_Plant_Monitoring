@@ -173,6 +173,7 @@ def _rule_row(session: Session, rule: MonitoringRule) -> dict[str, Any]:
         "evaluation_error": state.error_message,
         "latest_value": state.latest_value,
         "last_evaluated_at": state.last_evaluated_at,
+        "condition_started_at": state.condition_started_at,
         "rule_type": rule.rule_type,
         "source_template_id": rule.source_template_id,
         "variable_id": rule.variable_id,
@@ -367,19 +368,61 @@ def _same_rule_definition(rule: MonitoringRule, definition: dict[str, Any]) -> b
     )
 
 #Helper function for assigning templates -> finds variables on a target asset that are compatible with a template
-def _template_variables(session: Session, template: MonitoringRuleTemplate, asset_id: int
+def _template_variables(
+    session: Session,
+    template: MonitoringRuleTemplate,
+    asset_id: int,
+    *,
+    mapping_bypass_enabled: bool = False,
+    request: Request | None = None,
 ) -> list[Variable]:
         if not template.required_variable_types:
             return []
-        return session.scalars(
-            select(Variable)
-            .where(
+        query = select(Variable)
+        query = query.where(
                 Variable.asset_id == asset_id,
                 Variable.is_active.is_(True),
                 Variable.data_type.in_(template.required_variable_types),
             )
-            .order_by(Variable.name, Variable.id)
+        candidates = session.scalars(
+            query.order_by(Variable.name, Variable.id)
         ).all()
+        if not mapping_bypass_enabled:
+            return candidates
+        required_role = (
+            "running"
+            if template.rule_type == "runtime_duration"
+            or (
+                template.rule_type == "duration"
+                and isinstance(
+                    (template.parameters or {}).get("expected_value"), bool
+                )
+            )
+            else "cycle"
+            if template.rule_type == "boolean_count_threshold"
+            else None
+        )
+        if required_role is None:
+            return candidates
+        configured_variable_ids = set()
+        if request is not None:
+            mapping_function = (
+                configured_runtime_signal_mapping
+                if required_role == "running"
+                else configured_cycle_signal_mapping
+            )
+            configured_variable_ids = {
+                variable.id
+                for variable in candidates
+                if mapping_function(request, variable.id)
+                == (asset_id, variable.id)
+            }
+        return [
+            variable
+            for variable in candidates
+            if variable.signal_role == required_role
+            or variable.id in configured_variable_ids
+        ]
 
 #Function decides which compatible variable to use
 def _mapped_template_variable(
@@ -433,10 +476,18 @@ def _template_rule_definition(
         asset_id: int,
         request: Request,
         requested_variable_id: int | None,
+        *,
+        allow_disabled: bool = False,
 ) -> dict[str, Any]:
-        if not template.is_enabled:
+        if not template.is_enabled and not allow_disabled:
             raise HTTPException(status_code=422, detail=f"Rule template '{template.name}' is disabled")
-        candidates = _template_variables(session, template, asset_id)
+        candidates = _template_variables(
+            session,
+            template,
+            asset_id,
+            mapping_bypass_enabled=is_mapping_bypass_enabled(request),
+            request=request,
+        )
         variable = _mapped_template_variable(template, candidates, requested_variable_id)
         definition = {
             "name": template.name,
@@ -523,13 +574,58 @@ def get_rule_template(
 def update_rule_template(
         template_id: int,
         payload: RuleTemplateCreate,
+        request: Request,
         session: Session = Depends(get_db),
 ) -> MonitoringRuleTemplate:
         template = session.get(MonitoringRuleTemplate, template_id)
         if template is None:
             raise HTTPException(status_code=404, detail="Rule template was not found")
-        for field, value in payload.model_dump().items():
+        values = payload.model_dump()
+        semantic_fields = (
+            "rule_type",
+            "required_variable_types",
+            "variable_key",
+            "operator",
+            "threshold",
+            "parameters",
+            "severity",
+            "evaluation_interval_seconds",
+            "stale_after_seconds",
+        )
+        definition_changed = any(
+            getattr(template, field) != values[field]
+            for field in semantic_fields
+        )
+        for field, value in values.items():
             setattr(template, field, value)
+        if definition_changed:
+            assigned_rules = session.scalars(
+                select(MonitoringRule).where(
+                    MonitoringRule.source_template_id == template.id,
+                    MonitoringRule.is_archived.is_(False),
+                )
+            ).all()
+            for rule in assigned_rules:
+                definition = _template_rule_definition(
+                    session,
+                    template,
+                    rule.target_asset_id,
+                    request,
+                    rule.variable_id,
+                    allow_disabled=True,
+                )
+                for field in (
+                    "name",
+                    "description",
+                    "rule_type",
+                    "operator",
+                    "threshold",
+                    "parameters",
+                    "severity",
+                    "evaluation_interval_seconds",
+                    "stale_after_seconds",
+                ):
+                    setattr(rule, field, definition[field])
         session.commit()
         session.refresh(template)
         return template
@@ -634,7 +730,13 @@ def frontend_predefined_rules(
     result = []
     for template in templates:
         reason = None
-        candidates = _template_variables(session, template, asset_id)
+        candidates = _template_variables(
+            session,
+            template,
+            asset_id,
+            mapping_bypass_enabled=is_mapping_bypass_enabled(request),
+            request=request,
+        )
         mapped = _suggested_template_variable(template, candidates)
         definition = None
         mapping_required = bool(
@@ -647,6 +749,28 @@ def frontend_predefined_rules(
                     detail=f"Rule template '{template.name}' is disabled",
                 )
             if template.required_variable_types and not candidates:
+                required_role = (
+                    "Machine running state"
+                    if template.rule_type == "runtime_duration"
+                    or (
+                        template.rule_type == "duration"
+                        and isinstance(
+                            (template.parameters or {}).get("expected_value"),
+                            bool,
+                        )
+                    )
+                    else "Cycle signal"
+                    if template.rule_type == "boolean_count_threshold"
+                    else None
+                )
+                if is_mapping_bypass_enabled(request) and required_role:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            f"Set an active Boolean variable's purpose to "
+                            f"'{required_role}' in the asset's Variables panel"
+                        ),
+                    )
                 raise HTTPException(
                     status_code=422,
                     detail=(

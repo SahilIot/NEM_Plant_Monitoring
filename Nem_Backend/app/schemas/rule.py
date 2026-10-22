@@ -76,8 +76,18 @@ class RuleCreate(ORMModel):
         if self.target_asset_id is None and self.variable_id is None:
             raise ValueError("A rule must target an asset, a variable, or both")
         if self.rule_type == "parameter_threshold":
-            if self.variable_id is None or self.operator is None or self.threshold is None:
-                raise ValueError("Parameter threshold rules require a variable, operator, and threshold")
+            if self.variable_id is None or self.operator is None:
+                raise ValueError("Parameter threshold rules require a variable and operator")
+            expected_value = (self.parameters or {}).get("expected_value")
+            if isinstance(expected_value, bool):
+                if self.operator not in {"==", "!=", "eq", "ne"} or self.threshold is not None:
+                    raise ValueError(
+                        "Boolean parameter thresholds require an equality operator and Boolean expected_value"
+                    )
+            elif self.threshold is None:
+                raise ValueError(
+                    "Numeric parameter thresholds require a numeric threshold"
+                )
         if self.rule_type == "runtime_duration":
             validate_runtime_thresholds(self.parameters)
             if self.parameters and "warning_thresholds_seconds" in self.parameters:
@@ -230,11 +240,19 @@ class RuleTemplateCreate(ORMModel):
         if self.rule_type == "parameter_threshold":
             if required_types is None:
                 self.required_variable_types = ["number", "integer"]
-            elif not required_types or any(
-                item not in {"number", "integer"} for item in required_types
-            ):
+            elif required_types == ["boolean"]:
+                expected_value = (self.parameters or {}).get("expected_value")
+                if (
+                    not isinstance(expected_value, bool)
+                    or self.operator not in {"==", "!=", "eq", "ne"}
+                    or self.threshold is not None
+                ):
+                    raise ValueError(
+                        "Boolean parameter threshold templates require an equality operator and Boolean expected_value"
+                    )
+            elif not required_types or any(item not in {"number", "integer"} for item in required_types):
                 raise ValueError(
-                    "Parameter threshold templates require number or integer variables"
+                    "Parameter threshold templates require numeric variables or a Boolean variable"
                 )
         elif self.rule_type == "boolean_count_threshold":
             if required_types is not None and required_types != ["boolean"]:
@@ -246,6 +264,10 @@ class RuleTemplateCreate(ORMModel):
             if required_types is not None and required_types != ["boolean"]:
                 raise ValueError("Running-time templates require Boolean variables")
             self.required_variable_types = ["boolean"]
+            if not (self.parameters or {}).get("warning_thresholds_seconds"):
+                raise ValueError(
+                    "Running-time templates require two warning thresholds and an alert threshold"
+                )
         elif self.rule_type == "duration":
             condition = (self.parameters or {}).get("condition", "equals")
             if condition == "interval_elapsed":
@@ -254,16 +276,43 @@ class RuleTemplateCreate(ORMModel):
                         "Interval-based templates do not require a variable"
                     )
                 self.required_variable_types = None
+            elif condition == "threshold":
+                if required_types is None:
+                    self.required_variable_types = ["number", "integer"]
+                elif not required_types or any(
+                    item not in {"number", "integer"}
+                    for item in required_types
+                ):
+                    raise ValueError(
+                        "Threshold duration rules require numeric variables"
+                    )
             elif required_types is None:
                 expected = (self.parameters or {}).get("expected_value")
-                if condition == "threshold":
-                    self.required_variable_types = ["number", "integer"]
-                elif isinstance(expected, bool):
+                if isinstance(expected, bool):
                     self.required_variable_types = ["boolean"]
                 elif isinstance(expected, str):
                     self.required_variable_types = ["string"]
                 else:
                     self.required_variable_types = ["number", "integer"]
+            elif condition == "equals":
+                expected = (self.parameters or {}).get("expected_value")
+                expected_type = (
+                    "boolean" if isinstance(expected, bool)
+                    else "string" if isinstance(expected, str)
+                    else "number"
+                )
+                compatible_types = (
+                    {"number", "integer"}
+                    if expected_type == "number"
+                    else {expected_type}
+                )
+                if not required_types or any(
+                    item not in compatible_types for item in required_types
+                ):
+                    raise ValueError(
+                        "Equals duration rules require variables compatible "
+                        "with expected_value"
+                    )
         elif required_types:
             raise ValueError(
                 "This rule type does not support a required variable type"

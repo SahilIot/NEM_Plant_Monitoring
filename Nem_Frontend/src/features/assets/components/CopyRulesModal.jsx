@@ -8,6 +8,7 @@ export default function CopyRulesModal({
   assetId,
   assets = [],
   cycleVariableIds = [],
+  runtimeVariableIds = [],
   onClose,
   onCopied,
 }) {
@@ -135,15 +136,34 @@ export default function CopyRulesModal({
 
     const variable = matches[0];
 
+    const booleanParameterThreshold =
+      rule.rule_type === "parameter_threshold" &&
+      typeof rule.parameters?.expected_value === "boolean";
     if (
       rule.rule_type === "parameter_threshold" &&
-      !["number", "integer"].includes(variable.data_type)
+      (booleanParameterThreshold
+        ? variable.data_type !== "boolean"
+        : !["number", "integer"].includes(variable.data_type))
     ) {
       return {
         variable: null,
-        reason:
-          "This rule requires a numeric destination variable.",
+        reason: booleanParameterThreshold
+          ? "This rule requires a Boolean destination variable."
+          : "This rule requires a numeric destination variable.",
       };
+    }
+
+    if (rule.rule_type === "runtime_duration") {
+      if (
+        variable.data_type !== "boolean" ||
+        !runtimeVariableIds.some((id) => Number(id) === Number(variable.id))
+      ) {
+        return {
+          variable: null,
+          reason:
+            "This rule requires the destination asset's configured running signal.",
+        };
+      }
     }
 
     if (rule.rule_type === "boolean_count_threshold") {
@@ -240,24 +260,38 @@ export default function CopyRulesModal({
     }
 
     if (rule.rule_type === "runtime_duration") {
-      const seconds = Number(
-        rule.parameters?.duration_seconds
-      );
+      const parameters = rule.parameters || {};
+      const warnings = parameters.warning_thresholds_seconds;
+      const alert = Number(parameters.alert_threshold_seconds);
+      const hasThresholds =
+        Array.isArray(warnings) &&
+        warnings.length === 2 &&
+        warnings.every((value) => Number.isFinite(Number(value)) && Number(value) > 0) &&
+        Number(warnings[0]) < Number(warnings[1]) &&
+        Number.isFinite(alert) &&
+        alert > Number(warnings[1]);
+      const durationSeconds = Number(parameters.duration_seconds);
+      const hasLegacyDuration =
+        Number.isFinite(durationSeconds) && durationSeconds > 0;
 
-      if (!Number.isFinite(seconds) || seconds <= 0) {
+      if (!hasThresholds && !hasLegacyDuration) {
         return {
           variable: null,
           reason:
-            "Runtime duration settings are missing or invalid.",
+            "Running-time thresholds are missing or invalid.",
         };
       }
     }
 
     if (rule.rule_type === "parameter_threshold") {
+      const booleanThreshold =
+        typeof rule.parameters?.expected_value === "boolean";
       if (
         !rule.operator ||
-        rule.threshold == null ||
-        !Number.isFinite(Number(rule.threshold))
+        (booleanThreshold
+          ? !["==", "!=", "eq", "ne"].includes(rule.operator)
+          : rule.threshold == null ||
+            !Number.isFinite(Number(rule.threshold)))
       ) {
         return {
           variable: null,
