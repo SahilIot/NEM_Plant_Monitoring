@@ -64,28 +64,27 @@ export default function MaintenanceLogbookPage({
     },
   ];
 
- 
-return (
-  <main className="maintenance-logbook-page">
-    <header className="maintenance-logbook-header">
-      <button
-        type="button"
-        onClick={() =>
-          navigate(`/assets/${id}`, {
-            state: { activeTab: "logbook" },
-          })
-        }
-      >
-        ← Back to Maintenance log
-      </button>
+  return (
+    <main className="maintenance-logbook-page">
+      <header className="maintenance-logbook-header">
+        <div>
+          <h1>Maintenance Logbook</h1>
+          <p>
+            Track maintenance status and records for this asset.
+          </p>
+        </div>
 
-      <div>
-        <h1>Maintenance Logbook</h1>
-        <p>
-          Track maintenance status and records for this asset.
-        </p>
-      </div>
-    </header>
+        <button
+  type="button"
+  onClick={() =>
+    navigate(`/assets/${id}`, {
+      state: { activeTab: "logbook" },
+    })
+  }
+>
+  Back to Maintanance log
+</button>
+      </header>
 
       <section className="maintenance-logbook-grid">
         {maintenanceStatuses.map((status) => (

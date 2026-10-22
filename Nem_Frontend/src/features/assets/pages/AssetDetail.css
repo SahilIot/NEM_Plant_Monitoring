@@ -715,37 +715,3 @@
     align-items: flex-start;
   }
 }
-
-.rule-type-options {
-  display: grid;
-  gap: 12px;
-}
-
-.rule-type-option {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  width: 100%;
-  padding: 14px 16px;
-  border: 1px solid var(--border-color, #39434d);
-  border-radius: 10px;
-  background: var(--surface, #151b23);
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.rule-type-option:hover {
-  border-color: var(--accent-color, #4f8cff);
-}
-
-.rule-type-option strong {
-  font-size: 14px;
-}
-
-.rule-type-option small {
-  font-size: 12px;
-  opacity: 0.75;
-  line-height: 1.5;
-}
