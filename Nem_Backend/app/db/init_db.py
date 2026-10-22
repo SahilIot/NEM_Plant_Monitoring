@@ -162,6 +162,7 @@ def initialize_database(engine: Engine) -> None:
             )
 
     _migrate_legacy_rule_templates(engine)
+    _migrate_boolean_duration_templates(engine)
     _migrate_existing_rule_counters(engine)
 
     if "nem_maintenance_schedules" in table_names:
@@ -367,6 +368,28 @@ def _migrate_legacy_rule_templates(engine: Engine) -> None:
             )
             rule.is_enabled = False
             rule.is_archived = True
+        session.commit()
+
+
+def _migrate_boolean_duration_templates(engine: Engine) -> None:
+    with Session(engine) as session:
+        templates = session.scalars(
+            select(MonitoringRuleTemplate).where(
+                MonitoringRuleTemplate.rule_type == "duration"
+            )
+        ).all()
+        for template in templates:
+            parameters = dict(template.parameters or {})
+            if (
+                parameters.get("condition") != "threshold"
+                or "boolean" not in (template.required_variable_types or [])
+            ):
+                continue
+            parameters["condition"] = "equals"
+            parameters["expected_value"] = True
+            parameters.pop("operator", None)
+            parameters.pop("threshold", None)
+            template.parameters = parameters
         session.commit()
 
 

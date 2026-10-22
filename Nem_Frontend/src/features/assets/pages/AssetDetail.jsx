@@ -51,6 +51,13 @@ const HEALTH_LABEL = {
 };
 
 function thresholdMetrics(rule) {
+  const expectedBoolean = rule.parameters?.expected_value;
+  if (rule.rule_type === "parameter_threshold" && typeof expectedBoolean === "boolean") {
+    return [{
+      label: "Condition",
+      value: `${rule.operator === "!=" || rule.operator === "ne" ? "is not" : "is"} ${expectedBoolean ? "ON" : "OFF"}`,
+    }];
+  }
   if (rule.rule_type === "runtime_duration") {
     const warnings = rule.parameters?.warning_thresholds_seconds;
     const alert = rule.parameters?.alert_threshold_seconds;
@@ -111,6 +118,54 @@ function thresholdSequence(rule) {
     ];
   }
   return [];
+}
+
+function compactRuleDuration(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value <= 0) return "duration not set";
+  if (value % 86400 === 0) return `${value / 86400}d`;
+  if (value % 3600 === 0) return `${value / 3600}h`;
+  if (value % 60 === 0) return `${value / 60}m`;
+  return `${value}s`;
+}
+
+function ruleConditionSummary(rule) {
+  const parameters = rule.parameters || {};
+  if (rule.rule_type === "duration") {
+    const duration = compactRuleDuration(parameters.duration_seconds);
+    if (parameters.condition === "threshold") {
+      if (rule.variable_data_type === "boolean") {
+        return `Invalid condition: Boolean signal cannot be compared with ${parameters.operator || ""} ${parameters.threshold}; expected ON/OFF for ${duration}.`;
+      }
+      return `Value ${parameters.operator || ""} ${parameters.threshold} for ${duration}`.trim();
+    }
+    if (typeof parameters.expected_value === "boolean") {
+      return `Signal ${parameters.expected_value ? "ON" : "OFF"} continuously for ${duration}`;
+    }
+  }
+  if (rule.rule_type === "runtime_duration") {
+    const warnings = parameters.warning_thresholds_seconds;
+    const alert = parameters.alert_threshold_seconds;
+    if (Array.isArray(warnings) && warnings.length === 2 && alert != null) {
+      return `Running time · warnings at ${compactRuleDuration(warnings[0])} / ${compactRuleDuration(warnings[1])}, alert at ${compactRuleDuration(alert)}`;
+    }
+  }
+  if (rule.rule_type === "boolean_count_threshold") {
+    const warnings = parameters.warning_thresholds;
+    if (Array.isArray(warnings) && warnings.length === 2 && parameters.alert_threshold != null) {
+      return `Cycle count · warnings at ${warnings[0]} / ${warnings[1]}, alert at ${parameters.alert_threshold}`;
+    }
+  }
+  if (
+    rule.rule_type === "parameter_threshold" &&
+    typeof parameters.expected_value === "boolean"
+  ) {
+    return `Signal ${rule.operator === "!=" || rule.operator === "ne" ? "is not" : "is"} ${parameters.expected_value ? "ON" : "OFF"}`;
+  }
+  if (rule.rule_type === "parameter_threshold" && rule.threshold != null) {
+    return `Value ${rule.operator || ""} ${rule.threshold}`.trim();
+  }
+  return null;
 }
 
 function formatTimeUntilDue(seconds) {
@@ -1479,6 +1534,21 @@ const filteredLogs = [...logs].sort((a, b) => {
                         (threshold) => threshold.value > numericCurrentValue
                       )
                     : null;
+                const parameters = rule.parameters || {};
+                const isTimedBooleanRule =
+                  rule.rule_type === "duration" &&
+                  typeof parameters.expected_value === "boolean" &&
+                  Number.isFinite(Number(parameters.duration_seconds));
+                const conditionStartedAt = state?.condition_started_at
+                  ? new Date(state.condition_started_at).getTime()
+                  : Number.NaN;
+                const conditionMatches =
+                  isTimedBooleanRule &&
+                  displayedValue === parameters.expected_value;
+                const conditionElapsedSeconds =
+                  conditionMatches && Number.isFinite(conditionStartedAt)
+                      ? Math.max(0, (clockNow - conditionStartedAt) / 1000)
+                      : 0;
 
                 return (
                   <article
@@ -1491,6 +1561,13 @@ const filteredLogs = [...logs].sort((a, b) => {
                       <strong>{rule.name}</strong>
                       {rule.description && (
                         <small className="rule-description">{rule.description}</small>
+                      )}
+                      {ruleConditionSummary(rule) && (
+                        <small
+                          className={`rule-description${rule.evaluation_error === "invalid_rule_or_reading" ? " error-message" : ""}`}
+                        >
+                          {ruleConditionSummary(rule)}
+                        </small>
                       )}
                     </div>
 
@@ -1510,6 +1587,8 @@ const filteredLogs = [...logs].sort((a, b) => {
                               ? "Start in"
                               : runtimeCountdown
                                 ? "Due in"
+                              : isTimedBooleanRule
+                                ? "Signal / Hold time"
                               : rule.rule_type === "boolean_count_threshold"
                                 ? "Current / Target"
                               : rule.rule_type === "runtime_duration" &&
@@ -1533,6 +1612,8 @@ const filteredLogs = [...logs].sort((a, b) => {
                                   lifecycleStatus(rule) === "in_progress" &&
                                   ["ok", "warning"].includes(rule.status)
                                 ? "Threshold reached"
+                              : isTimedBooleanRule
+                                ? `${formatValue(displayedValue)} · ${formatDuration(conditionElapsedSeconds)} / ${formatDuration(parameters.duration_seconds)}`
                             : <>
                                 {displayedValue !== null && displayedValue !== undefined
                                   ? formattedCurrentValue
@@ -2105,6 +2186,7 @@ const filteredLogs = [...logs].sort((a, b) => {
     assetId={assetId}
     assets={assets}
     cycleVariableIds={cycleVariableIds}
+    runtimeVariableIds={runtimeVariableIds}
     onClose={() => setModal(null)}
     onCopied={async (result) => {
       setModal(null);

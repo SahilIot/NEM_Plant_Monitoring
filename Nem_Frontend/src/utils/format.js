@@ -70,6 +70,11 @@ export function conditionText(rule, variableName) {
       Number(value).toLocaleString([], { maximumFractionDigits: 0 });
     return `Cycles: warning at ${formatCount(warnings[0])} / ${formatCount(warnings[1])}, alert at ${formatCount(alert)}`;
   }
+  const expectedBoolean = rule.parameters?.expected_value;
+  if (rule.rule_type === "parameter_threshold" && typeof expectedBoolean === "boolean") {
+    const condition = rule.operator === "!=" || rule.operator === "ne" ? "is not" : "is";
+    return `${variableName || "Signal"} ${condition} ${expectedBoolean ? "ON" : "OFF"}`;
+  }
   if (rule.rule_type !== "parameter_threshold" || rule.threshold == null) return "";
   const symbol = OPERATOR_SYMBOL[rule.operator] || rule.operator || "";
   return `${variableName || "Value"} ${symbol} ${rule.threshold}`;
