@@ -239,7 +239,7 @@ export default function CreateMaintenanceSchedulePage() {
           onClick={goToMaintenanceLog}
           disabled={busy}
         >
-          ← Back to Maintenance log
+          Back to Maintenance log
         </button>
 
         <div>

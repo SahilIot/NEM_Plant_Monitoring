@@ -111,21 +111,8 @@ class BackupCreate(BaseModel):
     name: str | None = Field(default=None, max_length=200)
     note: str | None = None
 
-# Validates a new maintenance log entry
+#Validates a maintenance log entry
 class LogbookEntry(BaseModel):
-    text: str = Field(min_length=1, max_length=4000)
-
-    @field_validator("text")
-    @classmethod
-    def strip_text(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("Logbook entry cannot be empty")
-        return value
-
-
-# Validates an updated maintenance log entry
-class LogbookEntryUpdate(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
 
     @field_validator("text")
@@ -439,6 +426,7 @@ def _suggested_template_variable(template: MonitoringRuleTemplate, candidates: l
                 return key_matches[0]
         return candidates[0] if len(candidates) == 1 else None
 
+#function converts a reusable template into the definition of a rule for a specific asset
 def _template_rule_definition(
         session: Session,
         template: MonitoringRuleTemplate,
@@ -509,7 +497,7 @@ def list_rule_templates(
             query.order_by(MonitoringRuleTemplate.name, MonitoringRuleTemplate.id)
         ).all()
 
-
+#Creating a template not an asset-specific rule - templates are reusable definitions that can be assigned to multiple assets
 @router.post("/rule-templates", response_model=RuleTemplateRead, status_code=201)
 def create_rule_template(
         payload: RuleTemplateCreate, session: Session = Depends(get_db)
@@ -1288,80 +1276,6 @@ def frontend_add_logbook_entry(
     session.refresh(record)
     return {"id": record.id, "time": record.performed_at.isoformat(), "text": text_value}
 
-
-
-# Update an existing maintenance logbook entry
-@router.patch("/assets/{asset_id}/logbook/{record_id}")
-def frontend_update_logbook_entry(
-    asset_id: int,
-    record_id: int,
-    payload: LogbookEntryUpdate,
-    session: Session = Depends(get_db),
-) -> dict[str, Any]:
-    record = session.scalar(
-        select(MaintenanceRecord).where(
-            MaintenanceRecord.id == record_id,
-            MaintenanceRecord.asset_id == asset_id,
-        )
-    )
-
-    if record is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Maintenance entry was not found",
-        )
-
-    # Update the summary and notes while preserving the full text.
-    record.summary = payload.text[:200]
-    record.notes = payload.text if len(payload.text) > 200 else None
-
-    session.commit()
-    session.refresh(record)
-
-    return {
-        "id": record.id,
-        "time": record.performed_at.isoformat(),
-        "text": record.summary
-        + (f" — {record.notes}" if record.notes else ""),
-    }
-
-
-# Delete an existing maintenance logbook entry
-@router.delete(
-    "/assets/{asset_id}/logbook/{record_id}",
-    status_code=204,
-)
-def frontend_delete_logbook_entry(
-    asset_id: int,
-    record_id: int,
-    session: Session = Depends(get_db),
-) -> None:
-    record = session.scalar(
-        select(MaintenanceRecord).where(
-            MaintenanceRecord.id == record_id,
-            MaintenanceRecord.asset_id == asset_id,
-        )
-    )
-
-    if record is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Maintenance entry was not found",
-        )
-
-    # Prevent deleting records linked to maintenance schedules or alerts.
-    if record.schedule_id is not None or record.alert_id is not None:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "This entry is linked to a maintenance schedule or alert. "
-                "Use the existing maintenance management workflow to manage it."
-            ),
-        )
-
-    session.delete(record)
-    session.commit()
-
 #Machine events -> Returns the selected monitoring events for an asset
 @router.get("/assets/{asset_id}/events")
 def frontend_asset_events(
@@ -1369,45 +1283,30 @@ def frontend_asset_events(
     session: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
     if session.get(Asset, asset_id) is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Asset {asset_id} was not found",
-        )
-
-    # DEBUG: Check whether this asset has ANY stored events.
-    all_events = session.scalars(
+        raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+    events = session.scalars(
         select(MonitoringEvent)
-        .where(MonitoringEvent.asset_id == asset_id)
+        .where(
+            MonitoringEvent.asset_id == asset_id,
+            MonitoringEvent.event_type.in_(
+                (
+                    "rule_created",
+                    "warning_triggered",
+                    "alert_triggered",
+                    "machine_stopped",
+                )
+            ),
+        )
         .order_by(MonitoringEvent.occurred_at.desc())
         .limit(200)
     ).all()
-
-    print(
-        f"EVENT DEBUG: asset_id={asset_id}, "
-        f"total_events={len(all_events)}"
-    )
-
-    for event in all_events[:10]:
-        print(
-            f"EVENT DEBUG: id={event.id}, "
-            f"type={event.event_type}, "
-            f"message={event.message}, "
-            f"rule_id={event.rule_id}"
-        )
-
-    # Temporarily return all event types to test the existing filter.
     return [
-        {
-            "id": event.id,
-            "time": event.occurred_at.isoformat()
-            if event.occurred_at else None,
-            "text": event.message,
-            "event_type": event.event_type,
-            "rule_id": event.rule_id,
-        }
-        for event in all_events
+        {"id": event.id, "time": event.occurred_at.isoformat(), "text": event.message}
+        for event in events
     ]
 
+#Rule Collections -> 
+# List collections
 @router.get("/collections")
 def list_collections(session: Session = Depends(get_db)) -> list[dict[str, Any]]:
     rows = session.scalars(select(RuleCollection).order_by(RuleCollection.id)).all()

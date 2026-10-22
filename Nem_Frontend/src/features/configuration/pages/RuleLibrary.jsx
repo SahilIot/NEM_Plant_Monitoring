@@ -15,139 +15,49 @@ import "./RuleLibrary.css";
 
 const RULE_TYPES = [
   ["parameter_threshold", "Parameter threshold"],
-  ["interval", "Interval"],
+  ["boolean_count_threshold", "Boolean cycle count"],
+  ["duration", "Duration condition"],
+  ["runtime_duration", "Runtime duration"],
 ];
 
 const FIELDS = [
+  { key: "name", label: "Template name", required: true, placeholder: "e.g. High motor temperature" },
+  { key: "description", label: "Description", type: "textarea" },
+  { key: "rule_type", label: "Rule type", type: "select", required: true, default: "parameter_threshold", options: RULE_TYPES },
   {
-    key: "name",
-    label: "Rule name",
-    required: true,
-    placeholder: "e.g. High motor temperature",
-  },
-  {
-    key: "rule_type",
-    label: "Rule type",
+    key: "variable_type",
+    label: "Required variable type",
     type: "select",
-    required: true,
-    default: "parameter_threshold",
-    options: RULE_TYPES,
-  },
-  {
-    key: "variable_key",
-    label: "Preferred variable key (optional)",
-    placeholder: "e.g. motor_temperature",
-    hint: "Used to suggest a mapping; it does not bind the template to an asset.",
-    showWhen: {
-      key: "rule_type",
-      equals: "parameter_threshold",
-    },
-  },
-  {
-    key: "operator",
-    label: "Condition",
-    type: "select",
-    required: true,
-    default: ">=",
+    default: "number",
     options: [
-      [">=", "Greater than or equal"],
-      [">", "Greater than"],
-      ["<=", "Less than or equal"],
-      ["<", "Less than"],
-      ["==", "Equal"],
-      ["!=", "Not equal"],
+      ["number", "Number"],
+      ["integer", "Integer"],
+      ["boolean", "Boolean"],
+      ["string", "String"],
     ],
-    showWhen: {
-      key: "rule_type",
-      equals: "parameter_threshold",
-    },
+    showWhen: { key: "rule_type", equals: "duration" },
+    requiredWhen: { key: "rule_type", equals: "duration" },
+    hint: "The target asset needs an active variable with this data type.",
   },
-  {
-    key: "threshold",
-    label: "Threshold",
-    type: "number",
-    required: true,
-    showWhen: {
-      key: "rule_type",
-      equals: "parameter_threshold",
-    },
-  },
-  {
-    key: "start_time",
-    label: "Start time",
-    type: "time",
-    showWhen: {
-      key: "rule_type",
-      equals: "parameter_threshold",
-    },
-  },
-  {
-    key: "end_time",
-    label: "End time",
-    type: "time",
-    showWhen: {
-      key: "rule_type",
-      equals: "parameter_threshold",
-    },
-  },
-  {
-    key: "due_date",
-    label: "Due date",
-    type: "date",
-    showWhen: {
-      key: "rule_type",
-      equals: "parameter_threshold",
-    },
-  },
-  {
-    key: "interval_value",
-    label: "Interval",
-    type: "number",
-    required: true,
-    showWhen: {
-      key: "rule_type",
-      equals: "interval",
-    },
-  },
-  {
-    key: "interval_unit",
-    label: "Interval unit",
-    type: "select",
-    required: true,
-    default: "hours",
-    options: [
-      ["seconds", "Seconds"],
-      ["minutes", "Minutes"],
-      ["hours", "Hours"],
-      ["days", "Days"],
-    ],
-    showWhen: {
-      key: "rule_type",
-      equals: "interval",
-    },
-  },
-  {
-    key: "severity",
-    label: "Severity",
-    type: "select",
-    required: true,
-    default: "warning",
-    options: [
-      ["warning", "Warning"],
-      ["alert", "Alert"],
-    ],
-  },
-  {
-    key: "is_enabled",
-    label: "Rule status",
-    type: "select",
-    required: true,
-    default: "true",
-    options: [
-      ["true", "Available"],
-      ["false", "Disabled"],
-    ],
-  },
+  { key: "variable_key", label: "Preferred variable key (optional)", placeholder: "e.g. motor_temperature", hint: "Used to suggest a mapping; it does not bind the template to an asset.", showWhen: { anyOf: [{ key: "rule_type", equals: "parameter_threshold" }, { key: "rule_type", equals: "duration" }, { key: "rule_type", equals: "boolean_count_threshold" }] } },
+  { key: "operator", label: "Condition", type: "select", required: true, default: ">=", options: [[">=", "Greater than or equal"], [">", "Greater than"], ["<=", "Less than or equal"], ["<", "Less than"], ["==", "Equal"], ["!=", "Not equal"]], showWhen: { key: "rule_type", equals: "parameter_threshold" } },
+  { key: "threshold", label: "Threshold", type: "number", required: true, showWhen: { key: "rule_type", equals: "parameter_threshold" } },
+  { key: "warning_1", label: "First warning cycle count", type: "number", required: true, default: 9000, showWhen: { key: "rule_type", equals: "boolean_count_threshold" } },
+  { key: "warning_2", label: "Second warning cycle count", type: "number", required: true, default: 9500, showWhen: { key: "rule_type", equals: "boolean_count_threshold" } },
+  { key: "alert_threshold", label: "Alert cycle count", type: "number", required: true, default: 10000, showWhen: { key: "rule_type", equals: "boolean_count_threshold" } },
+  { key: "runtime_warning_hours", label: "Warning threshold (hours)", type: "number", required: true, showWhen: { key: "rule_type", equals: "runtime_duration" } },
+  { key: "runtime_warning_2_hours", label: "Higher warning threshold (hours)", type: "number", required: true, showWhen: { key: "rule_type", equals: "runtime_duration" } },
+  { key: "runtime_alert_hours", label: "Alert threshold (hours)", type: "number", required: true, showWhen: { key: "rule_type", equals: "runtime_duration" } },
+  { key: "duration_seconds", label: "Duration (seconds)", type: "number", required: true, showWhen: { key: "rule_type", equals: "duration" } },
+  { key: "runtime_duration_seconds", label: "Runtime duration (seconds)", type: "number", required: true, showWhen: { key: "rule_type", equals: "runtime_duration" } },
+  { key: "duration_condition", label: "Duration condition", type: "select", default: "equals", options: [["equals", "Value equals"], ["threshold", "Value crosses threshold"]], showWhen: { key: "rule_type", equals: "duration" } },
+  { key: "expected_value", label: "Expected value", showWhen: [{ key: "rule_type", equals: "duration" }, { key: "duration_condition", equals: "equals" }], requiredWhen: [{ key: "rule_type", equals: "duration" }, { key: "duration_condition", equals: "equals" }] },
+  { key: "duration_operator", label: "Condition", type: "select", default: ">=", options: [[">=", "Greater than or equal"], [">", "Greater than"], ["<=", "Less than or equal"], ["<", "Less than"], ["==", "Equal"], ["!=", "Not equal"]], showWhen: [{ key: "rule_type", equals: "duration" }, { key: "duration_condition", equals: "threshold" }] },
+  { key: "duration_threshold", label: "Threshold value", type: "number", required: true, showWhen: [{ key: "rule_type", equals: "duration" }, { key: "duration_condition", equals: "threshold" }] },
+  { key: "severity", label: "Severity", type: "select", required: true, default: "warning", options: [["warning", "Warning"], ["alert", "Alert"]] },
+  { key: "is_enabled", label: "Template status", type: "select", required: true, default: "true", options: [["true", "Available"], ["false", "Disabled"]] },
+  { key: "evaluation_interval_seconds", label: "Evaluation interval (seconds)", type: "number" },
+  { key: "stale_after_seconds", label: "Stale reading timeout (seconds)", type: "number" },
 ];
 
 const displayType = (type) =>
@@ -155,60 +65,88 @@ const displayType = (type) =>
 
 function initialTemplate(template) {
   if (!template) return {};
-
   const params = template.parameters || {};
-
+  const required = template.required_variable_types || [];
+  const variableType = required.length === 2 && required.includes("number") && required.includes("integer")
+    ? "number"
+    : required[0] || "number";
   return {
     ...template,
-    start_time: params.start_time || "",
-    end_time: params.end_time || "",
-    due_date: params.due_date || "",
-    interval_value: params.interval_value ?? "",
-    interval_unit: params.interval_unit || "hours",
+    variable_type: variableType,
+    warning_1: params.warning_thresholds?.[0],
+    warning_2: params.warning_thresholds?.[1],
+    alert_threshold: params.alert_threshold,
+    duration_seconds: template.rule_type === "duration" ? params.duration_seconds : undefined,
+    runtime_duration_seconds: template.rule_type === "runtime_duration" ? params.duration_seconds : undefined,
+    duration_condition: params.condition || "equals",
+    expected_value: params.expected_value,
+    duration_operator: params.operator || ">=",
+    duration_threshold: params.threshold,
     is_enabled: String(template.is_enabled),
   };
 }
 
 function templatePayload(values) {
   const type = values.rule_type;
-
-  const isThreshold = type === "parameter_threshold";
-  const isInterval = type === "interval";
-
+  let required_variable_types = null;
+  let parameters = null;
+  let operator = null;
+  let threshold = null;
+  if (type === "parameter_threshold") {
+    required_variable_types = values.variable_type === "integer"
+      ? ["integer"]
+      : ["number", "integer"];
+    operator = values.operator;
+    threshold = values.threshold;
+  } else if (type === "boolean_count_threshold") {
+    required_variable_types = ["boolean"];
+    parameters = {
+      warning_thresholds: [Number(values.warning_1), Number(values.warning_2)],
+      alert_threshold: Number(values.alert_threshold),
+    };
+  } else if (type === "runtime_duration") {
+    required_variable_types = ["boolean"];
+    parameters = {
+      warning_thresholds_seconds: [
+        Number(values.runtime_warning_hours) * 3600,
+        Number(values.runtime_warning_2_hours) * 3600,
+      ],
+      alert_threshold_seconds: Number(values.runtime_alert_hours) * 3600,
+    };
+  } else if (type === "duration") {
+    required_variable_types = [values.variable_type];
+    parameters = {
+      duration_seconds: Number(values.duration_seconds),
+      condition: values.duration_condition,
+      ...(values.duration_condition === "equals"
+        ? {
+            expected_value: values.variable_type === "boolean"
+              ? values.expected_value === "true"
+              : ["number", "integer"].includes(values.variable_type)
+                ? Number(values.expected_value)
+                : values.expected_value,
+          }
+        : {
+            operator: values.duration_operator,
+            threshold: Number(values.duration_threshold),
+          }),
+    };
+  } else if (type === "runtime_duration") {
+    parameters = { duration_seconds: Number(values.runtime_duration_seconds) };
+  }
   return {
     name: values.name,
     description: values.description || null,
     rule_type: type,
-
-    required_variable_types: isThreshold
-      ? ["number", "integer"]
-      : null,
-
-    variable_key: isThreshold
-      ? values.variable_key || null
-      : null,
-
-    operator: isThreshold ? values.operator : null,
-
-    threshold: isThreshold
-      ? Number(values.threshold)
-      : null,
-
-    parameters: isThreshold
-      ? {
-          start_time: values.start_time || null,
-          end_time: values.end_time || null,
-          due_date: values.due_date || null,
-        }
-      : isInterval
-        ? {
-            interval_value: Number(values.interval_value),
-            interval_unit: values.interval_unit,
-          }
-        : null,
-
+    required_variable_types,
+    variable_key: values.variable_key || null,
+    operator,
+    threshold,
+    parameters,
     severity: values.severity,
     is_enabled: values.is_enabled !== "false",
+    evaluation_interval_seconds: values.evaluation_interval_seconds || null,
+    stale_after_seconds: values.stale_after_seconds || null,
   };
 }
 
@@ -421,9 +359,9 @@ export default function RuleLibrary() {
       <div className="rule-library-heading">
         <div>
           <h1 className="page-title">Monitoring Rule Library</h1>
-          <p className="muted">Rules are independent of assets. Assigning a rule creates a separate, inactive rule for each selected asset.</p>
+          <p className="muted">Reusable rule templates are independent of asset rules. Assignments create separate, inactive rules on selected assets.</p>
         </div>
-        <button className="btn-primary" onClick={() => { setEditing(null); setModalOpen(true); }}><Plus size={17} /> New Rule</button>
+        <button className="btn-primary" onClick={() => { setEditing(null); setModalOpen(true); }}><Plus size={17} /> New template</button>
       </div>
 
       {message.text && <p className={"notice" + (message.error ? " error" : "")} role={message.error ? "alert" : "status"}>{message.text}</p>}
@@ -432,12 +370,12 @@ export default function RuleLibrary() {
         <div className="rule-library-tools">
           <label className="rule-library-search"><Search size={17} /><input aria-label="Search rule templates" placeholder="Search templates…" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
           <select aria-label="Filter template availability" value={status} onChange={(event) => setStatus(event.target.value)}>
-            <option value="all">All Rules</option>
+            <option value="all">All templates</option>
             <option value="true">Available</option>
             <option value="false">Disabled</option>
           </select>
         </div>
-        {templates === null ? <div className="loading" role="status">Loading rules..</div> : visible.length === 0 ? (
+        {templates === null ? <div className="loading" role="status">Loading rule templates…</div> : visible.length === 0 ? (
           <EmptyState art={false} title={templates.length === 0 ? "The rule library is empty" : "No templates match"} lines={[templates.length === 0 ? "Create a reusable template here. Asset-specific rules do not appear in this library." : "Try a different search or availability filter."]} />
         ) : (
           <div className="rule-library-list">
@@ -461,11 +399,11 @@ export default function RuleLibrary() {
       </section>
 
       {modalOpen && <CreateModal
-        title={editing ? "Edit reusable rule template" : "Create A rule"}
-        intro="Rules contain configuration only. Asset and variable references are selected when assigning the rule."
+        title={editing ? "Edit reusable rule template" : "Create reusable rule template"}
+        intro="Templates contain rule configuration only. Asset and variable references are selected when assigning the template."
         fields={FIELDS}
         initialValues={initialTemplate(editing)}
-        submitLabel={editing ? "Save template" : "Create A Rule"}
+        submitLabel={editing ? "Save template" : "Create template"}
         onSubmit={save}
         onClose={() => { setModalOpen(false); setEditing(null); }}
       />}
