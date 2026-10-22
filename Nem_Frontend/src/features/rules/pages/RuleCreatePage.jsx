@@ -50,24 +50,17 @@ export default function RuleCreatePage() {
     ])
       .then(([items, plc]) => {
         if (!active) return;
-        const activeVariables = Array.isArray(items) ? items : [];
-        const mappings = Array.isArray(plc?.mappings) ? plc.mappings : [];
-        const booleanMappings = mappings.filter(
-          (mapping) =>
-            Number(mapping.asset_id) === assetId &&
-            mapping.mapping_valid === true &&
-            mapping.data_type === "boolean"
-        );
-        const cycleIds = booleanMappings
-          .filter((mapping) => mapping.role === "cycle_signal")
-          .map((mapping) => Number(mapping.variable_id));
-        const runtimeIds = booleanMappings
-          .filter((mapping) => mapping.role === "running_signal")
-          .map((mapping) => Number(mapping.variable_id));
+       const activeVariables = (Array.isArray(items) ? items : [])
+  .filter((item) => item.is_active !== false);
 
-        setVariables(activeVariables);
-        setCycleVariableIds([...new Set(cycleIds)]);
-        setRuntimeVariableIds([...new Set(runtimeIds)]);
+setVariables(activeVariables);
+
+if (activeVariables.length) {
+  setValues((current) => ({
+    ...current,
+    variable_id: String(activeVariables[0].id),
+  }));
+}
       })
       .catch((requestError) => {
         if (active) {
@@ -120,34 +113,70 @@ export default function RuleCreatePage() {
 
     setSaving(true);
     try {
-      const rule = buildAssetMonitoringRule(
-        {
-          ...values,
-          rule_type: isUsage
-            ? "boolean_count_threshold"
-            : "runtime_duration",
-          ...(isScheduled ? {} : { activation_at: "" }),
-        },
-        assetId,
-        { variables, cycleVariableIds, runtimeVariableIds }
-      );
-      await api.post(`/assets/${assetId}/rules`, rule);
-      try {
-        await refreshStatus?.();
-      } catch (refreshError) {
-        console.error("Rule saved, but dashboard status refresh failed.", refreshError);
+      const name = values.name.trim();
+      const description = values.description.trim();
+      if (kind === "interval") {
+        if (!values.schedule_start_date || !values.first_due_date) {
+          throw new Error("Enter both the schedule start date and first due date.");
+        }
+        if (values.first_due_date < values.schedule_start_date) {
+          throw new Error("The first due date must not precede the schedule start date.");
+        }
+        let recurrenceInterval = null;
+        let recurrenceUnit = null;
+        if (values.recurrence_enabled) {
+          recurrenceInterval = Number(values.recurrence_interval);
+          recurrenceUnit = values.recurrence_unit;
+          if (!Number.isInteger(recurrenceInterval) || recurrenceInterval < 1 || recurrenceInterval > 3650) {
+            throw new Error("Recurrence interval must be a whole number from 1 to 3650.");
+          }
+        }
+        await api.post("/maintenance/schedules", {
+          asset_id: assetId,
+          title: name,
+          description: description || null,
+          maintenance_type: "preventive",
+          priority: "medium",
+          schedule_start_date: values.schedule_start_date,
+          first_due_date: values.first_due_date,
+          recurrence_enabled: values.recurrence_enabled,
+          recurrence_interval: recurrenceInterval,
+          recurrence_unit: recurrenceUnit,
+        });
+        await completeCreation("Recurring maintenance schedule created. View due dates in the asset maintenance logbook.");
+      } else if (kind === "usage") {
+  const usageLimit = Number(values.usage_limit);
+
+  const selectedVariable = variables.find(
+    (item) => String(item.id) === values.variable_id
+  );
+
+  if (!selectedVariable) {
+    throw new Error("Select an active variable.");
+  }
+
+  if (!["number", "integer"].includes(selectedVariable.data_type)) {
+    throw new Error(
+      "Usage threshold rules currently support numeric variables only."
+    );
+  }
+
+  if (!Number.isFinite(usageLimit) || usageLimit <= 0) {
+    throw new Error("Enter a valid positive usage threshold.");
+  }
+
+  await api.post(`/assets/${assetId}/rules/usage`, {
+    name,
+    description: description || null,
+    variable_id: Number(values.variable_id),
+    usage_limit: usageLimit,
+    severity: values.severity,
+  });
+
+  await completeCreation("Usage threshold rule created and activated.");
+      } else {
+        throw new Error("Unknown workflow type.");
       }
-      navigate(`/assets/${id}`, {
-        replace: true,
-        state: {
-          createdNotice: isUsage
-            ? "Usage-based cycle rule created and activated."
-            : isScheduled
-              ? "Time-based runtime rule created. Monitoring starts at its scheduled activation time and continues until deactivated."
-              : "Interval-based running-time rule created and activated.",
-          activeTab: "status",
-        },
-      });
     } catch (requestError) {
       setError(requestError.message || "Could not create the monitoring rule.");
     } finally {
@@ -166,9 +195,13 @@ export default function RuleCreatePage() {
     );
   }
 
-  if (loading) {
-    return <div className="loading" role="status">Loading asset variables…</div>;
-  }
+ if (loading) {
+  return (
+    <div className="loading" role="status">
+      Loading variables…
+    </div>
+  );
+}
 
   const disableSubmit =
     saving ||
@@ -178,9 +211,13 @@ export default function RuleCreatePage() {
   return (
     <div className="rule-create-page">
       <div className="rule-create-container">
-        <button type="button" className="btn-outline rule-back-btn" onClick={goBack}>
-          ← Back to {asset?.name || `Asset ${assetId}`}
-        </button>
+     <button
+  type="button"
+  className="btn-outline rule-back-btn"
+  onClick={() => navigate(`/assets/${assetId}`)}
+>
+  ← Back to Asset
+</button>
 
         <div className="page-head rule-page-head" style={{ marginTop: 20 }}>
           <h1 className="page-title rule-page-title">{TITLES[kind]}</h1>
@@ -213,18 +250,6 @@ export default function RuleCreatePage() {
                   onChange={updateField}
                   placeholder={isUsage ? "e.g. Rotation count limit" : "e.g. Machine running time"}
                   required
-                  disabled={saving}
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="rule-description">Description</label>
-                <textarea
-                  id="rule-description"
-                  name="description"
-                  value={values.description}
-                  onChange={updateField}
-                  rows={3}
                   disabled={saving}
                 />
               </div>
@@ -300,44 +325,31 @@ export default function RuleCreatePage() {
               ) : (
                 <>
                   <div className="form-group">
-                    <label htmlFor="runtime-variable">
-                      Boolean running signal * (ON means machine is running)
-                    </label>
-                    <select
-                      id="runtime-variable"
-                      name="runtime_variable_id"
-                      value={values.runtime_variable_id}
-                      onChange={updateField}
-                      required
-                      disabled={saving || !runtimeVariableOptions.length}
-                    >
-                      <option value="">Select the always-on running variable</option>
-                      {runtimeVariableOptions.map((variable) => (
-                        <option key={variable.id} value={String(variable.id)}>
-                          {variable.name}
-                        </option>
-                      ))}
-                    </select>
-                    {!runtimeVariableOptions.length && (
-                      <small>
-                        No running signal is configured. In the asset's Variables panel, edit the Boolean variable and set its purpose to Machine running state.
-                      </small>
-                    )}
-                  </div>
-                  {isScheduled && (
-                    <div className="form-group">
-                      <label htmlFor="activation-at">Activate monitoring at *</label>
-                      <input
-                        id="activation-at"
-                        name="activation_at"
-                        type="datetime-local"
-                        value={values.activation_at}
-                        onChange={updateField}
-                        required
-                        disabled={saving}
-                      />
-                    </div>
-                  )}
+  <label htmlFor="variable-id">Add a variable *</label>
+
+  <select
+    id="variable-id"
+    name="variable_id"
+    value={values.variable_id}
+    onChange={updateField}
+    required
+    disabled={saving || !variables.length}
+  >
+    <option value="">Select a variable</option>
+
+    {variables.map((variable) => (
+      <option key={variable.id} value={String(variable.id)}>
+        {variable.name}
+        {variable.unit ? ` (${variable.unit})` : ""}
+        {variable.data_type ? ` — ${variable.data_type}` : ""}
+      </option>
+    ))}
+  </select>
+
+  {!variables.length && (
+    <small>No active variables are available on this asset.</small>
+  )}
+</div>
                   <div className="form-group">
                     <label htmlFor="runtime-warning">Warning after running (hours) *</label>
                     <input
