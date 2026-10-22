@@ -45,6 +45,21 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def runtime_activation_at(rule: MonitoringRule) -> datetime | None:
+    value = (rule.parameters or {}).get("activation_at")
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("Runtime activation timestamp must be an ISO-8601 string")
+    try:
+        activation_at = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("Runtime activation timestamp is invalid") from error
+    if activation_at.tzinfo is None or activation_at.utcoffset() is None:
+        raise ValueError("Runtime activation timestamp must include a timezone")
+    return activation_at.astimezone(timezone.utc)
+
+
 def emit_event(
     session: Session,
     *,
@@ -155,16 +170,20 @@ def advance_rule_runtime(
     counter: RuleCounterState,
     at: datetime,
     stale_after_seconds: int,
+    activation_at: datetime | None = None,
 ) -> None:
     if counter.is_running is not True or counter.last_signal_at is None:
         return
     latest_trustworthy_time = counter.last_signal_at + timedelta(seconds=stale_after_seconds)
     end = min(at, latest_trustworthy_time)
     checkpoint = counter.runtime_checkpoint_at
-    if checkpoint is not None and end > checkpoint:
+    runtime_start = max(checkpoint, activation_at) if (
+        checkpoint is not None and activation_at is not None
+    ) else checkpoint or activation_at
+    if runtime_start is not None and end > runtime_start:
         counter.accumulated_running_seconds = Decimal(
             counter.accumulated_running_seconds
-        ) + Decimal(str((end - checkpoint).total_seconds()))
+        ) + Decimal(str((end - runtime_start).total_seconds()))
         counter.runtime_checkpoint_at = end
         counter.updated_at = end
 
@@ -173,6 +192,7 @@ def current_rule_runtime_seconds(
     counter: RuleCounterState,
     at: datetime,
     stale_after_seconds: int,
+    activation_at: datetime | None = None,
 ) -> Decimal:
     total = Decimal(counter.accumulated_running_seconds)
     if (
@@ -185,9 +205,14 @@ def current_rule_runtime_seconds(
         at,
         counter.last_signal_at + timedelta(seconds=stale_after_seconds),
     )
-    if end > counter.runtime_checkpoint_at:
+    runtime_start = (
+        max(counter.runtime_checkpoint_at, activation_at)
+        if activation_at is not None
+        else counter.runtime_checkpoint_at
+    )
+    if end > runtime_start:
         total += Decimal(
-            str((end - counter.runtime_checkpoint_at).total_seconds())
+            str((end - runtime_start).total_seconds())
         )
     return total
 
@@ -254,7 +279,20 @@ def update_rule_signal_states(
                 counter.cycle_count += 1
             counter.cycle_signal = value
         else:
-            advance_rule_runtime(counter, at, stale_after_seconds)
+            try:
+                activation_at = runtime_activation_at(rule)
+            except ValueError:
+                LOGGER.warning(
+                    "Skipping signal update for rule %s with invalid activation time",
+                    rule.id,
+                )
+                continue
+            advance_rule_runtime(
+                counter,
+                at,
+                stale_after_seconds,
+                activation_at,
+            )
             counter.is_running = value
             counter.runtime_checkpoint_at = at if value else None
 
@@ -592,6 +630,21 @@ def evaluate_runtime_duration(
     stale_after_seconds: int,
 ) -> RuleState:
     parameters = rule.parameters or {}
+    try:
+        activation_at = runtime_activation_at(rule)
+    except ValueError as error:
+        return _transition_state(
+            session,
+            rule,
+            asset,
+            state,
+            next_status="unknown",
+            value=None,
+            message="Scheduled running-time activation is invalid.",
+            evaluated_at=evaluated_at,
+            condition_started_at=None,
+            error_message="invalid_runtime_activation",
+        )
     warnings = parameters.get("warning_thresholds_seconds")
     alert_threshold = parameters.get("alert_threshold_seconds")
     if (
@@ -619,6 +672,35 @@ def evaluate_runtime_duration(
             error_message="invalid_runtime_threshold_configuration",
         )
 
+    if activation_at is not None and evaluated_at < activation_at:
+        return _transition_state(
+            session,
+            rule,
+            asset,
+            state,
+            next_status="normal",
+            value=0,
+            message=(
+                f"Scheduled runtime monitoring starts at "
+                f"{activation_at.isoformat()}. [scheduled-runtime:pending]"
+            ),
+            evaluated_at=evaluated_at,
+            condition_started_at=None,
+        )
+
+    if activation_at is not None and (
+        state is None or "[scheduled-runtime:pending]" in state.message
+    ):
+        emit_event(
+            session,
+            event_type="time_rule_activated",
+            message=f"Scheduled monitoring rule '{rule.name}' is now active.",
+            occurred_at=evaluated_at,
+            asset_id=asset.id,
+            rule_id=rule.id,
+            metadata={"activation_at": activation_at.isoformat()},
+        )
+
     counter = session.scalar(
         select(RuleCounterState)
         .where(
@@ -643,7 +725,7 @@ def evaluate_runtime_duration(
 
     stale_after = rule.stale_after_seconds or stale_after_seconds
     running_seconds = current_rule_runtime_seconds(
-        counter, evaluated_at, stale_after
+        counter, evaluated_at, stale_after, activation_at
     )
     if evaluated_at - counter.last_signal_at > timedelta(seconds=stale_after):
         return _transition_state(

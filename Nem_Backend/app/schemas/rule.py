@@ -85,6 +85,27 @@ class RuleCreate(ORMModel):
                     raise ValueError(
                         "Running-time rules require a Boolean variable"
                     )
+                activation_at = self.parameters.get("activation_at")
+                if activation_at is not None:
+                    if not isinstance(activation_at, str):
+                        raise ValueError(
+                            "parameters.activation_at must be an ISO-8601 timestamp"
+                        )
+                    try:
+                        parsed_activation = datetime.fromisoformat(
+                            activation_at.replace("Z", "+00:00")
+                        )
+                    except ValueError as error:
+                        raise ValueError(
+                            "parameters.activation_at must be an ISO-8601 timestamp"
+                        ) from error
+                    if (
+                        parsed_activation.tzinfo is None
+                        or parsed_activation.utcoffset() is None
+                    ):
+                        raise ValueError(
+                            "parameters.activation_at must include a timezone"
+                        )
             else:
                 duration = self.parameters.get("duration_seconds") if self.parameters else None
                 if not isinstance(duration, int) or isinstance(duration, bool) or duration <= 0:

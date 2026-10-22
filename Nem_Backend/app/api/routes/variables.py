@@ -114,6 +114,43 @@ def update_variable(variable_id: int,payload: VariableUpdate,session: Session = 
         if required in changes and changes[required] is None:
             raise HTTPException(status_code=422,detail=f"Variable {required} cannot be null", )
 
+    resulting_data_type = changes.get("data_type", variable.data_type)
+    resulting_signal_role = changes.get("signal_role", variable.signal_role)
+    if resulting_data_type != "boolean" and resulting_signal_role is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="A signal purpose can only be set for Boolean variables",
+        )
+    if "signal_role" in changes or resulting_data_type != variable.data_type:
+        active_signal_rule_types = set(
+            session.scalars(
+                select(MonitoringRule.rule_type).where(
+                    MonitoringRule.variable_id == variable.id,
+                    MonitoringRule.is_enabled.is_(True),
+                    MonitoringRule.is_archived.is_(False),
+                    MonitoringRule.rule_type.in_(
+                        {"runtime_duration", "boolean_count_threshold"}
+                    ),
+                )
+            ).all()
+        )
+        required_roles = {
+            "running" if rule_type == "runtime_duration" else "cycle"
+            for rule_type in active_signal_rule_types
+        }
+        if required_roles and (
+            len(required_roles) > 1
+            or resulting_signal_role not in required_roles
+            or resulting_data_type != "boolean"
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Deactivate or remap the active rules using this variable "
+                    "before changing its Boolean purpose."
+                ),
+            )
+
     for field, value in changes.items():
         setattr(variable, field, value)
 

@@ -50,6 +50,11 @@ def initialize_database(engine: Engine) -> None:
                         "ADD COLUMN opcua_node_id VARCHAR(512)"
                     )
                 )
+        if "signal_role" not in variable_columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE variables ADD COLUMN signal_role VARCHAR(20)")
+                )
         with engine.begin() as connection:
             connection.execute(
                 text("DROP INDEX IF EXISTS uq_variables_opcua_node_id")

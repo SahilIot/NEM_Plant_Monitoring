@@ -1294,6 +1294,7 @@ def frontend_asset_events(
                     "warning_triggered",
                     "alert_triggered",
                     "interval_elapsed",
+                    "time_rule_activated",
                     "machine_stopped",
                 )
             ),
