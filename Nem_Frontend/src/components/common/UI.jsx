@@ -1,5 +1,6 @@
 
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { EmptyArt } from "./Icons.jsx";
 
@@ -50,7 +51,7 @@ export const Modal = ({ title, onClose, children, wide }) => {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  return (
+  return createPortal(
     <div className="modal-bg" onClick={onClose}>
       <div
         className={"modal" + (wide ? " wide" : "")}
@@ -62,7 +63,8 @@ export const Modal = ({ title, onClose, children, wide }) => {
         <h3>{title}</h3>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

@@ -99,7 +99,7 @@
   display: grid;
   position: relative;
   box-sizing: border-box;
-  height: 104px;
+  height: 88px;
   grid-template-columns: 5px minmax(0, 1fr) minmax(0, .78fr) minmax(250px, 290px) auto;
   align-items: center;
   gap: 12px;
@@ -120,7 +120,7 @@
 }
 
 .asset-page .rule-card .sev {
-  min-height: 48px;
+  min-height: 40px;
 }
 
 .asset-page .rule-card.alert .sev,
@@ -137,7 +137,7 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .asset-page .rule-card-main > strong {
@@ -146,15 +146,15 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 1;
   color: var(--ink);
-  font-size: 15.5px;
+  font-size: 14px;
   font-weight: 650;
 }
 
 .asset-page .rule-name .rule-context,
 .asset-page .rule-name .rule-description {
   color: var(--muted);
-  font-size: 13.5px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.3;
   overflow-wrap: anywhere;
 }
 
@@ -167,7 +167,7 @@
   min-width: 0;
   flex-direction: column;
   align-items: flex-start;
-  gap: 7px;
+  gap: 4px;
 }
 
 .asset-page .rule-evaluation > small {
@@ -202,7 +202,7 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 1;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.3;
 }
 
@@ -218,8 +218,8 @@
   min-width: 0;
   flex-direction: column;
   justify-content: center;
-  gap: 5px;
-  padding: 9px 10px;
+  gap: 3px;
+  padding: 6px 9px;
   color: var(--muted);
   border: 1px solid var(--line);
   border-radius: 5px;
@@ -233,7 +233,7 @@
   -webkit-line-clamp: 2;
   color: var(--ink);
   font-family: var(--font-num);
-  font-size: 14px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   line-height: 1.35;
   overflow-wrap: break-word;
@@ -277,6 +277,11 @@
 
 .asset-page .rule-actions-menu .menu {
   z-index: 30;
+}
+
+.asset-page .rule-toolbar > .dropdown:last-child > .menu.right {
+  right: auto;
+  left: 0;
 }
 
 .asset-page .rule-card-actions .btn-outline {
@@ -340,7 +345,7 @@
 
 @container asset-detail (max-width: 700px) {
   .asset-page .rule-card.rule-row {
-    height: 112px;
+    height: 96px;
     grid-template-columns: 5px minmax(0, .8fr) minmax(0, 1.2fr) auto;
     align-items: center;
     gap: 8px 10px;
@@ -349,7 +354,7 @@
 
   .asset-page .rule-card .sev {
     grid-row: 1 / span 2;
-    min-height: 56px;
+    min-height: 44px;
   }
 
   .asset-page .rule-name.rule-card-main {
@@ -407,7 +412,7 @@
   }
 
   .asset-page .rule-card.rule-row {
-    height: 112px;
+    height: 96px;
     grid-template-columns: 5px minmax(0, .8fr) minmax(0, 1.2fr) auto;
     align-items: center;
     gap: 8px 10px;
@@ -416,7 +421,7 @@
 
   .asset-page .rule-card .sev {
     grid-row: 1 / span 2;
-    min-height: 56px;
+    min-height: 44px;
   }
 
   .asset-page .rule-name.rule-card-main {
@@ -469,7 +474,7 @@
   }
 
   .asset-page .rule-card.rule-row {
-    height: 132px;
+    height: 112px;
     grid-template-columns: 5px minmax(0, 1fr) auto;
     align-items: center;
     gap: 6px 8px;
@@ -478,7 +483,7 @@
 
   .asset-page .rule-card .sev {
     grid-row: 1 / span 2;
-    min-height: 48px;
+    min-height: 40px;
   }
 
   .asset-page .rule-name.rule-card-main {

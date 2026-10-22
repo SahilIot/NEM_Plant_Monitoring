@@ -12,6 +12,7 @@ export default function CreateInstructionPage() {
   const [labelInput, setLabelInput] = useState("");
   const [duration, setDuration] = useState("30");
   const [text, setText] = useState("");
+  const [files, setFiles] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -69,16 +70,26 @@ export default function CreateInstructionPage() {
       return;
     }
 
+    if (files.length > 10) {
+      setError("You can attach up to 10 documents.");
+      return;
+    }
+    if (files.some((file) => file.size > 10 * 1024 * 1024)) {
+      setError("Each document must be 10 MB or smaller.");
+      return;
+    }
+
     setBusy(true);
 
     try {
-      await api.post("/documents", {
-        title: cleanName,
-        kind: "Instruction",
-        description: cleanText,
-        labels,
-        duration_minutes: minutes,
-      });
+      const form = new FormData();
+      form.append("title", cleanName);
+      form.append("kind", "Instruction");
+      form.append("description", cleanText);
+      form.append("labels", JSON.stringify(labels));
+      form.append("duration_minutes", String(minutes));
+      files.forEach((file) => form.append("files", file));
+      await api.postForm("/documents/with-files", form);
 
       nav("/configuration/instructions");
     } catch (err) {
@@ -232,6 +243,27 @@ export default function CreateInstructionPage() {
           <small>
             {text.length}/10,000 characters
           </small>
+        </div>
+
+        <div className="instruction-field">
+          <label htmlFor="instruction-documents">Attach documents (optional)</label>
+          <input
+            id="instruction-documents"
+            type="file"
+            accept=".pdf,.doc,.docx,.txt"
+            multiple
+            disabled={busy}
+            onChange={(event) => {
+              setFiles(Array.from(event.target.files || []));
+              setError("");
+            }}
+          />
+          <small>PDF, DOC, DOCX or TXT. Up to 10 documents, 10 MB each.</small>
+          {files.length > 0 && (
+            <ul>
+              {files.map((file) => <li key={`${file.name}-${file.lastModified}`}>{file.name}</li>)}
+            </ul>
+          )}
         </div>
 
         <div className="instruction-form-actions">
