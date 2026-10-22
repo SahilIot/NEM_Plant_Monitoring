@@ -4,7 +4,7 @@ import { Link, useNavigate, useOutletContext } from "react-router-dom";
 import { api } from "../../../services/api.js";
 import { subscribeLiveUpdates } from "../../../services/liveUpdates.js";
 import { formatDuration, formatValue, timeAgo } from "../../../utils/format.js";
-import { EmptyState } from "../../../components/common/UI.jsx";
+import { EmptyState, Modal } from "../../../components/common/UI.jsx";
 import { CheckIcon } from "../../../components/common/Icons.jsx";
 
 const num = (value) =>
@@ -44,6 +44,7 @@ export default function Home() {
   const [operator, setOperator] = useState("");
   const [ackError, setAckError] = useState("");
   const [busyId, setBusyId] = useState(null);
+  const [completionAlert, setCompletionAlert] = useState(null);
 
   const loadSummary = useCallback(async () => {
     try {
@@ -176,23 +177,24 @@ export default function Home() {
     [alerts]
   );
 
-  const acknowledge = async (alert) => {
+  const completeRule = async () => {
+    if (!completionAlert || busyId !== null) return;
+    const alert = completionAlert;
     setBusyId(alert.id);
     setAckError("");
 
     try {
-      await api.post(
-        `/alerts/${alert.id}/acknowledge`,
-        operator ? { acknowledged_by: operator } : {}
-      );
+      await api.post(`/alerts/${alert.id}/complete`);
 
       await Promise.all([
-        refreshStatus?.(),
         loadSummary(),
+        refreshLiveStatus(),
+        refreshStatus?.(),
       ]);
+      setCompletionAlert(null);
     } catch (err) {
       setAckError(
-        err.message || "Unable to acknowledge this alert."
+        err.message || "Unable to complete this monitoring rule."
       );
     } finally {
       setBusyId(null);
@@ -206,7 +208,6 @@ export default function Home() {
           <strong>Could not load the overview</strong>
           <p>{error}</p>
         </div>
-
         <button
           type="button"
           className="btn-outline"
@@ -260,9 +261,20 @@ export default function Home() {
   const ruleStats = [
     ["Activated", "activated"],
     ["Suspended", "suspended"],
-    ["Finished", "finished"],
-    ["Not activated", "not_activated"],
+    ["Deactivated", "deactivated"],
+    ["Completed", "completed"],
   ];
+  const firstMonitoredAsset = assets.find(
+    (asset) =>
+      asset.is_active &&
+      rules.some(
+        (rule) =>
+          rule.target_asset_id === asset.id &&
+          rule.is_enabled &&
+          (rule.lifecycle_status === "in_progress" ||
+            rule.lifecycle_status == null)
+      )
+  );
 
   return (
     <div className="home">
@@ -325,7 +337,7 @@ export default function Home() {
 
             {ackError && (
               <p className="notice error" role="alert">
-                Could not acknowledge: {ackError}
+                Could not resolve and complete this alert: {ackError}
               </p>
             )}
 
@@ -398,30 +410,32 @@ export default function Home() {
                       </div>
                     </div>
 
-                    {alert.acknowledged_at ? (
-                      <span
-                        className="ack-done"
-                        title={new Date(
-                          alert.acknowledged_at
-                        ).toLocaleString()}
-                      >
-                        Acknowledged
-                        {alert.acknowledged_by
-                          ? ` by ${alert.acknowledged_by}`
-                          : ""}
-                      </span>
-                    ) : (
+                    <div className="alert-actions">
+                      {alert.acknowledged_at && (
+                        <span
+                          className="ack-done"
+                          title={new Date(
+                            alert.acknowledged_at
+                          ).toLocaleString()}
+                        >
+                          Acknowledged
+                          {alert.acknowledged_by
+                            ? ` by ${alert.acknowledged_by}`
+                            : ""}
+                        </span>
+                      )}
                       <button
                         type="button"
                         className="btn-outline"
                         disabled={busyId === alert.id}
-                        onClick={() => acknowledge(alert)}
+                        onClick={() => {
+                          setAckError("");
+                          setCompletionAlert(alert);
+                        }}
                       >
-                        {busyId === alert.id
-                          ? "Saving…"
-                          : "Acknowledge"}
+                        {busyId === alert.id ? "Saving…" : "Acknowledge"}
                       </button>
-                    )}
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -436,13 +450,19 @@ export default function Home() {
             <ul className="state-grid">
               {ruleStats.map(([label, key]) => (
                 <li key={key}>
-                  <Link to="/assets">
-                  <span>{label}</span>
-                  <b>{num(stats[key])}</b>
+                  <Link
+                    to={
+                      key === "activated" && firstMonitoredAsset
+                        ? `/assets/${firstMonitoredAsset.id}`
+                        : `/rules/${key}`
+                    }
+                  >
+                    <span>{label}</span>
+                    <b>{num(stats[key])}</b>
                   </Link>
-                  </li>
+                </li>
                 ))}
-                </ul>
+            </ul>
           </section>
         </div>
 
@@ -469,6 +489,43 @@ export default function Home() {
           </section>
         </aside>
       </div>
+      {completionAlert && (
+        <Modal
+          title="Confirm resolution"
+          onClose={() => {
+            if (busyId === null) setCompletionAlert(null);
+          }}
+        >
+          <p>
+            Has this alert or warning been resolved successfully? Confirming
+            will deactivate the associated monitoring rule and mark it as
+            completed.
+          </p>
+          {ackError && (
+            <p className="notice error" role="alert">{ackError}</p>
+          )}
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="btn-outline"
+              disabled={busyId !== null}
+              onClick={() => setCompletionAlert(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={busyId !== null}
+              onClick={completeRule}
+            >
+              {busyId === completionAlert.id
+                ? "Saving…"
+                : "Yes, mark as completed"}
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

@@ -35,9 +35,19 @@ function crumbs(path, assets) {
 
   let m;
   if ((m = matchPath("/rules/:kind", path))) {
+    const lifecycleLabels = {
+      activated: "Activated rules",
+      suspended: "Suspended rules",
+      deactivated: "Deactivated rules",
+      completed: "Completed rules",
+    };
     return [
       { label: "Overview", to: "/" },
-      { label: `Rules in ${m.params.kind} status` },
+      {
+        label:
+          lifecycleLabels[m.params.kind] ||
+          `Rules in ${m.params.kind} status`,
+      },
     ];
   }
 

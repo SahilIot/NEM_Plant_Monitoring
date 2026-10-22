@@ -30,6 +30,7 @@ const STATUS_LABEL = {
   normal: "Normal",
   warning: "Warning",
   alert: "Alert",
+  evaluated: "Evaluated",
   unknown: "Not evaluated",
 };
 

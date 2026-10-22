@@ -23,7 +23,12 @@ from app.schemas.monitoring import (
     EventRead,
     RuleStateRead,
 )
-from app.services.monitoring_engine import emit_event, evaluate_rules, utc_now
+from app.services.monitoring_engine import (
+    emit_event,
+    evaluate_rules,
+    set_rule_enabled_state,
+    utc_now,
+)
 
 router = APIRouter(tags=["monitoring", "alerts", "events"])
 
@@ -304,6 +309,61 @@ def acknowledge_alert(
         session.commit()
         session.refresh(alert)
     return alert
+
+#When the alert is mark as completed
+@router.post("/alerts/{alert_id}/complete", response_model=AlertRead)
+def complete_rule_from_alert(
+    alert_id: int,
+    session: Session = Depends(get_db),
+) -> Alert:
+    alert = session.scalar(select(Alert).where(Alert.id == alert_id).with_for_update())
+    if alert is None:
+        raise HTTPException(status_code=404, detail=f"Alert {alert_id} was not found")
+    if alert.status != "active":
+        raise HTTPException(status_code=409, detail="Resolved alerts cannot complete a rule")
+    if alert.rule_id is None:
+        raise HTTPException(status_code=409,detail="Maintenance alerts must be resolved through maintenance scheduling.",)
+
+    rule = session.scalar(
+        select(MonitoringRule)
+        .where(MonitoringRule.id == alert.rule_id)
+        .with_for_update()
+    )
+    if (
+        rule is None
+        or rule.is_archived
+        or rule.lifecycle_status != "in_progress"
+        or not rule.is_enabled
+    ):
+        raise HTTPException(status_code=409,detail="Only an active monitoring rule can be completed from an alert.",)
+    state = session.scalar(
+        select(RuleState).where(
+            RuleState.rule_id == rule.id,
+            RuleState.target_asset_id == alert.target_asset_id,
+        )
+    )
+    if state is None or state.status not in {"warning", "alert"}:
+        raise HTTPException(status_code=409,detail="The monitoring rule no longer has an active warning or alert.",)
+
+    now = utc_now()
+    set_rule_enabled_state(session, rule, False, at=now)
+    rule.lifecycle_status = "completed"
+    rule.completed_at = now
+    emit_event(
+        session,
+        event_type="rule_completed",
+        message=f"Rule '{rule.name}' marked completed after alert resolution.",
+        occurred_at=now,
+        asset_id=rule.target_asset_id,
+        rule_id=rule.id,
+        alert_id=alert.id,
+        severity=alert.severity,
+        metadata={"completed_at": now.isoformat()},
+    )
+    session.commit()
+    session.refresh(alert)
+    return alert
+
 
 #Listing monitoring events
 @router.get("/events")

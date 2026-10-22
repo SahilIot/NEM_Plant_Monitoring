@@ -79,6 +79,35 @@ function thresholdMetrics(rule) {
   return [];
 }
 
+function thresholdSequence(rule) {
+  const parameters = rule.parameters || {};
+  if (
+    rule.rule_type === "runtime_duration" &&
+    Array.isArray(parameters.warning_thresholds_seconds) &&
+    parameters.warning_thresholds_seconds.length === 2 &&
+    parameters.alert_threshold_seconds != null
+  ) {
+    return [
+      { label: "Warning", value: Number(parameters.warning_thresholds_seconds[0]) },
+      { label: "Higher warning", value: Number(parameters.warning_thresholds_seconds[1]) },
+      { label: "Alert", value: Number(parameters.alert_threshold_seconds) },
+    ];
+  }
+  if (
+    rule.rule_type === "boolean_count_threshold" &&
+    Array.isArray(parameters.warning_thresholds) &&
+    parameters.warning_thresholds.length === 2 &&
+    parameters.alert_threshold != null
+  ) {
+    return [
+      { label: "Warning", value: Number(parameters.warning_thresholds[0]) },
+      { label: "Higher warning", value: Number(parameters.warning_thresholds[1]) },
+      { label: "Alert", value: Number(parameters.alert_threshold) },
+    ];
+  }
+  return [];
+}
+
 const ruleFields = (
   variables,
   cycleVariableIds,
@@ -325,6 +354,8 @@ export default function AssetDetail() {
   const [bulkSaving, setBulkSaving] = useState(false);
   const [deletingRuleId, setDeletingRuleId] = useState(null);
   const [ruleActionMenuId, setRuleActionMenuId] = useState(null);
+  const [lifecycleAction, setLifecycleAction] = useState(null);
+  const [viewRule, setViewRule] = useState(null);
   const [actionNotice, setActionNotice] = useState("");
   const [sortMenu, setSortMenu] = useState(false);
   const [modal, setModal] = useState(null);
@@ -749,16 +780,33 @@ const filteredLogs = [...logs]
     ]);
   };
 
-  const setState = async (rule, state) => {
+  const confirmLifecycleChange = async () => {
+    if (!lifecycleAction || deletingRuleId !== null) return;
+    const { rule, action } = lifecycleAction;
+    setDeletingRuleId(rule.id);
+    setLoadError("");
     try {
-      await api.patch(`/rules/${rule.id}`, {
-        is_enabled: state === "activated",
-      });
-
+      await api.post(`/rules/${rule.id}/${action}`);
       await refreshAll();
+      setLifecycleAction(null);
+      setRuleActionMenuId(null);
     } catch (error) {
-      setLoadError(error.message);
+      setLoadError(error.message || `Could not ${action} this rule.`);
+    } finally {
+      setDeletingRuleId(null);
     }
+  };
+
+  const lifecycleStatus = (rule) =>
+    rule.lifecycle_status ||
+    (rule.is_enabled ? "in_progress" : "deactivated");
+
+  const lifecycleLabel = (rule) => {
+    const status = lifecycleStatus(rule);
+    if (status === "in_progress") return "Activated · In progress";
+    if (status === "suspended") return "Suspended";
+    if (status === "completed") return "Completed";
+    return "Deactivated";
   };
 
   const remove = async (rule) => {
@@ -1297,7 +1345,6 @@ const filteredLogs = [...logs]
               {shown.map((rule) => {
                 const state = ruleStates.get(rule.id);
 
-                const limits = thresholdMetrics(rule);
                 const currentValue =
                   state?.latest_value ?? rule.latest_value;
                 const runtimeReading = runtimeReadings.get(rule.variable_id);
@@ -1323,15 +1370,37 @@ const filteredLogs = [...logs]
                     ? currentValue +
                       Math.max(0, clockNow - evaluatedAt) / 1000
                     : currentValue;
+                const numericCurrentValue =
+                  displayedValue === null || displayedValue === undefined
+                    ? Number.NaN
+                    : Number(displayedValue);
+                const canShowNextThreshold =
+                  lifecycleStatus(rule) === "in_progress" &&
+                  ["ok", "warning"].includes(rule.status) &&
+                  Number.isFinite(numericCurrentValue) &&
+                  (rule.rule_type !== "runtime_duration" || signalIsFresh);
+                const nextThreshold = canShowNextThreshold
+                  ? thresholdSequence(rule).find(
+                      (threshold) => threshold.value > numericCurrentValue
+                    )
+                  : null;
                 const formattedCurrentValue =
                   rule.rule_type === "runtime_duration"
                     ? formatDuration(displayedValue)
-                    : formatValue(displayedValue);
+                    : rule.rule_type === "boolean_count_threshold" &&
+                        Number.isFinite(numericCurrentValue)
+                      ? numericCurrentValue.toLocaleString()
+                      : formatValue(displayedValue);
+                const formattedNextThreshold = nextThreshold
+                  ? rule.rule_type === "runtime_duration"
+                    ? formatDuration(nextThreshold.value)
+                    : nextThreshold.value.toLocaleString()
+                  : null;
 
                 return (
                   <article
                     key={rule.id}
-                    className={`rule-row rule-card ${rule.status || "unknown"}`}
+                    className={`rule-row rule-card ${rule.status || "unknown"}${ruleActionMenuId === rule.id ? " rule-card-menu-open" : ""}`}
                   >
                     <span className={"sev " + rule.status} />
 
@@ -1344,92 +1413,139 @@ const filteredLogs = [...logs]
 
                     <div className="rule-evaluation">
                       <StatusBadge status={rule.status} />
+                      <span className="rule-lifecycle-label">
+                        {lifecycleLabel(rule)}
+                      </span>
                     </div>
 
                     <div className="rule-card-metrics">
-                      {displayedValue !== null && displayedValue !== undefined && (
-                        <div className="rule-current-value">
-                          <span>{rule.rule_type === "runtime_duration" ? "Running time" : "Now"}</span>
-                          <b>{formattedCurrentValue}</b>
-                        </div>
-                      )}
-                      {limits.length > 0 && (
-                        <div className="rule-limits">
-                          {limits.map((limit) => (
-                            <span key={limit.label}>
-                              <small>{limit.label}</small>
-                              <b>{limit.value}</b>
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                      <div className="rule-current-next-value">
+                        <span>Current / Next</span>
+                        <b>
+                          {displayedValue !== null && displayedValue !== undefined
+                            ? formattedCurrentValue
+                            : "—"}
+                          {" / "}
+                          {nextThreshold
+                            ? `${nextThreshold.label} at ${formattedNextThreshold}`
+                            : "—"}
+                        </b>
+                      </div>
                     </div>
 
                     <div className="rule-card-actions">
-                      {isAct(rule) ? (
+                      <div className="dropdown rule-actions-menu">
                         <button
-                          className="btn-outline"
-                          onClick={() => setState(rule, "not_activated")}
-                          disabled={deletingRuleId !== null}
+                          type="button"
+                          className="icon-outline sm"
+                          title={`More actions for ${rule.name}`}
+                          aria-label={`More actions for ${rule.name}`}
+                          aria-haspopup="menu"
+                          aria-expanded={ruleActionMenuId === rule.id}
+                          onClick={() =>
+                            setRuleActionMenuId((current) =>
+                              current === rule.id ? null : rule.id
+                            )
+                          }
                         >
-                          Deactivate
+                          <DotsIcon size={17} />
                         </button>
-                      ) : (
-                        <>
-                          <button
-                            className="btn-outline"
-                            onClick={() => setState(rule, "activated")}
-                            disabled={deletingRuleId !== null}
-                          >
-                            Activate
-                          </button>
-                          <div className="dropdown rule-actions-menu">
+                        {ruleActionMenuId === rule.id && (
+                          <div className="menu right" role="menu">
                             <button
                               type="button"
-                              className="icon-outline sm"
-                              title={`More actions for ${rule.name}`}
-                              aria-label={`More actions for ${rule.name}`}
-                              aria-haspopup="menu"
-                              aria-expanded={ruleActionMenuId === rule.id}
-                              onClick={() =>
-                                setRuleActionMenuId((current) =>
-                                  current === rule.id ? null : rule.id
-                                )
-                              }
+                              role="menuitem"
+                              onClick={() => {
+                                setRuleActionMenuId(null);
+                                setViewRule(rule);
+                              }}
                             >
-                              <DotsIcon size={17} />
+                              View rule
                             </button>
-                            {ruleActionMenuId === rule.id && (
-                              <div className="menu right" role="menu">
-                                <button
-                                  type="button"
-                                  role="menuitem"
-                                  onClick={() => {
-                                    setRuleActionMenuId(null);
-                                    remove(rule);
-                                  }}
-                                  disabled={deletingRuleId !== null}
-                                >
-                                  Archive
-                                </button>
-                                <button
-                                  type="button"
-                                  role="menuitem"
-                                  onClick={() => {
-                                    setRuleActionMenuId(null);
-                                    permanentlyDeleteRule(rule);
-                                  }}
-                                  disabled={deletingRuleId !== null}
-                                >
-                                  {deletingRuleId === rule.id
-                                    ? "Deleting…"
-                                    : "Delete permanently"}
-                                </button>
-                              </div>
+                            {lifecycleStatus(rule) === "in_progress" && (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setRuleActionMenuId(null);
+                                  setLifecycleAction({ rule, action: "suspend" });
+                                }}
+                                disabled={deletingRuleId !== null}
+                              >
+                                Suspend rule
+                              </button>
                             )}
+                            {lifecycleStatus(rule) === "suspended" && (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setRuleActionMenuId(null);
+                                  setLifecycleAction({ rule, action: "resume" });
+                                }}
+                                disabled={deletingRuleId !== null}
+                              >
+                                Activate rule
+                              </button>
+                            )}
+                            {lifecycleStatus(rule) === "deactivated" && (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setRuleActionMenuId(null);
+                                  setLifecycleAction({ rule, action: "activate" });
+                                }}
+                                disabled={deletingRuleId !== null}
+                              >
+                                Activate rule
+                              </button>
+                            )}
+                            {["in_progress", "suspended"].includes(lifecycleStatus(rule)) && (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setRuleActionMenuId(null);
+                                  setLifecycleAction({ rule, action: "deactivate" });
+                                }}
+                                disabled={deletingRuleId !== null}
+                              >
+                                Deactivate rule
+                              </button>
+                            )}
+                            {lifecycleStatus(rule) !== "in_progress" &&
+                              lifecycleStatus(rule) !== "completed" && (
+                                <>
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    onClick={() => {
+                                      setRuleActionMenuId(null);
+                                      remove(rule);
+                                    }}
+                                    disabled={deletingRuleId !== null}
+                                  >
+                                    Archive
+                                  </button>
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    onClick={() => {
+                                      setRuleActionMenuId(null);
+                                      permanentlyDeleteRule(rule);
+                                    }}
+                                    disabled={deletingRuleId !== null}
+                                  >
+                                    {deletingRuleId === rule.id
+                                      ? "Deleting…"
+                                      : "Delete permanently"}
+                                  </button>
+                                </>
+                              )}
                           </div>
-                        </>
-                      )}
+                        )}
+                      </div>
                     </div>
                   </article>
                 );
@@ -1634,6 +1750,133 @@ const filteredLogs = [...logs]
   </Modal>
 )}
 
+{lifecycleAction && (
+  <Modal
+    title={
+      lifecycleAction.action === "suspend"
+        ? "Suspend monitoring rule"
+        : lifecycleAction.action === "deactivate"
+          ? "Deactivate monitoring rule"
+          : lifecycleAction.action === "resume"
+            ? "Resume monitoring rule"
+            : "Activate monitoring rule"
+    }
+    onClose={() => {
+      if (deletingRuleId === null) {
+        setLifecycleAction(null);
+        setLoadError("");
+      }
+    }}
+  >
+    <p>
+      {lifecycleAction.action === "suspend"
+        ? "Suspending pauses rule evaluation and prevents new alerts. The rule configuration and history will be retained."
+        : lifecycleAction.action === "deactivate"
+          ? "Are you sure you want to deactivate this monitoring rule? This disables monitoring but does not mark the rule completed. Its configuration and history will be retained."
+          : lifecycleAction.action === "resume"
+            ? "Resume monitoring using this rule's saved configuration?"
+            : "Activate monitoring using this rule's saved configuration?"}
+    </p>
+    {loadError && <p className="notice error" role="alert">{loadError}</p>}
+    <div className="modal-actions">
+      <button
+        type="button"
+        className="btn-outline"
+        disabled={deletingRuleId !== null}
+        onClick={() => {
+          setLifecycleAction(null);
+          setLoadError("");
+        }}
+      >
+        Cancel
+      </button>
+      <button
+        type="button"
+        className="btn-primary"
+        disabled={deletingRuleId !== null}
+        onClick={confirmLifecycleChange}
+      >
+        {deletingRuleId === lifecycleAction.rule.id
+          ? "Saving…"
+          : lifecycleAction.action === "suspend"
+            ? "Confirm suspension"
+            : lifecycleAction.action === "deactivate"
+              ? "Deactivate"
+              : lifecycleAction.action === "resume"
+                ? "Resume rule"
+                : "Activate rule"}
+      </button>
+    </div>
+  </Modal>
+)}
+
+{viewRule && (
+  <Modal title="Monitoring rule details" onClose={() => setViewRule(null)} wide>
+    <dl className="rule-detail-grid">
+      <div><dt>Rule name</dt><dd>{viewRule.name}</dd></div>
+      <div><dt>Rule type</dt><dd>{viewRule.rule_type.replaceAll("_", " ")}</dd></div>
+      {viewRule.description && <div><dt>Description</dt><dd>{viewRule.description}</dd></div>}
+      <div><dt>Asset</dt><dd>{viewRule.asset_name || asset?.name || `Asset ${viewRule.asset_id}`}</dd></div>
+      {viewRule.variable_id && (
+        <div>
+          <dt>Monitored variable</dt>
+          <dd>
+            {viewRule.variable_name ||
+              variables.find((item) => item.id === viewRule.variable_id)?.name ||
+              `Variable ${viewRule.variable_id}`}
+          </dd>
+        </div>
+      )}
+      {viewRule.variable_key && <div><dt>Variable key</dt><dd>{viewRule.variable_key}</dd></div>}
+      {viewRule.variable_data_type && <div><dt>Variable type</dt><dd>{viewRule.variable_data_type}</dd></div>}
+      {viewRule.variable_unit && <div><dt>Variable unit</dt><dd>{viewRule.variable_unit}</dd></div>}
+      <div><dt>Lifecycle</dt><dd>{lifecycleLabel(viewRule)}</dd></div>
+      <div><dt>Configured severity</dt><dd>{viewRule.severity}</dd></div>
+      <div><dt>Current status</dt><dd>{viewRule.current_status || viewRule.status || "Not evaluated"}</dd></div>
+      {viewRule.latest_value !== null && viewRule.latest_value !== undefined && (
+        <div>
+          <dt>Current value</dt>
+          <dd>
+            {viewRule.rule_type === "runtime_duration"
+              ? formatDuration(viewRule.latest_value)
+              : `${formatValue(viewRule.latest_value)}${viewRule.variable_unit ? ` ${viewRule.variable_unit}` : ""}`}
+          </dd>
+        </div>
+      )}
+      {thresholdMetrics(viewRule).map((item) => (
+        <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>
+      ))}
+      {viewRule.operator && <div><dt>Operator</dt><dd>{viewRule.operator}</dd></div>}
+      {viewRule.parameters && Object.entries(viewRule.parameters).map(([key, value]) => (
+        <div key={key}>
+          <dt>{key.replaceAll("_", " ")}</dt>
+          <dd>
+            {Array.isArray(value)
+              ? value.join(", ")
+              : value !== null && typeof value === "object"
+                ? JSON.stringify(value)
+                : String(value)}
+          </dd>
+        </div>
+      ))}
+      {viewRule.evaluation_interval_seconds && (
+        <div><dt>Evaluation interval</dt><dd>{viewRule.evaluation_interval_seconds} seconds</dd></div>
+      )}
+      {viewRule.stale_after_seconds && (
+        <div><dt>Stale after</dt><dd>{viewRule.stale_after_seconds} seconds</dd></div>
+      )}
+      {viewRule.source_template_id && (
+        <div><dt>Template ID</dt><dd>{viewRule.source_template_id}</dd></div>
+      )}
+      {viewRule.created_at && <div><dt>Created</dt><dd>{formatTime(viewRule.created_at)}</dd></div>}
+      {viewRule.updated_at && <div><dt>Updated</dt><dd>{formatTime(viewRule.updated_at)}</dd></div>}
+      {viewRule.completed_at && <div><dt>Completed</dt><dd>{formatTime(viewRule.completed_at)}</dd></div>}
+    </dl>
+    <div className="modal-actions">
+      <button type="button" className="btn-outline" onClick={() => setViewRule(null)}>Close</button>
+    </div>
+  </Modal>
+)}
 
       
 {modal === "copyRules" && (

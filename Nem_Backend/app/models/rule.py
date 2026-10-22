@@ -54,6 +54,10 @@ class MonitoringRule(Base):
     __table_args__ = (
         CheckConstraint("severity IN ('warning', 'alert')", name="ck_nem_monitoring_rules_severity"),
         CheckConstraint(
+            "lifecycle_status IN ('in_progress', 'suspended', 'deactivated', 'completed')",
+            name="ck_nem_monitoring_rules_lifecycle_status",
+        ),
+        CheckConstraint(
             "rule_type IN ('parameter_threshold', 'runtime_duration', "
             "'duration', 'generic', 'boolean_condition', "
             "'boolean_count_threshold')",
@@ -77,6 +81,8 @@ class MonitoringRule(Base):
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
+    lifecycle_status: Mapped[str] = mapped_column(String(20), default="in_progress", server_default="in_progress", nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     evaluation_interval_seconds: Mapped[int | None] = mapped_column()
     stale_after_seconds: Mapped[int | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=lambda: datetime.now(timezone.utc), nullable=False)

@@ -135,6 +135,7 @@ def _save_config(session: Session, key: str, value: dict[str, Any]) -> None:
 def _rule_row(session: Session, rule: MonitoringRule) -> dict[str, Any]:
     state = state_for_rule(session, rule)
     asset = session.get(Asset, rule.target_asset_id) if rule.target_asset_id else None
+    variable = session.get(Variable, rule.variable_id) if rule.variable_id else None
     return {
         "id": rule.id,
         "name": rule.name,
@@ -142,19 +143,38 @@ def _rule_row(session: Session, rule: MonitoringRule) -> dict[str, Any]:
         "asset_id": rule.target_asset_id,
         "asset_name": asset.name if asset else "",
         "severity": rule.severity,
-        "state": "activated" if rule.is_enabled else "not_activated",
+        "state": "activated" if rule.is_enabled else rule.lifecycle_status,
         "is_enabled": rule.is_enabled,
+        "lifecycle_status": rule.lifecycle_status,
+        "completed_at": rule.completed_at,
+        "created_at": rule.created_at,
+        "updated_at": rule.updated_at,
         "status": (
-            {"normal": "ok"}.get(state.status, state.status)
+            "evaluated"
+            if rule.lifecycle_status == "completed"
+            else {"normal": "ok"}.get(state.status, state.status)
             if rule.is_enabled
             else "unknown"
         ),
+        "current_status": (
+            "evaluated"
+            if rule.lifecycle_status == "completed"
+            else state.status
+        ),
+        "latest_value": state.latest_value,
+        "last_evaluated_at": state.last_evaluated_at,
         "rule_type": rule.rule_type,
         "source_template_id": rule.source_template_id,
         "variable_id": rule.variable_id,
+        "variable_name": variable.name if variable else None,
+        "variable_key": variable.key if variable else None,
+        "variable_data_type": variable.data_type if variable else None,
+        "variable_unit": variable.unit if variable else None,
         "operator": rule.operator,
         "threshold": float(rule.threshold) if rule.threshold is not None else None,
         "parameters": rule.parameters,
+        "evaluation_interval_seconds": rule.evaluation_interval_seconds,
+        "stale_after_seconds": rule.stale_after_seconds,
     }
 
 # Finds an asset and all its descendants, returning a set of their IDs. This is used to retrieve all rules for an asset and its children.
@@ -185,6 +205,18 @@ def frontend_summary(session: Session = Depends(get_db)) -> dict[str, Any]:
     from app.api.routes.dashboard import dashboard_summary
 
     summary = dashboard_summary(session)
+    lifecycle_counts = {
+        status: session.scalar(
+            select(func.count())
+            .select_from(MonitoringRule)
+            .where(
+                MonitoringRule.lifecycle_status == status,
+                MonitoringRule.is_archived.is_(False),
+            )
+        )
+        or 0
+        for status in ("in_progress", "suspended", "deactivated", "completed")
+    }
     return {
         "rules_alert": summary.rules_alert,
         "rules_warning": summary.rules_warning,
@@ -193,14 +225,40 @@ def frontend_summary(session: Session = Depends(get_db)) -> dict[str, Any]:
         "monitored_assets": summary.monitored_assets,
         "total_assets": summary.total_assets,
         "stats": {
-            "activated": summary.enabled_rules,
-            "suspended": 0,
-            "finished": 0,
-            "not_activated": summary.disabled_rules,
+            "activated": lifecycle_counts["in_progress"],
+            "in_progress": lifecycle_counts["in_progress"],
+            "suspended": lifecycle_counts["suspended"],
+            "deactivated": lifecycle_counts["deactivated"],
+            "completed": lifecycle_counts["completed"],
+            "not_activated": lifecycle_counts["deactivated"],
         },
     }
 
 #Reading and filtering machine rules
+#Rules by lifecycle state
+@router.get("/rules/lifecycle/{lifecycle_status}")
+def frontend_rules_by_lifecycle(
+    lifecycle_status: str,
+    session: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    allowed_statuses = {"in_progress", "suspended", "deactivated", "completed"}
+    if lifecycle_status not in allowed_statuses:
+        raise HTTPException(
+            status_code=422,
+            detail="Rule lifecycle status must be in_progress, suspended, deactivated, or completed",
+        )
+    rules = session.scalars(
+        select(MonitoringRule)
+        .where(
+            MonitoringRule.lifecycle_status == lifecycle_status,
+            MonitoringRule.is_archived.is_(False),
+            MonitoringRule.target_asset_id.is_not(None),
+        )
+        .order_by(MonitoringRule.target_asset_id, MonitoringRule.id)
+    ).all()
+    return [_rule_row(session, rule) for rule in rules]
+
+
 #Rules by status
 @router.get("/rules/status/{kind}")
 def frontend_rules_by_status(kind: str, session: Session = Depends(get_db)) -> list[dict[str, Any]]:
@@ -277,6 +335,7 @@ def _rule_definition(
         "parameters": source.parameters,
         "severity": source.severity,
         "is_enabled": False,
+        "lifecycle_status": "deactivated",
         "evaluation_interval_seconds": source.evaluation_interval_seconds,
         "stale_after_seconds": source.stale_after_seconds,
     }
@@ -380,6 +439,7 @@ def _template_rule_definition(
             "parameters": template.parameters,
             "severity": template.severity,
             "is_enabled": False,
+            "lifecycle_status": "deactivated",
             "evaluation_interval_seconds": template.evaluation_interval_seconds,
             "stale_after_seconds": template.stale_after_seconds,
             "source_template_id": template.id,
@@ -806,7 +866,11 @@ def frontend_create_asset_rule(
         configured_runtime_signal_mapping(request, payload.variable_id),
         is_mapping_bypass_enabled(request),
     )
-    rule = MonitoringRule(**payload.model_dump())
+    rule_data = payload.model_dump()
+    rule_data["lifecycle_status"] = (
+        "in_progress" if payload.is_enabled else "deactivated"
+    )
+    rule = MonitoringRule(**rule_data)
     session.add(rule)
     session.flush()
     emit_event(
@@ -920,6 +984,13 @@ def frontend_bulk_rule_state(
     updated = []
     skipped = []
     for rule in rules:
+        if rule.lifecycle_status == "completed":
+            skipped.append({
+                "rule_id": rule.id,
+                "name": rule.name,
+                "reason": "Completed rules cannot be reactivated.",
+            })
+            continue
         if rule.is_enabled == enabled:
             continue
         if enabled:
@@ -951,6 +1022,116 @@ def frontend_bulk_rule_state(
     session.commit()
     return {"updated": len(updated), "updated_rule_ids": updated, "skipped": skipped}
 
+
+def _transition_rule_lifecycle(
+    rule_id: int,
+    action: str,
+    request: Request,
+    session: Session,
+) -> dict[str, Any]:
+    rule = session.scalar(
+        select(MonitoringRule)
+        .where(MonitoringRule.id == rule_id)
+        .with_for_update()
+    )
+    if rule is None or rule.is_archived:
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id} was not found")
+
+    now = datetime.now(timezone.utc)
+    current = rule.lifecycle_status
+    if action == "suspend":
+        if current != "in_progress" or not rule.is_enabled:
+            raise HTTPException(status_code=409, detail="Only an active rule can be suspended.")
+        set_rule_enabled_state(session, rule, False, at=now)
+        rule.lifecycle_status = "suspended"
+        event_type = "rule_suspended"
+    elif action in {"resume", "activate"}:
+        expected = "suspended" if action == "resume" else "deactivated"
+        if current != expected or rule.is_enabled:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Only a {expected} rule can be {action}d.",
+            )
+        if rule.rule_type == "generic":
+            raise HTTPException(status_code=422, detail="This rule type has no monitoring evaluator.")
+        validate_targets(
+            session,
+            rule.target_asset_id,
+            rule.variable_id,
+            rule.rule_type,
+            rule.operator,
+            rule.threshold,
+            rule.parameters,
+            configured_cycle_signal_mapping(request, rule.variable_id),
+            configured_runtime_signal_mapping(request, rule.variable_id),
+            is_mapping_bypass_enabled(request),
+        )
+        set_rule_enabled_state(session, rule, True, at=now)
+        rule.lifecycle_status = "in_progress"
+        rule.completed_at = None
+        event_type = "rule_resumed" if action == "resume" else "rule_activated"
+    elif action == "deactivate":
+        if current not in {"in_progress", "suspended"}:
+            raise HTTPException(status_code=409, detail="Only an active or suspended rule can be deactivated.")
+        if rule.is_enabled:
+            set_rule_enabled_state(session, rule, False, at=now)
+        rule.lifecycle_status = "deactivated"
+        event_type = "rule_deactivated"
+    else:
+        raise HTTPException(status_code=422, detail="Unsupported lifecycle action.")
+
+    emit_event(
+        session,
+        event_type=event_type,
+        message=(
+            f"Rule '{rule.name}' "
+            f"{ {'suspend': 'suspended', 'resume': 'resumed', 'activate': 'activated', 'deactivate': 'deactivated'}[action] }."
+        ),
+        occurred_at=now,
+        asset_id=rule.target_asset_id,
+        rule_id=rule.id,
+    )
+    session.commit()
+    session.refresh(rule)
+    return _rule_row(session, rule)
+
+
+@router.post("/rules/{rule_id}/suspend")
+def suspend_rule(
+    rule_id: int,
+    request: Request,
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return _transition_rule_lifecycle(rule_id, "suspend", request, session)
+
+
+@router.post("/rules/{rule_id}/resume")
+def resume_rule(
+    rule_id: int,
+    request: Request,
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return _transition_rule_lifecycle(rule_id, "resume", request, session)
+
+
+@router.post("/rules/{rule_id}/activate")
+def activate_rule(
+    rule_id: int,
+    request: Request,
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return _transition_rule_lifecycle(rule_id, "activate", request, session)
+
+
+@router.post("/rules/{rule_id}/deactivate")
+def deactivate_rule(
+    rule_id: int,
+    request: Request,
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return _transition_rule_lifecycle(rule_id, "deactivate", request, session)
+
+
 #Deleting a rule(Soft deletion,also called archiving rather than deleting the db row)
 @router.delete("/rules/{rule_id}", status_code=204)
 def frontend_delete_rule(rule_id: int, session: Session = Depends(get_db)) -> None:
@@ -964,6 +1145,8 @@ def frontend_delete_rule(rule_id: int, session: Session = Depends(get_db)) -> No
     set_rule_enabled_state(session, rule, False)
     resolve_active_rule_alerts(session, rule.id)
     rule.is_archived = True
+    if rule.lifecycle_status != "completed":
+        rule.lifecycle_status = "deactivated"
     emit_event(
         session,
         event_type="rule_archived",
@@ -1302,7 +1485,11 @@ def import_configuration(
             configured_runtime_signal_mapping(request, data.variable_id),
             is_mapping_bypass_enabled(request),
         )
-        session.add(MonitoringRule(**data.model_dump()))
+        rule_data = data.model_dump()
+        rule_data["lifecycle_status"] = (
+            "in_progress" if data.is_enabled else "deactivated"
+        )
+        session.add(MonitoringRule(**rule_data))
     session.commit()
     return {"rules": len(rules), "collections": created}
 
