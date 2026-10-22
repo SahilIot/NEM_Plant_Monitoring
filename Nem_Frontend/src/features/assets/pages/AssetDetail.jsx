@@ -1,4 +1,4 @@
-
+﻿
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import CopyRulesModal from "../components/CopyRulesModal.jsx";
@@ -11,15 +11,17 @@ import {
 import MaintenancePanel from "../components/MaintenancePanel.jsx";
 import "./AssetDetail.css";
 import {
+  MONITORING_RULE_CHOICES,
+  LEGACY_RULE_CHOICES,
+  legacyRulePath,
+  buildAssetMonitoringRule,
+  monitoringRuleFormSelection,
+} from "../rules/monitoringRuleFlow.js";
+import {
   formatDuration,
   formatTime,
   formatValue,
 } from "../../../utils/format.js";
-import {
-  MONITORING_RULE_CHOICES,
-  buildAssetMonitoringRule,
-  monitoringRuleFormSelection,
-} from "../rules/monitoringRuleFlow.js";
 import {
   CreateModal,
   EmptyState,
@@ -387,7 +389,6 @@ export default function AssetDetail() {
   const [logStartDate, setLogStartDate] = useState("");
   const [logEndDate, setLogEndDate] = useState("");
   const [events, setEvents] = useState([]);
-  const eventsRequest = useRef(0);
   const [loadError, setLoadError] = useState("");
   const [deletingAsset, setDeletingAsset] = useState(false);
   const [deletingVariableId, setDeletingVariableId] = useState(null);
@@ -557,24 +558,10 @@ export default function AssetDetail() {
   }, [assetId]);
 
   const loadEvents = useCallback(async () => {
-    const requestId = ++eventsRequest.current;
     try {
-      const response = await api.get(`/assets/${assetId}/events`);
-      if (requestId !== eventsRequest.current) return;
-      const items = Array.isArray(response)
-        ? response
-        : Array.isArray(response?.items)
-          ? response.items
-        : Array.isArray(response?.events)
-          ? response.events
-          : Array.isArray(response?.data)
-            ? response.data
-            : Array.isArray(response?.data?.events)
-              ? response.data.events
-              : [];
-      setEvents(items);
+      const items = await api.get(`/assets/${assetId}/events`);
+      setEvents(Array.isArray(items) ? items : []);
     } catch (error) {
-      if (requestId !== eventsRequest.current) return;
       setLoadError(error.message || "Unable to load events.");
     }
   }, [assetId]);
@@ -755,41 +742,33 @@ export default function AssetDetail() {
         eventsScheduler();
       }
     });
-  }, [
-    assetId,
-    assets,
-    children,
-    connectionScheduler,
-    eventsScheduler,
-    liveScheduler,
-    loadLogs,
-    loadVariables,
-    statusScheduler,
-    tab,
-  ]);
+  }, [assetId, assets, children, loadLive, loadLogs, loadVariables]);
 
-  useEffect(() => {
-    if (tab !== "events") return;
-    loadEvents();
+ 
+useEffect(() => {
+  if (tab !== "events") return;
+
+    let cancelled = false;
+
+    api
+      .get(`/assets/${assetId}/events`)
+      .then((items) => {
+        if (!cancelled) {
+          setEvents(Array.isArray(items) ? items : []);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setLoadError(
+            error.message || "Unable to load events."
+          );
+        }
+      });
+
     return () => {
-      eventsRequest.current += 1;
+      cancelled = true;
     };
-  }, [tab, loadEvents]);
-
-  useEffect(
-    () => () => {
-      liveScheduler.dispose();
-      statusScheduler.dispose();
-      connectionScheduler.dispose();
-      eventsScheduler.dispose();
-    },
-    [
-      connectionScheduler,
-      eventsScheduler,
-      liveScheduler,
-      statusScheduler,
-    ]
-  );
+  }, [tab, assetId]);
 
   const availableVariables = variables;
   const ruleFormFields = useMemo(
@@ -832,52 +811,12 @@ export default function AssetDetail() {
   );
 
   
-const filteredLogs = [...logs]
-  .filter((entry) => {
-    const search = logSearch.trim().toLowerCase();
-
-    const matchesSearch =
-      !search ||
-      String(entry.text || "").toLowerCase().includes(search) ||
-      String(entry.maintenance_type || "unknown")
-        .toLowerCase()
-        .includes(search);
-
-    const matchesType =
-      logTypeFilter === "all" ||
-      (entry.maintenance_type || "unknown") === logTypeFilter;
-
-    const rawDate = entry.time || entry.created_at;
-    const date = new Date(rawDate);
-
-    const matchesStart =
-      !logStartDate ||
-      (Number.isFinite(date.getTime()) &&
-        date >= new Date(`${logStartDate}T00:00:00`));
-
-    const matchesEnd =
-      !logEndDate ||
-      (Number.isFinite(date.getTime()) &&
-        date <= new Date(`${logEndDate}T23:59:59.999`));
-
-    return (
-      matchesSearch &&
-      matchesType &&
-      matchesStart &&
-      matchesEnd
-    );
-  })
-  .sort((a, b) => {
-    const dateA =
-      new Date(a.time || a.created_at).getTime() || 0;
-    const dateB =
-      new Date(b.time || b.created_at).getTime() || 0;
-
-    return logSort === "newest"
-      ? dateB - dateA
-      : dateA - dateB;
-  });
-
+const filteredLogs = [...logs].sort((a, b) => {
+  const dateA = new Date(a.time || a.created_at || 0).getTime();
+  const dateB = new Date(b.time || b.created_at || 0).getTime();
+  return (Number.isFinite(dateB) ? dateB : 0) -
+         (Number.isFinite(dateA) ? dateA : 0);
+});
  
   const refreshAll = async () => {
     await Promise.all([
@@ -1373,13 +1312,12 @@ const filteredLogs = [...logs]
                 </div>
               )}
             </div>
-
             <button
-              className="btn-primary"
-              onClick={() => setModal("ruleTypeOptions")}
+            className="btn-primary"
+            onClick={() => setModal("addRuleOptions")}
             >
-              <PlusCircle size={17} /> Add rule
-            </button>
+              <PlusCircle size={17} /> Add Rule
+              </button>
 
             <div className="dropdown">
               <button
@@ -1705,134 +1643,140 @@ const filteredLogs = [...logs]
       onChanged={refreshMaintenanceData}
     />
 
-    <div className="panel maintenance-log-notes-panel">
-      <div className="panel-head maintenance-log-notes-head">
-        <div>
-          <h2>Maintenance Logbook</h2>
-          <span className="muted">
-            {filteredLogs.length} of {logs.length}{" "}
-            {logs.length === 1 ? "entry" : "entries"}
-          </span>
-        </div>
-
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={() => setModal("log")}
-        >
-          <PlusCircle size={17} /> Add note
-        </button>
-      </div>
-
-      <div className="maintenance-log-toolbar">
-        <input
-          type="search"
-          className="maintenance-log-search"
-          placeholder="Search notes..."
-          aria-label="Search maintenance notes"
-          value={logSearch}
-          onChange={(event) => setLogSearch(event.target.value)}
-        />
-
-        <label className="maintenance-log-filter">
-          <span>From</span>
-          <input
-            type="date"
-            value={logStartDate}
-            onChange={(event) => setLogStartDate(event.target.value)}
-            aria-label="Filter notes from date"
-          />
-        </label>
-
-        <label className="maintenance-log-filter">
-          <span>To</span>
-          <input
-            type="date"
-            value={logEndDate}
-            min={logStartDate || undefined}
-            onChange={(event) => setLogEndDate(event.target.value)}
-            aria-label="Filter notes to date"
-          />
-        </label>
-
-        <label className="maintenance-log-filter">
-          <span>Sort</span>
-          <select
-            value={logSort}
-            onChange={(event) => setLogSort(event.target.value)}
-            aria-label="Sort maintenance notes"
-          >
-            <option value="newest">Newest first</option>
-            <option value="oldest">Oldest first</option>
-          </select>
-        </label>
-
-        {(logSearch || logStartDate || logEndDate) && (
-          <button
-            type="button"
-            className="btn-outline"
-            onClick={() => {
-              setLogSearch("");
-              setLogStartDate("");
-              setLogEndDate("");
-            }}
-          >
-            Clear filters
-          </button>
-        )}
-      </div>
-
-      {logs.length === 0 ? (
-        <EmptyState
-          art={false}
-          title="No logbook notes"
-          lines={[
-            "Record brief observations separately from maintenance jobs.",
-            "Use Add note to record your first observation."
-          ]}
-        />
-      ) : filteredLogs.length === 0 ? (
-        <EmptyState
-          art={false}
-          title="No matching notes"
-          lines={[
-            "Try changing your search text or date range."
-          ]}
-        />
-      ) : (
-        <div className="maintenance-table-wrap">
-          <table className="table maintenance-notes-table">
-            <thead>
-              <tr>
-                <th className="col-time">Date and time</th>
-                <th>Entry</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {filteredLogs.map((entry) => {
-                const timestamp = entry.time || entry.created_at;
-
-                return (
-                  <tr key={entry.id}>
-                    <td className="col-time">
-                      {timestamp ? formatTime(timestamp) : "—"}
-                    </td>
-                    <td className="maintenance-note-text">
-                      {entry.text}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+   
+<div className="panel maintenance-log-notes-panel">
+  <div className="panel-head maintenance-log-notes-head">
+    <div>
+      <h2>Maintenance Logbook</h2>
+      <span className="muted">
+        {filteredLogs.length} maintenance entries
+      </span>
     </div>
+
+    <button
+      type="button"
+      className="btn-primary"
+      onClick={() => setModal("log")}
+    >
+      <PlusCircle size={17} /> Add note
+    </button>
+  </div>
+
+  {logs.length === 0 ? (
+    <EmptyState
+      art={false}
+      title="No maintenance entries"
+      lines={[
+        "Maintenance records and notes will appear here."
+      ]}
+    />
+  ) : (
+    <div className="maintenance-table-wrap">
+      <table className="table maintenance-notes-table">
+        <thead>
+          <tr>
+            <th className="col-time">Date and time</th>
+            <th>Entry</th>
+            <th>Entry type</th>
+            <th>Assigned rule</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {filteredLogs.map((entry) => {
+            const timestamp = entry.time || entry.created_at;
+
+            return (
+              <tr key={entry.id}>
+                <td className="col-time">
+                  {timestamp ? formatTime(timestamp) : "—"}
+                </td>
+
+                <td className="maintenance-note-text">
+                  {entry.text || entry.title || entry.summary || "—"}
+                </td>
+
+                <td>
+                  {entry.maintenance_type || "Note"}
+                </td>
+
+                <td>
+                  {entry.assigned_rule ||
+                    entry.rule_name ||
+                    entry.alert_id ||
+                    "—"}
+                </td>
+
+                <td>
+                  <div className="maintenance-actions">
+                    <button
+                      type="button"
+                      className="btn-outline"
+                      onClick={() => {
+                        if (entry.schedule_id) {
+                          navigate(
+                            `/assets/${assetId}/maintenance/schedules/${entry.schedule_id}/edit`
+                          );
+                        } else if (entry.maintenance_type) {
+                          navigate(
+                            `/assets/${assetId}/maintenance/logbook`,
+                            {
+                              state: {
+                                activeTab: "logbook",
+                                editMaintenanceId: entry.id,
+                              },
+                            }
+                          );
+                        } else {
+                          setModal("log");
+                        }
+                      }}
+                    >
+                      Update
+                    </button>
+
+                    <button
+                      type="button"
+                      className="btn-danger"
+                      onClick={() => {
+                        if (
+                          !window.confirm(
+                            "Are you sure you want to delete this entry?"
+                          )
+                        ) {
+                          return;
+                        }
+
+                        api.del(
+                          `/assets/${assetId}/logbook/${entry.id}`
+                        )
+                          .then(() => loadLogs())
+                          .catch((error) =>
+                            setLoadError(
+                              error.message ||
+                                "Could not delete this entry."
+                            )
+                          );
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  )}
+</div>
   </>
 )}
 
 
+      
 {tab === "events" && (
   <div className="panel">
     <div className="panel-head">
@@ -1843,54 +1787,135 @@ const filteredLogs = [...logs]
         </span>
       </div>
     </div>
+
     {events.length === 0 ? (
       <EmptyState
         art={false}
-        title="No events yet"
+        title="No events recorded"
         lines={[
-          "Alerts, acknowledgements and rule changes for this asset are recorded here.",
+          "Alerts, acknowledgements and monitoring rule changes will appear here.",
         ]}
       />
     ) : (
-      <table className="table">
-        <thead>
-          <tr>
-            <th className="col-time">Time</th>
-            <th>Event</th>
-          </tr>
-        </thead>
-        <tbody>
-          {events.map((event) => (
-            <tr key={event.id}>
-              <td className="col-time">
-                {formatTime(event.time || event.occurred_at)}
-              </td>
-              <td>{event.text || event.message || event.event_type}</td>
+      <div className="maintenance-table-wrap">
+        <table className="table maintenance-notes-table">
+          <thead>
+            <tr>
+              <th className="col-time">Date and time</th>
+              <th>Event</th>
+              <th>Assigned rule</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+
+          <tbody>
+            {[...events]
+              .sort((a, b) => {
+                const dateA = new Date(
+                  a.time || a.created_at || a.occurred_at || 0
+                ).getTime();
+
+                const dateB = new Date(
+                  b.time || b.created_at || b.occurred_at || 0
+                ).getTime();
+
+                return dateB - dateA;
+              })
+              .map((event) => {
+                const timestamp =
+                  event.time ||
+                  event.created_at ||
+                  event.occurred_at;
+
+                const assignedRule =
+                  event.rule_name ||
+                  event.assigned_rule ||
+                  event.rule?.name ||
+                  (event.rule_id != null
+                    ? `Rule #${event.rule_id}`
+                    : event.monitoring_rule_id != null
+                      ? `Rule #${event.monitoring_rule_id}`
+                      : "—");
+
+                return (
+                  <tr key={event.id}>
+                    <td className="col-time">
+                      {timestamp ? formatTime(timestamp) : "—"}
+                    </td>
+
+                    <td className="maintenance-note-text">
+                      {event.text ||
+                        event.description ||
+                        event.event_type ||
+                        event.type ||
+                        "—"}
+                    </td>
+
+                    <td>{assignedRule}</td>
+                  </tr>
+                );
+              })}
+          </tbody>
+        </table>
+      </div>
     )}
   </div>
 )}
-
       
 
-
-
-
-{modal === "ruleTypeOptions" && (
+{modal === "addRuleOptions" && (
   <Modal
-    title="Create monitoring rule"
+    title="Add Rule"
     onClose={() => setModal(null)}
   >
     <div className="rule-type-options">
-      {MONITORING_RULE_CHOICES.map((choice) => (
+      <button
+        type="button"
+        className="rule-type-option"
+        onClick={() => setModal("ruleTypeOptions")}
+      >
+        <strong>Create a Rule</strong>
+        <small>Create an interval, time, or usage-based rule.</small>
+      </button>
+
+      <button
+        type="button"
+        className="rule-type-option"
+        onClick={() => {
+          setModal(null);
+          setShowPredefinedRules(true);
+        }}
+      >
+        <strong>Assign Predefined Monitoring Rules</strong>
+        <small>Assign predefined rules to this asset.</small>
+      </button>
+
+      <button
+        type="button"
+        className="rule-type-option"
+        onClick={() => setModal("copyRules")}
+      >
+        <strong>Copy from Another Asset</strong>
+        <small>Copy rules from another asset.</small>
+      </button>
+    </div>
+  </Modal>
+)}
+
+{modal === "ruleTypeOptions" && (
+  <Modal
+    title="Create a Rule"
+    onClose={() => setModal(null)}
+  >
+    <div className="rule-type-options">
+      {LEGACY_RULE_CHOICES.map((choice) => (
         <button
-          key={choice.id}
+          key={choice.kind}
           type="button"
           className="rule-type-option"
-          onClick={() => openMonitoringRuleForm(choice.id)}
+          onClick={() => {
+            setModal(null);
+            navigate(legacyRulePath(assetId, choice.kind));
+          }}
         >
           <strong>{choice.label}</strong>
           <small>{choice.description}</small>
