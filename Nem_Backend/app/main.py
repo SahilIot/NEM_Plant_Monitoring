@@ -13,12 +13,14 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import delete, select
 from starlette.middleware.cors import CORSMiddleware
 from starlette.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.routes import (
     assets,
+    auth,
     dashboard,
     frontend_compat,
     maintenance,
@@ -28,6 +30,8 @@ from app.api.routes import (
     rules,
     variables,
 )
+from app.models import AuthSession, User, UserAssetAssignment
+from app.services.auth_security import hash_session_token
 from app.core.config import Settings, get_settings
 from app.db.init_db import initialize_database
 from app.db.session import create_database_engine, create_session_factory
@@ -183,6 +187,129 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.opcua_collector = opcua_collector
     application.state.live_updates = live_updates
 
+    @application.middleware("http")
+    async def authenticate_api_request(request: Request, call_next):
+        path = request.url.path
+        policy_path = "/api/v1/plc/test" if path == "/plc/test" else path
+        if not policy_path.startswith("/api/v1/") or policy_path in {
+            "/api/v1/health",
+            "/api/v1/ready",
+            "/api/v1/auth/login",
+        }:
+            return await call_next(request)
+
+        authorization = request.headers.get("authorization", "")
+        scheme, _, token = authorization.partition(" ")
+        if scheme.casefold() != "bearer" or not token.strip():
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Authentication required"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        token_hash = hash_session_token(token.strip())
+        with session_factory() as db:
+            auth_session = db.scalar(
+                select(AuthSession).where(AuthSession.token_hash == token_hash)
+            )
+            now = utc_now()
+            user = auth_session.user if auth_session is not None else None
+            if (
+                auth_session is None
+                or auth_session.expires_at <= now
+                or user is None
+                or not user.is_active
+            ):
+                if auth_session is not None and auth_session.expires_at <= now:
+                    db.delete(auth_session)
+                    db.commit()
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Session is invalid or expired"},
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
+            role = user.role
+            authorized_asset_ids = set(
+                db.scalars(
+                    select(UserAssetAssignment.asset_id).where(
+                        UserAssetAssignment.user_id == user.id
+                    )
+                ).all()
+            )
+            request.state.auth_user_id = user.id
+            request.state.auth_role = role
+            request.state.authorized_asset_ids = authorized_asset_ids
+            request.state.auth_token_hash = token_hash
+
+        method = request.method.upper()
+        safe_method = method in {"GET", "HEAD", "OPTIONS"}
+        admin_only_read_paths = (
+            "/api/v1/auth/users",
+            "/api/v1/plc",
+            "/api/v1/rule-templates",
+            "/api/v1/collections",
+            "/api/v1/documents",
+            "/api/v1/import",
+            "/api/v1/settings",
+            "/api/v1/backups",
+            "/api/v1/usage",
+        )
+        admin_only_write = (
+            (policy_path == "/api/v1/assets" and not safe_method)
+            or policy_path.startswith("/api/v1/assets/") and method in {"PATCH", "DELETE"}
+            or policy_path.startswith("/api/v1/variables")
+            or policy_path.startswith("/api/v1/plc")
+            or policy_path.startswith("/api/v1/rule-templates")
+            or policy_path.startswith("/api/v1/collections")
+            or policy_path.startswith("/api/v1/documents")
+            or policy_path.startswith("/api/v1/import")
+            or policy_path.startswith("/api/v1/settings")
+            or policy_path.startswith("/api/v1/backups")
+            or policy_path.startswith("/api/v1/usage")
+            or policy_path == "/api/v1/monitoring/evaluate"
+            or policy_path.startswith("/api/v1/readings") and not safe_method
+        )
+        operator_write_paths = (
+            policy_path.startswith("/api/v1/rules"),
+            policy_path.startswith("/api/v1/maintenance"),
+            policy_path.startswith("/api/v1/alerts"),
+            policy_path.startswith("/api/v1/assets/") and (
+                "/rules" in policy_path or "/logbook" in policy_path
+            ),
+        )
+        if (
+            role != "Admin"
+            and policy_path.startswith(admin_only_read_paths)
+            and policy_path != "/api/v1/auth/logout"
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Administrator permissions required"},
+            )
+        if role == "Viewer" and not safe_method and path != "/api/v1/auth/logout":
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Viewer accounts have read-only access"},
+            )
+        if (
+            role == "Operator"
+            and not safe_method
+            and policy_path != "/api/v1/auth/logout"
+        ):
+            if admin_only_write:
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Administrator permissions required"},
+                )
+            if not any(operator_write_paths):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "This action is not available to operators"},
+                )
+
+        return await call_next(request)
+
     @application.websocket("/api/v1/live")
     @application.websocket("/api/v1/ws/live")
     async def live_updates_websocket(websocket: WebSocket) -> None:
@@ -203,7 +330,80 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if not same_origin and not configured_origin:
                 await websocket.close(code=1008, reason="Origin is not allowed")
                 return
-        await serve_live_updates(websocket, live_updates)
+        offered_protocols = websocket.scope.get("subprotocols", [])
+        token = next(
+            (
+                protocol.removeprefix("nem-auth.")
+                for protocol in offered_protocols
+                if protocol.startswith("nem-auth.")
+            ),
+            "",
+        )
+        if not token:
+            await websocket.close(code=1008, reason="Authentication required")
+            return
+        with session_factory() as db:
+            auth_session = db.scalar(
+                select(AuthSession).where(
+                    AuthSession.token_hash == hash_session_token(token)
+                )
+            )
+            user = auth_session.user if auth_session is not None else None
+            if (
+                auth_session is None
+                or auth_session.expires_at <= utc_now()
+                or user is None
+                or not user.is_active
+            ):
+                await websocket.close(code=1008, reason="Session is invalid or expired")
+                return
+            asset_ids = None
+            if user.role != "Admin":
+                asset_ids = set(
+                    db.scalars(
+                        select(UserAssetAssignment.asset_id).where(
+                            UserAssetAssignment.user_id == user.id
+                        )
+                    ).all()
+                )
+
+        async def reauthorize_socket() -> tuple[bool, set[int] | None]:
+            def read_current_access() -> tuple[bool, set[int] | None]:
+                with session_factory() as db:
+                    current_session = db.scalar(
+                        select(AuthSession).where(
+                            AuthSession.token_hash == hash_session_token(token)
+                        )
+                    )
+                    current_user = (
+                        current_session.user if current_session is not None else None
+                    )
+                    if (
+                        current_session is None
+                        or current_session.expires_at <= utc_now()
+                        or current_user is None
+                        or not current_user.is_active
+                    ):
+                        return False, None
+                    if current_user.role == "Admin":
+                        return True, None
+                    current_asset_ids = set(
+                        db.scalars(
+                            select(UserAssetAssignment.asset_id).where(
+                                UserAssetAssignment.user_id == current_user.id
+                            )
+                        ).all()
+                    )
+                    return True, current_asset_ids
+
+            return await asyncio.to_thread(read_current_access)
+
+        await serve_live_updates(
+            websocket,
+            live_updates,
+            authorized_asset_ids=asset_ids,
+            authorization_check=reauthorize_socket,
+        )
 
 #Checking request size
     @application.middleware("http")
@@ -304,6 +504,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return JSONResponse(status_code=503,content={"status": "degraded", "database": "disconnected"},)
         return JSONResponse(content={"status": "ready", "database": "connected"})
 
+    application.include_router(auth.router, prefix="/api/v1")
     application.include_router(frontend_compat.router, prefix="/api/v1")
     application.include_router(assets.router, prefix="/api/v1")
     application.include_router(variables.router, prefix="/api/v1")

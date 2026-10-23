@@ -1,11 +1,13 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, matchPath } from "react-router-dom";
+import { LogOut, Users } from "lucide-react";
 import { api } from "../../services/api.js";
 import { subscribeLiveUpdates } from "../../services/liveUpdates.js";
 import { APP_TITLE } from "../../utils/config.js";
 import Brand from "./Brand.jsx";
 import AssetTree from "../../features/assets/components/AssetTree.jsx";
+import { useAuth } from "../../features/auth/AuthContext.jsx";
 import {
   HomeIcon,
   TreeIcon,
@@ -133,6 +135,7 @@ function computeHealth(assets, alerts) {
 
 export default function Layout() {
   const { pathname } = useLocation();
+  const { user, logout } = useAuth();
 
   const [rawAssets, setRawAssets] = useState([]);
   const [rules, setRules] = useState([]);
@@ -362,6 +365,15 @@ export default function Layout() {
         <Brand />
         <div className="app-title">{APP_TITLE}</div>
         <div className="spacer" />
+        <span className="auth-user-label">{user.username} · {user.role}</span>
+        {user.role === "Admin" && (
+          <Link to="/settings/users" className="auth-user-link" title="Manage users and machine access">
+            <Users size={17} /> User access
+          </Link>
+        )}
+        <button className="btn-outline auth-logout" onClick={() => logout()} type="button">
+          <LogOut size={16} /> Sign out
+        </button>
 
         <div
           className={
