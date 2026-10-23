@@ -353,9 +353,11 @@ export default function CreateMonitoringRulePage() {
           >
             ← Back to {assetName}
           </button>
+          <span className="monitoring-rule-kicker">MONITORING RULE</span>
           <h1>{selection.title}</h1>
-          <p className="muted">
-            Configure the monitoring thresholds for {assetName}.
+          <p className="monitoring-rule-asset">
+            <span>Asset</span>
+            <strong>{assetName}</strong>
           </p>
         </div>
       </header>
@@ -374,6 +376,11 @@ export default function CreateMonitoringRulePage() {
       )}
 
       <form className="monitoring-rule-card" onSubmit={submit}>
+        <div className="monitoring-rule-card-header">
+          <span>RULE CONFIGURATION</span>
+          <h2>Set up your monitoring rule</h2>
+          <p>Choose the signal and thresholds this rule should monitor.</p>
+        </div>
         <div className="monitoring-rule-fields">
           {visibleFields.map((field) => {
             const required =

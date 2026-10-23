@@ -168,18 +168,6 @@ function ruleConditionSummary(rule) {
   return null;
 }
 
-function formatTimeUntilDue(seconds) {
-  if (!Number.isFinite(seconds) || seconds <= 0) return "Due now";
-  let remaining = Math.ceil(seconds);
-  const days = Math.floor(remaining / 86400);
-  remaining %= 86400;
-  const hours = Math.floor(remaining / 3600);
-  remaining %= 3600;
-  const minutes = Math.floor(remaining / 60);
-  const secondsLeft = remaining % 60;
-  return `${days ? `${days}d ` : ""}${hours ? `${hours}h ` : ""}${minutes}m ${secondsLeft}s`;
-}
-
 function formatTimeUntilStart(milliseconds) {
   if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "Starting now";
   let remaining = Math.ceil(milliseconds / 1000);
@@ -451,7 +439,7 @@ export default function AssetDetail() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const { assets, assetsLoaded, reload, refreshStatus } =
+  const { assets, assetsLoaded, alerts = [], reload, refreshStatus } =
     useOutletContext();
 
   const assetId = Number(id);
@@ -1515,11 +1503,16 @@ const filteredLogs = [...logs].sort((a, b) => {
                   displayedValue === null || displayedValue === undefined
                     ? Number.NaN
                     : Number(displayedValue);
+                const runtimeCurrentSeconds =
+                  rule.rule_type === "runtime_duration" &&
+                  !Number.isFinite(numericCurrentValue)
+                    ? 0
+                    : numericCurrentValue;
                 const canShowNextThreshold =
+                  rule.rule_type === "boolean_count_threshold" &&
                   lifecycleStatus(rule) === "in_progress" &&
                   ["ok", "warning"].includes(rule.status) &&
-                  Number.isFinite(numericCurrentValue) &&
-                  (rule.rule_type !== "runtime_duration" || signalIsFresh);
+                  Number.isFinite(numericCurrentValue);
                 const nextThreshold = canShowNextThreshold
                   ? thresholdSequence(rule).find(
                       (threshold) => threshold.value > numericCurrentValue
@@ -1547,15 +1540,48 @@ const filteredLogs = [...logs].sort((a, b) => {
                   scheduledActivationAt > clockNow
                     ? scheduledActivationAt - clockNow
                     : null;
-                const runtimeCountdown =
+                const runtimeThresholds = thresholdSequence(rule);
+                const runtimeNextThreshold =
                   rule.rule_type === "runtime_duration" &&
-                  lifecycleStatus(rule) === "in_progress" &&
-                  ["ok", "warning"].includes(rule.status) &&
-                  Number.isFinite(numericCurrentValue)
-                    ? thresholdSequence(rule).find(
-                        (threshold) => threshold.value > numericCurrentValue
+                  Number.isFinite(runtimeCurrentSeconds)
+                    ? runtimeThresholds.find(
+                        (threshold) => threshold.value > runtimeCurrentSeconds
                       )
                     : null;
+                const runtimeAlertReached =
+                  rule.rule_type === "runtime_duration" &&
+                  Number.isFinite(runtimeCurrentSeconds) &&
+                  runtimeCurrentSeconds >=
+                    Number(rule.parameters?.alert_threshold_seconds);
+                const runtimeAlert =
+                  rule.rule_type === "runtime_duration"
+                    ? alerts.find(
+                        (alert) =>
+                          alert.rule_id === rule.id &&
+                          alert.target_asset_id ===
+                            (state?.target_asset_id ?? rule.target_asset_id) &&
+                          alert.severity === "alert" &&
+                          alert.status === "active"
+                      )
+                    : null;
+                const runtimeAlertPending =
+                  runtimeAlertReached &&
+                  lifecycleStatus(rule) === "in_progress" &&
+                  state?.status === "alert" &&
+                  runtimeAlert &&
+                  !runtimeAlert.acknowledged_at;
+                const runtimeAlertStartedAt = Date.parse(
+                  state?.last_transition_at || ""
+                );
+                const runtimeOvertimeSeconds = runtimeAlertPending
+                  ? Number.isFinite(runtimeAlertStartedAt)
+                    ? Math.max(0, (clockNow - runtimeAlertStartedAt) / 1000)
+                    : Math.max(
+                        0,
+                        runtimeCurrentSeconds -
+                          Number(rule.parameters?.alert_threshold_seconds)
+                      )
+                  : 0;
                 const parameters = rule.parameters || {};
                 const isTimedBooleanRule =
                   rule.rule_type === "duration" &&
@@ -1606,17 +1632,15 @@ const filteredLogs = [...logs].sort((a, b) => {
                           {list === "not_activated"
                             ? "Last evaluated"
                             : scheduledStartCountdown !== null
-                              ? "Start in"
-                              : runtimeCountdown
                                 ? "Due in"
-                              : isTimedBooleanRule
-                                ? "Signal / Hold time"
-                              : rule.rule_type === "boolean_count_threshold"
-                                ? "Current / Target"
-                              : rule.rule_type === "runtime_duration" &&
-                                  lifecycleStatus(rule) === "in_progress" &&
-                                  ["ok", "warning"].includes(rule.status)
-                                ? "Due"
+                                : isTimedBooleanRule
+                                  ? "Signal / Hold time"
+                                : rule.rule_type === "boolean_count_threshold"
+                                  ? "Current / Target"
+                                : rule.rule_type === "runtime_duration"
+                                  ? runtimeAlertPending
+                                    ? "Take action"
+                                    : "Current / Next"
                                 : "Current / Next"}
                         </span>
                         <b>
@@ -1626,16 +1650,12 @@ const filteredLogs = [...logs].sort((a, b) => {
                               : "Not evaluated yet"
                             : scheduledStartCountdown !== null
                               ? formatTimeUntilStart(scheduledStartCountdown)
-                            : runtimeCountdown
-                              ? formatTimeUntilDue(
-                                  runtimeCountdown.value - numericCurrentValue
-                                )
-                              : rule.rule_type === "runtime_duration" &&
-                                  lifecycleStatus(rule) === "in_progress" &&
-                                  ["ok", "warning"].includes(rule.status)
-                                ? "Threshold reached"
                               : isTimedBooleanRule
                                 ? `${formatValue(displayedValue)} · ${formatDuration(conditionElapsedSeconds)} / ${formatDuration(parameters.duration_seconds)}`
+                            : rule.rule_type === "runtime_duration"
+                              ? runtimeAlertPending
+                                ? `Required time complete · ${formatDuration(runtimeOvertimeSeconds)} over`
+                                : `${formatDuration(runtimeCurrentSeconds)} / ${runtimeNextThreshold ? `Next warning in ${formatDuration(runtimeNextThreshold.value - runtimeCurrentSeconds)}` : "—"}`
                             : <>
                                 {displayedValue !== null && displayedValue !== undefined
                                   ? formattedCurrentValue
@@ -2153,6 +2173,79 @@ const filteredLogs = [...logs].sort((a, b) => {
               : lifecycleAction.action === "resume"
                 ? "Resume rule"
                 : "Activate rule"}
+      </button>
+    </div>
+  </Modal>
+)}
+
+{viewRule && (
+  <Modal
+    title={viewRule.name || "Monitoring rule"}
+    onClose={() => setViewRule(null)}
+    wide
+  >
+    <dl className="rule-detail-grid">
+      <div>
+        <dt>Rule type</dt>
+        <dd>
+          {viewRule.rule_type === "runtime_duration"
+            ? "Running time"
+            : viewRule.rule_type === "boolean_count_threshold"
+              ? "Cycle count"
+              : viewRule.rule_type === "parameter_threshold"
+                ? "Parameter threshold"
+                : viewRule.rule_type === "duration" &&
+                    viewRule.parameters?.condition === "interval_elapsed"
+                  ? "Interval based"
+                  : viewRule.rule_type?.replaceAll("_", " ") || "—"}
+        </dd>
+      </div>
+      <div>
+        <dt>Lifecycle</dt>
+        <dd>{lifecycleLabel(viewRule)}</dd>
+      </div>
+      <div>
+        <dt>Evaluation status</dt>
+        <dd><StatusBadge status={viewRule.status || "unknown"} /></dd>
+      </div>
+      <div>
+        <dt>Variable</dt>
+        <dd>{viewRule.variable_name || "Asset-level rule"}</dd>
+      </div>
+      <div>
+        <dt>Condition</dt>
+        <dd>{ruleConditionSummary(viewRule) || "No condition summary available."}</dd>
+      </div>
+      {viewRule.description && (
+        <div>
+          <dt>Description</dt>
+          <dd>{viewRule.description}</dd>
+        </div>
+      )}
+      {thresholdMetrics(viewRule).map((metric) => (
+        <div key={metric.label}>
+          <dt>{metric.label} threshold</dt>
+          <dd>{metric.value}</dd>
+        </div>
+      ))}
+      <div>
+        <dt>Latest value</dt>
+        <dd>{formatValue(viewRule.latest_value)}</dd>
+      </div>
+      <div>
+        <dt>Last evaluated</dt>
+        <dd>{viewRule.last_evaluated_at ? formatTime(viewRule.last_evaluated_at) : "Not evaluated yet"}</dd>
+      </div>
+      {viewRule.evaluation_message && (
+        <div>
+          <dt>Evaluation detail</dt>
+          <dd>{viewRule.evaluation_message}</dd>
+        </div>
+      )}
+    </dl>
+    <div className="modal-actions">
+      <button type="button" className="btn-primary" onClick={() => setViewRule(null)}>
+        Close
       </button>
     </div>
   </Modal>
