@@ -1360,8 +1360,10 @@ def frontend_asset_logbook(
 ) -> list[dict[str, Any]]:
     if session.get(Asset, asset_id) is None:
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
-    rows = session.scalars(
-        select(MaintenanceRecord)
+    rows = session.execute(
+        select(MaintenanceRecord, MonitoringRule.name)
+        .outerjoin(Alert, Alert.id == MaintenanceRecord.alert_id)
+        .outerjoin(MonitoringRule, MonitoringRule.id == Alert.rule_id)
         .where(MaintenanceRecord.asset_id == asset_id)
         .order_by(MaintenanceRecord.performed_at.desc())
     ).all()
@@ -1370,8 +1372,25 @@ def frontend_asset_logbook(
             "id": record.id,
             "time": record.performed_at.isoformat(),
             "text": record.summary + (f" — {record.notes}" if record.notes else ""),
+            "title": record.title,
+            "summary": record.summary,
+            "notes": record.notes,
+            "maintenance_type": record.maintenance_type,
+            "status": record.status,
+            "alert_id": record.alert_id,
+            "assigned_rule": rule_name,
+            "planned_start_at": (
+                record.planned_start_at.isoformat()
+                if record.planned_start_at
+                else None
+            ),
+            "planned_end_at": (
+                record.planned_end_at.isoformat()
+                if record.planned_end_at
+                else None
+            ),
         }
-        for record in rows
+        for record, rule_name in rows
     ]
 
 #Add an entry (future implementation -> these records will be saved automatically when maintenance is done or pending or required)

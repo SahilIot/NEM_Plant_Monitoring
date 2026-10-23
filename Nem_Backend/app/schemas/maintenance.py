@@ -1,7 +1,7 @@
 #Pydantic schemas for maintenance records and recurring maintenance schedules
 
 from datetime import date, datetime, timezone
-from typing import Literal #restrict a field to specific permitted values
+from typing import Any, Literal #restrict a field to specific permitted values
 from pydantic import Field, field_validator, model_validator 
 from app.schemas.common import ORMModel
 
@@ -165,6 +165,7 @@ class MaintenanceScheduleCreate(ORMModel):
     recurrence_enabled: bool = False
     recurrence_interval: int | None = Field(default=None, ge=1, le=3650)
     recurrence_unit: Literal["days", "weeks", "months", "years"] | None = None
+    instruction_document_ids: list[int] = Field(default_factory=list, max_length=100)
 
     @field_validator("title", "assigned_technician")
     @classmethod
@@ -206,6 +207,7 @@ class MaintenanceScheduleUpdate(ORMModel):
     recurrence_enabled: bool | None = None
     recurrence_interval: int | None = Field(default=None, ge=1, le=3650)
     recurrence_unit: Literal["days", "weeks", "months", "years"] | None = None
+    instruction_document_ids: list[int] | None = Field(default=None, max_length=100)
     status: Literal["active", "paused", "cancelled", "awaiting_approval", "completed"] | None = None
 
     @field_validator("title", "assigned_technician")
@@ -234,6 +236,8 @@ class MaintenanceScheduleRead(ORMModel):
     priority: str
     assigned_technician: str | None
     description: str | None
+    instruction_document_ids: list[int]
+    instruction_documents: list[dict[str, Any]]
     schedule_start_date: date
     current_period_start_date: date
     first_due_date: date

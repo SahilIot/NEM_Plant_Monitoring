@@ -246,6 +246,65 @@
   display: contents;
 }
 
+.asset-page .maintenance-log-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.asset-page .maintenance-log-filters label {
+  display: grid;
+  min-width: 150px;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.asset-page .maintenance-log-filters input,
+.asset-page .maintenance-log-filters select {
+  min-height: 36px;
+  padding: 6px 9px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.asset-page .maintenance-log-filter-count {
+  margin-left: auto;
+  padding-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.asset-page .maintenance-log-notes-panel .maintenance-delete-icon {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: #dc2626;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.asset-page .maintenance-log-notes-panel .maintenance-delete-icon:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
+.asset-page .maintenance-log-notes-panel .maintenance-delete-icon:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .asset-page .rule-limits > span {
   display: flex;
   min-width: 0;
@@ -967,6 +1026,20 @@
 }
 
 @media (max-width: 768px) {
+  .asset-page .maintenance-log-filters {
+    align-items: stretch;
+    padding: 12px;
+  }
+
+  .asset-page .maintenance-log-filters label {
+    flex: 1 1 180px;
+  }
+
+  .asset-page .maintenance-log-filter-count {
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+
   .event-log-filters {
     align-items: stretch;
     padding: 12px;

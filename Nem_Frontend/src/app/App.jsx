@@ -24,7 +24,6 @@ import Plc from "../features/plc/pages/Plc.jsx";
 import Settings from "../features/settings/pages/Settings.jsx";
 import SettingsSub from "../features/settings/pages/SettingsSub.jsx";
 import CreateMaintenanceSchedulePage from "../features/assets/pages/CreateMaintenanceSchedulePage.jsx";
-import MaintenanceLogbookPage from "../features/assets/pages/MaintenanceLogbookPage.jsx";
 import CreateMonitoringRulePage from "../features/assets/pages/CreateMonitoringRulePage.jsx";
 
 export default function App() {
@@ -92,12 +91,6 @@ export default function App() {
   path="/assets/:id/maintenance/schedules/:scheduleId/edit"
   element={<CreateMaintenanceSchedulePage />}
 />
-
-<Route
-  path="/assets/:id/maintenance/logbook"
-  element={<MaintenanceLogbookPage />}
-/>
-
 
 {/* Monitoring Rules */}
 <Route

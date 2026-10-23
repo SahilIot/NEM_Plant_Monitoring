@@ -43,6 +43,9 @@ class MaintenanceSchedule(Base):
     priority: Mapped[str] = mapped_column(String(20), nullable=False)
     assigned_technician: Mapped[str | None] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text)
+    instruction_document_ids: Mapped[list[int]] = mapped_column(
+        JSON, nullable=False, default=list, server_default=text("'[]'")
+    )
     schedule_start_date: Mapped[date] = mapped_column(Date, nullable=False)
     current_period_start_date: Mapped[date] = mapped_column(Date, nullable=False)
     first_due_date: Mapped[date] = mapped_column(Date, nullable=False)

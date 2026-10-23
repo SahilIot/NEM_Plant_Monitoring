@@ -53,6 +53,25 @@
 .maintenance-details {
   display: grid;
   grid-template-columns: minmax(150px, 0.7fr) minmax(0, 1.3fr);
+}
+.maintenance-material-list { display: grid; gap: 14px; }
+.maintenance-material-item {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  background: var(--surface-2);
+}
+.maintenance-material-item h3 { margin: 0 0 4px; }
+.maintenance-material-item > p { margin: 4px 0 10px; }
+.maintenance-instruction-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.maintenance-material-files { display: flex; flex-wrap: wrap; gap: 8px; }
+.maintenance-document-preview {
+  width: 100%;
+  height: min(70vh, 850px);
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  background: #fff;
   gap: 10px 16px;
   margin: 16px 0;
 }
@@ -304,6 +323,28 @@
   white-space: nowrap;
 }
 
+.maintenance-panel .maintenance-actions .maintenance-delete-icon {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: #dc2626;
+  background: transparent;
+  border: 1px solid currentColor;
+  cursor: pointer;
+}
+
+.maintenance-panel .maintenance-actions .maintenance-delete-icon:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
+.maintenance-panel .maintenance-actions .maintenance-delete-icon:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 /* Schedule and archive sections */
 .maintenance-panel .maintenance-schedules {
   margin-top: 22px;
@@ -405,6 +446,222 @@
 .asset-page .maintenance-panel .empty p,
 .asset-page .maintenance-panel .empty .muted {
   color: var(--muted);
+}
+
+.asset-page .maintenance-panel {
+  overflow: hidden;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.asset-page .maintenance-panel h2,
+.asset-page .maintenance-panel h3,
+.asset-page .maintenance-panel strong {
+  color: var(--ink);
+}
+
+.asset-page .maintenance-panel p,
+.asset-page .maintenance-panel small,
+.asset-page .maintenance-panel .muted {
+  color: var(--muted);
+}
+
+.asset-page .maintenance-panel .maintenance-heading {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.asset-page .maintenance-panel .maintenance-heading h2 {
+  margin: 0 0 4px;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.asset-page .maintenance-panel .maintenance-heading p {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.asset-page .maintenance-panel .maintenance-record-list {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.asset-page .maintenance-panel .maintenance-record-card {
+  display: grid;
+  min-height: 78px;
+  grid-template-columns: 4px minmax(150px, 1.2fr) minmax(170px, 1fr) minmax(220px, 1.25fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px 10px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.asset-page .maintenance-panel .maintenance-record-card:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+}
+
+.asset-page .maintenance-record-indicator {
+  width: 4px;
+  height: 38px;
+  border-radius: 2px;
+  background: var(--off);
+}
+
+.asset-page .maintenance-record-card.planned .maintenance-record-indicator {
+  background: var(--warn-lamp);
+}
+
+.asset-page .maintenance-record-card.in_progress .maintenance-record-indicator {
+  background: var(--action);
+}
+
+.asset-page .maintenance-record-card.completed .maintenance-record-indicator {
+  background: var(--ok);
+}
+
+.asset-page .maintenance-record-main,
+.asset-page .maintenance-record-status,
+.asset-page .maintenance-record-meta,
+.asset-page .maintenance-record-meta > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.asset-page .maintenance-record-main {
+  gap: 4px;
+}
+
+.asset-page .maintenance-record-main > strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-page .maintenance-record-main > small,
+.asset-page .maintenance-record-status > small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.asset-page .maintenance-record-status {
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.asset-page .maintenance-record-card .maintenance-status {
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.asset-page .maintenance-record-card .maintenance-status.planned {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.asset-page .maintenance-record-card .maintenance-status.in_progress {
+  background: var(--action-soft);
+  color: var(--action);
+}
+
+.asset-page .maintenance-record-card .maintenance-status.completed {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.asset-page .maintenance-record-meta {
+  flex-direction: row;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.asset-page .maintenance-record-meta > span {
+  gap: 3px;
+}
+
+.asset-page .maintenance-record-meta small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.asset-page .maintenance-record-meta strong {
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-page .maintenance-panel .maintenance-record-card .maintenance-actions {
+  min-width: 0;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.asset-page .maintenance-panel .maintenance-record-card .maintenance-actions button {
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .asset-page .maintenance-panel .maintenance-record-card {
+    grid-template-columns: 4px minmax(0, 1fr) minmax(150px, 0.9fr) auto;
+  }
+
+  .asset-page .maintenance-record-meta {
+    grid-column: 2 / 4;
+  }
+
+  .asset-page .maintenance-panel .maintenance-record-card .maintenance-actions {
+    grid-column: 4;
+    grid-row: 1 / span 2;
+  }
+}
+
+@media (max-width: 620px) {
+  .asset-page .maintenance-panel .maintenance-record-card {
+    grid-template-columns: 4px minmax(0, 1fr) auto;
+    gap: 9px;
+    padding: 10px;
+  }
+
+  .asset-page .maintenance-record-status {
+    grid-column: 2;
+  }
+
+  .asset-page .maintenance-record-meta {
+    grid-column: 2 / 4;
+  }
+
+  .asset-page .maintenance-panel .maintenance-record-card .maintenance-actions {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    align-self: start;
+  }
 }
 .maintenance-details-panel {
   display: flex;

@@ -486,12 +486,9 @@ export default function AssetDetail() {
   const [showPredefinedRules, setShowPredefinedRules] = useState(false);
   const [addRuleMenu, setAddRuleMenu] = useState(false);
   const [logs, setLogs] = useState([]);
-  const [logSearch, setLogSearch] = useState("");
-  const [logSort, setLogSort] = useState("newest");
-  const [logTypeFilter, setLogTypeFilter] = useState("all");
-  const [showLogFilter, setShowLogFilter] = useState(false);
-  const [logStartDate, setLogStartDate] = useState("");
-  const [logEndDate, setLogEndDate] = useState("");
+  const [maintenanceTypeFilter, setMaintenanceTypeFilter] = useState("");
+  const [maintenanceStartDateTime, setMaintenanceStartDateTime] = useState("");
+  const [maintenanceEndDateTime, setMaintenanceEndDateTime] = useState("");
   const [events, setEvents] = useState([]);
   const [eventTypeFilter, setEventTypeFilter] = useState("");
   const [eventStartDateTime, setEventStartDateTime] = useState("");
@@ -507,6 +504,7 @@ export default function AssetDetail() {
   const [showEventDetails, setShowEventDetails] = useState(false);
   const [deletingEventId, setDeletingEventId] = useState(null);
   const [eventDeleteError, setEventDeleteError] = useState("");
+  const [deletingLogId, setDeletingLogId] = useState(null);
 
   const seq = useRef(0);
   const bulkRequest = useRef(false);
@@ -705,6 +703,9 @@ export default function AssetDetail() {
     setRuntimeReadings(new Map());
     setVariables([]);
     setLogs([]);
+    setMaintenanceTypeFilter("");
+    setMaintenanceStartDateTime("");
+    setMaintenanceEndDateTime("");
     setEvents([]);
     setEventTypeFilter("");
     setEventStartDateTime("");
@@ -936,12 +937,37 @@ useEffect(() => {
   );
 
   
-const filteredLogs = [...logs].sort((a, b) => {
-  const dateA = new Date(a.time || a.created_at || 0).getTime();
-  const dateB = new Date(b.time || b.created_at || 0).getTime();
-  return (Number.isFinite(dateB) ? dateB : 0) -
-         (Number.isFinite(dateA) ? dateA : 0);
-});
+const maintenanceTypes = [...new Set(
+  logs.map((entry) => entry.maintenance_type).filter(Boolean)
+)].sort((a, b) => a.localeCompare(b));
+const filteredLogs = [...logs]
+  .filter((entry) => {
+    if (
+      maintenanceTypeFilter &&
+      entry.maintenance_type !== maintenanceTypeFilter
+    ) {
+      return false;
+    }
+    const timestamp = new Date(entry.time || entry.created_at || "").getTime();
+    const start = maintenanceStartDateTime
+      ? new Date(maintenanceStartDateTime).getTime()
+      : Number.NaN;
+    const end = maintenanceEndDateTime
+      ? new Date(maintenanceEndDateTime).getTime()
+      : Number.NaN;
+    if (Number.isFinite(start) && (!Number.isFinite(timestamp) || timestamp < start)) {
+      return false;
+    }
+    if (Number.isFinite(end) && (!Number.isFinite(timestamp) || timestamp > end)) {
+      return false;
+    }
+    return true;
+  })
+  .sort(
+    (a, b) =>
+      new Date(b.time || b.created_at || 0).getTime() -
+      new Date(a.time || a.created_at || 0).getTime()
+  );
 
 const eventTypes = [...new Set(events.map((event) => event.event_type).filter(Boolean))]
   .sort((a, b) => eventActionLabel(a).localeCompare(eventActionLabel(b)));
@@ -1139,6 +1165,25 @@ const filteredEvents = [...events]
 
     setModal(null);
     loadLogs();
+  };
+
+  const deleteLogEntry = async (entry) => {
+    if (deletingLogId !== null) return;
+    if (!window.confirm("Permanently delete this maintenance log entry? This cannot be undone.")) {
+      return;
+    }
+
+    setDeletingLogId(entry.id);
+    setLoadError("");
+    try {
+      await api.del(`/maintenance/${entry.id}/permanent`);
+      await loadLogs();
+      await refreshStatus?.();
+    } catch (error) {
+      setLoadError(error.message || "Could not permanently delete this maintenance entry.");
+    } finally {
+      setDeletingLogId(null);
+    }
   };
 
   const saveAsset = async (values) => {
@@ -1874,13 +1919,66 @@ const filteredEvents = [...events]
     </div>
   </div>
 
-  {logs.length === 0 ? (
+  <div className="maintenance-log-filters" aria-label="Filter maintenance logbook">
+    <label>
+      <span>Entry type</span>
+      <select
+        value={maintenanceTypeFilter}
+        onChange={(event) => setMaintenanceTypeFilter(event.target.value)}
+      >
+        <option value="">All types</option>
+        {maintenanceTypes.map((type) => (
+          <option key={type} value={type}>
+            {type.replaceAll("_", " ")}
+          </option>
+        ))}
+      </select>
+    </label>
+
+    <label>
+      <span>From</span>
+      <input
+        type="datetime-local"
+        value={maintenanceStartDateTime}
+        onChange={(event) => setMaintenanceStartDateTime(event.target.value)}
+      />
+    </label>
+
+    <label>
+      <span>To</span>
+      <input
+        type="datetime-local"
+        value={maintenanceEndDateTime}
+        onChange={(event) => setMaintenanceEndDateTime(event.target.value)}
+      />
+    </label>
+
+    <button
+      type="button"
+      className="btn-outline"
+      onClick={() => {
+        setMaintenanceTypeFilter("");
+        setMaintenanceStartDateTime("");
+        setMaintenanceEndDateTime("");
+      }}
+      disabled={
+        !maintenanceTypeFilter &&
+        !maintenanceStartDateTime &&
+        !maintenanceEndDateTime
+      }
+    >
+      Clear filters
+    </button>
+    <span className="maintenance-log-filter-count">
+      Showing {filteredLogs.length} of {logs.length} entries
+    </span>
+  </div>
+
+  {filteredLogs.length === 0 ? (
     <EmptyState
       art={false}
-      title="No maintenance entries"
-      lines={[
-        "Maintenance records and notes will appear here."
-      ]}
+      title={logs.length === 0 ? "No maintenance entries" : "No entries match these filters"}
+      lines={logs.length === 0 ? ["Maintenance records and notes will appear here."] : []}
     />
   ) : (
     <div className="maintenance-table-wrap">
@@ -1926,64 +2024,23 @@ const filteredEvents = [...events]
                       type="button"
                       className="btn-outline"
                       onClick={() => {
-                        if (entry.schedule_id) {
-                          navigate(
-                            `/assets/${assetId}/maintenance/schedules/${entry.schedule_id}/edit`
-                          );
-                        } else if (entry.maintenance_type) {
-                          navigate(
-                            `/assets/${assetId}/maintenance/logbook`,
-                            {
-                              state: {
-                                activeTab: "logbook",
-                                editMaintenanceId: entry.id,
-                              },
-                            }
-                          );
-                        } else {
-                          setModal("log");
-                        }
+                        setSelectedEntry(entry);
+                        setModal("view");
                       }}
+                      disabled={deletingLogId !== null}
                     >
-                      Update
+                      View
                     </button>
-
                     <button
                       type="button"
-                      className="btn-danger"
-                      onClick={() => {
-                        if (
-                          !window.confirm(
-                            "Are you sure you want to delete this entry?"
-                          )
-                        ) {
-                          return;
-                        }
-
-                        api.del(
-                          `/assets/${assetId}/logbook/${entry.id}`
-                        )
-                          .then(() => loadLogs())
-                          .catch((error) =>
-                            setLoadError(
-                              error.message ||
-                                "Could not delete this entry."
-                            )
-                          );
-                      }}
+                      className="maintenance-delete-icon"
+                      title="Permanently delete maintenance log entry"
+                      aria-label={`Permanently delete maintenance log entry ${entry.title || entry.summary || entry.id}`}
+                      onClick={() => deleteLogEntry(entry)}
+                      disabled={deletingLogId !== null}
                     >
-                      Delete
+                      <Trash2 size={16} aria-hidden="true" />
                     </button>
-                    <button
-                    type="button"
-                    className="btn-outline"
-                    onClick={() => {
-                      setSelectedEntry(entry);
-                      setModal("view");
-                      }}
-                      >
-                        View
-                        </button>
                   </div>
                 </td>
               </tr>
