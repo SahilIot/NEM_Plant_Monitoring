@@ -494,7 +494,6 @@ export default function AssetDetail() {
   const [logEndDate, setLogEndDate] = useState("");
   const [events, setEvents] = useState([]);
   const [eventTypeFilter, setEventTypeFilter] = useState("");
-  const [eventAssetFilter, setEventAssetFilter] = useState("");
   const [eventStartDateTime, setEventStartDateTime] = useState("");
   const [eventEndDateTime, setEventEndDateTime] = useState("");
   const [loadError, setLoadError] = useState("");
@@ -708,7 +707,6 @@ export default function AssetDetail() {
     setLogs([]);
     setEvents([]);
     setEventTypeFilter("");
-    setEventAssetFilter("");
     setEventStartDateTime("");
     setEventEndDateTime("");
     setSelectedEvent(null);
@@ -947,23 +945,9 @@ const filteredLogs = [...logs].sort((a, b) => {
 
 const eventTypes = [...new Set(events.map((event) => event.event_type).filter(Boolean))]
   .sort((a, b) => eventActionLabel(a).localeCompare(eventActionLabel(b)));
-const eventAssets = [
-  ...new Map(
-    events.map((event) => [
-      String(event.asset_id ?? assetId),
-      event.asset_name || `Asset ${event.asset_id ?? assetId}`,
-    ])
-  ),
-].sort((a, b) => a[1].localeCompare(b[1]));
 const filteredEvents = [...events]
   .filter((event) => {
     if (eventTypeFilter && event.event_type !== eventTypeFilter) return false;
-    if (
-      eventAssetFilter &&
-      String(event.asset_id ?? assetId) !== eventAssetFilter
-    ) {
-      return false;
-    }
     const timestamp = new Date(event.time || event.occurred_at || "").getTime();
     const start = eventStartDateTime
       ? new Date(eventStartDateTime).getTime()
@@ -2041,21 +2025,6 @@ const filteredEvents = [...events]
       </label>
 
       <label>
-        <span>Asset</span>
-        <select
-          value={eventAssetFilter}
-          onChange={(event) => setEventAssetFilter(event.target.value)}
-        >
-          <option value="">All assets</option>
-          {eventAssets.map(([id, name]) => (
-            <option key={id} value={id}>
-              {name}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label>
         <span>From</span>
         <input
           type="datetime-local"
@@ -2078,13 +2047,11 @@ const filteredEvents = [...events]
         className="btn-outline"
         onClick={() => {
           setEventTypeFilter("");
-          setEventAssetFilter("");
           setEventStartDateTime("");
           setEventEndDateTime("");
         }}
         disabled={
           !eventTypeFilter &&
-          !eventAssetFilter &&
           !eventStartDateTime &&
           !eventEndDateTime
         }
@@ -2140,7 +2107,10 @@ const filteredEvents = [...events]
                     <div>{event.text || event.message || "—"}</div>
                   </td>
 
-                  <td>{event.asset_name || `Asset ${event.asset_id ?? assetId}`}</td>
+                  <td>
+                    {event.asset_name ||
+                      (event.asset_id != null ? `Asset ${event.asset_id}` : "System")}
+                  </td>
 
                   <td>{assignedRule}</td>
 
@@ -2212,7 +2182,9 @@ const filteredEvents = [...events]
         <p>
           <strong>Asset:</strong>{" "}
           {selectedEvent.asset_name ||
-            `Asset ${selectedEvent.asset_id ?? assetId}`}
+            (selectedEvent.asset_id != null
+              ? `Asset ${selectedEvent.asset_id}`
+              : "System")}
         </p>
 
         <p>

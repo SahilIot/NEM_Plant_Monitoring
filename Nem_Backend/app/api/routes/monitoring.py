@@ -382,7 +382,11 @@ def list_events(
     start, end = normalized(start_time), normalized(end_time)
     if start is not None and end is not None and start > end:
         raise HTTPException(status_code=422, detail="start_time must not be later than end_time")
-    query = select(MonitoringEvent)
+    query = (
+        select(MonitoringEvent, Asset.name, MonitoringRule.name)
+        .outerjoin(Asset, Asset.id == MonitoringEvent.asset_id)
+        .outerjoin(MonitoringRule, MonitoringRule.id == MonitoringEvent.rule_id)
+    )
     count_query = select(func.count()).select_from(MonitoringEvent)
     for value, column in (
         (asset_id, MonitoringEvent.asset_id),
@@ -401,13 +405,20 @@ def list_events(
         query, count_query = query.where(MonitoringEvent.occurred_at <= end), count_query.where(
             MonitoringEvent.occurred_at <= end
         )
-    rows = session.scalars(
+    rows = session.execute(
         query.order_by(MonitoringEvent.occurred_at.desc(), MonitoringEvent.id.desc())
         .offset(offset)
         .limit(limit)
     ).all()
     return {
-        "items": [EventRead.model_validate(row) for row in rows],
+        "items": [
+            {
+                **EventRead.model_validate(event).model_dump(),
+                "asset_name": asset_name,
+                "rule_name": rule_name,
+            }
+            for event, asset_name, rule_name in rows
+        ],
         "total": session.scalar(count_query) or 0,
         "limit": limit,
         "offset": offset,
