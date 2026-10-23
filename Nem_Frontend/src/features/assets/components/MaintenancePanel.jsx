@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../../services/api.js";
 import { EmptyState, Modal } from "../../../components/common/UI.jsx";
@@ -70,6 +70,28 @@ function actualDuration(record) {
   return `${hours}h ${minutes}m`;
 }
 
+function plannedDurationDays(record) {
+  if (!record.planned_start_at || !record.planned_end_at) {
+    return "—";
+  }
+
+  const start = new Date(record.planned_start_at);
+  const end = new Date(record.planned_end_at);
+
+  if (
+    Number.isNaN(start.getTime()) ||
+    Number.isNaN(end.getTime()) ||
+    end < start
+  ) {
+    return "—";
+  }
+
+  const millisecondsPerDay = 24 * 60 * 60 * 1000;
+  const days = Math.ceil((end - start) / millisecondsPerDay);
+
+  return `${days} ${days === 1 ? "day" : "days"}`;
+}
+
 function validateForm(values, requirePlannedDates) {
   const plannedStart = new Date(values.planned_start_at);
   const plannedEnd = new Date(values.planned_end_at);
@@ -127,7 +149,19 @@ export default function MaintenancePanel({ assetId, onChanged }) {
   const [dialog, setDialog] = useState(null);
   const [legacyRuleOptionsOpen, setLegacyRuleOptionsOpen] = useState(false);
   const [values, setValues] = useState(() => formValues(null));
-  const [scheduleValues, setScheduleValues] = useState(null);
+  const [scheduleValues, setScheduleValues] = useState({
+    title: "",
+    maintenance_type: "preventive",
+    priority: "medium",
+    assigned_technician: "",
+    description: "",
+    schedule_start_date: todayDateInput(),
+    first_due_date: "",
+    recurrence_enabled: true,
+    recurrence_interval: "1",
+    recurrence_unit: "months",
+    status: "active",
+  });
   const [approvalDate, setApprovalDate] = useState("");
 
   const archiveCompleted = async (record) => {
@@ -268,7 +302,39 @@ export default function MaintenancePanel({ assetId, onChanged }) {
 
   useEffect(() => {
     if (!dialog || dialog.kind === "details") return;
-    setValues(formValues(dialog.record));
+
+    if (
+      dialog.kind === "schedule-create" ||
+      dialog.kind === "schedule-edit"
+    ) {
+      const record = dialog.record;
+
+      setScheduleValues({
+        title: record?.title || "",
+        maintenance_type: record?.maintenance_type || "preventive",
+        priority: record?.priority || "medium",
+        assigned_technician: record?.assigned_technician || "",
+        description: record?.description || "",
+        schedule_start_date: record?.schedule_start_date
+          ? String(record.schedule_start_date).slice(0, 10)
+          : todayDateInput(),
+        first_due_date: record?.first_due_date
+          ? String(record.first_due_date).slice(0, 10)
+          : "",
+        recurrence_enabled:
+          record?.recurrence_enabled == null
+            ? true
+            : Boolean(record.recurrence_enabled),
+        recurrence_interval: String(record?.recurrence_interval ?? 1),
+        recurrence_unit: record?.recurrence_unit || "months",
+        status: record?.status || "active",
+      });
+      return;
+    }
+
+    if (dialog.record) {
+      setValues(formValues(dialog.record));
+    }
   }, [dialog]);
 
   const openCreate = () => {
@@ -574,12 +640,10 @@ const openScheduleEdit = (schedule) => {
               <thead>
                 <tr>
                   <th>Title</th>
-                  <th>Type</th>
                   <th>Planned</th>
-                  <th>Status</th>
-                  <th>Priority</th>
                   <th>Technician</th>
                   <th>Actual duration</th>
+                  <th>Current date</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -587,19 +651,32 @@ const openScheduleEdit = (schedule) => {
                 {records.map((record) => (
                   <tr key={record.id}>
                     <td>{record.title}</td>
-                    <td className="capitalize">{record.maintenance_type}</td>
-                    <td>
-                      {record.planned_start_at ? formatTime(record.planned_start_at) : "—"}
-                      <span className="maintenance-end">
-                        {record.planned_end_at ? formatTime(record.planned_end_at) : "—"}
-                      </span>
-                    </td>
-                    <td><span className={`maintenance-status ${record.status}`}>{record.status.replace("_", " ")}</span></td>
-                    <td className="capitalize">{record.priority}</td>
-                    <td>{record.assigned_technician || record.performed_by || "—"}</td>
-                    <td>{actualDuration(record)}</td>
-                    <td>
-                      <div className="maintenance-actions">
+
+<td className="capitalize">
+  <div>{plannedDurationDays(record)}</div>
+  <span className="maintenance-end">
+    {record.planned_end_at
+      ? formatTime(record.planned_end_at)
+      : "—"}
+  </span>
+</td>
+
+<td>
+  {record.assigned_technician || record.performed_by || "—"}
+</td>
+
+<td>{actualDuration(record)}</td>
+
+<td>
+  {new Date().toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  })}
+</td>
+
+                      <td>
+                        <div className="maintenance-actions">
                         <button type="button" className="btn-outline" onClick={() => setDialog({ kind: "details", record })}>View Details</button>
                         {record.status === "completed" ? (
                           <>
@@ -610,7 +687,6 @@ const openScheduleEdit = (schedule) => {
                           </>
                         ) : (
                           <>
-                            <button type="button" className="btn-outline" onClick={() => openEdit(record)} disabled={busy}>Edit</button>
                             {record.status !== "in_progress" && (
                               <button type="button" className="btn-danger" onClick={() => permanentlyDeleteRecord(record)} disabled={busy}>
                                 {deletingRecordId === record.id ? "Deleting…" : record.schedule_id ? "Delete schedule" : "Delete permanently"}
@@ -626,8 +702,8 @@ const openScheduleEdit = (schedule) => {
                             <button type="button" className="btn-primary" onClick={() => runAction(record, "complete")} disabled={busy}>Complete</button>
                           </>
                         )}
-                      </div>
-                    </td>
+                        </div>
+                      </td>
                   </tr>
                 ))}
               </tbody>
@@ -658,61 +734,6 @@ const openScheduleEdit = (schedule) => {
                         <button type="button" className="btn-danger" onClick={() => permanentlyDeleteRecord(record)} disabled={busy}>
                           {deletingRecordId === record.id ? "Deleting…" : "Delete permanently"}
                         </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {!loading && schedules.length > 0 && (
-          <div className="maintenance-schedules">
-            <h3>Maintenance schedules</h3>
-            <div className="maintenance-table-wrap">
-              <table className="table maintenance-table">
-                <thead>
-                  <tr>
-                    <th>Schedule</th><th>Recurrence</th><th>Current due</th><th>Day count (elapsed / total)</th><th>Due state</th><th>Last completed</th><th>Next proposed</th><th>Approval</th><th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {schedules.map((schedule) => (
-                    <tr key={schedule.id}>
-                      <td>{schedule.title}</td>
-                      <td>{schedule.recurrence_enabled ? `Every ${schedule.recurrence_interval} ${schedule.recurrence_unit}` : "One-time"}</td>
-                      <td>{displayDate(schedule.current_due_date)}</td>
-                      <td>{schedule.current_day_count}/{schedule.total_days}</td>
-                      <td><span className={`maintenance-status ${schedule.due_status}`}>{schedule.due_status.replaceAll("_", " ")}</span></td>
-                      <td>{schedule.last_completed_at ? formatTime(schedule.last_completed_at) : "—"}</td>
-                      <td>{displayDate(schedule.proposed_due_date)}</td>
-                      <td>{schedule.approval_status.replaceAll("_", " ")}</td>
-                      <td>
-                        <div className="maintenance-actions">
-                          <button type="button" className="btn-outline" onClick={() => setDialog({ kind: "schedule-details", record: schedule })} disabled={busy}>View schedule</button>
-                          <button type="button" className="btn-outline" onClick={() => openScheduleEdit(schedule)} disabled={busy}>Edit schedule</button>
-                          <button type="button" className="btn-danger" onClick={() => permanentlyDeleteSchedule(schedule)} disabled={busy}>
-                            {deletingScheduleId === schedule.id ? "Deleting…" : "Delete schedule"}
-                          </button>
-                          {schedule.approval_status === "pending" && (
-                            <>
-                              <button type="button" className="btn-primary" onClick={() => { setApprovalDate(schedule.proposed_due_date); setDialog({ kind: "approval", record: schedule }); }} disabled={busy}>Review next date</button>
-                              <button type="button" className="btn-outline" onClick={() => { setApprovalDate(schedule.proposed_due_date); setDialog({ kind: "approval", record: schedule }); }} disabled={busy}>Change date</button>
-                              <button type="button" className="btn-danger" onClick={() => declineNextOccurrence(schedule)} disabled={busy}>Do not schedule</button>
-                            </>
-                          )}
-                          {schedule.recurrence_enabled && schedule.status === "active" && (
-                            <button
-                            type="button"
-                            className="btn-outline"
-                            onClick={() => changeScheduleStatus(schedule, "paused")}
-                            disabled={busy}
-                            >Pause recurrence</button>)}
-                          {schedule.recurrence_enabled && schedule.status === "paused" && (
-                            <button type="button" className="btn-outline" onClick={() => changeScheduleStatus(schedule, "active")} disabled={busy}>Resume recurrence</button>
-                          )}
-                        </div>
                       </td>
                     </tr>
                   ))}
@@ -796,8 +817,8 @@ const openScheduleEdit = (schedule) => {
             <dt>First due date</dt><dd>{displayDate(dialog.record.first_due_date)}</dd>
             <dt>Current due date</dt><dd>{displayDate(dialog.record.current_due_date)}</dd>
             <dt>Recurrence</dt><dd>{dialog.record.recurrence_enabled ? `Every ${dialog.record.recurrence_interval} ${dialog.record.recurrence_unit}` : "Disabled"}</dd>
-            <dt>Schedule status / due state</dt><dd>{dialog.record.status.replaceAll("_", " ")} / {dialog.record.due_status.replaceAll("_", " ")}</dd>
-            <dt>Approval</dt><dd>{dialog.record.approval_status.replaceAll("_", " ")}</dd>
+            <dt>Schedule status / due state</dt><dd>{String(dialog.record.status || "—").replaceAll("_", " ")} / {String(dialog.record.due_status || "—").replaceAll("_", " ")}</dd>
+            <dt>Approval</dt><dd>{String(dialog.record.approval_status || "—").replaceAll("_", " ")}</dd>
             <dt>Proposed next due date</dt><dd>{displayDate(dialog.record.proposed_due_date)}</dd>
             <dt>Last completed</dt><dd>{dialog.record.last_completed_at ? formatTime(dialog.record.last_completed_at) : "—"}</dd>
             <dt>Assigned technician</dt><dd>{dialog.record.assigned_technician || "—"}</dd>
@@ -852,7 +873,19 @@ const openScheduleEdit = (schedule) => {
             <dd>{dialog.record.checklist?.length ? dialog.record.checklist.map((item) => `${item.completed ? "✓" : "○"} ${item.item}`).join(", ") : "—"}</dd>
           </dl>
           <div className="modal-actions">
-            <button type="button" className="btn-outline" onClick={() => setDialog(null)}>Close</button>
+            <button
+            type="button"
+            className="btn-outline"
+            onClick={() => {
+              const record = dialog.record;
+              openEdit(record);
+            }}
+            disabled={busy}>Edit</button>
+            <button
+            type="button"
+            className="btn-outline"
+            onClick={() => setDialog(null)}
+            disabled={busy}>Close</button>
           </div>
         </Modal>
       )}

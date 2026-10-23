@@ -406,3 +406,333 @@
 .asset-page .maintenance-panel .empty .muted {
   color: var(--muted);
 }
+.maintenance-details-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  color: var(--text, #172033);
+}
+
+.maintenance-details-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid var(--border, #dce3ec);
+  border-radius: 14px;
+  background: var(--surface, #fff);
+}
+
+.maintenance-details-eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.maintenance-details-heading h3 {
+  margin: 0;
+  font-size: 21px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.maintenance-status-badge,
+.maintenance-priority {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 6px 11px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.maintenance-status-badge {
+  background: #e8f0ff;
+  color: #2454a6;
+}
+
+.maintenance-status-badge.status-in_progress {
+  background: #fff2d6;
+  color: #925b00;
+}
+
+.maintenance-status-badge.status-completed {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.maintenance-status-badge.status-cancelled {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.maintenance-details-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.maintenance-summary-item,
+.maintenance-detail-card {
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid var(--border, #dce3ec);
+  border-radius: 11px;
+  background: var(--surface, #fff);
+}
+
+.maintenance-summary-item span,
+.maintenance-detail-card > span {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+}
+
+.maintenance-summary-item strong,
+.maintenance-detail-card strong {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.6;
+  text-transform: capitalize;
+}
+
+.maintenance-priority.priority-low {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.maintenance-priority.priority-medium {
+  background: #e8f0ff;
+  color: #2454a6;
+}
+
+.maintenance-priority.priority-high {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.maintenance-priority.priority-critical {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.maintenance-details-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.maintenance-details-section h4 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.maintenance-details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.maintenance-detail-wide {
+  width: auto;
+}
+
+.maintenance-detail-card p {
+  margin: 0;
+  color: var(--text, #172033);
+  font-size: 14px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.maintenance-detail-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.maintenance-detail-checklist li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.maintenance-detail-checklist li span {
+  font-weight: 700;
+}
+
+.maintenance-details-footer {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border, #dce3ec);
+}
+
+@media (max-width: 650px) {
+  .maintenance-details-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .maintenance-details-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .maintenance-details-heading {
+    flex-direction: column;
+  }
+
+  .maintenance-details-footer {
+    justify-content: stretch;
+  }
+
+  .maintenance-details-footer button {
+    flex: 1;
+  }
+}
+
+.maintenance-details-panel {
+  color: var(--text, var(--text-primary, #172033));
+  color-scheme: inherit;
+}
+
+.maintenance-details-heading,
+.maintenance-summary-item,
+.maintenance-detail-card {
+  color: var(--text, var(--text-primary, #172033));
+  background: var(--surface, var(--card-bg, #ffffff));
+  border-color: var(--border, var(--border-color, #dce3ec));
+}
+
+.maintenance-details-eyebrow,
+.maintenance-summary-item > span,
+.maintenance-detail-card > span {
+  color: var(--muted, var(--text-muted, #64748b));
+}
+
+.maintenance-details-heading h3,
+.maintenance-summary-item strong,
+.maintenance-detail-card strong,
+.maintenance-detail-card p,
+.maintenance-detail-checklist li {
+  color: var(--text, var(--text-primary, #172033));
+}
+
+.maintenance-details-footer {
+  border-top-color: var(--border, var(--border-color, #dce3ec));
+}
+
+/* Status badges */
+.maintenance-status-badge {
+  background: var(--badge-info-bg, #e8f0ff);
+  color: var(--badge-info-text, #2454a6);
+}
+
+.maintenance-status-badge.status-in_progress {
+  background: var(--badge-warning-bg, #fff2d6);
+  color: var(--badge-warning-text, #925b00);
+}
+
+.maintenance-status-badge.status-completed {
+  background: var(--badge-success-bg, #dcfce7);
+  color: var(--badge-success-text, #166534);
+}
+
+.maintenance-status-badge.status-cancelled {
+  background: var(--badge-danger-bg, #fee2e2);
+  color: var(--badge-danger-text, #991b1b);
+}
+
+/* Priority badges */
+.maintenance-priority.priority-low {
+  background: var(--badge-success-bg, #dcfce7);
+  color: var(--badge-success-text, #166534);
+}
+
+.maintenance-priority.priority-medium {
+  background: var(--badge-info-bg, #e8f0ff);
+  color: var(--badge-info-text, #2454a6);
+}
+
+.maintenance-priority.priority-high {
+  background: var(--badge-warning-bg, #ffedd5);
+  color: var(--badge-warning-text, #9a3412);
+}
+
+.maintenance-priority.priority-critical {
+  background: var(--badge-danger-bg, #fee2e2);
+  color: var(--badge-danger-text, #991b1b);
+}
+
+/* Respect the user's selected dark theme */
+:root[data-theme="dark"] .maintenance-details-heading,
+:root[data-theme="dark"] .maintenance-summary-item,
+:root[data-theme="dark"] .maintenance-detail-card,
+[data-theme="dark"] .maintenance-details-heading,
+[data-theme="dark"] .maintenance-summary-item,
+[data-theme="dark"] .maintenance-detail-card,
+.dark .maintenance-details-heading,
+.dark .maintenance-summary-item,
+.dark .maintenance-detail-card {
+  background: var(--surface, var(--card-bg, #151b24));
+  border-color: var(--border, var(--border-color, #374151));
+  color: var(--text, var(--text-primary, #f1f5f9));
+}
+
+:root[data-theme="dark"] .maintenance-details-panel,
+[data-theme="dark"] .maintenance-details-panel,
+.dark .maintenance-details-panel {
+  color: var(--text, var(--text-primary, #f1f5f9));
+}
+
+:root[data-theme="dark"] .maintenance-details-eyebrow,
+:root[data-theme="dark"] .maintenance-summary-item > span,
+:root[data-theme="dark"] .maintenance-detail-card > span,
+[data-theme="dark"] .maintenance-details-eyebrow,
+[data-theme="dark"] .maintenance-summary-item > span,
+[data-theme="dark"] .maintenance-detail-card > span,
+.dark .maintenance-details-eyebrow,
+.dark .maintenance-summary-item > span,
+.dark .maintenance-detail-card > span {
+  color: var(--muted, var(--text-muted, #a7b0bf));
+}
+
+:root[data-theme="dark"] .maintenance-details-heading h3,
+:root[data-theme="dark"] .maintenance-summary-item strong,
+:root[data-theme="dark"] .maintenance-detail-card strong,
+:root[data-theme="dark"] .maintenance-detail-card p,
+:root[data-theme="dark"] .maintenance-detail-checklist li,
+[data-theme="dark"] .maintenance-details-heading h3,
+[data-theme="dark"] .maintenance-summary-item strong,
+[data-theme="dark"] .maintenance-detail-card strong,
+[data-theme="dark"] .maintenance-detail-card p,
+[data-theme="dark"] .maintenance-detail-checklist li,
+.dark .maintenance-details-heading h3,
+.dark .maintenance-summary-item strong,
+.dark .maintenance-detail-card strong,
+.dark .maintenance-detail-card p,
+.dark .maintenance-detail-checklist li {
+  color: var(--text, var(--text-primary, #f1f5f9));
+}
+
+:root[data-theme="dark"] .maintenance-details-footer,
+[data-theme="dark"] .maintenance-details-footer,
+.dark .maintenance-details-footer {
+  border-top-color: var(--border, var(--border-color, #374151));
+}
