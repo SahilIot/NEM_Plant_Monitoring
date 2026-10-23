@@ -1,6 +1,7 @@
 ﻿
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { Trash2 } from "lucide-react";
 import CopyRulesModal from "../components/CopyRulesModal.jsx";
 import PredefinedRulesModal from "../../rules/components/PredefinedRulesModal.jsx";
 import { api } from "../../../services/api.js";
@@ -127,6 +128,13 @@ function compactRuleDuration(seconds) {
   if (value % 3600 === 0) return `${value / 3600}h`;
   if (value % 60 === 0) return `${value / 60}m`;
   return `${value}s`;
+}
+
+function eventActionLabel(eventType) {
+  if (!eventType) return "Event";
+  return eventType
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 function ruleConditionSummary(rule) {
@@ -485,6 +493,10 @@ export default function AssetDetail() {
   const [logStartDate, setLogStartDate] = useState("");
   const [logEndDate, setLogEndDate] = useState("");
   const [events, setEvents] = useState([]);
+  const [eventTypeFilter, setEventTypeFilter] = useState("");
+  const [eventAssetFilter, setEventAssetFilter] = useState("");
+  const [eventStartDateTime, setEventStartDateTime] = useState("");
+  const [eventEndDateTime, setEventEndDateTime] = useState("");
   const [loadError, setLoadError] = useState("");
   const [deletingAsset, setDeletingAsset] = useState(false);
   const [deletingVariableId, setDeletingVariableId] = useState(null);
@@ -494,6 +506,8 @@ export default function AssetDetail() {
   const [selectedEntry, setSelectedEntry] = useState(null);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [showEventDetails, setShowEventDetails] = useState(false);
+  const [deletingEventId, setDeletingEventId] = useState(null);
+  const [eventDeleteError, setEventDeleteError] = useState("");
 
   const seq = useRef(0);
   const bulkRequest = useRef(false);
@@ -663,6 +677,25 @@ export default function AssetDetail() {
     await Promise.all([refreshStatus?.(), loadLogs()]);
   }, [loadLogs, refreshStatus]);
 
+  const deleteEvent = async (event) => {
+    if (deletingEventId !== null) return;
+    if (!window.confirm("Permanently delete this event? This cannot be undone.")) {
+      return;
+    }
+    setDeletingEventId(event.id);
+    setEventDeleteError("");
+    try {
+      await api.del(`/events/${event.id}`);
+      setEvents((current) => current.filter((item) => item.id !== event.id));
+      setShowEventDetails(false);
+      setSelectedEvent(null);
+    } catch (error) {
+      setEventDeleteError(error.message || "Could not delete this event.");
+    } finally {
+      setDeletingEventId(null);
+    }
+  };
+
   
   useEffect(() => {
     setTab("status");
@@ -674,6 +707,12 @@ export default function AssetDetail() {
     setVariables([]);
     setLogs([]);
     setEvents([]);
+    setEventTypeFilter("");
+    setEventAssetFilter("");
+    setEventStartDateTime("");
+    setEventEndDateTime("");
+    setSelectedEvent(null);
+    setShowEventDetails(false);
     setLoadError("");
 
   loadVariables();
@@ -905,6 +944,46 @@ const filteredLogs = [...logs].sort((a, b) => {
   return (Number.isFinite(dateB) ? dateB : 0) -
          (Number.isFinite(dateA) ? dateA : 0);
 });
+
+const eventTypes = [...new Set(events.map((event) => event.event_type).filter(Boolean))]
+  .sort((a, b) => eventActionLabel(a).localeCompare(eventActionLabel(b)));
+const eventAssets = [
+  ...new Map(
+    events.map((event) => [
+      String(event.asset_id ?? assetId),
+      event.asset_name || `Asset ${event.asset_id ?? assetId}`,
+    ])
+  ),
+].sort((a, b) => a[1].localeCompare(b[1]));
+const filteredEvents = [...events]
+  .filter((event) => {
+    if (eventTypeFilter && event.event_type !== eventTypeFilter) return false;
+    if (
+      eventAssetFilter &&
+      String(event.asset_id ?? assetId) !== eventAssetFilter
+    ) {
+      return false;
+    }
+    const timestamp = new Date(event.time || event.occurred_at || "").getTime();
+    const start = eventStartDateTime
+      ? new Date(eventStartDateTime).getTime()
+      : Number.NaN;
+    const end = eventEndDateTime
+      ? new Date(eventEndDateTime).getTime()
+      : Number.NaN;
+    if (Number.isFinite(start) && (!Number.isFinite(timestamp) || timestamp < start)) {
+      return false;
+    }
+    if (Number.isFinite(end) && (!Number.isFinite(timestamp) || timestamp > end)) {
+      return false;
+    }
+    return true;
+  })
+  .sort(
+    (a, b) =>
+      new Date(b.time || b.occurred_at || 0).getTime() -
+      new Date(a.time || a.occurred_at || 0).getTime()
+  );
  
   const refreshAll = async () => {
     await Promise.all([
@@ -1940,26 +2019,106 @@ const filteredLogs = [...logs].sort((a, b) => {
 {/* Event Log */}
 {tab === "events" && (
   <div className="event-log-section">
+    {eventDeleteError && (
+      <div className="event-log-error" role="alert">
+        {eventDeleteError}
+      </div>
+    )}
+    <div className="event-log-filters" aria-label="Filter event log">
+      <label>
+        <span>Event</span>
+        <select
+          value={eventTypeFilter}
+          onChange={(event) => setEventTypeFilter(event.target.value)}
+        >
+          <option value="">All events</option>
+          {eventTypes.map((eventType) => (
+            <option key={eventType} value={eventType}>
+              {eventActionLabel(eventType)}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label>
+        <span>Asset</span>
+        <select
+          value={eventAssetFilter}
+          onChange={(event) => setEventAssetFilter(event.target.value)}
+        >
+          <option value="">All assets</option>
+          {eventAssets.map(([id, name]) => (
+            <option key={id} value={id}>
+              {name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label>
+        <span>From</span>
+        <input
+          type="datetime-local"
+          value={eventStartDateTime}
+          onChange={(event) => setEventStartDateTime(event.target.value)}
+        />
+      </label>
+
+      <label>
+        <span>To</span>
+        <input
+          type="datetime-local"
+          value={eventEndDateTime}
+          onChange={(event) => setEventEndDateTime(event.target.value)}
+        />
+      </label>
+
+      <button
+        type="button"
+        className="btn-outline"
+        onClick={() => {
+          setEventTypeFilter("");
+          setEventAssetFilter("");
+          setEventStartDateTime("");
+          setEventEndDateTime("");
+        }}
+        disabled={
+          !eventTypeFilter &&
+          !eventAssetFilter &&
+          !eventStartDateTime &&
+          !eventEndDateTime
+        }
+      >
+        Clear filters
+      </button>
+      <span className="event-filter-count">
+        Showing {filteredEvents.length} of {events.length} events
+      </span>
+    </div>
+
     <div className="table-responsive">
       <table className="data-table event-log-table">
         <thead>
           <tr>
             <th>Date &amp; Time</th>
             <th>Event</th>
+            <th>Asset</th>
             <th>Assigned Rule</th>
             <th>Actions</th>
           </tr>
         </thead>
 
         <tbody>
-          {events.length === 0 ? (
+          {filteredEvents.length === 0 ? (
             <tr>
-              <td colSpan={4} className="empty-state">
-                No events found.
+              <td colSpan={5} className="empty-state">
+                {events.length === 0
+                  ? "No events found."
+                  : "No events match these filters."}
               </td>
             </tr>
           ) : (
-            events.map((event) => {
+            filteredEvents.map((event) => {
               const assignedRule =
                 event.rule_name ||
                 event.assigned_rule ||
@@ -1968,8 +2127,8 @@ const filteredLogs = [...logs].sort((a, b) => {
                   ? `Rule #${event.rule_id}`
                   : "Not assigned");
 
-              const eventTime = event.time
-                ? new Date(event.time).toLocaleString()
+              const eventTime = (event.time || event.occurred_at)
+                ? new Date(event.time || event.occurred_at).toLocaleString()
                 : "—";
 
               return (
@@ -1977,22 +2136,38 @@ const filteredLogs = [...logs].sort((a, b) => {
                   <td>{eventTime}</td>
 
                   <td>
-                    {event.text || event.message || "—"}
+                    <strong>{eventActionLabel(event.event_type)}</strong>
+                    <div>{event.text || event.message || "—"}</div>
                   </td>
+
+                  <td>{event.asset_name || `Asset ${event.asset_id ?? assetId}`}</td>
 
                   <td>{assignedRule}</td>
 
                   <td>
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      onClick={() => {
-                        setSelectedEvent(event);
-                        setShowEventDetails(true);
-                      }}
-                    >
-                      View
-                    </button>
+                    <div className="event-row-actions">
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        onClick={() => {
+                          setEventDeleteError("");
+                          setSelectedEvent(event);
+                          setShowEventDetails(true);
+                        }}
+                      >
+                        View
+                      </button>
+                      <button
+                        type="button"
+                        className="event-delete-icon"
+                        title="Permanently delete event"
+                        aria-label={`Permanently delete ${eventActionLabel(event.event_type)} event`}
+                        disabled={deletingEventId !== null}
+                        onClick={() => deleteEvent(event)}
+                      >
+                        <Trash2 size={16} aria-hidden="true" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
@@ -2006,39 +2181,38 @@ const filteredLogs = [...logs].sort((a, b) => {
 
 
 {showEventDetails && selectedEvent && (
-  <div className="modal-overlay">
-    <div
-      className="modal-content"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="event-details-title"
-    >
-      <div className="modal-header">
-        <h3 id="event-details-title">Event Details</h3>
-
-        <button
-          type="button"
-          className="btn-secondary"
-          onClick={() => {
-            setShowEventDetails(false);
-            setSelectedEvent(null);
-          }}
-        >
-          Close
-        </button>
-      </div>
-
-      <div className="modal-body">
+  <Modal
+    title="Event Details"
+    onClose={() => {
+      setShowEventDetails(false);
+      setSelectedEvent(null);
+    }}
+  >
+      <div className="event-details-content">
+        {eventDeleteError && (
+          <p className="event-log-error" role="alert">{eventDeleteError}</p>
+        )}
         <p>
           <strong>Date &amp; Time:</strong>{" "}
-          {selectedEvent.time
-            ? new Date(selectedEvent.time).toLocaleString()
+          {(selectedEvent.time || selectedEvent.occurred_at)
+            ? new Date(selectedEvent.time || selectedEvent.occurred_at).toLocaleString()
             : "—"}
         </p>
 
         <p>
-          <strong>Event:</strong>{" "}
+          <strong>Action:</strong>{" "}
+          {eventActionLabel(selectedEvent.event_type)}
+        </p>
+
+        <p>
+          <strong>Event details:</strong>{" "}
           {selectedEvent.text || selectedEvent.message || "—"}
+        </p>
+
+        <p>
+          <strong>Asset:</strong>{" "}
+          {selectedEvent.asset_name ||
+            `Asset ${selectedEvent.asset_id ?? assetId}`}
         </p>
 
         <p>
@@ -2050,9 +2224,30 @@ const filteredLogs = [...logs].sort((a, b) => {
               ? `Rule #${selectedEvent.rule_id}`
               : "Not assigned")}
         </p>
+        <div className="event-details-actions">
+          <button
+            type="button"
+            className="event-delete-icon"
+            title="Permanently delete event"
+            aria-label="Permanently delete event"
+            disabled={deletingEventId === selectedEvent.id}
+            onClick={() => deleteEvent(selectedEvent)}
+          >
+            <Trash2 size={17} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="btn-outline"
+            onClick={() => {
+              setShowEventDetails(false);
+              setSelectedEvent(null);
+            }}
+          >
+            Close
+          </button>
+        </div>
       </div>
-    </div>
-  </div>
+  </Modal>
 )}
   
 {modal === "addRuleOptions" && (

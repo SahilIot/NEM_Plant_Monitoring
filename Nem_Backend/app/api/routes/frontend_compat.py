@@ -1408,27 +1408,28 @@ def frontend_asset_events(
 ) -> list[dict[str, Any]]:
     if session.get(Asset, asset_id) is None:
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
-    events = session.scalars(
-        select(MonitoringEvent)
-        .where(
-            MonitoringEvent.asset_id == asset_id,
-            MonitoringEvent.event_type.in_(
-                (
-                    "rule_created",
-                    "warning_triggered",
-                    "alert_triggered",
-                    "interval_elapsed",
-                    "time_rule_activated",
-                    "machine_stopped",
-                )
-            ),
-        )
-        .order_by(MonitoringEvent.occurred_at.desc())
+    events = session.execute(
+        select(MonitoringEvent, Asset.name, MonitoringRule.name)
+        .outerjoin(Asset, Asset.id == MonitoringEvent.asset_id)
+        .outerjoin(MonitoringRule, MonitoringRule.id == MonitoringEvent.rule_id)
+        .where(MonitoringEvent.asset_id == asset_id)
+        .order_by(MonitoringEvent.occurred_at.desc(), MonitoringEvent.id.desc())
         .limit(200)
     ).all()
     return [
-        {"id": event.id, "time": event.occurred_at.isoformat(), "text": event.message}
-        for event in events
+        {
+            "id": event.id,
+            "time": event.occurred_at.isoformat(),
+            "event_type": event.event_type,
+            "severity": event.severity,
+            "text": event.message,
+            "asset_id": event.asset_id,
+            "asset_name": asset_name,
+            "rule_id": event.rule_id,
+            "rule_name": rule_name,
+            "alert_id": event.alert_id,
+        }
+        for event, asset_name, rule_name in events
     ]
 
 #Rule Collections -> 

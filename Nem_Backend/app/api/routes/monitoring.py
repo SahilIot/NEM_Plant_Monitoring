@@ -1,7 +1,7 @@
 # Lets user evaluate monitoring rules,inspect machine status,view active alerts,acknowledge alerts and review the event history
 from datetime import datetime, timezone # work with timestamps and UTC
 # Groups API Endpoints
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 #func -> SQL Function, or_ -> Combines SQL Condition using OR, select -> constructs SQL queries
 from sqlalchemy import and_, func, or_, select
 #Represents the SQLAlchemy database session
@@ -420,5 +420,15 @@ def get_event(event_id: int, session: Session = Depends(get_db)) -> MonitoringEv
     if event is None:
         raise HTTPException(status_code=404, detail=f"Event {event_id} was not found")
     return event
+
+
+@router.delete("/events/{event_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_event(event_id: int, session: Session = Depends(get_db)) -> Response:
+    event = session.get(MonitoringEvent, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail=f"Event {event_id} was not found")
+    session.delete(event)
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 # A reading arrives -> the monitoring engine evaluates the rules -> dashboard request the status -> dashboard display the alert -> an operator acknowledge the alert -> the dashboard displays the history
