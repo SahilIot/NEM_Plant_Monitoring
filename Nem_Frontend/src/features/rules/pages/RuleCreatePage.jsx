@@ -7,7 +7,7 @@ import "./RuleCreatePage.css";
 const TITLES = {
   interval: "Create interval-based rule",
   usage: "Create usage-based rule",
-  time: "Create time-based rule",
+  time: "Create Running Time-based rule",
 };
 
 const INITIAL_VALUES = {
