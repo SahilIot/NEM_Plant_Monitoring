@@ -209,27 +209,30 @@ if (activeVariables.length) {
     (!isUsage && runtimeVariableOptions.length === 0);
 
   return (
-    <div className="rule-create-page">
+    <div className={`rule-create-page rule-create-page-${kind}`}>
       <div className="rule-create-container">
-     <button
-  type="button"
-  className="btn-outline rule-back-btn"
-  onClick={() => navigate(`/assets/${assetId}`)}
->
-  ← Back to Asset
-</button>
+       <button
+         type="button"
+         className="btn-outline rule-back-btn"
+         onClick={goBack}
+       >
+         ← Back to Asset
+       </button>
 
-        <div className="page-head rule-page-head" style={{ marginTop: 20 }}>
-          <h1 className="page-title rule-page-title">{TITLES[kind]}</h1>
-          <p className="muted rule-page-subtitle">
-            Asset: {asset?.name || `#${assetId}`}
-          </p>
-        </div>
+       <div className="page-head rule-page-head">
+         <span className="rule-create-kicker">MONITORING RULE</span>
+         <h1 className="page-title rule-page-title">{TITLES[kind]}</h1>
+         <p className="muted rule-page-subtitle">
+           <span>Asset</span>
+           <strong>{asset?.name || `#${assetId}`}</strong>
+         </p>
+       </div>
 
-        <section className="rule-create-card">
-          <div className="rule-create-card-header">
-            <h2>{TITLES[kind]}</h2>
-            <p>
+       <section className="rule-create-card">
+         <div className="rule-create-card-header">
+           <span className="rule-create-section-label">RULE CONFIGURATION</span>
+           <h2>Set up your monitoring rule</h2>
+           <p>
               {isUsage
                 ? "Each complete OFF-to-ON cycle increments the counter and is checked against the warning and alert thresholds."
                 : isScheduled
@@ -250,6 +253,19 @@ if (activeVariables.length) {
                   onChange={updateField}
                   placeholder={isUsage ? "e.g. Rotation count limit" : "e.g. Machine running time"}
                   required
+                  disabled={saving}
+                />
+              </div>
+
+              <div className="form-group form-group-description">
+                <label htmlFor="rule-description">Description <span className="optional-label">Optional</span></label>
+                <textarea
+                  id="rule-description"
+                  name="description"
+                  rows={3}
+                  value={values.description}
+                  onChange={updateField}
+                  placeholder="Add context for operators who will review this rule."
                   disabled={saving}
                 />
               </div>

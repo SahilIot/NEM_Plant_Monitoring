@@ -52,13 +52,9 @@ def initialize_database(engine: Engine) -> None:
                 )
         if "signal_role" not in variable_columns:
             with engine.begin() as connection:
-                connection.execute(
-                    text("ALTER TABLE variables ADD COLUMN signal_role VARCHAR(20)")
-                )
+                connection.execute(text("ALTER TABLE variables ADD COLUMN signal_role VARCHAR(20)"))
         with engine.begin() as connection:
-            connection.execute(
-                text("DROP INDEX IF EXISTS uq_variables_opcua_node_id")
-            )
+            connection.execute(text("DROP INDEX IF EXISTS uq_variables_opcua_node_id"))
             connection.execute(text("DROP INDEX IF EXISTS ix_variables_opcua_node_id"))
             connection.execute(
                 text(
@@ -111,24 +107,21 @@ def initialize_database(engine: Engine) -> None:
                         )
                     )
                 else:
-                    connection.execute(
-                        text(
+                    connection.execute(text(
                             "ALTER TABLE nem_monitoring_rules "
                             "ADD COLUMN completed_at " + column_type
                         )
                     )
             if "is_archived" not in rule_columns:
                 if engine.dialect.name == "postgresql":
-                    connection.execute(
-                        text(
+                    connection.execute(text(
                             "ALTER TABLE nem_monitoring_rules "
                             "ADD COLUMN IF NOT EXISTS is_archived "
                             "BOOLEAN NOT NULL DEFAULT FALSE"
                         )
                     )
                 else:
-                    connection.execute(
-                        text(
+                    connection.execute(text(
                             "ALTER TABLE nem_monitoring_rules "
                             "ADD COLUMN is_archived "
                             "BOOLEAN NOT NULL DEFAULT FALSE"
@@ -136,8 +129,7 @@ def initialize_database(engine: Engine) -> None:
                     )
             if "source_template_id" not in rule_columns:
                 if engine.dialect.name == "postgresql":
-                    connection.execute(
-                        text(
+                    connection.execute(text(
                             "ALTER TABLE nem_monitoring_rules "
                             "ADD COLUMN IF NOT EXISTS source_template_id INTEGER "
                             "REFERENCES nem_monitoring_rule_templates(id) "
@@ -145,22 +137,19 @@ def initialize_database(engine: Engine) -> None:
                         )
                     )
                 else:
-                    connection.execute(
-                        text(
+                    connection.execute(text(
                             "ALTER TABLE nem_monitoring_rules "
                             "ADD COLUMN source_template_id INTEGER "
                             "REFERENCES nem_monitoring_rule_templates(id) "
                             "ON DELETE RESTRICT"
                         )
                     )
-            connection.execute(
-                text(
+            connection.execute(text(
                     "CREATE INDEX IF NOT EXISTS "
                     "ix_nem_monitoring_rules_source_template_id "
                     "ON nem_monitoring_rules (source_template_id)"
                 )
             )
-
     _migrate_legacy_rule_templates(engine)
     _migrate_boolean_duration_templates(engine)
     _migrate_existing_rule_counters(engine)
@@ -174,22 +163,19 @@ def initialize_database(engine: Engine) -> None:
         }
         if "current_period_start_date" not in schedule_columns:
             with engine.begin() as connection:
-                connection.execute(
-                    text(
+                connection.execute(text(
                         "ALTER TABLE nem_maintenance_schedules "
                         "ADD COLUMN current_period_start_date DATE"
                     )
                 )
-                connection.execute(
-                    text(
+                connection.execute(text(
                         "UPDATE nem_maintenance_schedules "
                         "SET current_period_start_date = schedule_start_date "
                         "WHERE current_period_start_date IS NULL"
                     )
                 )
                 if engine.dialect.name == "postgresql":
-                    connection.execute(
-                        text(
+                    connection.execute(text(
                             "ALTER TABLE nem_maintenance_schedules "
                             "ALTER COLUMN current_period_start_date SET NOT NULL"
                         )
@@ -223,14 +209,12 @@ def initialize_database(engine: Engine) -> None:
         with engine.begin() as connection:
             for name, definition in record_column_definitions.items():
                 if name not in record_columns:
-                    connection.execute(
-                        text(
+                    connection.execute(text(
                             "ALTER TABLE nem_maintenance_records "
                             f"ADD COLUMN {name} {definition}"
                         )
                     )
-            connection.execute(
-                text(
+            connection.execute(text(
                     "UPDATE nem_maintenance_records "
                     "SET actual_completed_at = performed_at "
                     "WHERE status = 'completed' AND actual_completed_at IS NULL"
@@ -238,31 +222,26 @@ def initialize_database(engine: Engine) -> None:
             )
 
     if "nem_alerts" in table_names and "nem_maintenance_schedules" in table_names:
-        alert_columns = {
-            column["name"]
+        alert_columns = {column["name"]
             for column in inspect(engine).get_columns("nem_alerts")
         }
 
         with engine.begin() as connection:
             if "maintenance_schedule_id" not in alert_columns:
-                connection.execute(
-                    text(
+                connection.execute(text(
                         "ALTER TABLE nem_alerts "
                         "ADD COLUMN maintenance_schedule_id INTEGER"
                     )
                 )
-
             if "maintenance_due_date" not in alert_columns:
-                connection.execute(
-                    text(
+                connection.execute(text(
                         "ALTER TABLE nem_alerts "
                         "ADD COLUMN maintenance_due_date DATE"
                     )
                 )
 
             if engine.dialect.name == "postgresql":
-                connection.execute(
-                    text(
+                connection.execute(text(
                         "DO $$ BEGIN "
                         "IF NOT EXISTS (SELECT 1 FROM pg_constraint "
                         "WHERE conname = 'fk_nem_alerts_maintenance_schedule') "
@@ -273,17 +252,13 @@ def initialize_database(engine: Engine) -> None:
                         "ON DELETE RESTRICT; END IF; END $$"
                     )
                 )
-
-                connection.execute(
-                    text(
+                connection.execute(text(
                         "CREATE INDEX IF NOT EXISTS "
                         "ix_nem_alerts_maintenance_schedule_id "
                         "ON nem_alerts (maintenance_schedule_id)"
                     )
                 )
-
-                connection.execute(
-                    text(
+                connection.execute(text(
                         "CREATE UNIQUE INDEX IF NOT EXISTS "
                         "uq_nem_alerts_active_maintenance_due "
                         "ON nem_alerts (maintenance_schedule_id, maintenance_due_date) "
@@ -291,9 +266,7 @@ def initialize_database(engine: Engine) -> None:
                         "AND maintenance_schedule_id IS NOT NULL"
                     )
                 )
-
-                connection.execute(
-                    text(
+                connection.execute(text(
                         "DO $$ BEGIN "
                         "IF NOT EXISTS (SELECT 1 FROM pg_constraint "
                         "WHERE conname = 'ck_nem_alerts_source') "
@@ -339,9 +312,7 @@ def _migrate_legacy_rule_templates(engine: Engine) -> None:
                 if rule.variable_id is not None
                 else None
             )
-            required_types = (
-                type_map.get(variable.data_type) if variable is not None else None
-            )
+            required_types = (type_map.get(variable.data_type) if variable is not None else None)
             if rule.rule_type == "parameter_threshold" and required_types is None:
                 required_types = ["number", "integer"]
             elif rule.rule_type == "boolean_count_threshold":
@@ -370,7 +341,7 @@ def _migrate_legacy_rule_templates(engine: Engine) -> None:
             rule.is_archived = True
         session.commit()
 
-
+#fixes old duration-rule templates 
 def _migrate_boolean_duration_templates(engine: Engine) -> None:
     with Session(engine) as session:
         templates = session.scalars(
@@ -392,12 +363,10 @@ def _migrate_boolean_duration_templates(engine: Engine) -> None:
             template.parameters = parameters
         session.commit()
 
-
+#intializes counter-tracking records for existing boolean count-threshold rules
 def _migrate_existing_rule_counters(engine: Engine) -> None:
     migration_key = "internal_rule_counter_state_v1"
-    insert_function = (
-        pg_insert if engine.dialect.name == "postgresql" else sqlite_insert
-    )
+    insert_function = (pg_insert if engine.dialect.name == "postgresql" else sqlite_insert)
     with Session(engine) as session:
         statement = (
             insert_function(FrontendConfig)
@@ -409,7 +378,7 @@ def _migrate_existing_rule_counters(engine: Engine) -> None:
         if inserted is None:
             session.rollback()
             return
-
+#Find existing rules that need counter state
         rules = session.scalars(
             select(MonitoringRule).where(
                 MonitoringRule.rule_type == "boolean_count_threshold",
@@ -418,22 +387,20 @@ def _migrate_existing_rule_counters(engine: Engine) -> None:
             )
         ).all()
         for rule in rules:
-            machine_state = session.get(
-                MachineMonitoringState, rule.target_asset_id
-            )
+            #Retrieve the machine`s current state`
+            machine_state = session.get(MachineMonitoringState, rule.target_asset_id)
+            #Create a counter-state record 
             session.add(
                 RuleCounterState(
                     rule_id=rule.id,
                     asset_id=rule.target_asset_id,
                     cycle_count=machine_state.cycle_count if machine_state else 0,
                     cycle_signal=machine_state.cycle_signal if machine_state else None,
-                    last_signal_at=(
-                        machine_state.last_cycle_signal_at
+                    last_signal_at=(machine_state.last_cycle_signal_at
                         if machine_state
                         else None
                     ),
-                    updated_at=(
-                        machine_state.updated_at
+                    updated_at=(machine_state.updated_at
                         if machine_state
                         else rule.created_at
                     ),

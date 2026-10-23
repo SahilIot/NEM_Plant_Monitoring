@@ -1,7 +1,7 @@
 # Lets user evaluate monitoring rules,inspect machine status,view active alerts,acknowledge alerts and review the event history
 from datetime import datetime, timezone # work with timestamps and UTC
 # Groups API Endpoints
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 #func -> SQL Function, or_ -> Combines SQL Condition using OR, select -> constructs SQL queries
 from sqlalchemy import and_, func, or_, select
 #Represents the SQLAlchemy database session
@@ -382,7 +382,11 @@ def list_events(
     start, end = normalized(start_time), normalized(end_time)
     if start is not None and end is not None and start > end:
         raise HTTPException(status_code=422, detail="start_time must not be later than end_time")
-    query = select(MonitoringEvent)
+    query = (
+        select(MonitoringEvent, Asset.name, MonitoringRule.name)
+        .outerjoin(Asset, Asset.id == MonitoringEvent.asset_id)
+        .outerjoin(MonitoringRule, MonitoringRule.id == MonitoringEvent.rule_id)
+    )
     count_query = select(func.count()).select_from(MonitoringEvent)
     for value, column in (
         (asset_id, MonitoringEvent.asset_id),
@@ -401,13 +405,20 @@ def list_events(
         query, count_query = query.where(MonitoringEvent.occurred_at <= end), count_query.where(
             MonitoringEvent.occurred_at <= end
         )
-    rows = session.scalars(
+    rows = session.execute(
         query.order_by(MonitoringEvent.occurred_at.desc(), MonitoringEvent.id.desc())
         .offset(offset)
         .limit(limit)
     ).all()
     return {
-        "items": [EventRead.model_validate(row) for row in rows],
+        "items": [
+            {
+                **EventRead.model_validate(event).model_dump(),
+                "asset_name": asset_name,
+                "rule_name": rule_name,
+            }
+            for event, asset_name, rule_name in rows
+        ],
         "total": session.scalar(count_query) or 0,
         "limit": limit,
         "offset": offset,
@@ -420,5 +431,15 @@ def get_event(event_id: int, session: Session = Depends(get_db)) -> MonitoringEv
     if event is None:
         raise HTTPException(status_code=404, detail=f"Event {event_id} was not found")
     return event
+
+
+@router.delete("/events/{event_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_event(event_id: int, session: Session = Depends(get_db)) -> Response:
+    event = session.get(MonitoringEvent, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail=f"Event {event_id} was not found")
+    session.delete(event)
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 # A reading arrives -> the monitoring engine evaluates the rules -> dashboard request the status -> dashboard display the alert -> an operator acknowledge the alert -> the dashboard displays the history

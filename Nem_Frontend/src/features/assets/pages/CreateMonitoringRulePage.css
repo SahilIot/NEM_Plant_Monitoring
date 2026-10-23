@@ -1,45 +1,125 @@
-
 .monitoring-rule-page {
   width: 100%;
-  max-width: 1100px;
+  max-width: 920px;
   margin: 0 auto;
-  padding: 28px 24px 40px;
-  color: var(--text, inherit);
+  padding: 22px 24px 36px;
+  color: var(--ink);
 }
 
 .monitoring-rule-header {
-  margin-bottom: 24px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.monitoring-rule-header .link-btn {
+  margin-bottom: 14px;
+  color: var(--action);
+}
+
+.monitoring-rule-kicker,
+.monitoring-rule-card-header > span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
 }
 
 .monitoring-rule-header h1 {
-  margin: 18px 0 8px;
+  margin: 0 0 9px;
+  color: var(--ink);
+  font-family: var(--font-num);
   font-size: 28px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.monitoring-rule-header .monitoring-rule-asset {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.monitoring-rule-asset strong {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.monitoring-rule-page > .banner {
+  max-width: none;
+}
+
+.monitoring-rule-page > .banner.error {
+  border-color: var(--alert);
+  background: var(--alert-soft);
+  color: var(--ink);
 }
 
 .monitoring-rule-card {
   overflow: hidden;
-  border: 1px solid var(--border, #35404c);
-  border-radius: 14px;
-  background: var(--surface, #151b22);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.monitoring-rule-card-header {
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.monitoring-rule-card-header > span {
+  margin-bottom: 4px;
+}
+
+.monitoring-rule-card-header h2 {
+  margin: 0 0 5px;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.monitoring-rule-card-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .monitoring-rule-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 22px;
-  padding: 24px;
+  gap: 18px 20px;
+  padding: 22px;
+}
+
+.monitoring-rule-card-header {
+  padding: 16px;
 }
 
 .monitoring-rule-field {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+  color: var(--ink);
 }
 
 .monitoring-rule-field > span {
+  color: var(--ink-2);
   font-size: 13px;
-  color: var(--text, inherit);
+  font-weight: 600;
+  line-height: 1.4;
 }
 
 .monitoring-rule-field input,
@@ -48,35 +128,70 @@
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  padding: 11px 12px;
-  border: 1px solid var(--border, #35404c);
-  border-radius: 7px;
-  background: var(--surface, #151b22);
-  color: var(--text, inherit);
-  font: inherit;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-ctl);
+  outline: none;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.45;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .monitoring-rule-field textarea {
+  min-height: 88px;
   resize: vertical;
 }
 
+.monitoring-rule-field input::placeholder,
+.monitoring-rule-field textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+.monitoring-rule-field input:focus,
+.monitoring-rule-field select:focus,
+.monitoring-rule-field textarea:focus {
+  border-color: var(--action);
+  box-shadow: 0 0 0 3px var(--action-soft);
+}
+
 .monitoring-rule-field input:disabled,
-.monitoring-rule-field select:disabled {
-  opacity: 0.75;
+.monitoring-rule-field select:disabled,
+.monitoring-rule-field textarea:disabled {
+  opacity: 0.65;
   cursor: not-allowed;
 }
 
 .monitoring-rule-field small {
-  color: var(--muted, #8b9aab);
+  color: var(--muted);
+  font-size: 12px;
   line-height: 1.5;
+}
+
+.monitoring-rule-field:has(textarea) {
+  grid-column: 1 / -1;
 }
 
 .monitoring-rule-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 12px;
-  padding: 20px 24px;
-  border-top: 1px solid var(--border, #35404c);
+  gap: 9px;
+  padding: 16px 22px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.monitoring-rule-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+[data-theme="dark"] .monitoring-rule-field select {
+  color-scheme: dark;
 }
 
 @media (max-width: 700px) {
@@ -84,12 +199,25 @@
     padding: 16px 12px 24px;
   }
 
+  .monitoring-rule-header h1 {
+    font-size: 24px;
+  }
+
   .monitoring-rule-fields {
-    grid-template-columns: 1fr;
-    padding: 18px 16px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 15px;
+    padding: 16px;
+  }
+
+  .monitoring-rule-field:has(textarea) {
+    grid-column: 1;
   }
 
   .monitoring-rule-actions {
-    padding: 16px;
+    padding: 14px 16px;
+  }
+
+  .monitoring-rule-actions button {
+    flex: 1;
   }
 }
