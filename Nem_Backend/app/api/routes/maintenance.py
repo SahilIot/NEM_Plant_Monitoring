@@ -8,6 +8,8 @@ from app.db.session import get_db
 from app.models import (
     Alert,
     Asset,
+    InstructionDocument,
+    InstructionDocumentFile,
     MaintenanceRecord,
     MaintenanceSchedule,
     MonitoringEvent,
@@ -34,16 +36,85 @@ def _schedule_or_404(session: Session, schedule_id: int) -> MaintenanceSchedule:
     return schedule
 
 # This prepares a db schedule for the frontend
-def _schedule_read(schedule: MaintenanceSchedule,*,today: date | None = None,) -> MaintenanceScheduleRead:
+def _validate_instruction_documents(
+    session: Session,
+    document_ids: list[int],
+) -> list[int]:
+    normalized_ids = list(dict.fromkeys(document_ids))
+    if any(document_id <= 0 for document_id in normalized_ids):
+        raise HTTPException(
+            status_code=422,
+            detail="Instruction document IDs must be positive integers",
+        )
+    if not normalized_ids:
+        return []
+    existing_ids = set(session.scalars(
+        select(InstructionDocument.id).where(
+            InstructionDocument.id.in_(normalized_ids)
+        )
+    ).all())
+    missing_ids = [document_id for document_id in normalized_ids if document_id not in existing_ids]
+    if missing_ids:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Instruction documents were not found: {missing_ids}",
+        )
+    return normalized_ids
+
+
+def _schedule_read(
+    session: Session,
+    schedule: MaintenanceSchedule,
+    *,
+    today: date | None = None,
+) -> MaintenanceScheduleRead:
     progress_date = today or utc_now().date()
     if schedule.status in {"completed", "cancelled"} and schedule.last_completed_at:
         progress_date = schedule.last_completed_at.date()
+    document_ids = schedule.instruction_document_ids or []
+    documents = session.scalars(
+        select(InstructionDocument).where(
+            InstructionDocument.id.in_(document_ids)
+        )
+    ).all() if document_ids else []
+    documents_by_id = {document.id: document for document in documents}
+    files = session.scalars(
+        select(InstructionDocumentFile)
+        .where(InstructionDocumentFile.document_id.in_(document_ids))
+        .order_by(InstructionDocumentFile.id)
+    ).all() if document_ids else []
+    files_by_document: dict[int, list[dict[str, object]]] = {}
+    for file in files:
+        files_by_document.setdefault(file.document_id, []).append({
+            "id": file.id,
+            "name": file.original_name,
+            "size_bytes": file.size_bytes,
+            "content_type": file.content_type,
+            "view_url": (
+                f"/api/v1/documents/{file.document_id}/files/{file.id}/view"
+            ),
+            "download_url": (
+                f"/api/v1/documents/{file.document_id}/files/{file.id}/download"
+            ),
+        })
+    instruction_documents = [
+        {
+            "id": document.id,
+            "title": document.title,
+            "kind": document.kind,
+            "description": document.description,
+            "files": files_by_document.get(document.id, []),
+        }
+        for document_id in document_ids
+        if (document := documents_by_id.get(document_id)) is not None
+    ]
     return MaintenanceScheduleRead.model_validate(
         {
             column.name: getattr(schedule, column.name)
             for column in MaintenanceSchedule.__table__.columns
         }
         | {
+            "instruction_documents": instruction_documents,
             "due_status": due_status(
                 schedule.current_due_date,
                 today=today or utc_now().date(),
@@ -293,6 +364,9 @@ def create_maintenance_schedule(
         priority=payload.priority,
         assigned_technician=payload.assigned_technician,
         description=payload.description,
+        instruction_document_ids=_validate_instruction_documents(
+            session, payload.instruction_document_ids
+        ),
         schedule_start_date=payload.schedule_start_date,
         current_period_start_date=payload.schedule_start_date,
         first_due_date=payload.first_due_date,
@@ -315,7 +389,7 @@ def create_maintenance_schedule(
     )
     session.commit()
     session.refresh(schedule)
-    return _schedule_read(schedule)
+    return _schedule_read(session, schedule)
 
 #Listing and viewing schedules
 @router.get("/schedules")
@@ -335,7 +409,9 @@ def list_maintenance_schedules(
         query = query.where(MaintenanceSchedule.asset_id == asset_id)
     schedules = session.scalars(query).all()
     today = utc_now().date()
-    results = [_schedule_read(schedule, today=today) for schedule in schedules]
+    results = [
+        _schedule_read(session, schedule, today=today) for schedule in schedules
+    ]
     if due_state is not None:
         results = [schedule for schedule in results if schedule.due_status == due_state]
     return results
@@ -346,7 +422,7 @@ def get_maintenance_schedule(
     schedule_id: int,
     session: Session = Depends(get_db),
 ) -> MaintenanceScheduleRead:
-    return _schedule_read(_schedule_or_404(session, schedule_id))
+    return _schedule_read(session, _schedule_or_404(session, schedule_id))
 
 
 @router.delete("/schedules/{schedule_id}/permanent",status_code=status.HTTP_204_NO_CONTENT,)
@@ -424,6 +500,10 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status_code=422,detail="Provide at least one field to update",)
+    if "instruction_document_ids" in changes:
+        changes["instruction_document_ids"] = _validate_instruction_documents(
+            session, changes["instruction_document_ids"] or []
+        )
 
     previous_due_date = schedule.current_due_date
 
@@ -550,7 +630,7 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
         )
     session.commit()
     session.refresh(schedule)
-    return _schedule_read(schedule)
+    return _schedule_read(session, schedule)
 
 # Confirm the proposed date or save a replacement date selected by the user.
 @router.post("/schedules/{schedule_id}/confirm-next",response_model=MaintenanceScheduleRead,)
@@ -570,7 +650,7 @@ def confirm_next_occurrence(
 
     # Make repeated requests safe after an occurrence has been created.
     if (schedule.approval_status == "approved"and schedule.current_occurrence_id):
-        return _schedule_read(schedule)
+        return _schedule_read(session, schedule)
 
     # A proposal can be confirmed while pending.
     # A declined proposal can be replaced with a new date.
@@ -629,7 +709,7 @@ def confirm_next_occurrence(
     session.commit()
     session.refresh(schedule)
 
-    return _schedule_read(schedule)
+    return _schedule_read(session, schedule)
 # Decline the proposed date without ending the recurring schedule.
 @router.post("/schedules/{schedule_id}/decline-next",response_model=MaintenanceScheduleRead,)
 def decline_next_occurrence(schedule_id: int,
@@ -644,7 +724,7 @@ def decline_next_occurrence(schedule_id: int,
         raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
     # A repeated decline is safe if the proposal has already been cleared.
     if (schedule.approval_status == "declined" and schedule.proposed_due_date is None):
-        return _schedule_read(schedule)
+        return _schedule_read(session, schedule)
 
     if (schedule.approval_status != "pending" or schedule.proposed_due_date is None):
         raise HTTPException(status_code=409,detail="No proposed occurrence awaits approval",)
@@ -662,7 +742,7 @@ def decline_next_occurrence(schedule_id: int,
         due_date=rejected_date,)
     session.commit()
     session.refresh(schedule)
-    return _schedule_read(schedule)
+    return _schedule_read(session, schedule)
 
 # returns individual maintenance jobs,rather than schedule definitions
 @router.get("")

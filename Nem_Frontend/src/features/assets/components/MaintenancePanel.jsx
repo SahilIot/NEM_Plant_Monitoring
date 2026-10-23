@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Trash2 } from "lucide-react";
 import { api } from "../../../services/api.js";
 import { EmptyState, Modal } from "../../../components/common/UI.jsx";
 import { formatTime } from "../../../utils/format.js";
@@ -9,6 +10,7 @@ import {
 } from "../rules/monitoringRuleFlow.js";
 import "./MaintenancePanel.css";
 
+const API_BASE = (import.meta.env.VITE_API_URL || "/api/v1").replace(/\/+$/, "");
 const TYPES = ["preventive", "corrective", "inspection", "unplanned"];
 const STATUSES = ["planned", "in_progress", "completed", "cancelled"];
 const PRIORITIES = ["low", "medium", "high", "critical"];
@@ -142,11 +144,11 @@ export default function MaintenancePanel({ assetId, onChanged }) {
   const [schedules, setSchedules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [deletingRecordId, setDeletingRecordId] = useState(null);
   const [deletingScheduleId, setDeletingScheduleId] = useState(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [dialog, setDialog] = useState(null);
+  const [materialViewer, setMaterialViewer] = useState(null);
   const [legacyRuleOptionsOpen, setLegacyRuleOptionsOpen] = useState(false);
   const [values, setValues] = useState(() => formValues(null));
   const [scheduleValues, setScheduleValues] = useState({
@@ -209,7 +211,6 @@ export default function MaintenancePanel({ assetId, onChanged }) {
       return;
     }
     setBusy(true);
-    setDeletingRecordId(record.id);
     setError("");
     setNotice("");
     try {
@@ -222,7 +223,6 @@ export default function MaintenancePanel({ assetId, onChanged }) {
         requestError.message || "Could not permanently delete maintenance."
       );
     } finally {
-      setDeletingRecordId(null);
       setBusy(false);
     }
   };
@@ -340,12 +340,6 @@ export default function MaintenancePanel({ assetId, onChanged }) {
   const openCreate = () => {
     navigate(`/assets/${assetId}/maintenance/schedules/new`);
   };
-
-  // Opens the maintenance logbook for the current asset.
- 
-const openMaintenanceLogbook = () => {
-  navigate(`/assets/${assetId}/maintenance/logbook`);
-};
 
 const openScheduleEdit = (schedule) => {
   navigate(
@@ -489,43 +483,6 @@ const openScheduleEdit = (schedule) => {
     }
   };
 
-  const runAction = async (record, action) => {
-    if (busy) return;
-    if (
-      action === "cancel" &&
-      !window.confirm(`Cancel maintenance "${record.title}"? Its history will be retained.`)
-    ) {
-      return;
-    }
-    setBusy(true);
-    setError("");
-    setNotice("");
-    try {
-      const result = await api.post(`/maintenance/${record.id}/${action}`);
-      const labels = {
-        start: "Maintenance started.",
-        complete: "Maintenance completed.",
-        cancel: "Maintenance cancelled.",
-      };
-      setNotice(labels[action]);
-      await Promise.all([loadRecords(), loadSchedules(), loadArchivedRecords()]);
-      await onChanged?.();
-      if (action === "complete" && result.schedule_id) {
-        const schedule = await api.get(
-          `/maintenance/schedules/${result.schedule_id}`
-        );
-        if (schedule.approval_status === "pending") {
-          setApprovalDate(schedule.proposed_due_date);
-          setDialog({ kind: "approval", record: schedule });
-        }
-      }
-    } catch (requestError) {
-      setError(requestError.message || `Could not ${action} maintenance.`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const updateValue = (event) => {
     const { name, value } = event.target;
     setValues((previous) => ({ ...previous, [name]: value }));
@@ -593,6 +550,9 @@ const openScheduleEdit = (schedule) => {
   const plannedDatesRequired =
     dialog?.kind === "create" ||
     (dialog?.kind === "edit" && !terminalEdit);
+  const documentsForRecord = (record) =>
+    schedules.find((schedule) => schedule.id === record.schedule_id)
+      ?.instruction_documents || [];
 
   return (
     <>
@@ -605,14 +565,6 @@ const openScheduleEdit = (schedule) => {
             </p>
           </div>
           <div className="maintenance-heading-actions">
-            <button
-  type="button"
-  className="btn-primary"
-  onClick={openMaintenanceLogbook}
-  disabled={busy}
->
-  View Maintenance Logbook
-</button>
             <button
               type="button"
               className="btn-primary"
@@ -635,79 +587,96 @@ const openScheduleEdit = (schedule) => {
             lines={["Create a job to start tracking planned and completed work."]}
           />
         ) : (
-          <div className="maintenance-table-wrap">
-            <table className="table maintenance-table">
-              <thead>
-                <tr>
-                  <th>Title</th>
-                  <th>Planned</th>
-                  <th>Technician</th>
-                  <th>Actual duration</th>
-                  <th>Current date</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {records.map((record) => (
-                  <tr key={record.id}>
-                    <td>{record.title}</td>
-
-<td className="capitalize">
-  <div>{plannedDurationDays(record)}</div>
-  <span className="maintenance-end">
-    {record.planned_end_at
-      ? formatTime(record.planned_end_at)
-      : "—"}
-  </span>
-</td>
-
-<td>
-  {record.assigned_technician || record.performed_by || "—"}
-</td>
-
-<td>{actualDuration(record)}</td>
-
-<td>
-  {new Date().toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  })}
-</td>
-
-                      <td>
-                        <div className="maintenance-actions">
-                        <button type="button" className="btn-outline" onClick={() => setDialog({ kind: "details", record })}>View Details</button>
-                        {record.status === "completed" ? (
-                          <>
-                            <button type="button" className="btn-danger" onClick={() => archiveCompleted(record)} disabled={busy}>Archive</button>
-                            <button type="button" className="btn-danger" onClick={() => permanentlyDeleteRecord(record)} disabled={busy}>
-                              {deletingRecordId === record.id ? "Deleting…" : "Delete permanently"}
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            {record.status !== "in_progress" && (
-                              <button type="button" className="btn-danger" onClick={() => permanentlyDeleteRecord(record)} disabled={busy}>
-                                {deletingRecordId === record.id ? "Deleting…" : record.schedule_id ? "Delete schedule" : "Delete permanently"}
-                              </button>
-                            )}
-                          </>
-                        )}
-                        {record.status === "planned" && (
-                          <button type="button" className="btn-outline" onClick={() => runAction(record, "start")} disabled={busy}>Start</button>
-                        )}
-                        {!["completed", "cancelled"].includes(record.status) && (
-                          <>
-                            <button type="button" className="btn-primary" onClick={() => runAction(record, "complete")} disabled={busy}>Complete</button>
-                          </>
-                        )}
-                        </div>
-                      </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="maintenance-record-list">
+            {records.map((record) => (
+              <article
+                className={`maintenance-record-card ${record.status || "planned"}`}
+                key={record.id}
+              >
+                <span className="maintenance-record-indicator" aria-hidden="true" />
+                <div className="maintenance-record-main">
+                  <strong>{record.title}</strong>
+                  <small>
+                    {record.maintenance_type || "Maintenance"} ·{" "}
+                    {record.priority || "medium"} priority
+                  </small>
+                </div>
+                <div className="maintenance-record-status">
+                  <span className={`maintenance-status ${record.status}`}>
+                    {String(record.status || "planned").replaceAll("_", " ")}
+                  </span>
+                  <small>
+                    {record.planned_start_at
+                      ? formatTime(record.planned_start_at)
+                      : "No planned start"}
+                    {" — "}
+                    {record.planned_end_at
+                      ? formatTime(record.planned_end_at)
+                      : "No planned end"}
+                  </small>
+                </div>
+                <div className="maintenance-record-meta">
+                  <span>
+                    <small>Technician</small>
+                    <strong>{record.assigned_technician || record.performed_by || "—"}</strong>
+                  </span>
+                  <span>
+                    <small>Planned duration</small>
+                    <strong>{plannedDurationDays(record)}</strong>
+                  </span>
+                  <span>
+                    <small>Actual duration</small>
+                    <strong>{actualDuration(record)}</strong>
+                  </span>
+                </div>
+                <div className="maintenance-actions">
+                  <button
+                    type="button"
+                    className="btn-outline"
+                    onClick={() => setDialog({ kind: "details", record })}
+                    disabled={busy}
+                  >
+                    View
+                  </button>
+                  {documentsForRecord(record).length > 0 && (
+                    <button
+                      type="button"
+                      className="btn-outline"
+                      onClick={() => setMaterialViewer({
+                        document: documentsForRecord(record)[0],
+                        file: null,
+                        documents: documentsForRecord(record),
+                      })}
+                      disabled={busy}
+                    >
+                      Instructions / documents
+                    </button>
+                  )}
+                  {record.status === "completed" && (
+                    <button
+                      type="button"
+                      className="btn-danger"
+                      onClick={() => archiveCompleted(record)}
+                      disabled={busy}
+                    >
+                      Archive
+                    </button>
+                  )}
+                  {record.status !== "in_progress" && (
+                    <button
+                      type="button"
+                      className="maintenance-delete-icon"
+                      title={record.schedule_id ? "Permanently delete schedule" : "Permanently delete maintenance"}
+                      aria-label={`Permanently delete ${record.schedule_id ? "schedule" : "maintenance"} ${record.title}`}
+                      onClick={() => permanentlyDeleteRecord(record)}
+                      disabled={busy}
+                    >
+                      <Trash2 size={16} aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))}
           </div>
         )}
 
@@ -731,8 +700,15 @@ const openScheduleEdit = (schedule) => {
                       <td>{record.actual_completed_at ? formatTime(record.actual_completed_at) : "—"}</td>
                       <td>{formatTime(record.archived_at)}</td>
                       <td>
-                        <button type="button" className="btn-danger" onClick={() => permanentlyDeleteRecord(record)} disabled={busy}>
-                          {deletingRecordId === record.id ? "Deleting…" : "Delete permanently"}
+                        <button
+                          type="button"
+                          className="maintenance-delete-icon"
+                          title="Permanently delete archived maintenance"
+                          aria-label={`Permanently delete archived maintenance ${record.title}`}
+                          onClick={() => permanentlyDeleteRecord(record)}
+                          disabled={busy}
+                        >
+                          <Trash2 size={16} aria-hidden="true" />
                         </button>
                       </td>
                     </tr>
@@ -826,6 +802,60 @@ const openScheduleEdit = (schedule) => {
           </dl>
           <div className="modal-actions">
             <button type="button" className="btn-outline" onClick={() => setDialog(null)}>Close</button>
+          </div>
+        </Modal>
+      )}
+
+      {materialViewer && (
+        <Modal
+          title={materialViewer.file?.name || materialViewer.document.title || "Instructions and documents"}
+          onClose={() => setMaterialViewer(null)}
+          wide
+        >
+          {materialViewer.file ? (
+            <>
+              <button
+                type="button"
+                className="btn-outline"
+                onClick={() => setMaterialViewer((current) => ({ ...current, file: null }))}
+              >
+                Back to instructions and documents
+              </button>
+              <iframe
+                title={materialViewer.file.name}
+                src={`${API_BASE}/documents/${materialViewer.document.id}/files/${materialViewer.file.id}/view`}
+                className="maintenance-document-preview"
+              />
+            </>
+          ) : (
+            <div className="maintenance-material-list">
+              {materialViewer.documents.map((document) => (
+                <section key={document.id} className="maintenance-material-item">
+                  <h3>{document.title || "Untitled document"}</h3>
+                  <p className="muted">{document.kind || "Instruction"}</p>
+                  {document.description && <p className="maintenance-instruction-text">{document.description}</p>}
+                  {document.files?.length > 0 ? (
+                    <div className="maintenance-material-files">
+                      {document.files.map((file) => (
+                        <button
+                          key={file.id}
+                          type="button"
+                          className="btn-outline"
+                          onClick={() => setMaterialViewer({ ...materialViewer, document, file })}
+                        >
+                          View {file.name}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    !document.description && <p className="muted">No instruction text or document file is available.</p>
+                  )}
+                </section>
+              ))}
+            </div>
+          )}
+          <div className="modal-actions">
+            <button type="button" className="btn-outline" onClick={() => setMaterialViewer(null)}>Close</button>
           </div>
         </Modal>
       )}

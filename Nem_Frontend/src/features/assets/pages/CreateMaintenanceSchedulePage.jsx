@@ -81,6 +81,7 @@ export default function CreateMaintenanceSchedulePage() {
   const [instructionPickerOpen, setInstructionPickerOpen] =
     useState(false);
   const [instructions, setInstructions] = useState([]);
+  const [selectedDocuments, setSelectedDocuments] = useState([]);
   const [instructionsLoading, setInstructionsLoading] =
     useState(false);
   const [instructionsError, setInstructionsError] = useState("");
@@ -144,6 +145,7 @@ export default function CreateMaintenanceSchedulePage() {
           recurrence_unit:
             schedule.recurrence_unit ?? "months",
         });
+        setSelectedDocuments(schedule.instruction_documents || []);
       } catch (err) {
         console.error("Failed to load schedule:", err);
 
@@ -208,26 +210,12 @@ export default function CreateMaintenanceSchedulePage() {
     loadInstructions();
   };
 
-  const selectInstruction = (item) => {
-    const text = [item.title, item.description]
-      .filter(Boolean)
-      .join("\n\n");
-
-    if (!text.trim()) {
-      setInstructionsError(
-        "This document does not contain a title or description to add."
-      );
-      return;
-    }
-
-    setForm((previous) => ({
-      ...previous,
-      description: previous.description.trim()
-        ? `${previous.description.trim()}\n\n${text}`
-        : text,
-    }));
-
-    setInstructionPickerOpen(false);
+  const toggleInstruction = (item) => {
+    setSelectedDocuments((previous) =>
+      previous.some((selected) => selected.id === item.id)
+        ? previous.filter((selected) => selected.id !== item.id)
+        : [...previous, item]
+    );
     setInstructionsError("");
   };
 
@@ -302,6 +290,7 @@ export default function CreateMaintenanceSchedulePage() {
       recurrence_unit: form.recurrence_enabled
         ? form.recurrence_unit
         : null,
+      instruction_document_ids: selectedDocuments.map((item) => item.id),
     };
 
     setBusy(true);
@@ -406,12 +395,6 @@ export default function CreateMaintenanceSchedulePage() {
             <fieldset
               className="create-schedule-fieldset"
               disabled={busy}
-              style={{
-                border: 0,
-                padding: 0,
-                margin: 0,
-                minWidth: 0,
-              }}
             >
               <section className="create-schedule-section">
                 <h2>Schedule details</h2>
@@ -422,8 +405,9 @@ export default function CreateMaintenanceSchedulePage() {
 
                 <div className="create-schedule-grid">
                   <label className="field">
-                    Maintenance title{" "}
-                    <span className="req">*</span>
+                    <span className="field-label">
+                      Maintenance title <span className="req" aria-hidden="true">*</span>
+                    </span>
 
                     <input
                       name="title"
@@ -436,7 +420,7 @@ export default function CreateMaintenanceSchedulePage() {
                   </label>
 
                   <label className="field">
-                    Assigned technician
+                    <span className="field-label">Assigned technician</span>
 
                     <input
                       name="assigned_technician"
@@ -445,6 +429,36 @@ export default function CreateMaintenanceSchedulePage() {
                       maxLength={200}
                       placeholder="Technician name"
                     />
+                  </label>
+
+                  <label className="field">
+                    <span className="field-label">Maintenance type</span>
+                    <select
+                      name="maintenance_type"
+                      value={form.maintenance_type}
+                      onChange={updateField}
+                    >
+                      {TYPES.map((type) => (
+                        <option key={type} value={type}>
+                          {type.charAt(0).toUpperCase() + type.slice(1)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="field">
+                    <span className="field-label">Priority</span>
+                    <select
+                      name="priority"
+                      value={form.priority}
+                      onChange={updateField}
+                    >
+                      {PRIORITIES.map((priority) => (
+                        <option key={priority} value={priority}>
+                          {priority.charAt(0).toUpperCase() + priority.slice(1)}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                 </div>
               </section>
@@ -459,8 +473,9 @@ export default function CreateMaintenanceSchedulePage() {
 
                 <div className="create-schedule-grid">
                   <label className="field">
-                    Schedule start date{" "}
-                    <span className="req">*</span>
+                    <span className="field-label">
+                      Schedule start date <span className="req" aria-hidden="true">*</span>
+                    </span>
 
                     <input
                       type="date"
@@ -476,8 +491,9 @@ export default function CreateMaintenanceSchedulePage() {
                   </label>
 
                   <label className="field">
-                    First maintenance due date{" "}
-                    <span className="req">*</span>
+                    <span className="field-label">
+                      First maintenance due date <span className="req" aria-hidden="true">*</span>
+                    </span>
 
                     <input
                       type="date"
@@ -518,7 +534,7 @@ export default function CreateMaintenanceSchedulePage() {
                 {form.recurrence_enabled && (
                   <div className="create-schedule-grid recurrence-grid">
                     <label className="field">
-                      Repeat every
+                      <span className="field-label">Repeat every</span>
 
                       <input
                         type="number"
@@ -533,7 +549,7 @@ export default function CreateMaintenanceSchedulePage() {
                     </label>
 
                     <label className="field">
-                      Recurrence unit
+                      <span className="field-label">Recurrence unit</span>
 
                       <select
                         name="recurrence_unit"
@@ -561,25 +577,49 @@ export default function CreateMaintenanceSchedulePage() {
                 </p>
 
                 <label className="field">
-                  Description / work details
+                  <span className="field-label">Description / work details</span>
 
                   <textarea
                     name="description"
                     value={form.description}
                     onChange={updateField}
-                    rows={4}
+                    rows={3}
                     maxLength={10000}
                     placeholder="Enter maintenance instructions..."
                   />
                 </label>
                 <button
-                type="button"
-                className="btn-outline"
-                onClick={() => navigate("/configuration/documents")}
-                disabled={busy}
+                  type="button"
+                  className="btn-outline create-schedule-instructions"
+                  onClick={openInstructionPicker}
+                  disabled={busy}
                 >
                   Add from instructions and documents
-                  </button>
+                </button>
+                {selectedDocuments.length > 0 && (
+                  <div className="selected-instruction-list" aria-live="polite">
+                    <h3>Attached instructions and documents</h3>
+                    {selectedDocuments.map((item) => (
+                      <div className="selected-instruction-item" key={item.id}>
+                        <span>
+                          <strong>{item.title || "Untitled document"}</strong>
+                          <small>{item.kind || "Document"}</small>
+                        </span>
+                        <button
+                          type="button"
+                          className="btn-outline"
+                          onClick={() => setSelectedDocuments((previous) =>
+                            previous.filter((selected) => selected.id !== item.id)
+                          )}
+                          disabled={busy}
+                          aria-label={`Remove ${item.title || "document"}`}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </section>
             </fieldset>
 
@@ -630,7 +670,7 @@ export default function CreateMaintenanceSchedulePage() {
             Instructions and documents
           </h2>
           <p className="muted">
-            Select a document to add its details to the maintenance description.
+            Select the instructions and documents to attach to this maintenance schedule.
           </p>
         </div>
 
@@ -679,8 +719,9 @@ export default function CreateMaintenanceSchedulePage() {
             <button
               key={item.id}
               type="button"
-              className="instruction-document-tile"
-              onClick={() => selectInstruction(item)}
+              className={`instruction-document-tile${selectedDocuments.some((selected) => selected.id === item.id) ? " selected" : ""}`}
+              onClick={() => toggleInstruction(item)}
+              aria-pressed={selectedDocuments.some((selected) => selected.id === item.id)}
             >
               <strong>{item.title || "Untitled document"}</strong>
 
@@ -696,7 +737,10 @@ export default function CreateMaintenanceSchedulePage() {
                 {Array.isArray(item.files)
                   ? item.files.length
                   : 0}{" "}
-                attachment(s)
+                attachment(s) ·{" "}
+                {selectedDocuments.some((selected) => selected.id === item.id)
+                  ? "Selected"
+                  : "Click to select"}
               </span>
             </button>
           ))}

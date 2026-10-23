@@ -161,6 +161,12 @@ def initialize_database(engine: Engine) -> None:
                 "nem_maintenance_schedules"
             )
         }
+        if "instruction_document_ids" not in schedule_columns:
+            with engine.begin() as connection:
+                connection.execute(text(
+                    "ALTER TABLE nem_maintenance_schedules "
+                    "ADD COLUMN instruction_document_ids JSON NOT NULL DEFAULT '[]'"
+                ))
         if "current_period_start_date" not in schedule_columns:
             with engine.begin() as connection:
                 connection.execute(text(
