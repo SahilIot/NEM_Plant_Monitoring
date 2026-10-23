@@ -274,6 +274,12 @@ export default function ConfigSub() {
   const [msg, setMsg] = useState({ text: "", error: false });
   const [busyRuleId, setBusyRuleId] = useState(null);
 
+  const [instructionPickerOpen, setInstructionPickerOpen] = useState(false);
+  const [instructions, setInstructions] = useState([]);
+  const [instructionsLoading, setInstructionsLoading] = useState(false);
+  const [instructionsError, setInstructionsError] = useState("");
+  const [instructionSearch, setInstructionSearch] = useState("");
+
   const [search, setSearch] = useState("");
   const [severityFilter, setSeverityFilter] = useState("all");
   const [stateFilter, setStateFilter] = useState("all");

@@ -147,3 +147,100 @@ input[type="checkbox"] {
   color-scheme: inherit;
 }
 
+
+
+/* Maintenance management table */
+.maintenance-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.maintenance-table {
+  width: 100%;
+  min-width: 1000px;
+  table-layout: auto;
+  border-collapse: collapse;
+}
+
+.maintenance-table th,
+.maintenance-table td {
+  padding: 12px 10px;
+  vertical-align: middle;
+}
+
+.maintenance-table th:nth-child(1) {
+  min-width: 130px;
+}
+
+.maintenance-table th:nth-child(2) {
+  min-width: 100px;
+}
+
+.maintenance-table th:nth-child(3) {
+  min-width: 110px;
+}
+
+.maintenance-table th:nth-child(4) {
+  min-width: 120px;
+}
+
+.maintenance-table th:nth-child(5) {
+  min-width: 130px;
+}
+
+.maintenance-table th:last-child,
+.maintenance-table td:last-child {
+  min-width: 390px;
+}
+
+.maintenance-table .maintenance-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.maintenance-table .maintenance-actions button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+
+/* Maintenance management table layout fix */
+.maintenance-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.maintenance-table {
+  width: 100%;
+  min-width: 900px;
+  table-layout: auto;
+}
+
+.maintenance-table th,
+.maintenance-table td {
+  white-space: normal;
+  vertical-align: middle;
+}
+
+.maintenance-table th:last-child,
+.maintenance-table td:last-child {
+  min-width: 360px;
+}
+
+.maintenance-table .maintenance-actions {
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.maintenance-table .maintenance-actions button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}

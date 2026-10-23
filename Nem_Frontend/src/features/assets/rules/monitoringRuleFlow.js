@@ -35,7 +35,7 @@ export const LEGACY_RULE_CHOICES = [
   },
   {
     kind: "time",
-    label: "Time-based",
+    label: "Running Time-based",
     description: "Start tracking Boolean running time at a scheduled date and time.",
   },
 ];
