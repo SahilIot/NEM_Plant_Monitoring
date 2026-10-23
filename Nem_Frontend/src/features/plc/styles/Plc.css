@@ -971,3 +971,177 @@ html[data-theme="light"] .plc-page {
   justify-content: center;
   gap: 7px;
 }
+
+
+/* =========================================
+   RESPONSIVE DASHBOARD + SVG ICON ALIGNMENT
+   ========================================= */
+
+/* Prevent content from expanding beyond its container */
+.main-col,
+.content-row,
+.content,
+.home-grid,
+.home-left-stack,
+.home-right-column {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Dashboard layout */
+.home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 300px);
+  gap: 18px;
+  width: 100%;
+  max-width: 1600px;
+  align-items: start;
+}
+
+.home-grid .panel {
+  min-width: 0;
+  max-width: none;
+}
+
+/* Four dashboard status tiles */
+.annunciator {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  width: 100%;
+  max-width: 1600px;
+  min-width: 0;
+}
+
+.annunciator > * {
+  min-width: 0;
+}
+
+/* SVG icons and tile labels */
+.tile-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tile-label svg,
+.tile-icon {
+  display: block;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+}
+
+.tile-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Prevent long alert text from pushing panels wider */
+.alert-row {
+  min-width: 0;
+  align-items: flex-start;
+}
+
+.alert-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Tables can scroll horizontally when required */
+.table-wrapper {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-wrapper table {
+  min-width: 600px;
+  width: 100%;
+}
+
+/* Large screens */
+@media (min-width: 1601px) {
+  .content {
+    padding-left: 32px;
+    padding-right: 32px;
+  }
+
+  .home-grid {
+    gap: 24px;
+  }
+}
+
+/* Tablets and smaller laptops */
+@media (max-width: 1100px) {
+  .annunciator {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .annunciator > .tile:nth-child(2) {
+    border-right: none;
+  }
+
+  .annunciator > .tile:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 260px);
+    gap: 14px;
+  }
+}
+
+/* Tablets and phones */
+@media (max-width: 800px) {
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-left-stack,
+  .home-right-column {
+    width: 100%;
+  }
+
+  .content {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
+
+/* Small phones */
+@media (max-width: 560px) {
+  .annunciator {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .annunciator > .tile {
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .annunciator > .tile:last-child {
+    border-bottom: none;
+  }
+
+  .tile {
+    padding: 16px;
+    min-height: 100px;
+  }
+
+  .tile-value {
+    font-size: 42px;
+  }
+
+  .home-grid {
+    gap: 12px;
+  }
+
+  .content {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}
