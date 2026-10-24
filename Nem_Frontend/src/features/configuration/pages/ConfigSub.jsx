@@ -11,6 +11,7 @@ import {
   useParams,
 } from "react-router-dom";
 import { api } from "../../../services/api.js";
+import { useAuth } from "../../auth/AuthContext.jsx";
 import {
   createLiveUpdateScheduler,
   subscribeLiveUpdates,
@@ -265,12 +266,15 @@ function cell(key, row, variableNames) {
 }
 
 function ImportPage() {
+  const { user } = useAuth();
+  const canManageConfiguration = user?.role === "Administrator";
   const [msg, setMsg] = useState({
     text: "",
     error: false,
   });
 
   const onFile = async (event) => {
+    if (!canManageConfiguration) return;
     const file = event.target.files?.[0];
 
     if (!file) return;
@@ -307,9 +311,16 @@ function ImportPage() {
         the app, including its asset and variable IDs.
       </p>
 
+      {!canManageConfiguration && (
+        <p className="notice" role="status">
+          Configuration import is restricted to Administrators.
+        </p>
+      )}
       <input
         type="file"
         accept=".json,application/json"
+        disabled={!canManageConfiguration}
+        title={!canManageConfiguration ? "Only Administrators can import configuration." : undefined}
         onChange={onFile}
       />
 
@@ -328,6 +339,8 @@ function ImportPage() {
 }
 
 export default function ConfigSub() {
+  const { user } = useAuth();
+  const canManageConfiguration = user?.role === "Administrator";
   const confirm = useConfirmation();
   const { sub } = useParams();
   const nav = useNavigate();
@@ -671,6 +684,7 @@ export default function ConfigSub() {
   };
 
   const create = async (values) => {
+    if (!canManageConfiguration) return;
     if (sub === "rules") {
       const variable = numericVariables.find(
         (item) => item.id === Number(values.variable_id)
@@ -736,6 +750,7 @@ export default function ConfigSub() {
   };
 
   const edit = async (values) => {
+    if (!canManageConfiguration) return;
     const original = editingRule;
 
     if (!original) return;
@@ -777,6 +792,7 @@ export default function ConfigSub() {
   };
 
   const duplicate = async (rule) => {
+    if (!canManageConfiguration) return;
     const confirmed = await confirm(
       `Create a duplicate of "${rule.name}"? The copy will be disabled initially.`,
       {
@@ -832,6 +848,7 @@ export default function ConfigSub() {
   };
 
   const toggleRule = async (rule) => {
+    if (!canManageConfiguration) return;
     setBusyRuleId(rule.id);
     setMsg({ text: "", error: false });
 
@@ -859,6 +876,7 @@ export default function ConfigSub() {
   };
 
   const remove = async (row) => {
+    if (!canManageConfiguration) return;
     const isRule = sub === "rules";
 
     const confirmed = await confirm(
@@ -959,6 +977,8 @@ export default function ConfigSub() {
             <button
               type="button"
               className="btn-secondary"
+              disabled={!canManageConfiguration}
+              title={!canManageConfiguration ? "Only Administrators can create instructions." : undefined}
               onClick={() =>
                 nav("/configuration/instructions/new")
               }
@@ -971,6 +991,8 @@ export default function ConfigSub() {
           <button
             type="button"
             className="btn-primary"
+            disabled={!canManageConfiguration}
+            title={!canManageConfiguration ? "Only Administrators can change global configuration." : undefined}
             onClick={() => {
               setEditingRule(null);
               setMsg({ text: "", error: false });
@@ -988,6 +1010,11 @@ export default function ConfigSub() {
           </button>
         </div>
       </div>
+      {!canManageConfiguration && (
+        <p className="notice" role="status">
+          Global configuration changes are restricted to Administrators. Assigned-asset rule and maintenance actions remain available from their respective pages.
+        </p>
+      )}
 
       <div className="panel">
         {msg.text && (
@@ -1156,6 +1183,7 @@ export default function ConfigSub() {
                               className="config-icon-btn add"
                               title="Add rule"
                               aria-label="Add rule"
+                              disabled={!canManageConfiguration}
                               onClick={() => {
                                 // Connect this to the existing
                                 // collection-to-rule assignment flow.
@@ -1169,7 +1197,7 @@ export default function ConfigSub() {
                               className="config-icon-btn edit"
                               title="Edit rule"
                               aria-label="Edit rule"
-                              disabled={busyRuleId === row.id}
+                              disabled={!canManageConfiguration || busyRuleId === row.id}
                               onClick={() =>
                                 nav(
                                   `/assets/${row.target_asset_id}/monitoring-rules/${row.rule_type}/edit`,
@@ -1197,7 +1225,7 @@ export default function ConfigSub() {
                                   ? "Disable rule"
                                   : "Enable rule"
                               }
-                              disabled={busyRuleId === row.id}
+                              disabled={!canManageConfiguration || busyRuleId === row.id}
                               onClick={() => toggleRule(row)}
                             >
                               <Power size={17} />
@@ -1208,7 +1236,7 @@ export default function ConfigSub() {
                               className="config-icon-btn duplicate"
                               title="Duplicate rule"
                               aria-label="Duplicate rule"
-                              disabled={busyRuleId === row.id}
+                              disabled={!canManageConfiguration || busyRuleId === row.id}
                               onClick={() => duplicate(row)}
                             >
                               <Copy size={17} />
@@ -1219,7 +1247,7 @@ export default function ConfigSub() {
                               className="config-icon-btn delete"
                               title="Delete rule"
                               aria-label="Delete rule"
-                              disabled={busyRuleId === row.id}
+                              disabled={!canManageConfiguration || busyRuleId === row.id}
                               onClick={() => remove(row)}
                             >
                               <Trash2 size={17} />
@@ -1232,7 +1260,7 @@ export default function ConfigSub() {
   type="button"
   className="btn-outline"
   title="Add rule to collection"
-  disabled={row.rule_count >= 5}
+  disabled={!canManageConfiguration || row.rule_count >= 5}
   onClick={() => {
     setActiveCollection({
       id: row.id,
@@ -1250,6 +1278,7 @@ export default function ConfigSub() {
       type="button"
       className="btn-outline"
       title="Edit collection rules"
+      disabled={!canManageConfiguration}
       onClick={() => {
         nav("/configuration/rules", {
           state: {
@@ -1270,7 +1299,7 @@ export default function ConfigSub() {
       className="btn-danger"
       title="Delete collection"
       aria-label="Delete collection"
-      disabled={busyRuleId === row.id}
+      disabled={!canManageConfiguration || busyRuleId === row.id}
       onClick={() => remove(row)}
     >
       <Trash2 size={17} />
@@ -1284,7 +1313,7 @@ export default function ConfigSub() {
                               className="config-icon-btn delete"
                               title={`Delete ${cfg.noun.toLowerCase()}`}
                               aria-label={`Delete ${cfg.noun.toLowerCase()}`}
-                              disabled={busyRuleId === row.id}
+                              disabled={!canManageConfiguration || busyRuleId === row.id}
                               onClick={() => remove(row)}
                             >
                               <Trash2 size={17} />
@@ -1390,6 +1419,7 @@ export default function ConfigSub() {
       )}
       {open && sub !== "documents" && sub !== "collections" && (
         <CreateModal
+          disabled={!canManageConfiguration}
          title={
   sub === "collections" && activeCollection
     ? `Add Rule to ${activeCollection.name}`

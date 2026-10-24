@@ -5,6 +5,7 @@ import { Download, Trash2 } from "lucide-react";
 import CopyRulesModal from "../components/CopyRulesModal.jsx";
 import PredefinedRulesModal from "../../rules/components/PredefinedRulesModal.jsx";
 import { api } from "../../../services/api.js";
+import { useAuth } from "../../auth/AuthContext.jsx";
 import {
   createLiveUpdateScheduler,
   subscribeLiveUpdates,
@@ -446,6 +447,10 @@ const VARIABLE_FIELDS = [
 
 export default function AssetDetail() {
   const confirm = useConfirmation();
+  const { user } = useAuth();
+  const isAdministrator = user?.role === "Administrator";
+  const canManageRules = isAdministrator || user?.role === "Supervisor";
+  const canManageLogbook = canManageRules;
   const { id } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -709,7 +714,7 @@ export default function AssetDetail() {
   }, [loadLogs, refreshStatus]);
 
   const deleteEvent = async (event) => {
-    if (deletingEventId !== null) return;
+    if (!isAdministrator || deletingEventId !== null) return;
     if (
       !(await confirm("Permanently delete this event? This cannot be undone.", {
         title: "Delete event",
@@ -1078,7 +1083,7 @@ const filteredEvents = [...events]
   };
 
   const confirmLifecycleChange = async () => {
-    if (!lifecycleAction || deletingRuleId !== null) return;
+    if (!canManageRules || !lifecycleAction || deletingRuleId !== null) return;
     const { rule, action } = lifecycleAction;
     setDeletingRuleId(rule.id);
     setLoadError("");
@@ -1107,6 +1112,7 @@ const filteredEvents = [...events]
   };
 
   const remove = async (rule) => {
+    if (!canManageRules) return;
     if (
       !(await confirm(
         `Archive the rule “${rule.name}”? It will be hidden from the rule list, and its alert and evaluation history will be retained.`,
@@ -1129,7 +1135,7 @@ const filteredEvents = [...events]
   };
 
   const permanentlyDeleteRule = async (rule) => {
-    if (permanentDeleteRequest.current) return;
+    if (!isAdministrator || permanentDeleteRequest.current) return;
     if (
       !(await confirm(
         `Permanently delete “${rule.name}”? This irreversibly removes the rule, its alerts, and its evaluation history. Maintenance records linked to its alerts must be removed first.`,
@@ -1160,6 +1166,7 @@ const filteredEvents = [...events]
   };
 
   const addRule = async (values) => {
+    if (!canManageRules) return;
     const rule = buildAssetMonitoringRule(values, assetId, {
       variables: availableVariables,
       cycleVariableIds,
@@ -1198,7 +1205,7 @@ const filteredEvents = [...events]
   );
 
   const bulk = async (state) => {
-    if (bulkRequest.current || bulkSaving) return;
+    if (!canManageRules || bulkRequest.current || bulkSaving) return;
     const affected = rules.filter((rule) =>
       state === "activated" ? !isAct(rule) : isAct(rule)
     ).length;
@@ -1245,6 +1252,7 @@ const filteredEvents = [...events]
   };
 
   const addLog = async (values) => {
+    if (!canManageLogbook) return;
     if (!values.text?.trim()) {
       throw new Error("Enter a logbook entry.");
     }
@@ -1258,7 +1266,7 @@ const filteredEvents = [...events]
   };
 
   const deleteLogEntry = async (entry) => {
-    if (deletingLogId !== null) return;
+    if (!isAdministrator || deletingLogId !== null) return;
     if (
       !(await confirm(
         "Permanently delete this maintenance log entry? This cannot be undone.",
@@ -1286,6 +1294,7 @@ const filteredEvents = [...events]
   };
 
   const saveAsset = async (values) => {
+    if (!isAdministrator) return;
     await api.patch(`/assets/${assetId}`, {
       name: values.name.trim(),
       asset_type: values.asset_type.trim(),
@@ -1298,6 +1307,7 @@ const filteredEvents = [...events]
   };
 
   const addVariable = async (values) => {
+    if (!isAdministrator) return;
     await api.post(`/assets/${assetId}/variables`, {
       name: values.name.trim(),
       key: values.key.trim(),
@@ -1322,7 +1332,7 @@ const filteredEvents = [...events]
 };
 
   const updateVariable = async (values) => {
-    if (!editingVariable) return;
+    if (!isAdministrator || !editingVariable) return;
     await api.patch(`/variables/${editingVariable.id}`, {
       name: values.name.trim(),
       key: values.key.trim(),
@@ -1341,7 +1351,7 @@ const filteredEvents = [...events]
   };
 
   const deleteAsset = async () => {
-    if (deletingAsset) return;
+    if (!isAdministrator || deletingAsset) return;
     const confirmed = await confirm(
       `Permanently delete asset "${asset.name}" and its asset-scoped event history? This cannot be undone. Deletion is blocked if it still has child assets, variables, readings, rules, alerts, or maintenance records.`,
       {
@@ -1366,7 +1376,7 @@ const filteredEvents = [...events]
   };
 
   const deleteVariable = async (variable) => {
-    if (deletingVariableId !== null) return;
+    if (!isAdministrator || deletingVariableId !== null) return;
     const confirmed = await confirm(
       `Permanently delete variable "${variable.name}"? Variables with readings, monitoring rules, alerts, or an OPC UA mapping cannot be deleted.`,
       {
@@ -1469,6 +1479,8 @@ const filteredEvents = [...events]
           <button
             className="link-btn"
             onClick={() => setModal("settings")}
+            disabled={!isAdministrator}
+            title={!isAdministrator ? "Administrator access required to manage assets." : undefined}
           >
             <GearIcon size={17} /> Asset settings
           </button>
@@ -1476,8 +1488,8 @@ const filteredEvents = [...events]
           <button
             className="link-btn danger-link"
             onClick={deleteAsset}
-            disabled={deletingAsset}
-            title="Permanently delete this asset if it has no related records"
+            disabled={deletingAsset || !isAdministrator}
+            title={!isAdministrator ? "Administrator access required to manage assets." : "Permanently delete this asset if it has no related records"}
           >
             {deletingAsset ? "Deleting asset…" : "Delete asset"}
           </button>
@@ -1485,6 +1497,7 @@ const filteredEvents = [...events]
           <button
             className="link-btn"
             onClick={() => setModal("variables")}
+            title="View configured variables; only Administrators can change them."
           >
             <AssetIcon size={17} /> Variables
           </button>
@@ -1634,6 +1647,8 @@ const filteredEvents = [...events]
             <button
             className="btn-primary"
             onClick={() => setModal("addRuleOptions")}
+            disabled={!canManageRules}
+            title={!canManageRules ? "You do not have permission to manage monitoring rules." : undefined}
             >
               <PlusCircle size={17} /> Add Rule
               </button>
@@ -1653,7 +1668,8 @@ const filteredEvents = [...events]
                   <div className="menu right" role="menu">
                       <button
                       type="button"
-                      disabled={bulkSaving}
+                      disabled={bulkSaving || !canManageRules}
+                      title={!canManageRules ? "You do not have permission to manage monitoring rules." : undefined}
                       role="menuitem"
                       onClick={() => bulk("activated")}
                       >
@@ -1661,7 +1677,8 @@ const filteredEvents = [...events]
                       </button>
                         <button
                         type="button"
-                        disabled={bulkSaving}
+                        disabled={bulkSaving || !canManageRules}
+                        title={!canManageRules ? "You do not have permission to manage monitoring rules." : undefined}
                       role="menuitem"
                         onClick={() => bulk("not_activated")}
                         >Deactivate all rules</button>
@@ -1928,7 +1945,8 @@ const filteredEvents = [...events]
                                   setRuleActionMenuId(null);
                                   setLifecycleAction({ rule, action: "suspend" });
                                 }}
-                                disabled={deletingRuleId !== null}
+                                disabled={deletingRuleId !== null || !canManageRules}
+                                title={!canManageRules ? "You do not have permission to manage monitoring rules." : undefined}
                               >
                                 Suspend rule
                               </button>
@@ -1941,7 +1959,8 @@ const filteredEvents = [...events]
                                   setRuleActionMenuId(null);
                                   setLifecycleAction({ rule, action: "resume" });
                                 }}
-                                disabled={deletingRuleId !== null}
+                                disabled={deletingRuleId !== null || !canManageRules}
+                                title={!canManageRules ? "You do not have permission to manage monitoring rules." : undefined}
                               >
                                 Activate rule
                               </button>
@@ -1954,7 +1973,8 @@ const filteredEvents = [...events]
                                   setRuleActionMenuId(null);
                                   setLifecycleAction({ rule, action: "activate" });
                                 }}
-                                disabled={deletingRuleId !== null}
+                                disabled={deletingRuleId !== null || !canManageRules}
+                                title={!canManageRules ? "You do not have permission to manage monitoring rules." : undefined}
                               >
                                 Activate rule
                               </button>
@@ -1967,7 +1987,8 @@ const filteredEvents = [...events]
                                   setRuleActionMenuId(null);
                                   setLifecycleAction({ rule, action: "deactivate" });
                                 }}
-                                disabled={deletingRuleId !== null}
+                                disabled={deletingRuleId !== null || !canManageRules}
+                                title={!canManageRules ? "You do not have permission to manage monitoring rules." : undefined}
                               >
                                 Deactivate rule
                               </button>
@@ -1982,7 +2003,8 @@ const filteredEvents = [...events]
                                       setRuleActionMenuId(null);
                                       remove(rule);
                                     }}
-                                    disabled={deletingRuleId !== null}
+                                    disabled={deletingRuleId !== null || !canManageRules}
+                                    title={!canManageRules ? "You do not have permission to manage monitoring rules." : undefined}
                                   >
                                     Archive
                                   </button>
@@ -1993,7 +2015,8 @@ const filteredEvents = [...events]
                                       setRuleActionMenuId(null);
                                       permanentlyDeleteRule(rule);
                                     }}
-                                    disabled={deletingRuleId !== null}
+                                    disabled={deletingRuleId !== null || !isAdministrator}
+                                    title={!isAdministrator ? "Administrator access required for permanent deletion." : undefined}
                                   >
                                     {deletingRuleId === rule.id
                                       ? "Deleting…"
@@ -2178,7 +2201,7 @@ const filteredEvents = [...events]
                       title="Permanently delete maintenance log entry"
                       aria-label={`Permanently delete maintenance log entry ${entry.title || entry.summary || entry.id}`}
                       onClick={() => deleteLogEntry(entry)}
-                      disabled={deletingLogId !== null}
+                      disabled={deletingLogId !== null || !isAdministrator}
                     >
                       <Trash2 size={16} aria-hidden="true" />
                     </button>
@@ -2372,9 +2395,9 @@ const filteredEvents = [...events]
                       <button
                         type="button"
                         className="event-delete-icon"
-                        title="Permanently delete event"
+                        title={!isAdministrator ? "Administrator access required to delete events." : "Permanently delete event"}
                         aria-label={`Permanently delete ${eventActionLabel(event.event_type)} event`}
-                        disabled={deletingEventId !== null}
+                        disabled={deletingEventId !== null || !isAdministrator}
                         onClick={() => deleteEvent(event)}
                       >
                         <Trash2 size={16} aria-hidden="true" />
@@ -2442,9 +2465,9 @@ const filteredEvents = [...events]
           <button
             type="button"
             className="event-delete-icon"
-            title="Permanently delete event"
+            title={!isAdministrator ? "Administrator access required to delete events." : "Permanently delete event"}
             aria-label="Permanently delete event"
-            disabled={deletingEventId === selectedEvent.id}
+            disabled={deletingEventId === selectedEvent.id || !isAdministrator}
             onClick={() => deleteEvent(selectedEvent)}
           >
             <Trash2 size={17} aria-hidden="true" />
@@ -2805,13 +2828,16 @@ const filteredEvents = [...events]
           title={monitoringRuleSelection?.title || "Create monitoring rule"}
           submitLabel="Create rule"
           intro={
-            availableVariables.length
-              ? undefined
-              : "This asset has no active variables yet. Add one under Variables, then come back to create a rule."
+            !canManageRules
+              ? "You do not have permission to create or edit monitoring rules."
+              : availableVariables.length
+                ? undefined
+                : "This asset has no active variables yet. Add one under Variables, then come back to create a rule."
           }
           fields={monitoringRuleFormFields}
           initialValues={monitoringRuleSelection?.initialValues}
           onSubmit={addRule}
+          disabled={!canManageRules}
           onClose={() => {
             setModal(null);
             setMonitoringRuleSelection(null);
@@ -2825,6 +2851,8 @@ const filteredEvents = [...events]
           submitLabel="Add entry"
           fields={LOG_FIELDS}
           onSubmit={addLog}
+          disabled={!canManageLogbook}
+          intro={!canManageLogbook ? "You do not have permission to add logbook entries." : undefined}
           onClose={() => setModal(null)}
         />
       )}
@@ -2834,6 +2862,8 @@ const filteredEvents = [...events]
           title="Asset settings"
           submitLabel="Save changes"
           onSubmit={saveAsset}
+          disabled={!isAdministrator}
+          intro={!isAdministrator ? "Administrator access required to change asset settings." : undefined}
           onClose={() => setModal(null)}
           fields={[
             {
@@ -2877,6 +2907,8 @@ const filteredEvents = [...events]
           fields={VARIABLE_FIELDS}
           initialValues={editingVariable || {}}
           onSubmit={editingVariable ? updateVariable : addVariable}
+          disabled={!isAdministrator}
+          intro={!isAdministrator ? "Administrator access required to manage variables and OPC UA mappings." : undefined}
           onClose={() => {
             setEditingVariable(null);
             setModal("variables");
@@ -2943,7 +2975,8 @@ const filteredEvents = [...events]
                           setEditingVariable(variable);
                           setModal("editVariable");
                         }}
-                        disabled={deletingVariableId !== null}
+                        disabled={deletingVariableId !== null || !isAdministrator}
+                        title={!isAdministrator ? "Administrator access required to manage variables." : undefined}
                       >
                         Edit
                       </button>
@@ -2951,7 +2984,8 @@ const filteredEvents = [...events]
                         type="button"
                         className="btn-danger"
                         onClick={() => deleteVariable(variable)}
-                        disabled={deletingVariableId !== null}
+                        disabled={deletingVariableId !== null || !isAdministrator}
+                        title={!isAdministrator ? "Administrator access required to manage variables." : undefined}
                       >
                         {deletingVariableId === variable.id
                           ? "Deleting…"
@@ -2975,7 +3009,8 @@ const filteredEvents = [...events]
                 setEditingVariable(null);
                 setModal("addVariable");
               }}
-              disabled={deletingVariableId !== null}
+              disabled={deletingVariableId !== null || !isAdministrator}
+              title={!isAdministrator ? "Administrator access required to manage variables." : undefined}
             >
               Add variable
             </button>

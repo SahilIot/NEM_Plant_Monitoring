@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { api } from "../../services/api.js";
+import { useAuth } from "./AuthContext.jsx";
 
 export default function AdminUsersPage() {
+  const { user } = useAuth();
+  const canManageUsers = user?.role === "Administrator";
   const [users, setUsers] = useState([]);
   const [assets, setAssets] = useState([]);
   const [username, setUsername] = useState("");
@@ -27,8 +30,13 @@ export default function AdminUsersPage() {
   }, []);
 
   useEffect(() => {
+    if (!canManageUsers) {
+      setError("You do not have permission to manage user accounts or machine access.");
+      return undefined;
+    }
     load().catch((loadError) => setError(loadError.message || "Could not load user accounts."));
-  }, [load]);
+    return undefined;
+  }, [canManageUsers, load]);
 
   useEffect(() => {
     const selected = users.find((user) => String(user.id) === selectedUserId);
@@ -122,13 +130,13 @@ export default function AdminUsersPage() {
         <h2>Create account</h2>
         <form onSubmit={createUser} className="admin-user-form">
           <label className="field">Username
-            <input value={username} onChange={(event) => setUsername(event.target.value)} required maxLength={120} disabled={busy} />
+            <input value={username} onChange={(event) => setUsername(event.target.value)} required maxLength={120} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined} />
           </label>
           <label className="field">Temporary password (minimum 12 characters)
-            <input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={12} maxLength={1024} disabled={busy} />
+            <input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={12} maxLength={1024} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined} />
           </label>
           <label className="field">Role
-            <select value={role} onChange={(event) => setRole(event.target.value)} disabled={busy}>
+            <select value={role} onChange={(event) => setRole(event.target.value)} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined}>
               <option>Supervisor</option>
               <option>Operator</option>
               <option>Administrator</option>
@@ -143,14 +151,15 @@ export default function AdminUsersPage() {
                     type="checkbox"
                     checked={assetIds.includes(asset.id)}
                     onChange={() => toggle(asset.id, assetIds, setAssetIds)}
-                    disabled={busy}
+                    disabled={busy || !canManageUsers}
+                    title={!canManageUsers ? "Administrator access required" : undefined}
                   />
                   {asset.name}
                 </label>
               ))}
             </fieldset>
           )}
-          <button type="submit" className="btn-primary" disabled={busy}>{busy ? "Creating…" : "Create account"}</button>
+          <button type="submit" className="btn-primary" disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined}>{busy ? "Creating…" : "Create account"}</button>
         </form>
       </section>
 
@@ -178,7 +187,7 @@ export default function AdminUsersPage() {
       <section className="panel">
         <h2>Update account and machine access</h2>
         <label className="field">User
-          <select value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)} disabled={busy}>
+          <select value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined}>
             <option value="">Choose a user</option>
             {users.filter((user) => user.role !== "Administrator").map((user) => (
               <option key={user.id} value={user.id}>{user.username} ({user.role})</option>
@@ -189,21 +198,21 @@ export default function AdminUsersPage() {
           <>
             <div className="admin-user-form">
               <label className="field">Role
-                <select value={selectedRole} onChange={(event) => setSelectedRole(event.target.value)} disabled={busy}>
+                <select value={selectedRole} onChange={(event) => setSelectedRole(event.target.value)} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined}>
                   <option>Supervisor</option>
                   <option>Operator</option>
                 </select>
               </label>
               <label className="field">Account status
-                <select value={selectedActive ? "active" : "disabled"} onChange={(event) => setSelectedActive(event.target.value === "active")} disabled={busy}>
+                <select value={selectedActive ? "active" : "disabled"} onChange={(event) => setSelectedActive(event.target.value === "active")} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined}>
                   <option value="active">Active</option>
                   <option value="disabled">Disabled</option>
                 </select>
               </label>
               <label className="field">Reset password (optional, minimum 12 characters)
-                <input type="password" autoComplete="new-password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} minLength={12} maxLength={1024} disabled={busy} />
+                <input type="password" autoComplete="new-password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} minLength={12} maxLength={1024} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined} />
               </label>
-              <button type="button" className="btn-primary" onClick={saveUser} disabled={busy || (resetPassword.length > 0 && resetPassword.length < 12)}>
+              <button type="button" className="btn-primary" onClick={saveUser} disabled={busy || !canManageUsers || (resetPassword.length > 0 && resetPassword.length < 12)} title={!canManageUsers ? "Administrator access required" : undefined}>
                 {busy ? "Saving…" : "Save account settings"}
               </button>
             </div>
@@ -217,13 +226,14 @@ export default function AdminUsersPage() {
                         type="checkbox"
                         checked={assignedAssetIds.includes(asset.id)}
                         onChange={() => toggle(asset.id, assignedAssetIds, setAssignedAssetIds)}
-                        disabled={busy}
+                        disabled={busy || !canManageUsers}
+                        title={!canManageUsers ? "Administrator access required" : undefined}
                       />
                       {asset.name}
                     </label>
                   ))}
                 </fieldset>
-                <button type="button" className="btn-primary" onClick={saveAssignments} disabled={busy}>
+                <button type="button" className="btn-primary" onClick={saveAssignments} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined}>
                   {busy ? "Saving…" : "Save machine access"}
                 </button>
               </>

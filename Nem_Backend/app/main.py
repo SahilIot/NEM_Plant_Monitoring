@@ -247,7 +247,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         admin_only_read_paths = (
             "/api/v1/auth/users",
             "/api/v1/plc",
-            "/api/v1/rule-templates",
             "/api/v1/collections",
             "/api/v1/documents",
             "/api/v1/import",
@@ -257,10 +256,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         admin_only_write = (
             (policy_path == "/api/v1/assets" and not safe_method)
-            or policy_path.startswith("/api/v1/assets/") and method in {"PATCH", "DELETE"}
+            or policy_path.startswith("/api/v1/assets/")
+            and not any(segment in policy_path for segment in ("/rules", "/logbook"))
+            and method in {"PATCH", "DELETE"}
             or policy_path.startswith("/api/v1/variables")
             or policy_path.startswith("/api/v1/plc")
             or policy_path.startswith("/api/v1/rule-templates")
+            and not (
+                role == "Supervisor"
+                and method == "POST"
+                and policy_path.endswith("/assign")
+            )
             or policy_path.startswith("/api/v1/collections")
             or policy_path.startswith("/api/v1/documents")
             or policy_path.startswith("/api/v1/import")
@@ -289,7 +295,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             and not policy_path.endswith("/permanent")
             or policy_path.startswith("/api/v1/alerts/")
             and method == "POST"
-            and policy_path.endswith(("/acknowledge", "/complete"))
+            and policy_path.endswith("/acknowledge")
+            or policy_path.startswith("/api/v1/rule-templates/")
+            and method == "POST"
+            and policy_path.endswith("/assign")
         )
         if (
             role == "Supervisor"
@@ -344,9 +353,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await websocket.close(code=1008, reason="Authentication required")
             return
         with session_factory() as db:
-            auth_session = db.scalar(
-                select(AuthSession).where(AuthSession.token_hash == hash_session_token(token))
-            )
+            auth_session = db.scalar(select(AuthSession).where(AuthSession.token_hash == hash_session_token(token)))
             user = auth_session.user if auth_session is not None else None
             if (
                 auth_session is None
@@ -453,10 +460,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request: Request,error: StarletteHTTPException,) -> JSONResponse:
         if error.status_code == 413:
-            return JSONResponse(status_code=413,content={
-                    "error": {
-                        "message": "Request body is too large",
-                        "code": 413,
+            return JSONResponse(status_code=413,content={"error": {"message": "Request body is too large","code": 413,
                     }
                 },
             )
@@ -471,9 +475,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 session.execute(text("SELECT 1"))
         except SQLAlchemyError:
             LOGGER.exception("Database health check failed")
-            return JSONResponse(status_code=503,
-                content={"status": "degraded",
-                    "database": "disconnected",
+            return JSONResponse(status_code=503,content={"status": "degraded","database": "disconnected",
                 },
             )
         return JSONResponse(content={"status": "ok", "database": "connected"})

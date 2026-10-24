@@ -56,81 +56,72 @@ export default function App() {
         <Route path="/" element={<Home />} />
 
         {/* Alert Rules */}
-        <Route
-          path="/rules/:kind"
-          element={user?.role === "Operator" ? <Navigate to="/" replace /> : <AlertRules />}
-        />
+        <Route path="/rules/:kind" element={<AlertRules />} />
 
         {/* Assets */}
-        <Route
-          path="/assets"
-          element={user?.role === "Operator" ? <Navigate to="/" replace /> : <AssetsIndex />}
-        />
-        <Route
-          path="/assets/:id"
-          element={user?.role === "Operator" ? <Navigate to="/" replace /> : <AssetDetail />}
-        />
+        <Route path="/assets" element={<AssetsIndex />} />
+        <Route path="/assets/:id" element={<AssetDetail />} />
         <Route
           path="/assets/:id/rules/new/:kind"
-          element={user?.role === "Operator" ? <Navigate to="/" replace /> : <RuleCreatePage />}
+          element={<RuleCreatePage />}
         />
 
         {/* Configuration */}
-        <Route path="/configuration" element={user?.role === "Administrator" ? <Configuration /> : <Navigate to="/" replace />} />
+        <Route path="/configuration" element={<Configuration />} />
         <Route
           path="/configuration/rules"
-          element={user?.role === "Administrator" ? <RuleLibrary /> : <Navigate to="/" replace />}
+          element={<RuleLibrary />}
         />
         <Route
           path="/configuration/documents/new"
-          element={user?.role === "Administrator" ? <DocumentCreatePage /> : <Navigate to="/" replace />}
+          element={<DocumentCreatePage />}
         />
         <Route
           path="/configuration/instructions/new"
-          element={user?.role === "Administrator" ? <CreateInstructionPage /> : <Navigate to="/" replace />}
+          element={<CreateInstructionPage />}
         />
         <Route
           path="/configuration/documents/:documentId/files/:fileId/view"
-          element={user?.role === "Administrator" ? <DocumentViewerPage /> : <Navigate to="/" replace />}
+          element={<DocumentViewerPage />}
         />
 
         {/* Other configuration sections */}
         <Route
           path="/configuration/:sub"
-          element={user?.role === "Administrator" ? <ConfigSub /> : <Navigate to="/" replace />}
+          element={<ConfigSub />}
         />
 
         {/* Settings */}
-        <Route path="/settings" element={user?.role === "Administrator" ? <Settings /> : <Navigate to="/" replace />} />
+        <Route path="/settings" element={<Settings />} />
         <Route
           path="/settings/users"
-          element={user?.role === "Administrator" ? <AdminUsersPage /> : <Navigate to="/" replace />}
+          element={<AdminUsersPage />}
         />
         <Route
           path="/settings/:sub"
-          element={user?.role === "Administrator" ? <SettingsSub /> : <Navigate to="/" replace />}
+          element={<SettingsSub />}
         />
 
         {/* PLC */}
-        <Route path="/plc" element={user?.role === "Administrator" ? <Plc /> : <Navigate to="/" replace />} />
+        <Route path="/plc" element={<Plc />} />
 
         {/* Maintenance */}
 
 {/* Maintenance */}
 <Route
   path="/assets/:id/maintenance/schedules/new"
-  element={user?.role === "Operator" ? <Navigate to="/" replace /> : <CreateMaintenanceSchedulePage />}
+  element={<CreateMaintenanceSchedulePage />}
 />
 
 <Route
   path="/assets/:id/maintenance/schedules/:scheduleId/edit"
-  element={user?.role === "Operator" ? <Navigate to="/" replace /> : <CreateMaintenanceSchedulePage />}
+  element={<CreateMaintenanceSchedulePage />}
 />
 
 {/* Monitoring Rules */}
 <Route
   path="/assets/:id/monitoring-rules/new/:choiceId"
-  element={user?.role === "Operator" ? <Navigate to="/" replace /> : <CreateMonitoringRulePage />}
+  element={<CreateMonitoringRulePage />}
 />
 
 {/* Fallback — keep this last */}

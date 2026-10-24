@@ -389,11 +389,13 @@ export default function Layout() {
         <div className="app-title">{APP_TITLE}</div>
         <div className="spacer" />
         <span className="auth-user-label">{user.username} · {user.role}</span>
-        {user.role === "Administrator" && (
-          <Link to="/settings/users" className="auth-user-link" title="Manage users and machine access">
-            <Users size={17} /> User access
-          </Link>
-        )}
+        <Link
+          to="/settings/users"
+          className="auth-user-link"
+          title={user.role === "Administrator" ? "Manage users and machine access" : "Administrator access required"}
+        >
+          <Users size={17} /> User access
+        </Link>
         <button
           className="btn-outline auth-logout"
           onClick={confirmSignOut}
@@ -433,14 +435,10 @@ export default function Layout() {
         <nav className={"rail" + (railOpen ? " open" : "")} aria-label="Main">
           <div className="rail-main">
             {navItem("/", HomeIcon, "Overview", true)}
-            {user.role !== "Operator" && navItem("/assets", TreeIcon, "Assets")}
-            {user.role === "Administrator" && (
-              <>
-                {navItem("/plc", PlugIcon, "PLC / OPC UA")}
-                {navItem("/configuration", ShapesIcon, "Configuration")}
-                {navItem("/settings", GearIcon, "Settings")}
-              </>
-            )}
+            {navItem("/assets", TreeIcon, "Assets")}
+            {navItem("/plc", PlugIcon, "PLC / OPC UA")}
+            {navItem("/configuration", ShapesIcon, "Configuration")}
+            {navItem("/settings", GearIcon, "Settings")}
           </div>
 
           <button

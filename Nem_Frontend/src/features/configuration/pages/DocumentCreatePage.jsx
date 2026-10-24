@@ -2,6 +2,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../../services/api.js";
+import { useAuth } from "../../auth/AuthContext.jsx";
 import { BackIcon } from "../../../components/common/Icons.jsx";
 import "./DocumentCreatePage.css";
 
@@ -13,6 +14,8 @@ const DOC_TYPES = [
 ];
 
 export default function DocumentCreatePage() {
+  const { user } = useAuth();
+  const canManageDocuments = user?.role === "Administrator";
   const nav = useNavigate();
 
   const [title, setTitle] = useState("");
@@ -24,6 +27,7 @@ export default function DocumentCreatePage() {
 
   const submit = async (event) => {
     event.preventDefault();
+    if (!canManageDocuments) return;
     setError("");
 
     if (!title.trim()) {
@@ -135,6 +139,15 @@ export default function DocumentCreatePage() {
 
         <div className="document-form-body">
           <form onSubmit={submit}>
+            {!canManageDocuments && (
+              <p className="notice" role="status">
+                Document management is restricted to Administrators.
+              </p>
+            )}
+            <fieldset
+              disabled={!canManageDocuments || busy}
+              style={{ border: 0, margin: 0, minWidth: 0, padding: 0 }}
+            >
             <div className="document-fields-grid">
               <div className="field">
                 <label htmlFor="document-title">
@@ -267,6 +280,7 @@ export default function DocumentCreatePage() {
               </p>
             )}
 
+            </fieldset>
             <div className="document-form-footer">
               <span className="document-footer-note">
                 <span className="req">*</span> Required field
@@ -285,7 +299,8 @@ export default function DocumentCreatePage() {
                 <button
                   type="submit"
                   className="btn-primary"
-                  disabled={busy}
+                  disabled={busy || !canManageDocuments}
+                  title={!canManageDocuments ? "Only Administrators can create documents." : undefined}
                 >
                   {busy ? "Saving..." : "Create document"}
                 </button>

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { api } from "../../../services/api.js";
+import { useAuth } from "../../auth/AuthContext.jsx";
 import { buildAssetMonitoringRule } from "../../assets/rules/monitoringRuleFlow.js";
 import "./RuleCreatePage.css";
 
@@ -26,6 +27,8 @@ const INITIAL_VALUES = {
 };
 
 export default function RuleCreatePage() {
+  const { user } = useAuth();
+  const canManageRules = ["Administrator", "Supervisor"].includes(user?.role);
   const { id, kind } = useParams();
   const navigate = useNavigate();
   const { assets = [], refreshStatus } = useOutletContext() || {};
@@ -44,11 +47,8 @@ export default function RuleCreatePage() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      api.getAll(`/assets/${assetId}/variables?is_active=true`),
-      api.get("/plc/status"),
-    ])
-      .then(([items, plc]) => {
+    api.getAll(`/assets/${assetId}/variables?is_active=true`)
+      .then((items) => {
         if (!active) return;
        const activeVariables = (Array.isArray(items) ? items : [])
   .filter((item) => item.is_active !== false);
@@ -100,6 +100,7 @@ if (activeVariables.length) {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (!canManageRules) return;
     if (saving) return;
     setError("");
     if (!values.name.trim()) {
@@ -244,6 +245,11 @@ if (activeVariables.length) {
           <div className="rule-create-form">
             {error && <p role="alert" className="error-message">{error}</p>}
             <form onSubmit={handleSubmit}>
+              {!canManageRules && (
+                <p className="notice" role="status">
+                  You do not have permission to create monitoring rules.
+                </p>
+              )}
               <div className="form-group">
                 <label htmlFor="rule-name">Rule name *</label>
                 <input
@@ -253,7 +259,7 @@ if (activeVariables.length) {
                   onChange={updateField}
                   placeholder={isUsage ? "e.g. Rotation count limit" : "e.g. Machine running time"}
                   required
-                  disabled={saving}
+                  disabled={saving || !canManageRules}
                 />
               </div>
 
@@ -266,7 +272,7 @@ if (activeVariables.length) {
                   value={values.description}
                   onChange={updateField}
                   placeholder="Add context for operators who will review this rule."
-                  disabled={saving}
+                  disabled={saving || !canManageRules}
                 />
               </div>
 
@@ -280,7 +286,7 @@ if (activeVariables.length) {
                       value={values.cycle_variable_id}
                       onChange={updateField}
                       required
-                      disabled={saving || !cycleVariableOptions.length}
+                      disabled={saving || !canManageRules || !cycleVariableOptions.length}
                     >
                       <option value="">Select the cycle on/off variable</option>
                       {cycleVariableOptions.map((variable) => (
@@ -306,7 +312,7 @@ if (activeVariables.length) {
                       value={values.warning_threshold_1}
                       onChange={updateField}
                       required
-                      disabled={saving}
+                      disabled={saving || !canManageRules}
                     />
                   </div>
                   <div className="form-group">
@@ -320,7 +326,7 @@ if (activeVariables.length) {
                       value={values.warning_threshold_2}
                       onChange={updateField}
                       required
-                      disabled={saving}
+                      disabled={saving || !canManageRules}
                     />
                   </div>
                   <div className="form-group">
@@ -334,7 +340,7 @@ if (activeVariables.length) {
                       value={values.alert_threshold}
                       onChange={updateField}
                       required
-                      disabled={saving}
+                      disabled={saving || !canManageRules}
                     />
                   </div>
                 </>
@@ -349,7 +355,7 @@ if (activeVariables.length) {
     value={values.variable_id}
     onChange={updateField}
     required
-    disabled={saving || !variables.length}
+    disabled={saving || !canManageRules || !variables.length}
   >
     <option value="">Select a variable</option>
 
@@ -377,7 +383,7 @@ if (activeVariables.length) {
                       value={values.runtime_warning_hours}
                       onChange={updateField}
                       required
-                      disabled={saving}
+                      disabled={saving || !canManageRules}
                     />
                   </div>
                   <div className="form-group">
@@ -391,7 +397,7 @@ if (activeVariables.length) {
                       value={values.runtime_warning_2_hours}
                       onChange={updateField}
                       required
-                      disabled={saving}
+                      disabled={saving || !canManageRules}
                     />
                   </div>
                   <div className="form-group">
@@ -405,7 +411,7 @@ if (activeVariables.length) {
                       value={values.runtime_alert_hours}
                       onChange={updateField}
                       required
-                      disabled={saving}
+                      disabled={saving || !canManageRules}
                     />
                   </div>
                 </>
@@ -415,7 +421,7 @@ if (activeVariables.length) {
                 <button type="button" className="btn-outline" onClick={goBack} disabled={saving}>
                   Cancel
                 </button>
-                <button type="submit" className="btn-primary" disabled={disableSubmit}>
+                <button type="submit" className="btn-primary" disabled={disableSubmit || !canManageRules} title={!canManageRules ? "You do not have permission to create monitoring rules." : undefined}>
                   {saving ? "Saving…" : isScheduled ? "Create scheduled rule" : isUsage ? "Create Cycle Clock rule" : "Create Motor Running Time rule"}
                 </button>
               </div>

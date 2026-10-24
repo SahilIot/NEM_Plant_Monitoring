@@ -283,7 +283,9 @@ def acknowledge_alert(
     session: Session = Depends(get_db),
 ) -> Alert:
     # find the alert
-    alert = session.get(Alert, alert_id)
+    alert = session.scalar(
+        select(Alert).where(Alert.id == alert_id).with_for_update()
+    )
     if alert is None:
         raise HTTPException(status_code=404, detail=f"Alert {alert_id} was not found")
     user_id = getattr(request.state, "auth_user_id", None)

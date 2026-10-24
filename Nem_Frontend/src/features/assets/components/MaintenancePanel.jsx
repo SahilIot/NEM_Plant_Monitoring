@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FileText, Timer, Trash2 } from "lucide-react";
 import { api } from "../../../services/api.js";
+import { useAuth } from "../../auth/AuthContext.jsx";
 import {
   EmptyState,
   Modal,
@@ -144,6 +145,8 @@ function validateForm(values, requirePlannedDates) {
 
 export default function MaintenancePanel({ assetId, onChanged }) {
   const confirm = useConfirmation();
+  const { user } = useAuth();
+  const canManageMaintenance = ["Administrator", "Supervisor"].includes(user?.role);
   const navigate = useNavigate();
   const [records, setRecords] = useState([]);
   const [schedules, setSchedules] = useState([]);
@@ -174,7 +177,7 @@ export default function MaintenancePanel({ assetId, onChanged }) {
   const [clockNow, setClockNow] = useState(Date.now());
 
   const permanentlyDeleteRecord = async (record) => {
-    if (busy) return;
+    if (!canManageMaintenance || busy) return;
     const scheduled =
       Boolean(record.schedule_id) &&
       !(record.status === "completed" && record.archived_at);
@@ -222,7 +225,7 @@ export default function MaintenancePanel({ assetId, onChanged }) {
   };
 
   const permanentlyDeleteSchedule = async (schedule) => {
-    if (busy) return;
+    if (!canManageMaintenance || busy) return;
     const dueDate = schedule.current_due_date
       ? displayDate(schedule.current_due_date)
       : null;
@@ -338,10 +341,12 @@ export default function MaintenancePanel({ assetId, onChanged }) {
   }, [dialog]);
 
   const openCreate = () => {
+    if (!canManageMaintenance) return;
     navigate(`/assets/${assetId}/maintenance/schedules/new`);
   };
 
 const openScheduleEdit = (schedule) => {
+  if (!canManageMaintenance) return;
   navigate(
     `/assets/${assetId}/maintenance/schedules/${schedule.id}/edit`
   );
@@ -350,6 +355,7 @@ const openScheduleEdit = (schedule) => {
 
 
 const openEdit = (record) => {
+  if (!canManageMaintenance) return;
   setError("");
   setNotice("");
 
@@ -367,7 +373,7 @@ const openEdit = (record) => {
 
   const save = async (event) => {
     event.preventDefault();
-    if (busy) return;
+    if (!canManageMaintenance || busy) return;
     setError("");
     setNotice("");
     if (dialog.kind === "schedule-create" || dialog.kind === "schedule-edit") {
@@ -500,7 +506,7 @@ const openEdit = (record) => {
     }));
   };
   const confirmNextOccurrence = async (schedule, dueDate) => {
-    if (busy) return;
+    if (!canManageMaintenance || busy) return;
     if (!dueDate) {
       setError("Choose a due date before confirming the next occurrence.");
       return;
@@ -521,7 +527,7 @@ const openEdit = (record) => {
     }
   };
   const declineNextOccurrence = async (schedule) => {
-    if (busy) return;
+    if (!canManageMaintenance || busy) return;
     setBusy(true);
     setError("");
     try {
@@ -550,7 +556,7 @@ const openEdit = (record) => {
     }
   };
   const changeMaintenanceStatus = async (record) => {
-    if (busy) return;
+    if (!canManageMaintenance || busy) return;
     const isStarting = record.status === "planned";
     if (!isStarting && record.status !== "in_progress") return;
     setBusy(true);
@@ -688,10 +694,12 @@ const openEdit = (record) => {
           <button
             type="button"
             className="maintenance-delete-icon"
-            title={record.schedule_id ? "Permanently delete schedule" : "Permanently delete maintenance"}
+            title={!canManageMaintenance
+              ? "You do not have permission to change maintenance records."
+              : record.schedule_id ? "Permanently delete schedule" : "Permanently delete maintenance"}
             aria-label={`Permanently delete ${record.schedule_id ? "schedule" : "maintenance"} ${record.title}`}
             onClick={() => permanentlyDeleteRecord(record)}
-            disabled={busy}
+            disabled={busy || !canManageMaintenance}
           >
             <Trash2 size={16} aria-hidden="true" />
           </button>
@@ -715,7 +723,8 @@ const openEdit = (record) => {
               type="button"
               className="btn-primary"
               onClick={openCreate}
-              disabled={busy}
+              disabled={busy || !canManageMaintenance}
+              title={!canManageMaintenance ? "You do not have permission to create maintenance schedules." : undefined}
             >
               Add Maintenance
             </button>
@@ -724,6 +733,11 @@ const openEdit = (record) => {
 
         {error && <p className="notice error" role="alert">{error}</p>}
         {notice && <p className="notice" role="status">{notice}</p>}
+        {!canManageMaintenance && (
+          <p className="muted" role="status">
+            Maintenance records and schedules are view-only for your role.
+          </p>
+        )}
         {loading ? (
           <p className="muted" role="status">Loading maintenance history…</p>
         ) : visibleRecords.length === 0 ? (
@@ -746,6 +760,7 @@ const openEdit = (record) => {
         <Modal title={dialog.kind === "schedule-create" ? "Add maintenance schedule" : "Edit maintenance schedule"} onClose={() => { if (!busy) setDialog(null); }} wide>
           <form className="maintenance-form" onSubmit={save}>
             {error && <p className="notice error" role="alert">{error}</p>}
+            <fieldset disabled={!canManageMaintenance} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
             <div className="maintenance-form-grid">
               <label className="field">Maintenance title <span className="req">*</span>
                 <input name="title" value={scheduleValues.title} onChange={updateScheduleValue} maxLength={200} required disabled={busy} />
@@ -798,10 +813,11 @@ const openEdit = (record) => {
                 <textarea name="description" value={scheduleValues.description} onChange={updateScheduleValue} rows={3} maxLength={10000} disabled={busy} />
               </label>
             </div>
+            </fieldset>
             {error && <p className="notice error" role="alert">{error}</p>}
             <div className="modal-actions">
               <button type="button" className="btn-outline" onClick={() => setDialog(null)} disabled={busy}>Cancel</button>
-              <button type="submit" className="btn-primary" disabled={busy}>{busy ? "Saving…" : dialog.kind === "schedule-create" ? "Create schedule" : "Save schedule"}</button>
+              <button type="submit" className="btn-primary" disabled={busy || !canManageMaintenance} title={!canManageMaintenance ? "You do not have permission to manage maintenance schedules." : undefined}>{busy ? "Saving…" : dialog.kind === "schedule-create" ? "Create schedule" : "Save schedule"}</button>
             </div>
           </form>
         </Modal>
@@ -898,12 +914,12 @@ const openEdit = (record) => {
             {dialog.record.recurrence_interval ? ` with a recurrence of every ${dialog.record.recurrence_interval} ${dialog.record.recurrence_unit}.` : "."}
           </p>
           <label className="field">Confirmed next due date
-            <input type="date" value={approvalDate} min={dialog.record.schedule_start_date} onChange={(event) => setApprovalDate(event.target.value)} disabled={busy} />
+            <input type="date" value={approvalDate} min={dialog.record.schedule_start_date} onChange={(event) => setApprovalDate(event.target.value)} disabled={busy || !canManageMaintenance} />
           </label>
           <p className="muted">Review the date and interval before approving the next occurrence.</p>
           <div className="modal-actions">
-            <button type="button" className="btn-danger" onClick={() => declineNextOccurrence(dialog.record)} disabled={busy}>Do not schedule</button>
-            <button type="button" className="btn-primary" onClick={() => confirmNextOccurrence(dialog.record, approvalDate)} disabled={busy}>Confirm date</button>
+            <button type="button" className="btn-danger" onClick={() => declineNextOccurrence(dialog.record)} disabled={busy || !canManageMaintenance} title={!canManageMaintenance ? "You do not have permission to manage maintenance schedules." : undefined}>Do not schedule</button>
+            <button type="button" className="btn-primary" onClick={() => confirmNextOccurrence(dialog.record, approvalDate)} disabled={busy || !canManageMaintenance} title={!canManageMaintenance ? "You do not have permission to manage maintenance schedules." : undefined}>Confirm date</button>
           </div>
         </Modal>
       )}
@@ -932,7 +948,8 @@ const openEdit = (record) => {
                 type="button"
                 className="btn-primary"
                 onClick={() => changeMaintenanceStatus(dialog.record)}
-                disabled={busy}
+                disabled={busy || !canManageMaintenance}
+                title={!canManageMaintenance ? "You do not have permission to manage maintenance." : undefined}
               >
                 {busy ? "Starting…" : "Start"}
               </button>
@@ -942,7 +959,8 @@ const openEdit = (record) => {
                 type="button"
                 className="btn-primary"
                 onClick={() => changeMaintenanceStatus(dialog.record)}
-                disabled={busy}
+                disabled={busy || !canManageMaintenance}
+                title={!canManageMaintenance ? "You do not have permission to manage maintenance." : undefined}
               >
                 {busy ? "Finishing…" : "Finish"}
               </button>
@@ -954,7 +972,8 @@ const openEdit = (record) => {
               const record = dialog.record;
               openEdit(record);
             }}
-            disabled={busy}>Edit</button>
+            disabled={busy || !canManageMaintenance}
+            title={!canManageMaintenance ? "You do not have permission to edit maintenance records." : undefined}>Edit</button>
             <button
             type="button"
             className="btn-outline"
@@ -968,6 +987,7 @@ const openEdit = (record) => {
         <Modal title="Edit maintenance" onClose={() => { if (!busy) setDialog(null); }} wide>
           <form className="maintenance-form" onSubmit={save}>
             {error && <p className="notice error" role="alert">{error}</p>}
+            <fieldset disabled={!canManageMaintenance} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
             <div className="maintenance-form-grid">
               <label className="field">Title <span className="req">*</span>
                 <input name="title" value={values.title} onChange={updateValue} required maxLength={200} disabled={busy} />
@@ -1035,9 +1055,10 @@ const openEdit = (record) => {
                 <textarea name="checklist" value={values.checklist} onChange={updateValue} rows={3} disabled={busy} />
               </label>
             </div>
+            </fieldset>
             <div className="modal-actions">
               <button type="button" className="btn-outline" onClick={() => setDialog(null)} disabled={busy}>Cancel</button>
-              <button type="submit" className="btn-primary" disabled={busy}>{busy ? "Saving…" : dialog.kind === "create" ? "Create maintenance" : "Save changes"}</button>
+              <button type="submit" className="btn-primary" disabled={busy || !canManageMaintenance} title={!canManageMaintenance ? "You do not have permission to manage maintenance." : undefined}>{busy ? "Saving…" : dialog.kind === "create" ? "Create maintenance" : "Save changes"}</button>
             </div>
           </form>
         </Modal>

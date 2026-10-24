@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { api } from "../../../services/api.js";
+import { useAuth } from "../../auth/AuthContext.jsx";
 import { EmptyState, Modal } from "../../../components/common/UI.jsx";
 import { formatTime } from "../../../utils/format.js";
 
@@ -21,6 +22,8 @@ export default function CurrentMaintenanceCards({
   onCompleted,
   showCompleted = false,
 }) {
+  const { user } = useAuth();
+  const canManageMaintenance = ["Administrator", "Supervisor"].includes(user?.role);
   const [records, setRecords] = useState([]);
   const [completedRecords, setCompletedRecords] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -74,6 +77,7 @@ export default function CurrentMaintenanceCards({
   }, [loadCurrentMaintenance]);
 
   const startMaintenance = async (record) => {
+    if (!canManageMaintenance) return;
     if (startingRecordId !== null) return;
     setStartingRecordId(record.id);
     setError("");
@@ -92,6 +96,7 @@ export default function CurrentMaintenanceCards({
   };
 
   const completeMaintenance = async (record) => {
+    if (!canManageMaintenance) return;
     if (completingRecordId !== null) return;
     setCompletingRecordId(record.id);
     setError("");
@@ -169,7 +174,8 @@ export default function CurrentMaintenanceCards({
                     type="button"
                     className="btn-primary"
                     onClick={() => startMaintenance(record)}
-                    disabled={startingRecordId !== null}
+                    disabled={startingRecordId !== null || !canManageMaintenance}
+                    title={!canManageMaintenance ? "You do not have permission to start maintenance." : undefined}
                   >
                     {startingRecordId === record.id ? "Starting…" : "Start"}
                   </button>
@@ -216,7 +222,8 @@ export default function CurrentMaintenanceCards({
                 type="button"
                 className="btn-primary"
                 onClick={() => completeMaintenance(selectedRecord)}
-                disabled={completingRecordId !== null}
+                disabled={completingRecordId !== null || !canManageMaintenance}
+                title={!canManageMaintenance ? "You do not have permission to complete maintenance." : undefined}
               >
                 {completingRecordId === selectedRecord.id
                   ? "Completing…"

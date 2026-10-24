@@ -46,7 +46,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [ackError, setAckError] = useState("");
   const [busyId, setBusyId] = useState(null);
-  const [completionAlert, setCompletionAlert] = useState(null);
+  const [alertToAcknowledge, setAlertToAcknowledge] = useState(null);
 
   const loadSummary = useCallback(async () => {
     try {
@@ -188,8 +188,8 @@ export default function Home() {
   );
 
   const acknowledgeAlert = async () => {
-    if (!completionAlert || busyId !== null) return;
-    const alert = completionAlert;
+    if (!alertToAcknowledge || busyId !== null) return;
+    const alert = alertToAcknowledge;
     setBusyId(alert.id);
     setAckError("");
 
@@ -201,7 +201,7 @@ export default function Home() {
         refreshLiveStatus(),
         refreshStatus?.(),
       ]);
-      setCompletionAlert(null);
+      setAlertToAcknowledge(null);
     } catch (err) {
       setAckError(
         err.message || "Unable to acknowledge this alert."
@@ -347,7 +347,7 @@ export default function Home() {
 
             {ackError && (
               <p className="notice error" role="alert">
-                Could not resolve and complete this alert: {ackError}
+                Could not acknowledge this alert: {ackError}
               </p>
             )}
 
@@ -446,7 +446,7 @@ export default function Home() {
                           disabled={busyId === alert.id}
                           onClick={() => {
                             setAckError("");
-                            setCompletionAlert(alert);
+                            setAlertToAcknowledge(alert);
                           }}
                         >
                           {busyId === alert.id ? "Saving…" : "Acknowledge"}
@@ -506,11 +506,11 @@ export default function Home() {
           </section>
         </aside>
       </div>
-      {completionAlert && (
+      {alertToAcknowledge && (
         <Modal
           title="Confirm acknowledgement"
           onClose={() => {
-            if (busyId === null) setCompletionAlert(null);
+            if (busyId === null) setAlertToAcknowledge(null);
           }}
         >
           <p>
@@ -525,7 +525,7 @@ export default function Home() {
               type="button"
               className="btn-outline"
               disabled={busyId !== null}
-              onClick={() => setCompletionAlert(null)}
+              onClick={() => setAlertToAcknowledge(null)}
             >
               Cancel
             </button>
@@ -535,7 +535,7 @@ export default function Home() {
               disabled={busyId !== null}
               onClick={acknowledgeAlert}
             >
-              {busyId === completionAlert.id
+              {busyId === alertToAcknowledge.id
                 ? "Saving…"
                 : "Yes, acknowledge alert"}
             </button>

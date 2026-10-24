@@ -165,6 +165,7 @@ export function CreateModal({
   submitLabel = "Create",
   intro,
   initialValues = {},
+  disabled = false,
 }) {
   const [values, setValues] = useState(() =>
     Object.fromEntries(
@@ -251,6 +252,7 @@ export function CreateModal({
 
   const submit = async (event) => {
     event.preventDefault();
+    if (disabled) return;
 
     for (const field of fields) {
       if (
@@ -325,7 +327,7 @@ export function CreateModal({
                   type="file"
                   multiple
                   accept={field.accept || ".pdf,.doc,.docx,.txt"}
-                  disabled={busy}
+                  disabled={busy || disabled}
                   onChange={(event) =>
                     set(field.key, Array.from(event.target.files || []))
                   }
@@ -348,7 +350,7 @@ export function CreateModal({
                 rows={3}
                 placeholder={field.placeholder}
                 value={values[field.key] ?? ""}
-                disabled={busy}
+                disabled={busy || disabled}
                 onChange={(event) => set(field.key, event.target.value)}
               />
             ) : field.type === "select" ? (
@@ -356,7 +358,7 @@ export function CreateModal({
                 id={"f-" + field.key}
                 value={values[field.key] ?? ""}
                 required={isRequired(field)}
-                disabled={Boolean(field.disabled || busy)}
+                disabled={Boolean(field.disabled || busy || disabled)}
                 onChange={(event) => {
                   const value = event.target.value;
                   set(field.key, value);
@@ -384,7 +386,7 @@ export function CreateModal({
                 step={field.type === "number" ? "any" : undefined}
                 autoFocus={index === 0}
                 required={isRequired(field)}
-                disabled={busy}
+                disabled={busy || disabled}
                 placeholder={field.placeholder}
                 value={values[field.key] ?? ""}
                 onChange={(event) => set(field.key, event.target.value)}
@@ -412,7 +414,8 @@ export function CreateModal({
           <button
             type="submit"
             className="btn-primary"
-            disabled={busy}
+            disabled={busy || disabled}
+            title={disabled ? "You do not have permission to perform this action." : undefined}
           >
             {busy ? "Saving..." : submitLabel}
           </button>
