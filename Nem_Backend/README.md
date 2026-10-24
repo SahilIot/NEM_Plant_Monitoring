@@ -2,13 +2,17 @@
 
 The backend supports local username/password accounts with three roles:
 
-- **Admin** can manage accounts, settings, machine configuration, and all machines.
+- **Administrator** can manage accounts, settings, machine configuration, and all machines.
 - **Operator** can monitor and operate assigned machines.
-- **Viewer** has read-only access to assigned machines.
+- **Supervisor** can manage monitoring and maintenance on explicitly assigned machines.
+- **Operator** can view assigned task information and acknowledge active alerts only.
+
+See [AUTHENTICATION.md](./AUTHENTICATION.md) for role permissions, database
+upgrades, and authentication endpoint details.
 
 All `/api/v1/` endpoints require a bearer session except `/api/v1/health`,
 `/api/v1/ready`, and `/api/v1/auth/login`. The legacy `/plc/test` compatibility
-endpoint is also protected and requires an Admin account. Sessions expire after
+endpoint is also protected and requires an Administrator account. Sessions expire after
 eight hours; logging out, disabling an account, or changing its role/password
 revokes its existing sessions. Live-update WebSockets recheck session and
 machine access as they send updates.

@@ -270,43 +270,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             or policy_path == "/api/v1/monitoring/evaluate"
             or policy_path.startswith("/api/v1/readings") and not safe_method
         )
-        operator_write_paths = (
-            policy_path.startswith("/api/v1/rules"),
-            policy_path.startswith("/api/v1/maintenance"),
-            policy_path.startswith("/api/v1/alerts"),
-            policy_path.startswith("/api/v1/assets/") and (
-                "/rules" in policy_path or "/logbook" in policy_path
-            ),
-        )
         if (
-            role != "Admin"
+            role != "Administrator"
             and policy_path.startswith(admin_only_read_paths)
             and policy_path != "/api/v1/auth/logout"
         ):
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "Administrator permissions required"},
+            return JSONResponse(status_code=403,content={"detail": "Administrator permissions required"},)
+        supervisor_write_paths = (
+            (
+                policy_path.startswith("/api/v1/maintenance")
+                or policy_path.startswith("/api/v1/rules")
             )
-        if role == "Viewer" and not safe_method and path != "/api/v1/auth/logout":
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "Viewer accounts have read-only access"},
-            )
+            and method in {"POST", "PATCH", "DELETE"}
+            and not policy_path.endswith("/permanent")
+            or policy_path.startswith("/api/v1/assets/")
+            and ("/rules" in policy_path or "/logbook" in policy_path)
+            and method in {"POST", "PATCH", "DELETE"}
+            and not policy_path.endswith("/permanent")
+            or policy_path.startswith("/api/v1/alerts/")
+            and method == "POST"
+            and policy_path.endswith(("/acknowledge", "/complete"))
+        )
+        if (
+            role == "Supervisor"
+            and not safe_method
+            and policy_path != "/api/v1/auth/logout"
+            and (admin_only_write or not supervisor_write_paths)
+        ):
+            return JSONResponse(status_code=403,content={"detail": "This action is not available to supervisors"},)
         if (
             role == "Operator"
             and not safe_method
             and policy_path != "/api/v1/auth/logout"
         ):
-            if admin_only_write:
-                return JSONResponse(
-                    status_code=403,
-                    content={"detail": "Administrator permissions required"},
-                )
-            if not any(operator_write_paths):
-                return JSONResponse(
-                    status_code=403,
-                    content={"detail": "This action is not available to operators"},
-                )
+            operator_acknowledge = (
+                policy_path.startswith("/api/v1/alerts/")
+                and method == "POST"
+                and policy_path.endswith("/acknowledge")
+            )
+            if admin_only_write or not operator_acknowledge:
+                return JSONResponse(status_code=403,content={"detail": "Operators may only acknowledge alerts"},)
 
         return await call_next(request)
 
@@ -320,9 +323,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except ValueError:
                 await websocket.close(code=1008, reason="Origin is not allowed")
                 return
-            same_origin = parsed_origin.netloc.casefold() == (
-                websocket.headers.get("host", "").casefold()
-            )
+            same_origin = parsed_origin.netloc.casefold() == (websocket.headers.get("host", "").casefold())
             configured_origin = origin.rstrip("/") in {
                 configured.rstrip("/")
                 for configured in selected_settings.allowed_origins
@@ -344,9 +345,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return
         with session_factory() as db:
             auth_session = db.scalar(
-                select(AuthSession).where(
-                    AuthSession.token_hash == hash_session_token(token)
-                )
+                select(AuthSession).where(AuthSession.token_hash == hash_session_token(token))
             )
             user = auth_session.user if auth_session is not None else None
             if (
@@ -358,7 +357,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await websocket.close(code=1008, reason="Session is invalid or expired")
                 return
             asset_ids = None
-            if user.role != "Admin":
+            if user.role != "Administrator":
                 asset_ids = set(
                     db.scalars(
                         select(UserAssetAssignment.asset_id).where(
@@ -371,13 +370,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             def read_current_access() -> tuple[bool, set[int] | None]:
                 with session_factory() as db:
                     current_session = db.scalar(
-                        select(AuthSession).where(
-                            AuthSession.token_hash == hash_session_token(token)
-                        )
+                        select(AuthSession).where(AuthSession.token_hash == hash_session_token(token))
                     )
-                    current_user = (
-                        current_session.user if current_session is not None else None
-                    )
+                    current_user = (current_session.user if current_session is not None else None)
                     if (
                         current_session is None
                         or current_session.expires_at <= utc_now()
@@ -385,7 +380,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         or not current_user.is_active
                     ):
                         return False, None
-                    if current_user.role == "Admin":
+                    if current_user.role == "Administrator":
                         return True, None
                     current_asset_ids = set(
                         db.scalars(
@@ -412,10 +407,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if content_length is not None:
             try:
                 if int(content_length) > MAX_REQUEST_BODY_BYTES:
-                    return JSONResponse(status_code=413,
-                        content={"error": {
-                                "message": "Request body is too large",
-                                "code": 413,
+                    return JSONResponse(status_code=413,content={"error": {"message": "Request body is too large","code": 413,
                             }
                         },
                     )
@@ -453,9 +445,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     for key, value in ctx.items()
                 }
             details.append(clean_item)
-        return JSONResponse(status_code=422,
-            content={"error": { "message": "Request validation failed",
-                    "code": 422,"details": details,
+        return JSONResponse(status_code=422,content={"error": { "message": "Request validation failed", "code": 422,"details": details,
                 }
             },
         )
@@ -463,8 +453,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request: Request,error: StarletteHTTPException,) -> JSONResponse:
         if error.status_code == 413:
-            return JSONResponse(status_code=413,
-                content={
+            return JSONResponse(status_code=413,content={
                     "error": {
                         "message": "Request body is too large",
                         "code": 413,
@@ -483,8 +472,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except SQLAlchemyError:
             LOGGER.exception("Database health check failed")
             return JSONResponse(status_code=503,
-                content={
-                    "status": "degraded",
+                content={"status": "degraded",
                     "database": "disconnected",
                 },
             )

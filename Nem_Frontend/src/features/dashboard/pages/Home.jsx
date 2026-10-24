@@ -44,7 +44,6 @@ export default function Home() {
   const [liveStatusError, setLiveStatusError] = useState("");
   const liveStatusRequest = useRef(false);
   const [error, setError] = useState("");
-  const [operator, setOperator] = useState("");
   const [ackError, setAckError] = useState("");
   const [busyId, setBusyId] = useState(null);
   const [completionAlert, setCompletionAlert] = useState(null);
@@ -164,23 +163,6 @@ export default function Home() {
     [refreshLiveScheduler, summaryScheduler]
   );
 
-  useEffect(() => {
-    let cancelled = false;
-
-    api
-      .get("/me")
-      .then((me) => {
-        if (!cancelled) {
-          setOperator(me?.name || "");
-        }
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const assetName = useMemo(
     () => new Map(assets.map((a) => [a.id, a.name])),
     [assets]
@@ -205,14 +187,14 @@ export default function Home() {
     [alerts]
   );
 
-  const completeRule = async () => {
+  const acknowledgeAlert = async () => {
     if (!completionAlert || busyId !== null) return;
     const alert = completionAlert;
     setBusyId(alert.id);
     setAckError("");
 
     try {
-      await api.post(`/alerts/${alert.id}/complete`);
+      await api.post(`/alerts/${alert.id}/acknowledge`);
 
       await Promise.all([
         loadSummary(),
@@ -222,7 +204,7 @@ export default function Home() {
       setCompletionAlert(null);
     } catch (err) {
       setAckError(
-        err.message || "Unable to complete this monitoring rule."
+        err.message || "Unable to acknowledge this alert."
       );
     } finally {
       setBusyId(null);
@@ -457,17 +439,19 @@ export default function Home() {
                             : ""}
                         </span>
                       )}
-                      <button
-                        type="button"
-                        className="btn-outline"
-                        disabled={busyId === alert.id}
-                        onClick={() => {
-                          setAckError("");
-                          setCompletionAlert(alert);
-                        }}
-                      >
-                        {busyId === alert.id ? "Saving…" : "Acknowledge"}
-                      </button>
+                      {!alert.acknowledged_at && (
+                        <button
+                          type="button"
+                          className="btn-outline"
+                          disabled={busyId === alert.id}
+                          onClick={() => {
+                            setAckError("");
+                            setCompletionAlert(alert);
+                          }}
+                        >
+                          {busyId === alert.id ? "Saving…" : "Acknowledge"}
+                        </button>
+                      )}
                     </div>
                   </li>
                 ))}
@@ -524,15 +508,14 @@ export default function Home() {
       </div>
       {completionAlert && (
         <Modal
-          title="Confirm resolution"
+          title="Confirm acknowledgement"
           onClose={() => {
             if (busyId === null) setCompletionAlert(null);
           }}
         >
           <p>
-            Has this alert or warning been resolved successfully? Confirming
-            will deactivate the associated monitoring rule and mark it as
-            completed.
+            Acknowledge that you have seen this alert. This will not resolve
+            the alert or deactivate its monitoring rule.
           </p>
           {ackError && (
             <p className="notice error" role="alert">{ackError}</p>
@@ -550,11 +533,11 @@ export default function Home() {
               type="button"
               className="btn-primary"
               disabled={busyId !== null}
-              onClick={completeRule}
+              onClick={acknowledgeAlert}
             >
               {busyId === completionAlert.id
                 ? "Saving…"
-                : "Yes, mark as completed"}
+                : "Yes, acknowledge alert"}
             </button>
           </div>
         </Modal>

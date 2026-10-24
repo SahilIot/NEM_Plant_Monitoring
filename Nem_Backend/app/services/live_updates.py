@@ -242,9 +242,7 @@ async def serve_live_updates(
         [], Awaitable[tuple[bool, set[int] | None]]
     ] | None = None,
 ) -> None:
-    await websocket.accept(
-        subprotocol="nem-auth" if "nem-auth" in websocket.scope.get("subprotocols", []) else None
-    )
+    await websocket.accept(subprotocol="nem-auth" if "nem-auth" in websocket.scope.get("subprotocols", []) else None)
     queue = hub.subscribe()
 
     async def receive_until_disconnected() -> None:
@@ -263,16 +261,49 @@ async def serve_live_updates(
                 if not authorized:
                     await websocket.close(code=1008, reason="Session is invalid or expired")
                     return
-            if authorized_asset_ids is not None and update["type"] == "database_change":
-                visible_asset_ids = set(update.get("asset_ids", ())) & authorized_asset_ids
-                if not visible_asset_ids:
+            if authorized_asset_ids is not None:
+                if update["type"] == "database_change":
+                    visible_asset_ids = (set(update.get("asset_ids", ())) & authorized_asset_ids)
+                    if visible_asset_ids:
+                        update = {
+                            **update,
+                            "asset_ids": sorted(visible_asset_ids),
+                            "entity_ids": {},
+                            "critical_events": [],
+                        }
+                    elif update.get("resync_required"):
+                        update = {
+                            "type": "database_change",
+                            "asset_ids": [],
+                            "changed_tables": [],
+                            "entity_ids": {},
+                            "critical_events": [],
+                            "resync_required": True,
+                        }
+                    else:
+                        continue
+                elif update["type"] == "opcua_status":
+                    if not update.get("resync_required"):
+                        continue
+                    update = {
+                        "type": "database_change",
+                        "asset_ids": [],
+                        "changed_tables": [],
+                        "entity_ids": {},
+                        "critical_events": [],
+                        "resync_required": True,
+                    }
+                elif update.get("resync_required"):
+                    update = {
+                        "type": "database_change",
+                        "asset_ids": [],
+                        "changed_tables": [],
+                        "entity_ids": {},
+                        "critical_events": [],
+                        "resync_required": True,
+                    }
+                elif update["type"] not in {"connected", "heartbeat"}:
                     continue
-                update = {
-                    **update,
-                    "asset_ids": sorted(visible_asset_ids),
-                    "entity_ids": {},
-                    "critical_events": [],
-                }
             await websocket.send_json(update)
     except WebSocketDisconnect:
         pass

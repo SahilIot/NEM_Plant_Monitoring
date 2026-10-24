@@ -14,10 +14,10 @@ from app.models import (
     MonitoringEvent,
     MonitoringRule,
     RuleState, # stores the current state associated with a rule and target
+    User, # stores the current state associated with a rule and target
     Variable, # represents a monitored variable belonging to an asset
 )
 from app.schemas.monitoring import (
-    AcknowledgeRequest,
     AlertRead,
     EvaluationResult,
     EventRead,
@@ -279,13 +279,17 @@ def get_alert(alert_id: int, session: Session = Depends(get_db)) -> Alert:
 @router.post("/alerts/{alert_id}/acknowledge", response_model=AlertRead)
 def acknowledge_alert(
     alert_id: int,
-    payload: AcknowledgeRequest | None = None,
+    request: Request,
     session: Session = Depends(get_db),
 ) -> Alert:
     # find the alert
     alert = session.get(Alert, alert_id)
     if alert is None:
         raise HTTPException(status_code=404, detail=f"Alert {alert_id} was not found")
+    user_id = getattr(request.state, "auth_user_id", None)
+    user = session.get(User, user_id) if user_id is not None else None
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=401, detail="Authentication required")
     #Prevent acknowledging resolved alerts
     if alert.status != "active":
         raise HTTPException(status_code=409, detail="Resolved alerts cannot be acknowledged")
@@ -293,7 +297,7 @@ def acknowledge_alert(
     if alert.acknowledged_at is None:
         now = utc_now()
         alert.acknowledged_at = now
-        alert.acknowledged_by = payload.acknowledged_by if payload else None
+        alert.acknowledged_by = user.username
         #Emit an acknowledgment event 
         emit_event(
             session,
@@ -304,7 +308,11 @@ def acknowledge_alert(
             rule_id=alert.rule_id,
             alert_id=alert.id,
             severity=alert.severity,
-            metadata={"acknowledged_by": alert.acknowledged_by, "identity_verified": False},
+            metadata={
+                "acknowledged_by": alert.acknowledged_by,
+                "identity_verified": True,
+                "outcome": "acknowledged_not_resolved",
+            },
         )
         session.commit()
         session.refresh(alert)

@@ -19,30 +19,29 @@ from app.services.auth_security import (
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 SESSION_HOURS = 8
-ROLES = ("Admin", "Operator", "Viewer")
+ROLES = ("Administrator", "Supervisor", "Operator")
 _DUMMY_PASSWORD_HASH = ("pbkdf2_sha256$600000$00000000000000000000000000000000$"
     "0000000000000000000000000000000000000000000000000000000000000000"
 )
-
-
+#Login request -> when user logs in , the request must contains a username and password.
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=120)
     password: str = Field(min_length=1, max_length=1024)
 
-
+#succefully login -> frontend receives session toekn, token type, and  when the session expires and user details
 class LoginResponse(BaseModel):
     access_token: str
-    token_type: str = "bearer"
+    token_type: str = "bearer" # Possession of the token is sufficient for auth ,without additional credentials
     expires_at: datetime
     user: dict
 
-
+#This model controls account creation
 class UserCreate(BaseModel):
     username: str = Field(min_length=1, max_length=120)
     password: str = Field(min_length=12, max_length=1024)
-    role: Literal["Admin", "Operator", "Viewer"] = "Viewer"
+    role: Literal["Administrator", "Supervisor", "Operator"] = "Supervisor"
     asset_ids: list[int] = Field(default_factory=list, max_length=1000)
-
+#Username normalization to case-insensitive form.
     @field_validator("username")
     @classmethod
     def normalize_username(cls, value: str) -> str:
@@ -50,7 +49,7 @@ class UserCreate(BaseModel):
         if not value:
             raise ValueError("Username cannot be empty")
         return value
-
+#Duplicate asset validation
     @field_validator("asset_ids")
     @classmethod
     def unique_asset_ids(cls, value: list[int]) -> list[int]:
@@ -58,9 +57,9 @@ class UserCreate(BaseModel):
             raise ValueError("Asset assignments must be unique")
         return value
 
-
+#This model allow administrator to change a user`s role,active status or password`
 class UserUpdate(BaseModel):
-    role: Literal["Admin", "Operator", "Viewer"] | None = None
+    role: Literal["Administrator", "Supervisor", "Operator"] | None = None
     is_active: bool | None = None
     password: str | None = Field(default=None, min_length=12, max_length=1024)
 
@@ -75,10 +74,10 @@ class AssetAssignments(BaseModel):
             raise ValueError("Asset assignments must be unique")
         return value
 
-
+#DB Session dependency -> shortcut for asking FASTAPI to provide SQLAlchemy db session
 Db = Annotated[Session, Depends(get_db)]
 
-
+#Building the user response  -> func converts a db user object into a dictionary suitable for an API response 
 def _user_read(user: User, asset_ids: list[int] | None = None) -> dict:
     return {
         "id": user.id,
@@ -88,30 +87,25 @@ def _user_read(user: User, asset_ids: list[int] | None = None) -> dict:
         "asset_ids": asset_ids if asset_ids is not None else [],
     }
 
-
+#Identifying the loggin-in user  
 async def get_current_user(request: Request, db: Db) -> User:
     user_id = getattr(request.state, "auth_user_id", None)
     if user_id is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication required",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise HTTPException(status_code=401,detail="Authentication required",headers={"WWW-Authenticate": "Bearer"},)
     user = db.get(User, user_id)
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="Session is invalid or expired")
     return user
 
-
+#Controlling what each role can do 
 def require_roles(*roles: str):
     async def check_role(user: Annotated[User, Depends(get_current_user)]) -> User:
         if user.role not in roles:
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return user
-
     return check_role
 
-
+#Asset assignment helpers ,this queries the db for all assest IDs assigned to a user 
 def _assignment_ids(db: Session, user_id: int) -> list[int]:
     return list(
         db.scalars(
@@ -121,7 +115,7 @@ def _assignment_ids(db: Session, user_id: int) -> list[int]:
         ).all()
     )
 
-
+#Before assigning machines to a user, this function checks that all requested asset IDs exist.
 def _validate_assets(db: Session, asset_ids: list[int]) -> None:
     if not asset_ids:
         return
@@ -130,11 +124,14 @@ def _validate_assets(db: Session, asset_ids: list[int]) -> None:
     if missing:
         raise HTTPException(status_code=422, detail=f"Unknown asset assignment(s): {missing}")
 
+#Login endpoint  -> authenticates a user and create a session
 @router.post("/login", response_model=LoginResponse)
 def login(payload: LoginRequest, db: Db) -> LoginResponse:
+    #Normalize the username 
     username = payload.username.strip().casefold()
     user = db.scalar(select(User).where(User.username == username))
     password_hash = user.password_hash if user is not None else _DUMMY_PASSWORD_HASH
+    #Verify the password 
     password_is_valid = verify_password(payload.password, password_hash)
     if (
         user is None
@@ -142,29 +139,28 @@ def login(payload: LoginRequest, db: Db) -> LoginResponse:
         or not password_is_valid
     ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail="Invalid username or password",headers={"WWW-Authenticate": "Bearer"},)
-
+#Generate a session token 
     token = new_session_token()
     expires = datetime.now(timezone.utc) + timedelta(hours=SESSION_HOURS)
-    db.add(
-        AuthSession(
+    #Store the session
+    db.add(AuthSession(
             user_id=user.id,
             token_hash=hash_session_token(token),
             expires_at=expires,
         )
     )
     db.commit()
-    return LoginResponse(
-        access_token=token,
+    return LoginResponse(access_token=token,
         expires_at=expires,
         user=_user_read(user, _assignment_ids(db, user.id)),
     )
 
-
+#Current user endpoint
 @router.get("/me")
 async def me(user: Annotated[User, Depends(get_current_user)], db: Db) -> dict:
     return _user_read(user, _assignment_ids(db, user.id))
 
-
+#Logout endpoint 
 @router.post("/logout", status_code=204)
 def logout(request: Request, db: Db) -> None:
     token = getattr(request.state, "auth_token_hash", None)
@@ -172,14 +168,14 @@ def logout(request: Request, db: Db) -> None:
         db.execute(delete(AuthSession).where(AuthSession.token_hash == token))
         db.commit()
 
-
-@router.get("/users", dependencies=[Depends(require_roles("Admin"))])
+#List accounts 
+@router.get("/users", dependencies=[Depends(require_roles("Administrator"))])
 def list_users(db: Db) -> list[dict]:
     users = db.scalars(select(User).order_by(User.username)).all()
     return [_user_read(user, _assignment_ids(db, user.id)) for user in users]
 
-
-@router.post("/users", status_code=201, dependencies=[Depends(require_roles("Admin"))])
+#Create account 
+@router.post("/users", status_code=201, dependencies=[Depends(require_roles("Administrator"))])
 def create_user(payload: UserCreate, db: Db) -> dict:
     _validate_assets(db, payload.asset_ids)
     user = User(
@@ -202,10 +198,8 @@ def create_user(payload: UserCreate, db: Db) -> dict:
     db.refresh(user)
     return _user_read(user, payload.asset_ids)
 
-
-@router.patch(
-    "/users/{user_id}", dependencies=[Depends(require_roles("Admin"))]
-)
+#Updating a user account
+@router.patch("/users/{user_id}", dependencies=[Depends(require_roles("Administrator"))])
 def update_user(user_id: int, payload: UserUpdate, db: Db) -> dict:
     user = db.get(User, user_id)
     if user is None:
@@ -215,20 +209,18 @@ def update_user(user_id: int, payload: UserUpdate, db: Db) -> dict:
         return _user_read(user, _assignment_ids(db, user.id))
     if any(value is None for value in values.values()):
         raise HTTPException(status_code=422, detail="User update values cannot be null")
-    removing_admin = user.role == "Admin" and (
-        values.get("role", user.role) != "Admin"
+    removing_admin = user.role == "Administrator" and (
+        values.get("role", user.role) != "Administrator"
         or values.get("is_active", user.is_active) is False
     )
     if removing_admin:
         active_admin_count = db.scalar(
             select(User.id).where(
-                User.role == "Admin", User.is_active.is_(True), User.id != user.id
+                User.role == "Administrator", User.is_active.is_(True), User.id != user.id
             ).limit(1)
         )
         if active_admin_count is None:
-            raise HTTPException(
-                status_code=409, detail="The last active administrator cannot be removed"
-            )
+            raise HTTPException(status_code=409, detail="The last active administrator cannot be removed")
     role_or_password_changed = "role" in values or "password" in values
     if "password" in values:
         values["password_hash"] = hash_password(values.pop("password"))
@@ -240,21 +232,15 @@ def update_user(user_id: int, payload: UserUpdate, db: Db) -> dict:
     db.refresh(user)
     return _user_read(user, _assignment_ids(db, user.id))
 
-
-@router.put(
-    "/users/{user_id}/assets",
-    dependencies=[Depends(require_roles("Admin"))],
-)
+#Replacing asset assignments
+@router.put("/users/{user_id}/assets",dependencies=[Depends(require_roles("Administrator"))],)
 def replace_user_assets(user_id: int, payload: AssetAssignments, db: Db) -> dict:
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User was not found")
     _validate_assets(db, payload.asset_ids)
-    db.execute(
-        delete(UserAssetAssignment).where(UserAssetAssignment.user_id == user.id)
-    )
-    db.add_all(
-        UserAssetAssignment(user_id=user.id, asset_id=asset_id)
+    db.execute(delete(UserAssetAssignment).where(UserAssetAssignment.user_id == user.id))
+    db.add_all(UserAssetAssignment(user_id=user.id, asset_id=asset_id)
         for asset_id in payload.asset_ids
     )
     db.commit()

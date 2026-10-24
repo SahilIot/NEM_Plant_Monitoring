@@ -6,11 +6,11 @@ export default function AdminUsersPage() {
   const [assets, setAssets] = useState([]);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState("Viewer");
+  const [role, setRole] = useState("Supervisor");
   const [assetIds, setAssetIds] = useState([]);
   const [selectedUserId, setSelectedUserId] = useState("");
   const [assignedAssetIds, setAssignedAssetIds] = useState([]);
-  const [selectedRole, setSelectedRole] = useState("Viewer");
+  const [selectedRole, setSelectedRole] = useState("Supervisor");
   const [selectedActive, setSelectedActive] = useState(true);
   const [resetPassword, setResetPassword] = useState("");
   const [message, setMessage] = useState("");
@@ -33,7 +33,7 @@ export default function AdminUsersPage() {
   useEffect(() => {
     const selected = users.find((user) => String(user.id) === selectedUserId);
     setAssignedAssetIds(selected?.asset_ids || []);
-    setSelectedRole(selected?.role || "Viewer");
+    setSelectedRole(selected?.role || "Supervisor");
     setSelectedActive(selected?.is_active ?? true);
     setResetPassword("");
   }, [selectedUserId, users]);
@@ -55,11 +55,11 @@ export default function AdminUsersPage() {
         username,
         password,
         role,
-        asset_ids: role === "Admin" ? [] : assetIds,
+        asset_ids: role === "Administrator" ? [] : assetIds,
       });
       setUsername("");
       setPassword("");
-      setRole("Viewer");
+      setRole("Supervisor");
       setAssetIds([]);
       setMessage("User account created.");
       await load();
@@ -129,12 +129,12 @@ export default function AdminUsersPage() {
           </label>
           <label className="field">Role
             <select value={role} onChange={(event) => setRole(event.target.value)} disabled={busy}>
-              <option>Viewer</option>
+              <option>Supervisor</option>
               <option>Operator</option>
-              <option>Admin</option>
+              <option>Administrator</option>
             </select>
           </label>
-          {role !== "Admin" && (
+          {role !== "Administrator" && (
             <fieldset className="auth-asset-list">
               <legend>Assigned machines</legend>
               {assets.map((asset) => (
@@ -166,7 +166,7 @@ export default function AdminUsersPage() {
                     <td>{user.username}</td>
                     <td>{user.role}</td>
                     <td>{user.is_active ? "Active" : "Disabled"}</td>
-                    <td>{user.role === "Admin" ? "All machines" : user.asset_ids.map((id) => assets.find((asset) => asset.id === id)?.name || `Asset ${id}`).join(", ") || "None"}</td>
+                    <td>{user.role === "Administrator" ? "All machines" : user.asset_ids.map((id) => assets.find((asset) => asset.id === id)?.name || `Asset ${id}`).join(", ") || "None"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -180,7 +180,7 @@ export default function AdminUsersPage() {
         <label className="field">User
           <select value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)} disabled={busy}>
             <option value="">Choose a user</option>
-            {users.filter((user) => user.role !== "Admin").map((user) => (
+            {users.filter((user) => user.role !== "Administrator").map((user) => (
               <option key={user.id} value={user.id}>{user.username} ({user.role})</option>
             ))}
           </select>
@@ -190,7 +190,7 @@ export default function AdminUsersPage() {
             <div className="admin-user-form">
               <label className="field">Role
                 <select value={selectedRole} onChange={(event) => setSelectedRole(event.target.value)} disabled={busy}>
-                  <option>Viewer</option>
+                  <option>Supervisor</option>
                   <option>Operator</option>
                 </select>
               </label>
@@ -207,7 +207,7 @@ export default function AdminUsersPage() {
                 {busy ? "Saving…" : "Save account settings"}
               </button>
             </div>
-            {selectedRole !== "Admin" && (
+            {selectedRole !== "Administrator" && (
               <>
                 <fieldset className="auth-asset-list">
                   <legend>Machines this user can access</legend>

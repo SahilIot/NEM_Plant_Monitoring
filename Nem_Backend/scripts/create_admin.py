@@ -39,7 +39,7 @@ def main() -> int:
             db.add(User(
                 username=username,
                 password_hash=password_hash,
-                role="Admin",
+                role="Administrator",
                 is_active=True,
             ))
             db.commit()

@@ -63,11 +63,11 @@ def get_db(request: Request) -> Generator[Session, None, None]:
             )
         yield session
 
-
+#Automatically filtering db queries 
 @event.listens_for(Session, "do_orm_execute")
 def _scope_queries_to_assigned_assets(execute_state) -> None:
     session = execute_state.session
-    if session.info.get("auth_role") not in {"Operator", "Viewer"}:
+    if session.info.get("auth_role") not in {"Operator", "Supervisor"}:
         return
     if not (
         execute_state.is_select
@@ -107,10 +107,10 @@ def _scope_queries_to_assigned_assets(execute_state) -> None:
         with_loader_criteria(RuleCounterState, RuleCounterState.asset_id.in_(asset_ids), include_aliases=True),
     )
 
-
+#Preventing unauthorized writes 
 @event.listens_for(Session, "before_flush")
 def _reject_unassigned_asset_writes(session: Session, flush_context, instances) -> None:
-    if session.info.get("auth_role") in (None, "Admin"):
+    if session.info.get("auth_role") in (None, "Administrator"):
         return
     asset_ids = session.info.get("authorized_asset_ids", frozenset())
 
@@ -146,8 +146,5 @@ def _reject_unassigned_asset_writes(session: Session, flush_context, instances) 
             if isinstance(instance, model):
                 asset_id = getattr(instance, attribute, None)
                 if asset_id not in asset_ids:
-                    raise HTTPException(
-                        status_code=403,
-                        detail="You do not have permission to modify this machine's data",
-                    )
+                    raise HTTPException(status_code=403,detail="You do not have permission to modify this machine's data",)
                 break

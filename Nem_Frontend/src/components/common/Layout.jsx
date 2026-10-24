@@ -389,7 +389,7 @@ export default function Layout() {
         <div className="app-title">{APP_TITLE}</div>
         <div className="spacer" />
         <span className="auth-user-label">{user.username} · {user.role}</span>
-        {user.role === "Admin" && (
+        {user.role === "Administrator" && (
           <Link to="/settings/users" className="auth-user-link" title="Manage users and machine access">
             <Users size={17} /> User access
           </Link>
@@ -433,10 +433,14 @@ export default function Layout() {
         <nav className={"rail" + (railOpen ? " open" : "")} aria-label="Main">
           <div className="rail-main">
             {navItem("/", HomeIcon, "Overview", true)}
-            {navItem("/assets", TreeIcon, "Assets")}
-            {navItem("/plc", PlugIcon, "PLC / OPC UA")}
-            {navItem("/configuration", ShapesIcon, "Configuration")}
-            {navItem("/settings", GearIcon, "Settings")}
+            {user.role !== "Operator" && navItem("/assets", TreeIcon, "Assets")}
+            {user.role === "Administrator" && (
+              <>
+                {navItem("/plc", PlugIcon, "PLC / OPC UA")}
+                {navItem("/configuration", ShapesIcon, "Configuration")}
+                {navItem("/settings", GearIcon, "Settings")}
+              </>
+            )}
           </div>
 
           <button
