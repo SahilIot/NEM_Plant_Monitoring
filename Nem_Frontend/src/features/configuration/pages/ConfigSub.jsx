@@ -16,7 +16,11 @@ import {
   subscribeLiveUpdates,
 } from "../../../services/liveUpdates.js";
 import { conditionText } from "../../../utils/format.js";
-import { CreateModal, EmptyState } from "../../../components/common/UI.jsx";
+import {
+  CreateModal,
+  EmptyState,
+  useConfirmation,
+} from "../../../components/common/UI.jsx";
 import {
   BackIcon,
   PlusCircle,
@@ -324,6 +328,7 @@ function ImportPage() {
 }
 
 export default function ConfigSub() {
+  const confirm = useConfirmation();
   const { sub } = useParams();
   const nav = useNavigate();
   const location = useLocation();
@@ -772,8 +777,12 @@ export default function ConfigSub() {
   };
 
   const duplicate = async (rule) => {
-    const confirmed = window.confirm(
-      `Create a duplicate of "${rule.name}"? The copy will be disabled initially.`
+    const confirmed = await confirm(
+      `Create a duplicate of "${rule.name}"? The copy will be disabled initially.`,
+      {
+        title: "Duplicate rule",
+        confirmLabel: "Create duplicate",
+      }
     );
 
     if (!confirmed) return;
@@ -852,10 +861,15 @@ export default function ConfigSub() {
   const remove = async (row) => {
     const isRule = sub === "rules";
 
-    const confirmed = window.confirm(
+    const confirmed = await confirm(
       isRule
         ? `Delete rule "${row.name}"? This action may be rejected if the rule has alert history.`
-        : `Delete this ${cfg.noun.toLowerCase()}?`
+        : `Delete this ${cfg.noun.toLowerCase()}?`,
+      {
+        title: `Delete ${isRule ? "rule" : cfg.noun.toLowerCase()}`,
+        confirmLabel: "Delete",
+        destructive: true,
+      }
     );
 
     if (!confirmed) return;

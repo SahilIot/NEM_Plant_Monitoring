@@ -8,6 +8,7 @@ import { APP_TITLE } from "../../utils/config.js";
 import Brand from "./Brand.jsx";
 import AssetTree from "../../features/assets/components/AssetTree.jsx";
 import { useAuth } from "../../features/auth/AuthContext.jsx";
+import { useConfirmation } from "./UI.jsx";
 import {
   HomeIcon,
   TreeIcon,
@@ -136,6 +137,7 @@ function computeHealth(assets, alerts) {
 export default function Layout() {
   const { pathname } = useLocation();
   const { user, logout } = useAuth();
+  const confirm = useConfirmation();
 
   const [rawAssets, setRawAssets] = useState([]);
   const [rules, setRules] = useState([]);
@@ -157,6 +159,27 @@ export default function Layout() {
   });
 
   const [treeOpen, setTreeOpen] = useState(true);
+  const [signingOut, setSigningOut] = useState(false);
+
+  const confirmSignOut = async () => {
+    if (signingOut) return;
+    const accepted = await confirm(
+      "Are you sure you want to sign out of the application?",
+      {
+        title: "Sign out",
+        confirmLabel: "Sign out",
+        destructive: true,
+      }
+    );
+    if (!accepted) return;
+
+    setSigningOut(true);
+    try {
+      await logout();
+    } finally {
+      setSigningOut(false);
+    }
+  };
 
   const [theme, setTheme] = useState(() => {
     try {
@@ -371,8 +394,13 @@ export default function Layout() {
             <Users size={17} /> User access
           </Link>
         )}
-        <button className="btn-outline auth-logout" onClick={() => logout()} type="button">
-          <LogOut size={16} /> Sign out
+        <button
+          className="btn-outline auth-logout"
+          onClick={confirmSignOut}
+          type="button"
+          disabled={signingOut}
+        >
+          <LogOut size={16} /> {signingOut ? "Signing out…" : "Sign out"}
         </button>
 
         <div

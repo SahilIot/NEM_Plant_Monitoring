@@ -419,7 +419,6 @@ export default function Home() {
                           state={alert.maintenance_schedule_id
                             ? {
                                 activeTab: "logbook",
-                                focusMaintenanceScheduleId: alert.maintenance_schedule_id,
                               }
                             : undefined}
                         >

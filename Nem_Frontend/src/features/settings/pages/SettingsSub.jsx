@@ -3,7 +3,11 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../../../services/api.js";
 import { formatTime } from "../../../utils/format.js";
-import { CreateModal, EmptyState } from "../../../components/common/UI.jsx";
+import {
+  CreateModal,
+  EmptyState,
+  useConfirmation,
+} from "../../../components/common/UI.jsx";
 import { BackIcon } from "../../../components/common/Icons.jsx";
 
 const TITLES = {
@@ -151,6 +155,7 @@ function Usage() {
 }
 
 function Backup() {
+  const confirm = useConfirmation();
   const [list, setList] = useState([]);
   const [msg, setMsg] = useState("");
   const [open, setOpen] = useState(false);
@@ -161,7 +166,16 @@ function Backup() {
     setOpen(false); setMsg(`Backup ${b.name} created.`); load();
   };
   const restore = async (b) => {
-    if (!window.confirm(`Restore "${b.name}"? This replaces all current monitoring data.`)) return;
+    if (
+      !(await confirm(
+        `Restore "${b.name}"? This replaces all current monitoring data.`,
+        {
+          title: "Restore backup",
+          confirmLabel: "Restore backup",
+          destructive: true,
+        }
+      ))
+    ) return;
     try {
       await api.post(`/backups/${b.id}/restore`);
       setMsg(`Backup ${b.name} restored.`);

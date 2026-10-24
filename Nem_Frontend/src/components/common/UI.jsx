@@ -1,7 +1,15 @@
 
-import React, { useEffect, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
+import { AlertTriangle } from "lucide-react";
 import { EmptyArt } from "./Icons.jsx";
 
 export const EmptyState = ({ title, lines = [], art = true }) => (
@@ -67,6 +75,79 @@ export const Modal = ({ title, onClose, children, wide }) => {
     document.body
   );
 };
+
+const ConfirmationContext = createContext(null);
+
+export function useConfirmation() {
+  const confirm = useContext(ConfirmationContext);
+  if (!confirm) {
+    throw new Error("useConfirmation must be used inside ConfirmationProvider");
+  }
+  return confirm;
+}
+
+export function ConfirmationProvider({ children }) {
+  const [request, setRequest] = useState(null);
+  const resolver = useRef(null);
+
+  const confirm = useCallback((message, options = {}) => {
+    if (resolver.current) resolver.current(false);
+    return new Promise((resolve) => {
+      resolver.current = resolve;
+      setRequest({
+        message,
+        title: options.title || "Please confirm",
+        confirmLabel: options.confirmLabel || "Confirm",
+        cancelLabel: options.cancelLabel || "Cancel",
+        destructive: Boolean(options.destructive),
+      });
+    });
+  }, []);
+
+  const finish = useCallback((result) => {
+    resolver.current?.(result);
+    resolver.current = null;
+    setRequest(null);
+  }, []);
+
+  return (
+    <ConfirmationContext.Provider value={confirm}>
+      {children}
+      {request && (
+        <Modal title={request.title} onClose={() => finish(false)}>
+          <div className="confirmation-message">
+            <span
+              className={
+                "confirmation-icon" +
+                (request.destructive ? " destructive" : "")
+              }
+              aria-hidden="true"
+            >
+              <AlertTriangle size={20} />
+            </span>
+            <p>{request.message}</p>
+          </div>
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="btn-outline"
+              onClick={() => finish(false)}
+            >
+              {request.cancelLabel}
+            </button>
+            <button
+              type="button"
+              className={request.destructive ? "btn-danger" : "btn-primary"}
+              onClick={() => finish(true)}
+            >
+              {request.confirmLabel}
+            </button>
+          </div>
+        </Modal>
+      )}
+    </ConfirmationContext.Provider>
+  );
+}
 
 const initialValue = (field) => {
   if (field.type === "files") return [];

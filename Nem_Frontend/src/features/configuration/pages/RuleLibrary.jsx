@@ -10,7 +10,11 @@ import {
   X,
 } from "lucide-react";
 import { api } from "../../../services/api.js";
-import { CreateModal, EmptyState } from "../../../components/common/UI.jsx";
+import {
+  CreateModal,
+  EmptyState,
+  useConfirmation,
+} from "../../../components/common/UI.jsx";
 import "./RuleLibrary.css";
 
 const RULE_TYPES = [
@@ -498,6 +502,7 @@ function AssignmentModal({ template, onClose, onComplete }) {
 }
 
 export default function RuleLibrary() {
+  const confirm = useConfirmation();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -560,7 +565,16 @@ export default function RuleLibrary() {
   };
 
   const remove = async (template) => {
-    if (!window.confirm(`Delete the reusable rule “${template.name}”? Assigned asset rules will not be changed.`)) return;
+    if (
+      !(await confirm(
+        `Delete the reusable rule “${template.name}”? Assigned asset rules will not be changed.`,
+        {
+          title: "Delete reusable rule",
+          confirmLabel: "Delete",
+          destructive: true,
+        }
+      ))
+    ) return;
     setBusyId(template.id);
     setMessage({ text: "", error: false });
     try {

@@ -2,7 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FileText, Timer, Trash2 } from "lucide-react";
 import { api } from "../../../services/api.js";
-import { EmptyState, Modal } from "../../../components/common/UI.jsx";
+import {
+  EmptyState,
+  Modal,
+  useConfirmation,
+} from "../../../components/common/UI.jsx";
 import { formatTime } from "../../../utils/format.js";
 import {
   LEGACY_RULE_CHOICES,
@@ -138,7 +142,8 @@ function validateForm(values, requirePlannedDates) {
   return "";
 }
 
-export default function MaintenancePanel({ assetId, focusScheduleId, onChanged }) {
+export default function MaintenancePanel({ assetId, onChanged }) {
+  const confirm = useConfirmation();
   const navigate = useNavigate();
   const [records, setRecords] = useState([]);
   const [schedules, setSchedules] = useState([]);
@@ -167,7 +172,6 @@ export default function MaintenancePanel({ assetId, focusScheduleId, onChanged }
   });
   const [approvalDate, setApprovalDate] = useState("");
   const [clockNow, setClockNow] = useState(Date.now());
-  const handledFocusScheduleId = useRef(null);
 
   const permanentlyDeleteRecord = async (record) => {
     if (busy) return;
@@ -180,12 +184,23 @@ export default function MaintenancePanel({ assetId, focusScheduleId, onChanged }
     const confirmation = scheduled
       ? `Delete the entire schedule "${record.title}"${plannedDate ? `, scheduled for ${plannedDate}` : ""}, including its linked maintenance entries?`
       : `Permanently delete maintenance "${record.title}"${plannedDate ? `, scheduled for ${plannedDate}` : ""}?`;
-    if (!window.confirm(confirmation)) return;
+    if (
+      !(await confirm(confirmation, {
+        title: scheduled ? "Delete maintenance schedule" : "Delete maintenance",
+        confirmLabel: "Continue",
+        destructive: true,
+      }))
+    ) return;
     if (
       (scheduled || (record.planned_start_at && new Date(record.planned_start_at) > new Date())) &&
-      !window.confirm(
-        `Confirm again: permanently delete "${record.title}"${plannedDate ? ` scheduled for ${plannedDate}` : ""}? This cannot be undone.`
-      )
+      !(await confirm(
+        `Confirm again: permanently delete "${record.title}"${plannedDate ? ` scheduled for ${plannedDate}` : ""}? This cannot be undone.`,
+        {
+          title: "Confirm permanent deletion",
+          confirmLabel: "Delete permanently",
+          destructive: true,
+        }
+      ))
     ) {
       return;
     }
@@ -211,12 +226,22 @@ export default function MaintenancePanel({ assetId, focusScheduleId, onChanged }
     const dueDate = schedule.current_due_date
       ? displayDate(schedule.current_due_date)
       : null;
-    if (!window.confirm(
-      `Delete maintenance schedule "${schedule.title}"${dueDate ? `, due ${dueDate}` : ""}, including its linked maintenance entries?`
-    )) return;
-    if (!window.confirm(
-      `Confirm again: permanently delete schedule "${schedule.title}"${dueDate ? ` due ${dueDate}` : ""}? This cannot be undone.`
-    )) return;
+    if (!(await confirm(
+      `Delete maintenance schedule "${schedule.title}"${dueDate ? `, due ${dueDate}` : ""}, including its linked maintenance entries?`,
+      {
+        title: "Delete maintenance schedule",
+        confirmLabel: "Continue",
+        destructive: true,
+      }
+    ))) return;
+    if (!(await confirm(
+      `Confirm again: permanently delete schedule "${schedule.title}"${dueDate ? ` due ${dueDate}` : ""}? This cannot be undone.`,
+      {
+        title: "Confirm permanent deletion",
+        confirmLabel: "Delete permanently",
+        destructive: true,
+      }
+    ))) return;
     setBusy(true);
     setDeletingScheduleId(schedule.id);
     setError("");
@@ -267,42 +292,6 @@ export default function MaintenancePanel({ assetId, focusScheduleId, onChanged }
     loadRecords();
     loadSchedules();
   }, [loadRecords, loadSchedules]);
-
-  useEffect(() => {
-    if (
-      !focusScheduleId ||
-      loading ||
-      !schedulesLoaded ||
-      handledFocusScheduleId.current === String(focusScheduleId)
-    ) {
-      return;
-    }
-
-    handledFocusScheduleId.current = String(focusScheduleId);
-    const schedule = schedules.find(
-      (item) => String(item.id) === String(focusScheduleId)
-    );
-    if (!schedule) {
-      setError("The maintenance schedule for this alert could not be found.");
-      return;
-    }
-
-    const occurrence = records.find(
-      (record) =>
-        schedule.current_occurrence_id != null &&
-        String(record.id) === String(schedule.current_occurrence_id)
-    ) || records.find(
-      (record) =>
-        String(record.schedule_id) === String(schedule.id) &&
-        ["planned", "in_progress"].includes(record.status)
-    );
-
-    setDialog(
-      occurrence
-        ? { kind: "details", record: occurrence }
-        : { kind: "schedule-details", record: schedule }
-    );
-  }, [focusScheduleId, loading, records, schedules, schedulesLoaded]);
 
   useEffect(() => {
     const timerIsRunning = records.some((record) => record.status === "in_progress");
@@ -610,6 +599,106 @@ const openEdit = (record) => {
   const documentsForRecord = (record) =>
     schedules.find((schedule) => schedule.id === record.schedule_id)
       ?.instruction_documents || [];
+  const today = todayDateInput();
+  const visibleRecords = records.filter(
+    (record) =>
+      !(
+        record.schedule_id != null &&
+        (record.status === "in_progress" ||
+          (record.status === "planned" &&
+            record.planned_due_date === today))
+      )
+  );
+  const renderRecordCard = (record) => (
+    <article
+      className={`maintenance-record-card ${record.status || "planned"}`}
+      key={record.id}
+    >
+      <span className="maintenance-record-indicator" aria-hidden="true" />
+      <div className="maintenance-record-main">
+        <strong>{record.title}</strong>
+        <small>
+          {record.maintenance_type || "Maintenance"} ·{" "}
+          {record.priority || "medium"} priority
+        </small>
+      </div>
+      <div className="maintenance-record-status">
+        <span className={`maintenance-status ${record.status}`}>
+          {record.status === "in_progress" ? (
+            <><Timer size={13} aria-hidden="true" /> Started</>
+          ) : String(record.status || "planned").replaceAll("_", " ")}
+        </span>
+        <small>
+          {record.planned_start_at
+            ? formatTime(record.planned_start_at)
+            : "No planned start"}
+          {" — "}
+          {record.planned_end_at
+            ? formatTime(record.planned_end_at)
+            : "No planned end"}
+        </small>
+      </div>
+      <div className="maintenance-record-meta">
+        <span>
+          <small>Technician</small>
+          <strong>{record.assigned_technician || record.performed_by || "—"}</strong>
+        </span>
+        <span>
+          <small>Planned duration</small>
+          <strong>{plannedDurationDays(record)}</strong>
+        </span>
+        <span>
+          <small>Actual duration</small>
+          <strong>{actualDuration(record, clockNow)}</strong>
+        </span>
+      </div>
+      <div className="maintenance-actions">
+        <button
+          type="button"
+          className="btn-outline"
+          onClick={() => setDialog({ kind: "details", record })}
+          disabled={busy}
+        >
+          View
+        </button>
+        <button
+          type="button"
+          className="btn-outline"
+          onClick={() => {
+            const documents = documentsForRecord(record);
+            if (documents.length > 0) {
+              setMaterialViewer({
+                document: documents[0],
+                file: null,
+                documents,
+              });
+            }
+          }}
+          disabled={busy || documentsForRecord(record).length === 0}
+          title={
+            documentsForRecord(record).length > 0
+              ? "View attached instructions and documents"
+              : "No instruction or document attached"
+          }
+        >
+          <FileText size={14} aria-hidden="true" />
+          Materials
+        </button>
+        {record.status !== "in_progress" && (
+          <button
+            type="button"
+            className="maintenance-delete-icon"
+            title={record.schedule_id ? "Permanently delete schedule" : "Permanently delete maintenance"}
+            aria-label={`Permanently delete ${record.schedule_id ? "schedule" : "maintenance"} ${record.title}`}
+            onClick={() => permanentlyDeleteRecord(record)}
+            disabled={busy}
+          >
+            <Trash2 size={16} aria-hidden="true" />
+          </button>
+        )}
+      </div>
+    </article>
+  );
 
   return (
     <>
@@ -637,104 +726,17 @@ const openEdit = (record) => {
         {notice && <p className="notice" role="status">{notice}</p>}
         {loading ? (
           <p className="muted" role="status">Loading maintenance history…</p>
-        ) : records.length === 0 ? (
+        ) : visibleRecords.length === 0 ? (
           <EmptyState
             art={false}
-            title="No maintenance jobs"
-            lines={["Create a job to start tracking planned and completed work."]}
+            title={records.length === 0 ? "No maintenance jobs" : "No other maintenance jobs"}
+            lines={records.length === 0
+              ? ["Create a job to start tracking planned and completed work."]
+              : ["Due-today scheduled work and active scheduled work are shown in Current status."]}
           />
         ) : (
           <div className="maintenance-record-list">
-            {records.map((record) => (
-              <article
-                className={`maintenance-record-card ${record.status || "planned"}`}
-                key={record.id}
-              >
-                <span className="maintenance-record-indicator" aria-hidden="true" />
-                <div className="maintenance-record-main">
-                  <strong>{record.title}</strong>
-                  <small>
-                    {record.maintenance_type || "Maintenance"} ·{" "}
-                    {record.priority || "medium"} priority
-                  </small>
-                </div>
-                <div className="maintenance-record-status">
-                  <span className={`maintenance-status ${record.status}`}>
-                    {record.status === "in_progress" ? (
-                      <><Timer size={13} aria-hidden="true" /> Started</>
-                    ) : String(record.status || "planned").replaceAll("_", " ")}
-                  </span>
-                  <small>
-                    {record.planned_start_at
-                      ? formatTime(record.planned_start_at)
-                      : "No planned start"}
-                    {" — "}
-                    {record.planned_end_at
-                      ? formatTime(record.planned_end_at)
-                      : "No planned end"}
-                  </small>
-                </div>
-                <div className="maintenance-record-meta">
-                  <span>
-                    <small>Technician</small>
-                    <strong>{record.assigned_technician || record.performed_by || "—"}</strong>
-                  </span>
-                  <span>
-                    <small>Planned duration</small>
-                    <strong>{plannedDurationDays(record)}</strong>
-                  </span>
-                  <span>
-                    <small>Actual duration</small>
-                    <strong>{actualDuration(record, clockNow)}</strong>
-                  </span>
-                </div>
-                <div className="maintenance-actions">
-                  <button
-                    type="button"
-                    className="btn-outline"
-                    onClick={() => setDialog({ kind: "details", record })}
-                    disabled={busy}
-                  >
-                    View
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-outline"
-                    onClick={() => {
-                      const documents = documentsForRecord(record);
-                      if (documents.length > 0) {
-                        setMaterialViewer({
-                          document: documents[0],
-                          file: null,
-                          documents,
-                        });
-                      }
-                    }}
-                    disabled={busy || documentsForRecord(record).length === 0}
-                    title={
-                      documentsForRecord(record).length > 0
-                        ? "View attached instructions and documents"
-                        : "No instruction or document attached"
-                    }
-                  >
-                    <FileText size={14} aria-hidden="true" />
-                    Materials
-                  </button>
-                  {record.status !== "in_progress" && (
-                    <button
-                      type="button"
-                      className="maintenance-delete-icon"
-                      title={record.schedule_id ? "Permanently delete schedule" : "Permanently delete maintenance"}
-                      aria-label={`Permanently delete ${record.schedule_id ? "schedule" : "maintenance"} ${record.title}`}
-                      onClick={() => permanentlyDeleteRecord(record)}
-                      disabled={busy}
-                    >
-                      <Trash2 size={16} aria-hidden="true" />
-                    </button>
-                  )}
-                </div>
-              </article>
-            ))}
+            {visibleRecords.map(renderRecordCard)}
           </div>
         )}
 

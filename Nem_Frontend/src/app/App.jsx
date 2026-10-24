@@ -28,6 +28,7 @@ import CreateMonitoringRulePage from "../features/assets/pages/CreateMonitoringR
 import LoginPage from "../features/auth/LoginPage.jsx";
 import AdminUsersPage from "../features/auth/AdminUsersPage.jsx";
 import { useAuth } from "../features/auth/AuthContext.jsx";
+import { ConfirmationProvider } from "../components/common/UI.jsx";
 
 export default function App() {
   const { user, loading } = useAuth();
@@ -38,6 +39,7 @@ export default function App() {
   }
 
   return (
+    <ConfirmationProvider>
     <Routes>
       <Route
         path="/login"
@@ -126,5 +128,6 @@ export default function App() {
 <Route path="*" element={<Home />} />
       </Route>
     </Routes>
+    </ConfirmationProvider>
   );
 }

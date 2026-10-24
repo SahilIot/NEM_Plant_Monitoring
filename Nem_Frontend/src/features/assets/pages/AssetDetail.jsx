@@ -1,7 +1,7 @@
 ﻿
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
-import { Trash2 } from "lucide-react";
+import { Download, Trash2 } from "lucide-react";
 import CopyRulesModal from "../components/CopyRulesModal.jsx";
 import PredefinedRulesModal from "../../rules/components/PredefinedRulesModal.jsx";
 import { api } from "../../../services/api.js";
@@ -9,6 +9,7 @@ import {
   createLiveUpdateScheduler,
   subscribeLiveUpdates,
 } from "../../../services/liveUpdates.js";
+import CurrentMaintenanceCards from "../components/CurrentMaintenanceCards.jsx";
 import MaintenancePanel from "../components/MaintenancePanel.jsx";
 import "./AssetDetail.css";
 import {
@@ -28,6 +29,7 @@ import {
   EmptyState,
   Modal,
   StatusBadge,
+  useConfirmation,
 } from "../../../components/common/UI.jsx";
 import {
   GearIcon,
@@ -443,6 +445,7 @@ const VARIABLE_FIELDS = [
 ];
 
 export default function AssetDetail() {
+  const confirm = useConfirmation();
   const { id } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -455,9 +458,6 @@ export default function AssetDetail() {
 
   const [tab, setTab] = useState(
     location.state?.activeTab === "logbook" ? "logbook" : "status"
-  );
-  const [focusMaintenanceScheduleId, setFocusMaintenanceScheduleId] = useState(
-    () => location.state?.focusMaintenanceScheduleId ?? null
   );
   const [list, setList] = useState("activated");
   const [rules, setRules] = useState([]);
@@ -508,10 +508,41 @@ export default function AssetDetail() {
   const [deletingEventId, setDeletingEventId] = useState(null);
   const [eventDeleteError, setEventDeleteError] = useState("");
   const [deletingLogId, setDeletingLogId] = useState(null);
+  const [exportError, setExportError] = useState("");
+  const [exporting, setExporting] = useState(false);
 
   const seq = useRef(0);
   const bulkRequest = useRef(false);
   const permanentDeleteRequest = useRef(false);
+
+  useEffect(() => {
+    if (!menu && !sortMenu && ruleActionMenuId === null) return undefined;
+
+    const closeMenus = () => {
+      setMenu(false);
+      setSortMenu(false);
+      setRuleActionMenuId(null);
+    };
+    const handlePointerDown = (event) => {
+      if (!(event.target instanceof Element)) return;
+      const openDropdowns = document.querySelectorAll(
+        ".asset-page .dropdown[data-menu-open='true']"
+      );
+      if (![...openDropdowns].some((dropdown) => dropdown.contains(event.target))) {
+        closeMenus();
+      }
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") closeMenus();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [menu, ruleActionMenuId, sortMenu]);
 
   
   const loadLive = useCallback(async ({
@@ -679,7 +710,13 @@ export default function AssetDetail() {
 
   const deleteEvent = async (event) => {
     if (deletingEventId !== null) return;
-    if (!window.confirm("Permanently delete this event? This cannot be undone.")) {
+    if (
+      !(await confirm("Permanently delete this event? This cannot be undone.", {
+        title: "Delete event",
+        confirmLabel: "Delete permanently",
+        destructive: true,
+      }))
+    ) {
       return;
     }
     setDeletingEventId(event.id);
@@ -764,13 +801,7 @@ export default function AssetDetail() {
     const navigationState = location.state;
 
     if (navigationState?.activeTab === "logbook") {
-      setTab("logbook");
-    }
-
-    if (navigationState?.focusMaintenanceScheduleId) {
-      setFocusMaintenanceScheduleId(
-        navigationState.focusMaintenanceScheduleId
-      );
+      setTab("status");
     }
 
     if (navigationState?.createdNotice) {
@@ -1004,6 +1035,41 @@ const filteredEvents = [...events]
       new Date(a.time || a.occurred_at || 0).getTime()
   );
  
+  const exportExcel = async ({
+    rows,
+    headers,
+    sheetName,
+    fileName,
+    confirmMessage,
+  }) => {
+    if (
+      !(await confirm(confirmMessage, {
+        title: "Export Excel file",
+        confirmLabel: "Download",
+      }))
+    ) return;
+    setExportError("");
+    setExporting(true);
+    try {
+      const XLSX = await import("@e965/xlsx");
+      const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+      XLSX.writeFile(workbook, fileName);
+    } catch (error) {
+      setExportError(error.message || "Could not export the Excel file.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const exportFileDate = new Date().toISOString().slice(0, 10);
+  const assetFileName =
+    (asset?.name || `asset-${assetId}`)
+      .replace(/[^a-z0-9-_]+/gi, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase() || `asset-${assetId}`;
+
   const refreshAll = async () => {
     await Promise.all([
       loadLive(),
@@ -1042,9 +1108,14 @@ const filteredEvents = [...events]
 
   const remove = async (rule) => {
     if (
-      !window.confirm(
-        `Archive the rule “${rule.name}”? It will be hidden from the rule list, and its alert and evaluation history will be retained.`
-      )
+      !(await confirm(
+        `Archive the rule “${rule.name}”? It will be hidden from the rule list, and its alert and evaluation history will be retained.`,
+        {
+          title: "Archive rule",
+          confirmLabel: "Archive",
+          destructive: true,
+        }
+      ))
     ) {
       return;
     }
@@ -1060,9 +1131,14 @@ const filteredEvents = [...events]
   const permanentlyDeleteRule = async (rule) => {
     if (permanentDeleteRequest.current) return;
     if (
-      !window.confirm(
-        `Permanently delete “${rule.name}”? This irreversibly removes the rule, its alerts, and its evaluation history. Maintenance records linked to its alerts must be removed first.`
-      )
+      !(await confirm(
+        `Permanently delete “${rule.name}”? This irreversibly removes the rule, its alerts, and its evaluation history. Maintenance records linked to its alerts must be removed first.`,
+        {
+          title: "Permanently delete rule",
+          confirmLabel: "Delete permanently",
+          destructive: true,
+        }
+      ))
     ) {
       return;
     }
@@ -1130,9 +1206,14 @@ const filteredEvents = [...events]
       const scope = children
         ? "this asset and its included child assets"
         : "this asset only";
-      if (!window.confirm(
-        `Deactivate ${affected} active rule(s) on ${scope}? Active alerts for those rules will be resolved.`
-      )) {
+      if (!(await confirm(
+        `Deactivate ${affected} active rule(s) on ${scope}? Active alerts for those rules will be resolved.`,
+        {
+          title: "Deactivate rules",
+          confirmLabel: "Deactivate",
+          destructive: true,
+        }
+      ))) {
         return;
       }
     }
@@ -1178,7 +1259,16 @@ const filteredEvents = [...events]
 
   const deleteLogEntry = async (entry) => {
     if (deletingLogId !== null) return;
-    if (!window.confirm("Permanently delete this maintenance log entry? This cannot be undone.")) {
+    if (
+      !(await confirm(
+        "Permanently delete this maintenance log entry? This cannot be undone.",
+        {
+          title: "Delete maintenance entry",
+          confirmLabel: "Delete permanently",
+          destructive: true,
+        }
+      ))
+    ) {
       return;
     }
 
@@ -1252,8 +1342,13 @@ const filteredEvents = [...events]
 
   const deleteAsset = async () => {
     if (deletingAsset) return;
-    const confirmed = window.confirm(
-      `Permanently delete asset "${asset.name}" and its asset-scoped event history? This cannot be undone. Deletion is blocked if it still has child assets, variables, readings, rules, alerts, or maintenance records.`
+    const confirmed = await confirm(
+      `Permanently delete asset "${asset.name}" and its asset-scoped event history? This cannot be undone. Deletion is blocked if it still has child assets, variables, readings, rules, alerts, or maintenance records.`,
+      {
+        title: "Permanently delete asset",
+        confirmLabel: "Delete permanently",
+        destructive: true,
+      }
     );
     if (!confirmed) return;
 
@@ -1272,8 +1367,13 @@ const filteredEvents = [...events]
 
   const deleteVariable = async (variable) => {
     if (deletingVariableId !== null) return;
-    const confirmed = window.confirm(
-      `Permanently delete variable "${variable.name}"? Variables with readings, monitoring rules, alerts, or an OPC UA mapping cannot be deleted.`
+    const confirmed = await confirm(
+      `Permanently delete variable "${variable.name}"? Variables with readings, monitoring rules, alerts, or an OPC UA mapping cannot be deleted.`,
+      {
+        title: "Permanently delete variable",
+        confirmLabel: "Delete permanently",
+        destructive: true,
+      }
     );
     if (!confirmed) return;
 
@@ -1496,7 +1596,7 @@ const filteredEvents = [...events]
 
             <div className="spacer" />
 
-            <div className="dropdown">
+            <div className="dropdown" data-menu-open={sortMenu}>
               <button
                 className="link-btn"
                 onClick={() => setSortMenu(!sortMenu)}
@@ -1538,7 +1638,7 @@ const filteredEvents = [...events]
               <PlusCircle size={17} /> Add Rule
               </button>
 
-            <div className="dropdown">
+            <div className="dropdown" data-menu-open={menu}>
               <button
                 className="icon-outline sm"
                 onClick={() => setMenu(!menu)}
@@ -1570,7 +1670,7 @@ const filteredEvents = [...events]
                     </div>
                     </div>
 
-          {shown.length === 0 ? (
+          {shown.length === 0 && list === "activated" ? (
             <div className="panel">
               <EmptyState
                 art={false}
@@ -1789,7 +1889,10 @@ const filteredEvents = [...events]
                     </div>
 
                     <div className="rule-card-actions">
-                      <div className="dropdown rule-actions-menu">
+                      <div
+                        className="dropdown rule-actions-menu"
+                        data-menu-open={ruleActionMenuId === rule.id}
+                      >
                         <button
                           type="button"
                           className="icon-outline sm"
@@ -1907,6 +2010,12 @@ const filteredEvents = [...events]
               })}
             </div>
           )}
+          <CurrentMaintenanceCards
+            assetId={assetId}
+            onChanged={refreshMaintenanceData}
+            onCompleted={() => setList("not_activated")}
+            showCompleted={list === "not_activated"}
+          />
         </>
       )}
 
@@ -1914,7 +2023,6 @@ const filteredEvents = [...events]
   <>
     <MaintenancePanel
       assetId={assetId}
-      focusScheduleId={focusMaintenanceScheduleId}
       onChanged={refreshMaintenanceData}
     />
 
@@ -1927,7 +2035,33 @@ const filteredEvents = [...events]
         {filteredLogs.length} maintenance entries
       </span>
     </div>
+    <button
+      type="button"
+      className="icon-outline sm export-icon"
+      title={exporting ? "Preparing Excel export" : "Export filtered maintenance logbook entries to Excel"}
+      aria-label="Export maintenance logbook entries to Excel"
+      disabled={filteredLogs.length === 0 || exporting}
+      onClick={() =>
+        exportExcel({
+          headers: ["Date and time", "Entry", "Entry type", "Technician"],
+          rows: filteredLogs.map((entry) => [
+            entry.time || entry.created_at
+              ? formatTime(entry.time || entry.created_at)
+              : "",
+            entry.text || entry.title || entry.summary || "",
+            entry.maintenance_type || "Note",
+            entry.assigned_technician || "",
+          ]),
+          sheetName: "Maintenance logbook",
+          fileName: `${assetFileName}-maintenance-logbook-${exportFileDate}.xlsx`,
+          confirmMessage: `Download ${filteredLogs.length} filtered maintenance logbook entries as an Excel file?`,
+        })
+      }
+    >
+      <Download size={17} aria-hidden="true" />
+    </button>
   </div>
+  {exportError && <p className="notice error" role="alert">{exportError}</p>}
 
   <div className="maintenance-log-filters" aria-label="Filter maintenance logbook">
     <label>
@@ -2067,6 +2201,47 @@ const filteredEvents = [...events]
 {/* Event Log */}
 {tab === "events" && (
   <div className="event-log-section">
+    <div className="event-log-heading">
+      <div>
+        <h2>Event log</h2>
+        <span className="muted">{filteredEvents.length} events</span>
+      </div>
+      <button
+        type="button"
+        className="icon-outline sm export-icon"
+        title={exporting ? "Preparing Excel export" : "Export filtered events to Excel"}
+        aria-label="Export event log to Excel"
+        disabled={filteredEvents.length === 0 || exporting}
+        onClick={() =>
+          exportExcel({
+            headers: ["Date and time", "Event", "Details", "Asset", "Assigned rule"],
+            rows: filteredEvents.map((event) => [
+              event.time || event.occurred_at
+                ? new Date(event.time || event.occurred_at).toLocaleString()
+                : "",
+              eventActionLabel(event.event_type),
+              event.text || event.message || "",
+              event.asset_name ||
+                (event.asset_id != null ? `Asset ${event.asset_id}` : "System"),
+              event.rule_name ||
+                event.assigned_rule ||
+                event.rule?.name ||
+                (event.event_type === "maintenance_completed"
+                  ? "Maintenance"
+                  : event.rule_id != null
+                    ? `Rule #${event.rule_id}`
+                    : "Not assigned"),
+            ]),
+            sheetName: "Event log",
+            fileName: `${assetFileName}-event-log-${exportFileDate}.xlsx`,
+            confirmMessage: `Download ${filteredEvents.length} filtered events as an Excel file?`,
+          })
+        }
+      >
+        <Download size={17} aria-hidden="true" />
+      </button>
+    </div>
+    {exportError && <p className="notice error" role="alert">{exportError}</p>}
     {eventDeleteError && (
       <div className="event-log-error" role="alert">
         {eventDeleteError}
