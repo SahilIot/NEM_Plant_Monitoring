@@ -30,7 +30,7 @@ from app.api.routes import (
     rules,
     variables,
 )
-from app.models import AuthSession, User, UserAssetAssignment
+from app.models import AuthSession, User
 from app.services.auth_security import hash_session_token
 from app.core.config import Settings, get_settings
 from app.db.init_db import initialize_database
@@ -230,16 +230,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
 
             role = user.role
-            authorized_asset_ids = set(
-                db.scalars(
-                    select(UserAssetAssignment.asset_id).where(
-                        UserAssetAssignment.user_id == user.id
-                    )
-                ).all()
-            )
             request.state.auth_user_id = user.id
-            request.state.auth_role = role
-            request.state.authorized_asset_ids = authorized_asset_ids
             request.state.auth_token_hash = token_hash
 
         method = request.method.upper()
@@ -248,11 +239,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "/api/v1/auth/users",
             "/api/v1/plc",
             "/api/v1/collections",
-            "/api/v1/documents",
             "/api/v1/import",
             "/api/v1/settings",
             "/api/v1/backups",
             "/api/v1/usage",
+        )
+        supervisor_content_create = (
+            role == "Supervisor"
+            and method == "POST"
+            and policy_path in {
+                "/api/v1/rule-templates",
+                "/api/v1/documents",
+                "/api/v1/documents/with-files",
+            }
+        )
+        supervisor_rule_template_update = (
+            role == "Supervisor"
+            and method == "PUT"
+            and policy_path.startswith("/api/v1/rule-templates/")
+            and len(policy_path.rstrip("/").split("/")) == 5
+        )
+        supervisor_plc_status_read = (
+            role == "Supervisor"
+            and method in {"GET", "HEAD"}
+            and policy_path == "/api/v1/plc/status"
         )
         admin_only_write = (
             (policy_path == "/api/v1/assets" and not safe_method)
@@ -263,9 +273,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             or policy_path.startswith("/api/v1/plc")
             or policy_path.startswith("/api/v1/rule-templates")
             and not (
-                role == "Supervisor"
-                and method == "POST"
-                and policy_path.endswith("/assign")
+                (role == "Supervisor" and method == "POST" and policy_path.endswith("/assign"))
+                or supervisor_content_create
+                or supervisor_rule_template_update
             )
             or policy_path.startswith("/api/v1/collections")
             or policy_path.startswith("/api/v1/documents")
@@ -280,6 +290,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             role != "Administrator"
             and policy_path.startswith(admin_only_read_paths)
             and policy_path != "/api/v1/auth/logout"
+            and not supervisor_plc_status_read
         ):
             return JSONResponse(status_code=403,content={"detail": "Administrator permissions required"},)
         supervisor_write_paths = (
@@ -295,16 +306,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             and not policy_path.endswith("/permanent")
             or policy_path.startswith("/api/v1/alerts/")
             and method == "POST"
-            and policy_path.endswith("/acknowledge")
+            and policy_path.endswith(("/acknowledge", "/complete"))
             or policy_path.startswith("/api/v1/rule-templates/")
             and method == "POST"
             and policy_path.endswith("/assign")
+            or supervisor_content_create
+            or supervisor_rule_template_update
         )
         if (
             role == "Supervisor"
             and not safe_method
             and policy_path != "/api/v1/auth/logout"
-            and (admin_only_write or not supervisor_write_paths)
+            and (
+                (
+                    admin_only_write
+                    and not supervisor_content_create
+                    and not supervisor_rule_template_update
+                )
+                or not supervisor_write_paths
+            )
         ):
             return JSONResponse(status_code=403,content={"detail": "This action is not available to supervisors"},)
         if (
@@ -315,10 +335,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             operator_acknowledge = (
                 policy_path.startswith("/api/v1/alerts/")
                 and method == "POST"
-                and policy_path.endswith("/acknowledge")
+                and policy_path.endswith(("/acknowledge", "/complete"))
             )
             if admin_only_write or not operator_acknowledge:
-                return JSONResponse(status_code=403,content={"detail": "Operators may only acknowledge alerts"},)
+                return JSONResponse(status_code=403,content={"detail": "Operators may only acknowledge alerts or complete a resolved alert"},)
 
         return await call_next(request)
 
@@ -363,16 +383,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ):
                 await websocket.close(code=1008, reason="Session is invalid or expired")
                 return
-            asset_ids = None
-            if user.role != "Administrator":
-                asset_ids = set(
-                    db.scalars(
-                        select(UserAssetAssignment.asset_id).where(
-                            UserAssetAssignment.user_id == user.id
-                        )
-                    ).all()
-                )
-
         async def reauthorize_socket() -> tuple[bool, set[int] | None]:
             def read_current_access() -> tuple[bool, set[int] | None]:
                 with session_factory() as db:
@@ -387,23 +397,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         or not current_user.is_active
                     ):
                         return False, None
-                    if current_user.role == "Administrator":
-                        return True, None
-                    current_asset_ids = set(
-                        db.scalars(
-                            select(UserAssetAssignment.asset_id).where(
-                                UserAssetAssignment.user_id == current_user.id
-                            )
-                        ).all()
-                    )
-                    return True, current_asset_ids
+                    return True, None
 
             return await asyncio.to_thread(read_current_access)
 
         await serve_live_updates(
             websocket,
             live_updates,
-            authorized_asset_ids=asset_ids,
+            authorized_asset_ids=None,
             authorization_check=reauthorize_socket,
         )
 

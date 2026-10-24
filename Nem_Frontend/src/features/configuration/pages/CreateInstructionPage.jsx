@@ -7,7 +7,8 @@ import "./CreateInstructionPage.css";
 
 export default function CreateInstructionPage() {
   const { user } = useAuth();
-  const canManageInstructions = user?.role === "Administrator";
+  const canManageInstructions =
+    user?.role === "Administrator" || user?.role === "Supervisor";
   const nav = useNavigate();
 
   const [name, setName] = useState("");
@@ -132,7 +133,7 @@ export default function CreateInstructionPage() {
       >
         {!canManageInstructions && (
           <p className="notice" role="status">
-            Instruction management is restricted to Administrators.
+            Only Administrators and Supervisors can create instructions.
           </p>
         )}
         {error && (
@@ -297,7 +298,7 @@ export default function CreateInstructionPage() {
             type="submit"
             className="btn-primary"
             disabled={busy || !canManageInstructions}
-            title={!canManageInstructions ? "Only Administrators can create instructions." : undefined}
+            title={!canManageInstructions ? "Only Administrators and Supervisors can create instructions." : undefined}
           >
             {busy ? "Submitting..." : "Submit"}
           </button>

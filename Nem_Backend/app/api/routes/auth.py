@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models import Asset, AuthSession, User, UserAssetAssignment
+from app.models import AuthSession, User
 from app.services.auth_security import (
     hash_password,
     hash_session_token,
@@ -40,7 +40,6 @@ class UserCreate(BaseModel):
     username: str = Field(min_length=1, max_length=120)
     password: str = Field(min_length=12, max_length=1024)
     role: Literal["Administrator", "Supervisor", "Operator"] = "Supervisor"
-    asset_ids: list[int] = Field(default_factory=list, max_length=1000)
 #Username normalization to case-insensitive form.
     @field_validator("username")
     @classmethod
@@ -49,14 +48,6 @@ class UserCreate(BaseModel):
         if not value:
             raise ValueError("Username cannot be empty")
         return value
-#Duplicate asset validation
-    @field_validator("asset_ids")
-    @classmethod
-    def unique_asset_ids(cls, value: list[int]) -> list[int]:
-        if len(value) != len(set(value)):
-            raise ValueError("Asset assignments must be unique")
-        return value
-
 #This model allow administrator to change a user`s role,active status or password`
 class UserUpdate(BaseModel):
     role: Literal["Administrator", "Supervisor", "Operator"] | None = None
@@ -64,27 +55,16 @@ class UserUpdate(BaseModel):
     password: str | None = Field(default=None, min_length=12, max_length=1024)
 
 
-class AssetAssignments(BaseModel):
-    asset_ids: list[int] = Field(max_length=1000)
-
-    @field_validator("asset_ids")
-    @classmethod
-    def unique_asset_ids(cls, value: list[int]) -> list[int]:
-        if len(value) != len(set(value)):
-            raise ValueError("Asset assignments must be unique")
-        return value
-
 #DB Session dependency -> shortcut for asking FASTAPI to provide SQLAlchemy db session
 Db = Annotated[Session, Depends(get_db)]
 
 #Building the user response  -> func converts a db user object into a dictionary suitable for an API response 
-def _user_read(user: User, asset_ids: list[int] | None = None) -> dict:
+def _user_read(user: User) -> dict:
     return {
         "id": user.id,
         "username": user.username,
         "role": user.role,
         "is_active": user.is_active,
-        "asset_ids": asset_ids if asset_ids is not None else [],
     }
 
 #Identifying the loggin-in user  
@@ -104,25 +84,6 @@ def require_roles(*roles: str):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return user
     return check_role
-
-#Asset assignment helpers ,this queries the db for all assest IDs assigned to a user 
-def _assignment_ids(db: Session, user_id: int) -> list[int]:
-    return list(
-        db.scalars(
-            select(UserAssetAssignment.asset_id)
-            .where(UserAssetAssignment.user_id == user_id)
-            .order_by(UserAssetAssignment.asset_id)
-        ).all()
-    )
-
-#Before assigning machines to a user, this function checks that all requested asset IDs exist.
-def _validate_assets(db: Session, asset_ids: list[int]) -> None:
-    if not asset_ids:
-        return
-    existing = set(db.scalars(select(Asset.id).where(Asset.id.in_(asset_ids))).all())
-    missing = sorted(set(asset_ids) - existing)
-    if missing:
-        raise HTTPException(status_code=422, detail=f"Unknown asset assignment(s): {missing}")
 
 #Login endpoint  -> authenticates a user and create a session
 @router.post("/login", response_model=LoginResponse)
@@ -152,13 +113,13 @@ def login(payload: LoginRequest, db: Db) -> LoginResponse:
     db.commit()
     return LoginResponse(access_token=token,
         expires_at=expires,
-        user=_user_read(user, _assignment_ids(db, user.id)),
+        user=_user_read(user),
     )
 
 #Current user endpoint
 @router.get("/me")
 async def me(user: Annotated[User, Depends(get_current_user)], db: Db) -> dict:
-    return _user_read(user, _assignment_ids(db, user.id))
+    return _user_read(user)
 
 #Logout endpoint 
 @router.post("/logout", status_code=204)
@@ -172,12 +133,11 @@ def logout(request: Request, db: Db) -> None:
 @router.get("/users", dependencies=[Depends(require_roles("Administrator"))])
 def list_users(db: Db) -> list[dict]:
     users = db.scalars(select(User).order_by(User.username)).all()
-    return [_user_read(user, _assignment_ids(db, user.id)) for user in users]
+    return [_user_read(user) for user in users]
 
 #Create account 
 @router.post("/users", status_code=201, dependencies=[Depends(require_roles("Administrator"))])
 def create_user(payload: UserCreate, db: Db) -> dict:
-    _validate_assets(db, payload.asset_ids)
     user = User(
         username=payload.username,
         password_hash=hash_password(payload.password),
@@ -186,17 +146,12 @@ def create_user(payload: UserCreate, db: Db) -> dict:
     )
     db.add(user)
     try:
-        db.flush()
-        db.add_all(
-            UserAssetAssignment(user_id=user.id, asset_id=asset_id)
-            for asset_id in payload.asset_ids
-        )
         db.commit()
     except IntegrityError as error:
         db.rollback()
         raise HTTPException(status_code=409, detail="Username already exists") from error
     db.refresh(user)
-    return _user_read(user, payload.asset_ids)
+    return _user_read(user)
 
 #Updating a user account
 @router.patch("/users/{user_id}", dependencies=[Depends(require_roles("Administrator"))])
@@ -206,7 +161,7 @@ def update_user(user_id: int, payload: UserUpdate, db: Db) -> dict:
         raise HTTPException(status_code=404, detail="User was not found")
     values = payload.model_dump(exclude_unset=True)
     if not values:
-        return _user_read(user, _assignment_ids(db, user.id))
+        return _user_read(user)
     if any(value is None for value in values.values()):
         raise HTTPException(status_code=422, detail="User update values cannot be null")
     removing_admin = user.role == "Administrator" and (
@@ -230,18 +185,4 @@ def update_user(user_id: int, payload: UserUpdate, db: Db) -> dict:
         db.execute(delete(AuthSession).where(AuthSession.user_id == user.id))
     db.commit()
     db.refresh(user)
-    return _user_read(user, _assignment_ids(db, user.id))
-
-#Replacing asset assignments
-@router.put("/users/{user_id}/assets",dependencies=[Depends(require_roles("Administrator"))],)
-def replace_user_assets(user_id: int, payload: AssetAssignments, db: Db) -> dict:
-    user = db.get(User, user_id)
-    if user is None:
-        raise HTTPException(status_code=404, detail="User was not found")
-    _validate_assets(db, payload.asset_ids)
-    db.execute(delete(UserAssetAssignment).where(UserAssetAssignment.user_id == user.id))
-    db.add_all(UserAssetAssignment(user_id=user.id, asset_id=asset_id)
-        for asset_id in payload.asset_ids
-    )
-    db.commit()
-    return _user_read(user, _assignment_ids(db, user.id))
+    return _user_read(user)

@@ -341,6 +341,8 @@ function ImportPage() {
 export default function ConfigSub() {
   const { user } = useAuth();
   const canManageConfiguration = user?.role === "Administrator";
+  const canCreateRulesAndDocuments =
+    canManageConfiguration || user?.role === "Supervisor";
   const confirm = useConfirmation();
   const { sub } = useParams();
   const nav = useNavigate();
@@ -684,7 +686,10 @@ export default function ConfigSub() {
   };
 
   const create = async (values) => {
-    if (!canManageConfiguration) return;
+    if (
+      !canManageConfiguration &&
+      !(canCreateRulesAndDocuments && ["rules", "documents"].includes(sub))
+    ) return;
     if (sub === "rules") {
       const variable = numericVariables.find(
         (item) => item.id === Number(values.variable_id)
@@ -977,8 +982,8 @@ export default function ConfigSub() {
             <button
               type="button"
               className="btn-secondary"
-              disabled={!canManageConfiguration}
-              title={!canManageConfiguration ? "Only Administrators can create instructions." : undefined}
+              disabled={!canCreateRulesAndDocuments}
+              title={!canCreateRulesAndDocuments ? "Only Administrators and Supervisors can create instructions." : undefined}
               onClick={() =>
                 nav("/configuration/instructions/new")
               }
@@ -991,8 +996,15 @@ export default function ConfigSub() {
           <button
             type="button"
             className="btn-primary"
-            disabled={!canManageConfiguration}
-            title={!canManageConfiguration ? "Only Administrators can change global configuration." : undefined}
+            disabled={
+              !canManageConfiguration &&
+              !(canCreateRulesAndDocuments && ["rules", "documents"].includes(sub))
+            }
+            title={
+              !canManageConfiguration && !canCreateRulesAndDocuments
+                ? "Only Administrators and Supervisors can create rules and documents."
+                : undefined
+            }
             onClick={() => {
               setEditingRule(null);
               setMsg({ text: "", error: false });
@@ -1012,7 +1024,9 @@ export default function ConfigSub() {
       </div>
       {!canManageConfiguration && (
         <p className="notice" role="status">
-          Global configuration changes are restricted to Administrators. Assigned-asset rule and maintenance actions remain available from their respective pages.
+          {["rules", "documents"].includes(sub)
+            ? "Administrators and Supervisors can create rules and documents. Editing, deleting, and other global configuration changes are restricted to Administrators."
+            : "Global configuration changes are restricted to Administrators. Assigned-asset rule and maintenance actions remain available from their respective pages."}
         </p>
       )}
 

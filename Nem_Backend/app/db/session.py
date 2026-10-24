@@ -2,9 +2,9 @@
 from datetime import datetime, timezone
 from typing import Generator # describes a function that yields values.
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 from sqlalchemy import DateTime, Engine, create_engine, event
-from sqlalchemy.orm import Session, sessionmaker, with_loader_criteria
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.types import TypeDecorator
 
 from app.core.config import get_settings, validate_postgresql_database_url
@@ -57,94 +57,4 @@ def get_db(request: Request) -> Generator[Session, None, None]:
         user_id = getattr(request.state, "auth_user_id", None)
         if user_id is not None:
             session.info["auth_user_id"] = user_id
-            session.info["auth_role"] = request.state.auth_role
-            session.info["authorized_asset_ids"] = frozenset(
-                request.state.authorized_asset_ids
-            )
         yield session
-
-#Automatically filtering db queries 
-@event.listens_for(Session, "do_orm_execute")
-def _scope_queries_to_assigned_assets(execute_state) -> None:
-    session = execute_state.session
-    if session.info.get("auth_role") not in {"Operator", "Supervisor"}:
-        return
-    if not (
-        execute_state.is_select
-        or execute_state.is_update
-        or execute_state.is_delete
-    ):
-        return
-    asset_ids = tuple(session.info.get("authorized_asset_ids", ()))
-    if not asset_ids:
-        asset_ids = (-1,)
-
-    from app.models import (
-        Alert,
-        Asset,
-        MachineMonitoringState,
-        MaintenanceRecord,
-        MaintenanceSchedule,
-        MonitoringEvent,
-        MonitoringRule,
-        Reading,
-        RuleCounterState,
-        RuleState,
-        Variable,
-    )
-
-    execute_state.statement = execute_state.statement.options(
-        with_loader_criteria(Asset, Asset.id.in_(asset_ids), include_aliases=True),
-        with_loader_criteria(Variable, Variable.asset_id.in_(asset_ids), include_aliases=True),
-        with_loader_criteria(Reading, Reading.asset_id.in_(asset_ids), include_aliases=True),
-        with_loader_criteria(MonitoringRule, MonitoringRule.target_asset_id.in_(asset_ids), include_aliases=True),
-        with_loader_criteria(RuleState, RuleState.target_asset_id.in_(asset_ids), include_aliases=True),
-        with_loader_criteria(Alert, Alert.target_asset_id.in_(asset_ids), include_aliases=True),
-        with_loader_criteria(MonitoringEvent, MonitoringEvent.asset_id.in_(asset_ids), include_aliases=True),
-        with_loader_criteria(MaintenanceRecord, MaintenanceRecord.asset_id.in_(asset_ids), include_aliases=True),
-        with_loader_criteria(MaintenanceSchedule, MaintenanceSchedule.asset_id.in_(asset_ids), include_aliases=True),
-        with_loader_criteria(MachineMonitoringState, MachineMonitoringState.asset_id.in_(asset_ids), include_aliases=True),
-        with_loader_criteria(RuleCounterState, RuleCounterState.asset_id.in_(asset_ids), include_aliases=True),
-    )
-
-#Preventing unauthorized writes 
-@event.listens_for(Session, "before_flush")
-def _reject_unassigned_asset_writes(session: Session, flush_context, instances) -> None:
-    if session.info.get("auth_role") in (None, "Administrator"):
-        return
-    asset_ids = session.info.get("authorized_asset_ids", frozenset())
-
-    from app.models import (
-        Alert,
-        Asset,
-        MachineMonitoringState,
-        MaintenanceRecord,
-        MaintenanceSchedule,
-        MonitoringEvent,
-        MonitoringRule,
-        Reading,
-        RuleCounterState,
-        RuleState,
-        Variable,
-    )
-
-    asset_attributes = {
-        Asset: "id",
-        Variable: "asset_id",
-        Reading: "asset_id",
-        MonitoringRule: "target_asset_id",
-        RuleState: "target_asset_id",
-        Alert: "target_asset_id",
-        MonitoringEvent: "asset_id",
-        MaintenanceRecord: "asset_id",
-        MaintenanceSchedule: "asset_id",
-        MachineMonitoringState: "asset_id",
-        RuleCounterState: "asset_id",
-    }
-    for instance in (*session.new, *session.dirty, *session.deleted):
-        for model, attribute in asset_attributes.items():
-            if isinstance(instance, model):
-                asset_id = getattr(instance, attribute, None)
-                if asset_id not in asset_ids:
-                    raise HTTPException(status_code=403,detail="You do not have permission to modify this machine's data",)
-                break

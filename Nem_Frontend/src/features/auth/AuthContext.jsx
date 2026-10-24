@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, AUTH_TOKEN_KEY, getAuthToken } from "../../services/api.js";
 
@@ -46,6 +46,12 @@ export function AuthProvider({ children }) {
     return () => window.removeEventListener("nem-auth-expired", expire);
   }, [navigate]);
 
+  const refreshUser = useCallback(async () => {
+    const currentUser = await api.get("/auth/me");
+    setUser(currentUser);
+    return currentUser;
+  }, []);
+
   const value = useMemo(() => ({
     user,
     loading,
@@ -64,12 +70,8 @@ export function AuthProvider({ children }) {
         navigate("/login", { replace: true });
       }
     },
-    refreshUser: async () => {
-      const currentUser = await api.get("/auth/me");
-      setUser(currentUser);
-      return currentUser;
-    },
-  }), [loading, navigate, user]);
+    refreshUser,
+  }), [loading, navigate, refreshUser, user]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -135,9 +135,29 @@ function compactRuleDuration(seconds) {
 
 function eventActionLabel(eventType) {
   if (!eventType) return "Event";
+  if (eventType === "alert_acknowledged") return "Alert Acknowledged";
+  if (eventType === "rule_completed") return "Rule Completed";
   return eventType
     .replaceAll("_", " ")
     .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function eventAuditSummary(event) {
+  const metadata = event?.metadata || {};
+  const parts = [];
+  if (metadata.acknowledged_by) {
+    parts.push(`Acknowledged by ${metadata.acknowledged_by}`);
+  }
+  if (metadata.acknowledged_at) {
+    parts.push(`at ${formatTime(metadata.acknowledged_at)}`);
+  }
+  if (metadata.completed_by) {
+    parts.push(`Completed by ${metadata.completed_by}`);
+  }
+  if (metadata.completed_at) {
+    parts.push(`at ${formatTime(metadata.completed_at)}`);
+  }
+  return parts.join(" · ");
 }
 
 function ruleConditionSummary(rule) {
@@ -487,6 +507,8 @@ export default function AssetDetail() {
   const [ruleActionMenuId, setRuleActionMenuId] = useState(null);
   const [lifecycleAction, setLifecycleAction] = useState(null);
   const [viewRule, setViewRule] = useState(null);
+  const [completionDetails, setCompletionDetails] = useState(null);
+  const [completionDetailsError, setCompletionDetailsError] = useState("");
   const [actionNotice, setActionNotice] = useState("");
   const [sortMenu, setSortMenu] = useState(false);
   const [modal, setModal] = useState(null);
@@ -1109,6 +1131,39 @@ const filteredEvents = [...events]
     if (status === "suspended") return "Suspended";
     if (status === "completed") return "Completed";
     return "Deactivated";
+  };
+
+  const openRuleDetails = async (rule) => {
+    setViewRule(rule);
+    setCompletionDetails(null);
+    setCompletionDetailsError("");
+
+    try {
+      const response = await api.get(`/events?rule_id=${rule.id}&limit=100`);
+      const ruleEvents = response.items || [];
+      const acknowledgement = ruleEvents.find(
+        (item) => item.event_type === "alert_acknowledged"
+      );
+      const completion = ruleEvents.find(
+        (item) => item.event_type === "rule_completed"
+      );
+      setCompletionDetails({
+        acknowledged_by:
+          completion?.metadata?.acknowledged_by ||
+          acknowledgement?.metadata?.acknowledged_by,
+        acknowledged_at:
+          completion?.metadata?.acknowledged_at ||
+          acknowledgement?.metadata?.acknowledged_at ||
+          acknowledgement?.occurred_at,
+        completed_by: completion?.metadata?.completed_by,
+        completed_at:
+          completion?.metadata?.completed_at || completion?.occurred_at,
+      });
+    } catch (error) {
+      setCompletionDetailsError(
+        error.message || "Could not load completion details."
+      );
+    }
   };
 
   const remove = async (rule) => {
@@ -1932,7 +1987,7 @@ const filteredEvents = [...events]
                               role="menuitem"
                               onClick={() => {
                                 setRuleActionMenuId(null);
-                                setViewRule(rule);
+                                openRuleDetails(rule);
                               }}
                             >
                               View rule
@@ -2024,6 +2079,22 @@ const filteredEvents = [...events]
                                   </button>
                                 </>
                               )}
+                            {lifecycleStatus(rule) === "completed" && (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setRuleActionMenuId(null);
+                                  permanentlyDeleteRule(rule);
+                                }}
+                                disabled={deletingRuleId !== null || !isAdministrator}
+                                title={!isAdministrator ? "Administrator access required for permanent deletion." : undefined}
+                              >
+                                {deletingRuleId === rule.id
+                                  ? "Deleting…"
+                                  : "Delete permanently"}
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -2243,7 +2314,9 @@ const filteredEvents = [...events]
                 ? new Date(event.time || event.occurred_at).toLocaleString()
                 : "",
               eventActionLabel(event.event_type),
-              event.text || event.message || "",
+              [event.text || event.message || "", eventAuditSummary(event)]
+                .filter(Boolean)
+                .join(" · "),
               event.asset_name ||
                 (event.asset_id != null ? `Asset ${event.asset_id}` : "System"),
               event.rule_name ||
@@ -2370,6 +2443,9 @@ const filteredEvents = [...events]
                   <td>
                     <strong>{eventActionLabel(event.event_type)}</strong>
                     <div>{event.text || event.message || "—"}</div>
+                    {eventAuditSummary(event) && (
+                      <small className="muted">{eventAuditSummary(event)}</small>
+                    )}
                   </td>
 
                   <td>
@@ -2443,6 +2519,39 @@ const filteredEvents = [...events]
           <strong>Event details:</strong>{" "}
           {selectedEvent.text || selectedEvent.message || "—"}
         </p>
+        {selectedEvent.metadata?.acknowledged_by && (
+          <>
+            <p>
+              <strong>Acknowledged by:</strong>{" "}
+              {selectedEvent.metadata.acknowledged_by}
+            </p>
+            <p>
+              <strong>Acknowledged at:</strong>{" "}
+              {selectedEvent.metadata.acknowledged_at
+                ? formatTime(selectedEvent.metadata.acknowledged_at)
+                : (selectedEvent.time || selectedEvent.occurred_at)
+                  ? formatTime(selectedEvent.time || selectedEvent.occurred_at)
+                  : "—"}
+            </p>
+          </>
+        )}
+        {selectedEvent.metadata?.completed_by && (
+          <>
+            <p>
+              <strong>Completed by:</strong>{" "}
+              {selectedEvent.metadata.completed_by}
+            </p>
+            <p>
+              <strong>Completed at:</strong>{" "}
+              {selectedEvent.metadata.completed_at
+                ? formatTime(selectedEvent.metadata.completed_at)
+                : (selectedEvent.time || selectedEvent.occurred_at)
+                  ? formatTime(selectedEvent.time || selectedEvent.occurred_at)
+                  : "—"}
+            </p>
+            <p><strong>Result:</strong> Rule successfully completed.</p>
+          </>
+        )}
 
         <p>
           <strong>Asset:</strong>{" "}
@@ -2613,7 +2722,11 @@ const filteredEvents = [...events]
 {viewRule && (
   <Modal
     title={viewRule.name || "Monitoring rule"}
-    onClose={() => setViewRule(null)}
+    onClose={() => {
+      setViewRule(null);
+      setCompletionDetails(null);
+      setCompletionDetailsError("");
+    }}
     wide
   >
     <dl className="rule-detail-grid">
@@ -2674,9 +2787,61 @@ const filteredEvents = [...events]
           <dd>{viewRule.evaluation_message}</dd>
         </div>
       )}
+      {completionDetailsError ? (
+        <div>
+          <dt>Action history</dt>
+          <dd className="error-message">{completionDetailsError}</dd>
+        </div>
+      ) : completionDetails === null ? (
+        <div>
+          <dt>Action history</dt>
+          <dd>Loading acknowledgement and completion details…</dd>
+        </div>
+      ) : (
+        <>
+          {completionDetails.acknowledged_by && (
+            <>
+              <div>
+                <dt>Acknowledged by</dt>
+                <dd>{completionDetails.acknowledged_by}</dd>
+              </div>
+              <div>
+                <dt>Acknowledged at</dt>
+                <dd>{completionDetails.acknowledged_at
+                  ? formatTime(completionDetails.acknowledged_at)
+                  : "—"}</dd>
+              </div>
+            </>
+          )}
+          {lifecycleStatus(viewRule) === "completed" && (
+            <>
+              <div>
+                <dt>Completion</dt>
+                <dd>Rule successfully completed and deactivated.</dd>
+              </div>
+              <div>
+                <dt>Completed by</dt>
+                <dd>{completionDetails.completed_by || "—"}</dd>
+              </div>
+              <div>
+                <dt>Completed at</dt>
+                <dd>{completionDetails.completed_at
+                  ? formatTime(completionDetails.completed_at)
+                  : viewRule.completed_at
+                    ? formatTime(viewRule.completed_at)
+                    : "—"}</dd>
+              </div>
+            </>
+          )}
+        </>
+      )}
     </dl>
     <div className="modal-actions">
-      <button type="button" className="btn-primary" onClick={() => setViewRule(null)}>
+      <button type="button" className="btn-primary" onClick={() => {
+        setViewRule(null);
+        setCompletionDetails(null);
+        setCompletionDetailsError("");
+      }}>
         Close
       </button>
     </div>

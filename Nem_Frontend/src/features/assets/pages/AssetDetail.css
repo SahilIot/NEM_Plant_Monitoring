@@ -484,6 +484,11 @@
 }
 
 @container asset-detail (max-width: 700px) {
+  .asset-page .rule-toolbar > .dropdown:last-child > .menu.right {
+    right: auto;
+    left: 0;
+  }
+
   .asset-page .rule-card.rule-row {
     height: 96px;
     grid-template-columns: 5px minmax(0, .8fr) minmax(0, 1.2fr) auto;

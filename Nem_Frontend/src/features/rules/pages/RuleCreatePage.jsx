@@ -31,7 +31,7 @@ export default function RuleCreatePage() {
   const canManageRules = ["Administrator", "Supervisor"].includes(user?.role);
   const { id, kind } = useParams();
   const navigate = useNavigate();
-  const { assets = [], refreshStatus } = useOutletContext() || {};
+  const { assets = [] } = useOutletContext() || {};
   const assetId = Number(id);
   const asset = assets.find((item) => Number(item.id) === assetId);
   const isUsage = kind === "usage";
@@ -47,36 +47,67 @@ export default function RuleCreatePage() {
 
   useEffect(() => {
     let active = true;
-    api.getAll(`/assets/${assetId}/variables?is_active=true`)
-      .then((items) => {
+    async function loadRuleInputs() {
+      try {
+        const [items, plcStatus] = await Promise.all([
+          api.getAll(`/assets/${assetId}/variables?is_active=true`),
+          canManageRules ? api.get("/plc/status") : Promise.resolve(null),
+        ]);
         if (!active) return;
-       const activeVariables = (Array.isArray(items) ? items : [])
-  .filter((item) => item.is_active !== false);
 
-setVariables(activeVariables);
+        const activeVariables = (Array.isArray(items) ? items : [])
+          .filter((item) => item.is_active !== false);
+        const mappings = Array.isArray(plcStatus?.mappings)
+          ? plcStatus.mappings
+          : [];
+        const validBooleanMappings = mappings.filter(
+          (mapping) =>
+            Number(mapping.asset_id) === assetId &&
+            mapping.mapping_valid &&
+            mapping.data_type === "boolean"
+        );
 
-if (activeVariables.length) {
-  setValues((current) => ({
-    ...current,
-    variable_id: String(activeVariables[0].id),
-  }));
-}
-      })
-      .catch((requestError) => {
+        setVariables(activeVariables);
+        setCycleVariableIds(
+          validBooleanMappings
+            .filter((mapping) => mapping.role === "cycle_signal")
+            .map((mapping) => Number(mapping.variable_id))
+        );
+        setRuntimeVariableIds(
+          validBooleanMappings
+            .filter((mapping) => mapping.role === "running_signal")
+            .map((mapping) => Number(mapping.variable_id))
+        );
+        const cycleVariableId = validBooleanMappings.find(
+          (mapping) => mapping.role === "cycle_signal"
+        )?.variable_id;
+        const runtimeVariableId = validBooleanMappings.find(
+          (mapping) => mapping.role === "running_signal"
+        )?.variable_id;
+        setValues((current) => ({
+          ...current,
+          cycle_variable_id:
+            current.cycle_variable_id || (cycleVariableId != null ? String(cycleVariableId) : ""),
+          runtime_variable_id:
+            current.runtime_variable_id || (runtimeVariableId != null ? String(runtimeVariableId) : ""),
+        }));
+      } catch (requestError) {
         if (active) {
           setError(
             requestError.message ||
-              "Could not load this asset's Boolean OPC UA variables."
+              "Could not load this asset's rule variables and PLC mappings."
           );
         }
-      })
-      .finally(() => {
+      } finally {
         if (active) setLoading(false);
-      });
+      }
+    }
+
+    loadRuleInputs();
     return () => {
       active = false;
     };
-  }, [assetId]);
+  }, [assetId, canManageRules]);
 
   const goBack = () =>
     navigate(`/assets/${id}`, { state: { activeTab: "status" } });
@@ -114,70 +145,27 @@ if (activeVariables.length) {
 
     setSaving(true);
     try {
-      const name = values.name.trim();
-      const description = values.description.trim();
-      if (kind === "interval") {
-        if (!values.schedule_start_date || !values.first_due_date) {
-          throw new Error("Enter both the schedule start date and first due date.");
+      const rule = buildAssetMonitoringRule(
+        {
+          ...values,
+          rule_type: isUsage
+            ? "boolean_count_threshold"
+            : "runtime_duration",
+        },
+        assetId,
+        {
+          variables,
+          cycleVariableIds,
+          runtimeVariableIds,
         }
-        if (values.first_due_date < values.schedule_start_date) {
-          throw new Error("The first due date must not precede the schedule start date.");
-        }
-        let recurrenceInterval = null;
-        let recurrenceUnit = null;
-        if (values.recurrence_enabled) {
-          recurrenceInterval = Number(values.recurrence_interval);
-          recurrenceUnit = values.recurrence_unit;
-          if (!Number.isInteger(recurrenceInterval) || recurrenceInterval < 1 || recurrenceInterval > 3650) {
-            throw new Error("Recurrence interval must be a whole number from 1 to 3650.");
-          }
-        }
-        await api.post("/maintenance/schedules", {
-          asset_id: assetId,
-          title: name,
-          description: description || null,
-          maintenance_type: "preventive",
-          priority: "medium",
-          schedule_start_date: values.schedule_start_date,
-          first_due_date: values.first_due_date,
-          recurrence_enabled: values.recurrence_enabled,
-          recurrence_interval: recurrenceInterval,
-          recurrence_unit: recurrenceUnit,
-        });
-        await completeCreation("Recurring maintenance schedule created. View due dates in the asset maintenance logbook.");
-      } else if (kind === "usage") {
-  const usageLimit = Number(values.usage_limit);
-
-  const selectedVariable = variables.find(
-    (item) => String(item.id) === values.variable_id
-  );
-
-  if (!selectedVariable) {
-    throw new Error("Select an active variable.");
-  }
-
-  if (!["number", "integer"].includes(selectedVariable.data_type)) {
-    throw new Error(
-      "Usage threshold rules currently support numeric variables only."
-    );
-  }
-
-  if (!Number.isFinite(usageLimit) || usageLimit <= 0) {
-    throw new Error("Enter a valid positive usage threshold.");
-  }
-
-  await api.post(`/assets/${assetId}/rules/usage`, {
-    name,
-    description: description || null,
-    variable_id: Number(values.variable_id),
-    usage_limit: usageLimit,
-    severity: values.severity,
-  });
-
-  await completeCreation("Usage threshold rule created and activated.");
-      } else {
-        throw new Error("Unknown workflow type.");
-      }
+      );
+      await api.post(`/assets/${assetId}/rules`, rule);
+      navigate(`/assets/${assetId}`, {
+        state: {
+          activeTab: "status",
+          createdNotice: `Rule "${rule.name}" created successfully.`,
+        },
+      });
     } catch (requestError) {
       setError(requestError.message || "Could not create the monitoring rule.");
     } finally {
@@ -347,31 +335,45 @@ if (activeVariables.length) {
               ) : (
                 <>
                   <div className="form-group">
-  <label htmlFor="variable-id">Add a variable *</label>
+  <label htmlFor="variable-id">Boolean running signal *</label>
 
   <select
     id="variable-id"
-    name="variable_id"
-    value={values.variable_id}
+    name="runtime_variable_id"
+    value={values.runtime_variable_id}
     onChange={updateField}
     required
-    disabled={saving || !canManageRules || !variables.length}
+    disabled={saving || !canManageRules || !runtimeVariableOptions.length}
   >
-    <option value="">Select a variable</option>
+    <option value="">Select the machine running signal</option>
 
-    {variables.map((variable) => (
+    {runtimeVariableOptions.map((variable) => (
       <option key={variable.id} value={String(variable.id)}>
         {variable.name}
-        {variable.unit ? ` (${variable.unit})` : ""}
-        {variable.data_type ? ` — ${variable.data_type}` : ""}
       </option>
     ))}
   </select>
 
-  {!variables.length && (
-    <small>No active variables are available on this asset.</small>
+  {!runtimeVariableOptions.length && (
+    <small>
+      No running signal is configured. In the asset's Variables panel, set a Boolean variable's purpose to Machine running state.
+    </small>
   )}
 </div>
+                  {isScheduled && (
+                    <div className="form-group">
+                      <label htmlFor="activation-at">Activate on *</label>
+                      <input
+                        id="activation-at"
+                        name="activation_at"
+                        type="datetime-local"
+                        value={values.activation_at}
+                        onChange={updateField}
+                        required
+                        disabled={saving || !canManageRules}
+                      />
+                    </div>
+                  )}
                   <div className="form-group">
                     <label htmlFor="runtime-warning">Warning after running (hours) *</label>
                     <input

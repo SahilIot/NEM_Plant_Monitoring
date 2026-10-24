@@ -1,5 +1,5 @@
 from app.models.asset import Asset
-from app.models.auth import AuthSession, User, UserAssetAssignment
+from app.models.auth import AuthSession, User
 from app.models.maintenance import MaintenanceRecord, MaintenanceSchedule
 from app.models.machine_monitoring import MachineMonitoringState, RuleCounterState
 from app.models.frontend_data import (
@@ -21,7 +21,7 @@ from app.models.rule import (
 from app.models.variable import Variable
 
 __all__ = [
-    "User", "AuthSession", "UserAssetAssignment",
+    "User", "AuthSession",
     "Asset", "Variable", "Reading", "MonitoringRule", "MonitoringRuleTemplate", "RuleState", "MaintenanceRecord",
     "MaintenanceSchedule",
     "Alert", "MonitoringEvent", "SchedulerLease",

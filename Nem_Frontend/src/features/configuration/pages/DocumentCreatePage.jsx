@@ -15,7 +15,8 @@ const DOC_TYPES = [
 
 export default function DocumentCreatePage() {
   const { user } = useAuth();
-  const canManageDocuments = user?.role === "Administrator";
+  const canManageDocuments =
+    user?.role === "Administrator" || user?.role === "Supervisor";
   const nav = useNavigate();
 
   const [title, setTitle] = useState("");
@@ -141,7 +142,7 @@ export default function DocumentCreatePage() {
           <form onSubmit={submit}>
             {!canManageDocuments && (
               <p className="notice" role="status">
-                Document management is restricted to Administrators.
+                Only Administrators and Supervisors can create documents.
               </p>
             )}
             <fieldset
@@ -300,7 +301,7 @@ export default function DocumentCreatePage() {
                   type="submit"
                   className="btn-primary"
                   disabled={busy || !canManageDocuments}
-                  title={!canManageDocuments ? "Only Administrators can create documents." : undefined}
+                  title={!canManageDocuments ? "Only Administrators and Supervisors can create documents." : undefined}
                 >
                   {busy ? "Saving..." : "Create document"}
                 </button>

@@ -6,13 +6,10 @@ export default function AdminUsersPage() {
   const { user } = useAuth();
   const canManageUsers = user?.role === "Administrator";
   const [users, setUsers] = useState([]);
-  const [assets, setAssets] = useState([]);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("Supervisor");
-  const [assetIds, setAssetIds] = useState([]);
   const [selectedUserId, setSelectedUserId] = useState("");
-  const [assignedAssetIds, setAssignedAssetIds] = useState([]);
   const [selectedRole, setSelectedRole] = useState("Supervisor");
   const [selectedActive, setSelectedActive] = useState(true);
   const [resetPassword, setResetPassword] = useState("");
@@ -21,17 +18,12 @@ export default function AdminUsersPage() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const [loadedUsers, loadedAssets] = await Promise.all([
-      api.get("/auth/users"),
-      api.getAll("/assets"),
-    ]);
-    setUsers(loadedUsers);
-    setAssets(loadedAssets);
+    setUsers(await api.get("/auth/users"));
   }, []);
 
   useEffect(() => {
     if (!canManageUsers) {
-      setError("You do not have permission to manage user accounts or machine access.");
+      setError("You do not have permission to manage user accounts.");
       return undefined;
     }
     load().catch((loadError) => setError(loadError.message || "Could not load user accounts."));
@@ -40,18 +32,10 @@ export default function AdminUsersPage() {
 
   useEffect(() => {
     const selected = users.find((user) => String(user.id) === selectedUserId);
-    setAssignedAssetIds(selected?.asset_ids || []);
     setSelectedRole(selected?.role || "Supervisor");
     setSelectedActive(selected?.is_active ?? true);
     setResetPassword("");
   }, [selectedUserId, users]);
-
-  const toggle = (value, list, update) => {
-    const id = Number(value);
-    update((current) => current.includes(id)
-      ? current.filter((item) => item !== id)
-      : [...current, id]);
-  };
 
   const createUser = async (event) => {
     event.preventDefault();
@@ -63,34 +47,14 @@ export default function AdminUsersPage() {
         username,
         password,
         role,
-        asset_ids: role === "Administrator" ? [] : assetIds,
       });
       setUsername("");
       setPassword("");
       setRole("Supervisor");
-      setAssetIds([]);
       setMessage("User account created.");
       await load();
     } catch (createError) {
       setError(createError.message || "Could not create the user account.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const saveAssignments = async () => {
-    if (!selectedUserId) return;
-    setBusy(true);
-    setError("");
-    setMessage("");
-    try {
-      const updated = await api.put(`/auth/users/${selectedUserId}/assets`, {
-        asset_ids: assignedAssetIds,
-      });
-      setUsers((current) => current.map((user) => user.id === updated.id ? updated : user));
-      setMessage("Machine access updated.");
-    } catch (saveError) {
-      setError(saveError.message || "Could not update machine access.");
     } finally {
       setBusy(false);
     }
@@ -120,7 +84,7 @@ export default function AdminUsersPage() {
       <div className="page-head">
         <div>
           <h1 className="page-title">User access</h1>
-          <p className="muted">Create local accounts and assign machine access.</p>
+          <p className="muted">Create local accounts and manage roles. All roles can view all machines.</p>
         </div>
       </div>
       {error && <p className="notice error" role="alert">{error}</p>}
@@ -142,23 +106,6 @@ export default function AdminUsersPage() {
               <option>Administrator</option>
             </select>
           </label>
-          {role !== "Administrator" && (
-            <fieldset className="auth-asset-list">
-              <legend>Assigned machines</legend>
-              {assets.map((asset) => (
-                <label key={asset.id}>
-                  <input
-                    type="checkbox"
-                    checked={assetIds.includes(asset.id)}
-                    onChange={() => toggle(asset.id, assetIds, setAssetIds)}
-                    disabled={busy || !canManageUsers}
-                    title={!canManageUsers ? "Administrator access required" : undefined}
-                  />
-                  {asset.name}
-                </label>
-              ))}
-            </fieldset>
-          )}
           <button type="submit" className="btn-primary" disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined}>{busy ? "Creating…" : "Create account"}</button>
         </form>
       </section>
@@ -168,14 +115,13 @@ export default function AdminUsersPage() {
         {users.length ? (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Machine access</th></tr></thead>
+              <thead><tr><th>Username</th><th>Role</th><th>Status</th></tr></thead>
               <tbody>
                 {users.map((user) => (
                   <tr key={user.id}>
                     <td>{user.username}</td>
                     <td>{user.role}</td>
                     <td>{user.is_active ? "Active" : "Disabled"}</td>
-                    <td>{user.role === "Administrator" ? "All machines" : user.asset_ids.map((id) => assets.find((asset) => asset.id === id)?.name || `Asset ${id}`).join(", ") || "None"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -185,7 +131,7 @@ export default function AdminUsersPage() {
       </section>
 
       <section className="panel">
-        <h2>Update account and machine access</h2>
+        <h2>Update account</h2>
         <label className="field">User
           <select value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined}>
             <option value="">Choose a user</option>
@@ -216,28 +162,6 @@ export default function AdminUsersPage() {
                 {busy ? "Saving…" : "Save account settings"}
               </button>
             </div>
-            {selectedRole !== "Administrator" && (
-              <>
-                <fieldset className="auth-asset-list">
-                  <legend>Machines this user can access</legend>
-                  {assets.map((asset) => (
-                    <label key={asset.id}>
-                      <input
-                        type="checkbox"
-                        checked={assignedAssetIds.includes(asset.id)}
-                        onChange={() => toggle(asset.id, assignedAssetIds, setAssignedAssetIds)}
-                        disabled={busy || !canManageUsers}
-                        title={!canManageUsers ? "Administrator access required" : undefined}
-                      />
-                      {asset.name}
-                    </label>
-                  ))}
-                </fieldset>
-                <button type="button" className="btn-primary" onClick={saveAssignments} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined}>
-                  {busy ? "Saving…" : "Save machine access"}
-                </button>
-              </>
-            )}
           </>
         )}
       </section>

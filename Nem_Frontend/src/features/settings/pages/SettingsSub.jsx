@@ -1,4 +1,3 @@
-import React from "react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../../../services/api.js";
@@ -27,74 +26,40 @@ const FORMS = {
 };
 
 
-const FIELDS = [
-  ["name", "Name", true],
-  ["role", "Role", false],
-  ["email", "Email", true],
-  ["phone", "Phone", true],
-];
-
 function UserInfo() {
-  const [u, setU] = useState(null);
-  const [draft, setDraft] = useState(null); // null = view mode, object = edit mode
+  const { user, refreshUser } = useAuth();
   const [err, setErr] = useState("");
-  const [saveErr, setSaveErr] = useState("");
-  const [msg, setMsg] = useState("");
-  useEffect(() => { api.get("/me").then(setU).catch((e) => setErr(String(e.message || e))); }, []);
+  useEffect(() => {
+    let active = true;
+    refreshUser().catch((e) => {
+      if (active) setErr(String(e.message || e));
+    });
+    return () => { active = false; };
+  }, [refreshUser]);
   if (err) return <div className="panel"><p className="notice error flush" role="alert">Could not load the profile: {err}</p></div>;
-  if (!u) return <div className="loading">LoadingÃ¢â‚¬Â¦</div>;
+  if (!user) return <div className="loading">LoadingÃ¢â‚¬Â¦</div>;
 
-  const startEdit = () => { setDraft({ name: u.name || "", email: u.email || "", phone: u.phone || "" }); setSaveErr(""); setMsg(""); };
-  const cancel = () => { setDraft(null); setSaveErr(""); };
-  const save = async () => {
-    if (!draft.name.trim()) return setSaveErr("Name cannot be empty.");
-    if (draft.email && !draft.email.includes("@")) return setSaveErr("Please enter a valid email.");
-    try {
-      const saved = await api.put("/me", draft);
-      setU(saved); setDraft(null); setSaveErr(""); setMsg("Profile saved.");
-    } catch (e) {
-      setSaveErr("Could not save: " + String(e.message || e));
-    }
-  };
-
-  const editing = draft !== null;
+  const displayName = user.username || "—";
+  const role = user.role || "—";
   return (
     <div className="panel-white profile">
       <div className="profile-head">
-        <div className="avatar">{(u.name || "?").charAt(0).toUpperCase()}</div>
+        <div className="avatar">{displayName.charAt(0).toUpperCase()}</div>
         <div className="profile-who">
-          <div className="profile-name">{u.name}</div>
-          <span className="badge role">{u.role}</span>
+          <div className="profile-name">{displayName}</div>
+          <span className="badge role">{role}</span>
         </div>
-        {!editing && <button className="btn-outline profile-edit" onClick={startEdit}>Edit profile</button>}
       </div>
 
       <dl className="profile-list">
-        {FIELDS.map(([k, label, canEdit]) => (
-          <React.Fragment key={k}>
-            <dt>{label}</dt>
-            <dd>
-              {editing && canEdit ? (
-                <input value={draft[k]} onChange={(e) => setDraft({ ...draft, [k]: e.target.value })} />
-              ) : k === "email" && u.email ? (
-                <a href={`mailto:${u.email}`}>{u.email}</a>
-              ) : (
-                u[k] || <span className="muted">-</span>
-              )}
-            </dd>
-          </React.Fragment>
-        ))}
+        <dt>Name</dt>
+        <dd>{displayName}</dd>
+        <dt>Role</dt>
+        <dd>{role}</dd>
+        <dt>Account status</dt>
+        <dd>{user.is_active ? "Active" : "Disabled"}</dd>
       </dl>
-
-      {editing && (
-        <div className="profile-actions">
-          <button className="btn-primary" onClick={save}>Save</button>
-          <button className="btn-outline" onClick={cancel}>Cancel</button>
-        </div>
-      )}
-      {editing && <p className="hint">Role is set by your login / administrator and cannot be changed here.</p>}
-      {saveErr && <p className="notice error">{saveErr}</p>}
-      {msg && !editing && <p className="notice">{msg}</p>}
+      <p className="hint">Your name and role are taken from your signed-in account. An Administrator can update your role.</p>
     </div>
   );
 }

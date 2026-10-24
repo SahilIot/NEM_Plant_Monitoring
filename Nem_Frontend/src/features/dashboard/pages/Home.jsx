@@ -187,14 +187,14 @@ export default function Home() {
     [alerts]
   );
 
-  const acknowledgeAlert = async () => {
+  const finishAlertAction = async (action) => {
     if (!alertToAcknowledge || busyId !== null) return;
     const alert = alertToAcknowledge;
     setBusyId(alert.id);
     setAckError("");
 
     try {
-      await api.post(`/alerts/${alert.id}/acknowledge`);
+      await api.post(`/alerts/${alert.id}/${action}`);
 
       await Promise.all([
         loadSummary(),
@@ -204,12 +204,17 @@ export default function Home() {
       setAlertToAcknowledge(null);
     } catch (err) {
       setAckError(
-        err.message || "Unable to acknowledge this alert."
+        err.message || (action === "complete"
+          ? "Unable to complete this rule."
+          : "Unable to acknowledge this alert.")
       );
     } finally {
       setBusyId(null);
     }
   };
+
+  const acknowledgeAlert = () => finishAlertAction("acknowledge");
+  const completeAlert = () => finishAlertAction("complete");
 
   if (!summary && error) {
     return (
@@ -347,7 +352,7 @@ export default function Home() {
 
             {ackError && (
               <p className="notice error" role="alert">
-                Could not acknowledge this alert: {ackError}
+                Could not update this alert: {ackError}
               </p>
             )}
 
@@ -439,7 +444,19 @@ export default function Home() {
                             : ""}
                         </span>
                       )}
-                      {!alert.acknowledged_at && (
+                      {alert.acknowledged_at && alert.rule_id ? (
+                        <button
+                          type="button"
+                          className="btn-outline"
+                          disabled={busyId === alert.id}
+                          onClick={() => {
+                            setAckError("");
+                            setAlertToAcknowledge(alert);
+                          }}
+                        >
+                          {busyId === alert.id ? "Saving…" : "Complete"}
+                        </button>
+                      ) : !alert.acknowledged_at ? (
                         <button
                           type="button"
                           className="btn-outline"
@@ -451,7 +468,7 @@ export default function Home() {
                         >
                           {busyId === alert.id ? "Saving…" : "Acknowledge"}
                         </button>
-                      )}
+                      ) : null}
                     </div>
                   </li>
                 ))}
@@ -508,14 +525,15 @@ export default function Home() {
       </div>
       {alertToAcknowledge && (
         <Modal
-          title="Confirm acknowledgement"
+          title="Confirm alert action"
           onClose={() => {
             if (busyId === null) setAlertToAcknowledge(null);
           }}
         >
           <p>
-            Acknowledge that you have seen this alert. This will not resolve
-            the alert or deactivate its monitoring rule.
+            {alertToAcknowledge.rule_id
+              ? "Is the condition resolved and ready for this rule to be completed? Choose “No” to record your acknowledgement while keeping the alert active. Cancel makes no changes."
+              : "Acknowledge that you have seen this maintenance alert. Resolve it through maintenance management when the scheduled work is complete. Cancel makes no changes."}
           </p>
           {ackError && (
             <p className="notice error" role="alert">{ackError}</p>
@@ -529,16 +547,30 @@ export default function Home() {
             >
               Cancel
             </button>
-            <button
-              type="button"
-              className="btn-primary"
-              disabled={busyId !== null}
-              onClick={acknowledgeAlert}
-            >
-              {busyId === alertToAcknowledge.id
-                ? "Saving…"
-                : "Yes, acknowledge alert"}
-            </button>
+            {!alertToAcknowledge.acknowledged_at && (
+              <button
+                type="button"
+                className="btn-outline"
+                disabled={busyId !== null}
+                onClick={acknowledgeAlert}
+              >
+                {busyId === alertToAcknowledge.id
+                  ? "Saving…"
+                  : "No, acknowledge only"}
+              </button>
+            )}
+            {alertToAcknowledge.rule_id && (
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={busyId !== null}
+                onClick={completeAlert}
+              >
+                {busyId === alertToAcknowledge.id
+                  ? "Saving…"
+                  : "Yes, complete rule"}
+              </button>
+            )}
           </div>
         </Modal>
       )}
