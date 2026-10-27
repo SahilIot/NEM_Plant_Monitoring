@@ -504,10 +504,17 @@ function AssignmentModal({ template, onClose, onComplete }) {
 
 export default function RuleLibrary() {
   const { user } = useAuth();
-  const isAdministrator = user?.role === "Administrator";
-  const canCreateRules = isAdministrator || user?.role === "Supervisor";
-  const canEditRules = isAdministrator || user?.role === "Supervisor";
-  const canAssignRules = isAdministrator || user?.role === "Supervisor";
+ const isAdministrator = user?.role === "Administrator";
+ const isSupervisor = user?.role === "Supervisor";
+ const isOperator = user?.role === "Operator";
+
+ const isRestrictedEditor = isSupervisor || isOperator;
+
+ const canCreateRules = isAdministrator;
+ const canEditRules =
+ isAdministrator || isSupervisor || isOperator;
+ const canAssignRules = isAdministrator || isSupervisor;
+
   const confirm = useConfirmation();
   const navigate = useNavigate();
   const location = useLocation();
@@ -525,17 +532,20 @@ export default function RuleLibrary() {
     setTemplates(Array.isArray(result) ? result : []);
   };
 
-  useEffect(() => {
+
+useEffect(() => {
   if (location.state?.openCreate) {
-    setEditing(null);
-    setModalOpen(true);
+    if (canCreateRules) {
+      setEditing(null);
+      setModalOpen(true);
+    }
 
     navigate(location.pathname, {
       replace: true,
       state: {},
     });
   }
-}, [location.pathname, location.state, navigate]);
+}, [location.pathname, location.state, navigate, canCreateRules]);
 
   useEffect(() => {
     let alive = true;
@@ -557,19 +567,54 @@ export default function RuleLibrary() {
 
   const save = async (values) => {
     if (editing ? !canEditRules : !canCreateRules) return;
-    const payload = {
+    let payload;
+    
+    if (editing && isRestrictedEditor) {
+      if (
+        !supportsCurrentRuleEditor(editing) ||
+        editing.rule_type !== "parameter_threshold" ||
+        editing.threshold == null
+      ) {
+        throw new Error(
+          "Only the threshold of a numeric parameter rule can be edited with your role."
+        );
+      }
+      const newThreshold = Number(values.threshold);
+      if (!Number.isFinite(newThreshold)) {
+        throw new Error("Please enter a valid threshold.");
+      }
+      payload = {
+        ...templatePayload({
+        ...initialTemplate(editing),
+        threshold: String(newThreshold),
+      }),
+      ...editing,
+      threshold: newThreshold,
+    };
+  } else {
+    payload = {
       ...(editing && !supportsCurrentRuleEditor(editing)
-        ? legacyTemplatePayload(values, editing)
-        : templatePayload(values)),
+      ? legacyTemplatePayload(values, editing)
+      : templatePayload(values)),
       collection_id: editing?.collection_id ?? null,
     };
-    if (editing) await api.put(`/rule-templates/${editing.id}`, payload);
-    else await api.post("/rule-templates", payload);
-    setModalOpen(false);
-    setEditing(null);
-    setMessage({ text: `Rule ${editing ? "updated" : "created"} successfully.`, error: false });
-    await load();
-  };
+  }
+  
+  if (editing) {
+    await api.put(`/rule-templates/${editing.id}`, payload);
+  } else {
+    await api.post("/rule-templates", payload);
+  }
+  
+  setModalOpen(false);
+  setEditing(null);
+  setMessage({
+    text: `Rule ${editing ? "updated" : "created"} successfully.`,
+    error: false,
+  });
+  await load();
+};
+
 
   const remove = async (template) => {
     if (
@@ -603,7 +648,7 @@ export default function RuleLibrary() {
           <h1 className="page-title">Monitoring Rule Library</h1>
           <p className="muted">Create reusable monitoring rules, then assign them to assets. Assigned rules start inactive.</p>
         </div>
-        <button className="btn-primary" onClick={() => { setEditing(null); setModalOpen(true); }} disabled={!canCreateRules} title={!canCreateRules ? "Only Administrators and Supervisors can create reusable rules." : undefined}><Plus size={17} /> New rule</button>
+        <button type="button"className="btn-primary"disabled={isSupervisor || !canCreateRules}title={isSupervisor? "Supervisors cannot create monitoring rules": "Create new rule"}onClick={() => {if (isSupervisor || !canCreateRules) return;setEditing(null);setModalOpen(true);}}><Plus size={17} />New rule</button>
       </div>
 
       {message.text && <p className={"notice" + (message.error ? " error" : "")} role={message.error ? "alert" : "status"}>{message.text}</p>}
@@ -649,9 +694,22 @@ export default function RuleLibrary() {
         }
         fields={
           editing && !supportsCurrentRuleEditor(editing)
-            ? LEGACY_EDIT_FIELDS
-            : FIELDS
-        }
+          ? (
+            isRestrictedEditor
+            ? LEGACY_EDIT_FIELDS.map((field) => ({
+            ...field,
+            disabled: true,
+          }))
+          : LEGACY_EDIT_FIELDS
+        ): (
+          editing && isRestrictedEditor
+          ? FIELDS.map((field) => ({
+            ...field,
+            disabled: field.key !== "threshold",
+          }))
+          : FIELDS
+        )
+      }
         initialValues={initialTemplate(editing)}
         submitLabel={editing ? "Save rule" : "Create rule"}
         onSubmit={save}

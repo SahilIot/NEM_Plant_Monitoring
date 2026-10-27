@@ -469,7 +469,8 @@ export default function AssetDetail() {
   const confirm = useConfirmation();
   const { user } = useAuth();
   const isAdministrator = user?.role === "Administrator";
-  const canManageRules = isAdministrator || user?.role === "Supervisor";
+  const isSupervisor = user?.role === "Supervisor";
+  const canManageRules = isAdministrator || isSupervisor;
   const canManageLogbook = canManageRules;
   const { id } = useParams();
   const location = useLocation();
@@ -1246,7 +1247,7 @@ const filteredEvents = [...events]
   };
 
   const addRule = async (values) => {
-    if (!canManageRules) return;
+    if (isSupervisor || !canManageRules) return;
     const rule = buildAssetMonitoringRule(values, assetId, {
       variables: availableVariables,
       cycleVariableIds,
@@ -1575,9 +1576,18 @@ const filteredEvents = [...events]
           </button>
 
           <button
+            type="button"
             className="link-btn"
-            onClick={() => setModal("variables")}
-            title="View configured variables; only Administrators can change them."
+            disabled={isSupervisor}
+            title={
+              isSupervisor
+                ? "Supervisors cannot manage variables."
+                : "View configured variables; only Administrators can change them."
+            }
+            onClick={() => {
+              if (isSupervisor) return;
+              setModal("variables");
+            }}
           >
             <AssetIcon size={17} /> Variables
           </button>
@@ -1725,13 +1735,23 @@ const filteredEvents = [...events]
               )}
             </div>
             <button
-            className="btn-primary"
-            onClick={() => setModal("addRuleOptions")}
-            disabled={!canManageRules}
-            title={!canManageRules ? "You do not have permission to manage monitoring rules." : undefined}
+              type="button"
+              className="btn-primary"
+              disabled={isSupervisor || !canManageRules}
+              title={
+                isSupervisor
+                  ? "Supervisors cannot add monitoring rules."
+                  : !canManageRules
+                    ? "You do not have permission to manage monitoring rules."
+                    : "Add rule"
+              }
+              onClick={() => {
+                if (isSupervisor || !canManageRules) return;
+                setModal("addRuleOptions");
+              }}
             >
               <PlusCircle size={17} /> Add Rule
-              </button>
+            </button>
 
             <div className="dropdown" data-menu-open={menu}>
               <button

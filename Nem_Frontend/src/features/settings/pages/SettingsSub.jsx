@@ -51,15 +51,27 @@ function UserInfo() {
         </div>
       </div>
 
-      <dl className="profile-list">
-        <dt>Name</dt>
-        <dd>{displayName}</dd>
-        <dt>Role</dt>
-        <dd>{role}</dd>
-        <dt>Account status</dt>
-        <dd>{user.is_active ? "Active" : "Disabled"}</dd>
-      </dl>
-      <p className="hint">Your name and role are taken from your signed-in account. An Administrator can update your role.</p>
+    <dl className="profile-list">
+  <dt>Name</dt>
+  <dd>{displayName}</dd>
+
+  <dt>Role</dt>
+  <dd>{role}</dd>
+
+  <dt>Account status</dt>
+  <dd>{user.is_active ? "Active" : "Disabled"}</dd>
+
+  <dt>Contact number</dt>
+  <dd>{user?.contact_number || "Not provided"}</dd>
+
+  <dt>Email address</dt>
+  <dd>{user?.email || "Not provided"}</dd>
+</dl>
+
+<p className="hint">
+  Your name and role are taken from your signed-in account.
+  An Administrator can update your role.
+</p>
     </div>
   );
 }
