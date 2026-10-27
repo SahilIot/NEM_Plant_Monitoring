@@ -38,6 +38,7 @@ export default function CurrentMaintenanceCards({
   const [error, setError] = useState("");
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [editingRecordId, setEditingRecordId] = useState(null);
+  const busy = startingRecordId !== null || completingRecordId !== null;
 
   const openEdit = (record) => {
     if (!canManageMaintenance) return;

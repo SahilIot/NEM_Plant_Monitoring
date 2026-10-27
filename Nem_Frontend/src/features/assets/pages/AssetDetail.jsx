@@ -1,4 +1,4 @@
-﻿
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { Download, Trash2 } from "lucide-react";
@@ -212,6 +212,92 @@ function formatTimeUntilStart(milliseconds) {
   return `${days}d ${hours}h ${minutes}m ${seconds}s`;
 }
 
+const isBlank = (value) =>
+  value === undefined || value === null || String(value).trim() === "";
+
+const sameNumber = (a, b) =>
+  !isBlank(a) && !isBlank(b) && Number(a) === Number(b);
+
+// Builds the rule-specific threshold/interval part of a PATCH payload from
+// the edit form. Only values the user actually changed are included.
+function buildRuleThresholdChanges(ruleType, values, initial) {
+  const changes = {};
+
+  if (ruleType === "runtime_duration") {
+    const keys = [
+      "runtime_warning_hours",
+      "runtime_warning_2_hours",
+      "runtime_alert_hours",
+    ];
+    if (!keys.every((key) => sameNumber(values[key], initial[key]))) {
+      const [warning1, warning2, alert] = keys.map((key) => Number(values[key]));
+      if (
+        keys.some((key) => isBlank(values[key])) ||
+        ![warning1, warning2, alert].every(
+          (value) => Number.isFinite(value) && value > 0
+        ) ||
+        warning1 >= warning2 ||
+        warning2 >= alert
+      ) {
+        throw new Error(
+          "Running-time thresholds must be positive and strictly increasing."
+        );
+      }
+      changes.parameters = {
+        warning_thresholds_seconds: [
+          Math.round(warning1 * 3600),
+          Math.round(warning2 * 3600),
+        ],
+        alert_threshold_seconds: Math.round(alert * 3600),
+      };
+    }
+  } else if (ruleType === "boolean_count_threshold") {
+    const keys = ["warning_threshold_1", "warning_threshold_2", "alert_threshold"];
+    if (!keys.every((key) => sameNumber(values[key], initial[key]))) {
+      const [warning1, warning2, alert] = keys.map((key) => Number(values[key]));
+      if (
+        keys.some((key) => isBlank(values[key])) ||
+        ![warning1, warning2, alert].every(
+          (value) => Number.isSafeInteger(value) && value > 0
+        ) ||
+        warning1 >= warning2 ||
+        warning2 >= alert
+      ) {
+        throw new Error(
+          "Cycle thresholds must be positive whole numbers in increasing order."
+        );
+      }
+      changes.parameters = {
+        warning_thresholds: [warning1, warning2],
+        alert_threshold: alert,
+      };
+    }
+  } else if (
+    ruleType === "parameter_threshold" &&
+    !sameNumber(values.threshold, initial.threshold) &&
+    !isBlank(values.threshold)
+  ) {
+    const threshold = Number(values.threshold);
+    if (!Number.isFinite(threshold)) {
+      throw new Error("Enter a valid numeric threshold.");
+    }
+    changes.threshold = threshold;
+  }
+
+  if (
+    !isBlank(values.evaluation_interval_seconds) &&
+    !sameNumber(values.evaluation_interval_seconds, initial.evaluation_interval_seconds)
+  ) {
+    const interval = Number(values.evaluation_interval_seconds);
+    if (!Number.isInteger(interval) || interval < 1) {
+      throw new Error("Evaluation interval must be a whole number of seconds (1 or more).");
+    }
+    changes.evaluation_interval_seconds = interval;
+  }
+
+  return changes;
+}
+
 const ruleFields = (
   variables,
   cycleVariableIds,
@@ -375,6 +461,12 @@ const ruleFields = (
       ["warning", "Warning"],
       ["alert", "Alert"],
     ],
+  },
+  {
+    key: "evaluation_interval_seconds",
+    label: "Evaluation interval (seconds)",
+    type: "number",
+    placeholder: "Leave blank to keep the current interval",
   },
 ];
 
@@ -1249,37 +1341,42 @@ const filteredEvents = [...events]
 
   const addRule = async (values) => {
     if (!canManageRules) return;
-    const rule = buildAssetMonitoringRule(values, assetId, {
-      variables: availableVariables,
-      cycleVariableIds,
-      runtimeVariableIds,
-    });
 
     const editId = monitoringRuleSelection?.ruleId;
-    if (editId) {
-      if (isSupervisor) {
-        const payload = {};
-        if (values.threshold !== undefined && values.threshold !== null) {
-          payload.threshold = values.threshold;
-        }
-        if (
-          values.evaluation_interval_seconds !== undefined &&
-          values.evaluation_interval_seconds !== null
-        ) {
-          payload.evaluation_interval_seconds =
-            values.evaluation_interval_seconds;
-        }
-        if (Object.keys(payload).length === 0) {
-          throw new Error(
-            "Please enter at least one value (threshold or interval) to update."
+    if (editId && isSupervisor) {
+      // Supervisors may only change thresholds and intervals; send just those.
+      const payload = buildRuleThresholdChanges(
+        monitoringRuleSelection?.initialValues?.rule_type,
+        values,
+        monitoringRuleSelection?.initialValues || {}
+      );
+      if (Object.keys(payload).length === 0) {
+        setModal(null);
+        setMonitoringRuleSelection(null);
+        setActionNotice("No changes were made to the rule.");
+        return;
+      }
+      await api.patch(`/rules/${editId}`, payload);
+    } else {
+      const rule = buildAssetMonitoringRule(values, assetId, {
+        variables: availableVariables,
+        cycleVariableIds,
+        runtimeVariableIds,
+      });
+
+      if (editId) {
+        // Editing must not change activation state or the stale timeout.
+        delete rule.is_enabled;
+        delete rule.stale_after_seconds;
+        if (!isBlank(values.evaluation_interval_seconds)) {
+          rule.evaluation_interval_seconds = Number(
+            values.evaluation_interval_seconds
           );
         }
-        await api.patch(`/rules/${editId}`, payload);
-      } else {
         await api.patch(`/rules/${editId}`, rule);
+      } else {
+        await api.post(`/assets/${assetId}/rules`, rule);
       }
-    } else {
-      await api.post(`/assets/${assetId}/rules`, rule);
     }
 
     setModal(null);
@@ -1305,7 +1402,7 @@ const filteredEvents = [...events]
       rule_type: rule.rule_type || "parameter_threshold",
       severity: rule.severity || "warning",
       evaluation_interval_seconds:
-        rule.evaluation_interval_seconds ?? 60,
+        rule.evaluation_interval_seconds ?? null,
     };
 
     if (rule.rule_type === "parameter_threshold") {
@@ -1314,18 +1411,28 @@ const filteredEvents = [...events]
       initialValues.threshold = rule.threshold;
     } else if (rule.rule_type === "boolean_count_threshold") {
       initialValues.cycle_variable_id = rule.variable_id;
-      initialValues.warning_threshold_1 =
-        parameters.warning_threshold_1 ?? null;
-      initialValues.warning_threshold_2 =
-        parameters.warning_threshold_2 ?? null;
+      const countWarnings = parameters.warning_thresholds;
+      initialValues.warning_threshold_1 = Array.isArray(countWarnings)
+        ? countWarnings[0] ?? null
+        : null;
+      initialValues.warning_threshold_2 = Array.isArray(countWarnings)
+        ? countWarnings[1] ?? null
+        : null;
       initialValues.alert_threshold = parameters.alert_threshold ?? null;
     } else if (rule.rule_type === "runtime_duration") {
       initialValues.runtime_variable_id = rule.variable_id;
+      const warnings = parameters.warning_thresholds_seconds;
+      const alert = parameters.alert_threshold_seconds;
       initialValues.runtime_warning_hours =
-        parameters.warning_hours ?? null;
+        Array.isArray(warnings) && warnings.length >= 1
+          ? warnings[0] / 3600
+          : null;
       initialValues.runtime_warning_2_hours =
-        parameters.warning_2_hours ?? null;
-      initialValues.runtime_alert_hours = parameters.alert_hours ?? null;
+        Array.isArray(warnings) && warnings.length >= 2
+          ? warnings[1] / 3600
+          : null;
+      initialValues.runtime_alert_hours =
+        alert != null ? alert / 3600 : null;
     }
 
     setMonitoringRuleSelection({
@@ -1342,7 +1449,12 @@ const filteredEvents = [...events]
       const editingRuleType =
         monitoringRuleSelection?.initialValues?.rule_type;
 
-      return ruleFormFields.map((field) => {
+      return ruleFormFields
+        .filter(
+          (field) =>
+            field.key !== "evaluation_interval_seconds" || isEditing
+        )
+        .map((field) => {
         let disabled = false;
         let options = field.options;
 
