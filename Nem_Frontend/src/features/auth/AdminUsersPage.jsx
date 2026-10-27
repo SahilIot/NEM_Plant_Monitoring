@@ -13,12 +13,16 @@ export default function AdminUsersPage() {
   const [role, setRole] = useState("Supervisor");
   const [contactNumber, setContactNumber] = useState("");
   const [email, setEmail] = useState("");
+  const [contactError, setContactError] = useState("");
+  const [emailError, setEmailError] = useState("");
   const requiresContactDetails = ["Supervisor", "Operator"].includes(role);
   const [selectedUserId, setSelectedUserId] = useState("");
   const [selectedRole, setSelectedRole] = useState("Supervisor");
   const [selectedActive, setSelectedActive] = useState(true);
   const [selectedContact, setSelectedContact] = useState("");
   const [selectedEmail, setSelectedEmail] = useState("");
+  const [selectedContactError, setSelectedContactError] = useState("");
+  const [selectedEmailError, setSelectedEmailError] = useState("");
   const [resetPassword, setResetPassword] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -71,52 +75,97 @@ export default function AdminUsersPage() {
     setResetPassword("");
   }, [selectedUserId, users]);
 
-  const createUser = async (event) => {
-    event.preventDefault();
-    setBusy(true);
-    setError("");
-    setMessage("");
-    try {
-      if (requiresContactDetails && (!contactNumber.trim() || !email.trim())) {
-        setError("Contact number and email are required for Supervisor and Operator accounts.");
-        return;
-      }
-      await api.post("/auth/users", {
-        username: username.trim(),
-        password,
-        role,
-        contact_number: requiresContactDetails
-        ? contactNumber.trim()
-        : null,
-      email: requiresContactDetails
-        ? email.trim()
-        : null,
-      });
-      setUsername("");
-      setPassword("");
-      setRole("Supervisor");
-      setContactNumber("");
-      setEmail("");
-      setMessage("User account created.");
-      await load();
-    } catch (createError) {
-      setError(createError.message || "Could not create the user account.");
-    } finally {
-      setBusy(false);
-    }
+  const INDIAN_PHONE_REGEX = /^(\+91|91|0)?[6-9]\d{9}$/;
+  const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  const normalizePhone = (value) => {
+    const digits = value.replace(/\D/g, "");
+    if (digits.startsWith("91") && digits.length === 12) return digits.slice(2);
+    if (digits.startsWith("0") && digits.length === 11) return digits.slice(1);
+    return digits;
   };
+
+  const validatePhone = (value) => {
+    const trimmed = value.trim();
+    if (!trimmed) return { valid: true, normalized: "" };
+    const digits = trimmed.replace(/\D/g, "");
+    if (!INDIAN_PHONE_REGEX.test(trimmed)) return { valid: false, normalized: "" };
+    return { valid: true, normalized: normalizePhone(trimmed) };
+  };
+
+  const validateEmail = (value) => {
+    const trimmed = value.trim();
+    if (!trimmed) return { valid: true, normalized: "" };
+    if (!EMAIL_REGEX.test(trimmed)) return { valid: false, normalized: "" };
+    return { valid: true, normalized: trimmed };
+  };
+
+  const createUser = async (event) => {
+      event.preventDefault();
+      setBusy(true);
+      setError("");
+      setMessage("");
+      setContactError("");
+      setEmailError("");
+      try {
+        if (requiresContactDetails && (!contactNumber.trim() || !email.trim())) {
+          setError("Contact number and email are required for Supervisor and Operator accounts.");
+          return;
+        }
+        const contactResult = validatePhone(contactNumber);
+        if (!contactResult.valid) {
+          setContactError("Enter a valid Indian mobile number (10 digits, optionally prefixed with +91).");
+          return;
+        }
+        const emailResult = validateEmail(email);
+        if (!emailResult.valid) {
+          setEmailError("Enter a valid email address (e.g., name@domain.com).");
+          return;
+        }
+        await api.post("/auth/users", {
+          username: username.trim(),
+          password,
+          role,
+          contact_number: requiresContactDetails ? contactResult.normalized || null : null,
+          email_address: requiresContactDetails ? emailResult.normalized || null : null,
+        });
+        setUsername("");
+        setPassword("");
+        setRole("Supervisor");
+        setContactNumber("");
+        setEmail("");
+        setMessage("User account created.");
+        await load();
+      } catch (createError) {
+        setError(createError.message || "Could not create the user account.");
+      } finally {
+        setBusy(false);
+      }
+    };
 
   const saveUser = async () => {
     if (!selectedUserId) return;
     setBusy(true);
     setError("");
     setMessage("");
+    setSelectedContactError("");
+    setSelectedEmailError("");
     try {
+      const contactResult = validatePhone(selectedContact);
+      if (!contactResult.valid) {
+        setSelectedContactError("Enter a valid Indian mobile number (10 digits, optionally prefixed with +91).");
+        return;
+      }
+      const emailResult = validateEmail(selectedEmail);
+      if (!emailResult.valid) {
+        setSelectedEmailError("Enter a valid email address (e.g., name@domain.com).");
+        return;
+      }
       const changes = {
         role: selectedRole,
         is_active: selectedActive,
-        contact_number: selectedContact.trim() || null,
-        email_address: selectedEmail.trim() || null,
+        contact_number: contactResult.normalized || null,
+        email_address: emailResult.normalized || null,
       };
       if (resetPassword) changes.password = resetPassword;
       const updated = await api.patch(`/auth/users/${selectedUserId}`, changes);
@@ -198,6 +247,7 @@ export default function AdminUsersPage() {
                       disabled={busy || !canManageUsers}
                       title={!canManageUsers ? "Administrator access required" : undefined}
                       />
+                      {contactError && <span className="notice error" style={{ display: "block", marginTop: 4, fontSize: "12px" }}>{contactError}</span>}
                       </label>
                       <label className="field">
                         Email address
@@ -212,6 +262,7 @@ export default function AdminUsersPage() {
                         disabled={busy || !canManageUsers}
                         title={!canManageUsers ? "Administrator access required" : undefined}
                         />
+                        {emailError && <span className="notice error" style={{ display: "block", marginTop: 4, fontSize: "12px" }}>{emailError}</span>}
                         </label>
                         </>
                       )}
@@ -287,9 +338,11 @@ export default function AdminUsersPage() {
               </label>
               <label className="field">Contact number
                 <input type="tel" value={selectedContact} onChange={(event) => setSelectedContact(event.target.value)} placeholder="Enter contact number" autoComplete="tel" maxLength={20} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined} />
+                {selectedContactError && <span className="notice error" style={{ display: "block", marginTop: 4, fontSize: "12px" }}>{selectedContactError}</span>}
               </label>
               <label className="field">Email address
                 <input type="email" value={selectedEmail} onChange={(event) => setSelectedEmail(event.target.value)} placeholder="Enter email address" autoComplete="email" maxLength={254} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined} />
+                {selectedEmailError && <span className="notice error" style={{ display: "block", marginTop: 4, fontSize: "12px" }}>{selectedEmailError}</span>}
               </label>
               <label className="field">Reset password (optional, minimum 12 characters)
                 <input type="password" autoComplete="new-password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} minLength={12} maxLength={1024} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined} />

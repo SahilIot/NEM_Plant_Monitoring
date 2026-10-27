@@ -8,6 +8,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+import re
+
 from app.db.session import get_db
 from app.models import AuthSession, User
 from app.services.auth_security import (
@@ -35,6 +37,46 @@ class LoginResponse(BaseModel):
     expires_at: datetime
     user: dict
 
+_INDIAN_PHONE_REGEX = re.compile(r"^(\+91|91|0)?[6-9]\d{9}$")
+_EMAIL_REGEX = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def _normalize_phone(value: str) -> str:
+    digits = re.sub(r"\D", "", value)
+    if digits.startswith("91") and len(digits) == 12:
+        return digits[2:]
+    if digits.startswith("0") and len(digits) == 11:
+        return digits[1:]
+    return digits
+
+
+def _validate_phone(value: str | None) -> str | None:
+    if value is None:
+        return None
+    trimmed = value.strip()
+    if not trimmed:
+        return None
+    if not _INDIAN_PHONE_REGEX.match(trimmed):
+        raise ValueError(
+            "Invalid phone number. Enter a valid 10-digit Indian mobile number "
+            "(optionally prefixed with +91)."
+        )
+    return _normalize_phone(trimmed)
+
+
+def _validate_email(value: str | None) -> str | None:
+    if value is None:
+        return None
+    trimmed = value.strip()
+    if not trimmed:
+        return None
+    if not _EMAIL_REGEX.match(trimmed):
+        raise ValueError(
+            "Invalid email address. Use a valid format such as name@domain.com."
+        )
+    return trimmed
+
+
 #This model controls account creation
 class UserCreate(BaseModel):
     username: str = Field(min_length=1, max_length=120)
@@ -42,6 +84,17 @@ class UserCreate(BaseModel):
     role: Literal["Administrator", "Supervisor", "Operator"] = "Supervisor"
     contact_number: str | None = Field(default=None, max_length=20)
     email_address: str | None = Field(default=None, max_length=254)
+
+    @field_validator("contact_number")
+    @classmethod
+    def validate_contact_number(cls, value: str | None) -> str | None:
+        return _validate_phone(value)
+
+    @field_validator("email_address")
+    @classmethod
+    def validate_email_address(cls, value: str | None) -> str | None:
+        return _validate_email(value)
+
 #Username normalization to case-insensitive form.
     @field_validator("username")
     @classmethod
@@ -57,6 +110,16 @@ class UserUpdate(BaseModel):
     contact_number: str | None = Field(default=None, max_length=20)
     email_address: str | None = Field(default=None, max_length=254)
     password: str | None = Field(default=None, min_length=12, max_length=1024)
+
+    @field_validator("contact_number")
+    @classmethod
+    def validate_contact_number(cls, value: str | None) -> str | None:
+        return _validate_phone(value)
+
+    @field_validator("email_address")
+    @classmethod
+    def validate_email_address(cls, value: str | None) -> str | None:
+        return _validate_email(value)
 
 
 #DB Session dependency -> shortcut for asking FASTAPI to provide SQLAlchemy db session
