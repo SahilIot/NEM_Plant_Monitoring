@@ -9,6 +9,9 @@ export default function AdminUsersPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("Supervisor");
+  const [contactNumber, setContactNumber] = useState("");
+  const [email, setEmail] = useState("");
+  const requiresContactDetails = ["Supervisor", "Operator"].includes(role);
   const [selectedUserId, setSelectedUserId] = useState("");
   const [selectedRole, setSelectedRole] = useState("Supervisor");
   const [selectedActive, setSelectedActive] = useState(true);
@@ -43,14 +46,26 @@ export default function AdminUsersPage() {
     setError("");
     setMessage("");
     try {
+      if (requiresContactDetails && (!contactNumber.trim() || !email.trim())) {
+        setError("Contact number and email are required for Supervisor and Operator accounts.");
+        return;
+      }
       await api.post("/auth/users", {
-        username,
+        username: username.trim(),
         password,
         role,
+        contact_number: requiresContactDetails
+        ? contactNumber.trim()
+        : null,
+      email: requiresContactDetails
+        ? email.trim()
+        : null,
       });
       setUsername("");
       setPassword("");
       setRole("Supervisor");
+      setContactNumber("");
+      setEmail("");
       setMessage("User account created.");
       await load();
     } catch (createError) {
@@ -94,21 +109,87 @@ export default function AdminUsersPage() {
         <h2>Create account</h2>
         <form onSubmit={createUser} className="admin-user-form">
           <label className="field">Username
-            <input value={username} onChange={(event) => setUsername(event.target.value)} required maxLength={120} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined} />
-          </label>
-          <label className="field">Temporary password (minimum 12 characters)
-            <input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={12} maxLength={1024} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined} />
-          </label>
-          <label className="field">Role
-            <select value={role} onChange={(event) => setRole(event.target.value)} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined}>
-              <option>Supervisor</option>
-              <option>Operator</option>
-              <option>Administrator</option>
-            </select>
-          </label>
-          <button type="submit" className="btn-primary" disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined}>{busy ? "Creating…" : "Create account"}</button>
-        </form>
-      </section>
+            <input
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            required
+            maxLength={120}
+            disabled={busy || !canManageUsers}
+            title={!canManageUsers ? "Administrator access required" : undefined}
+            />
+            </label>
+            <label className="field">
+              Temporary password (minimum 12 characters)
+              <input
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+              minLength={12}
+              maxLength={1024}
+              disabled={busy || !canManageUsers}
+              title={!canManageUsers ? "Administrator access required" : undefined}
+              />
+              </label>
+              {/* Role field */}
+              <label className="field">
+                Role
+                <select
+                value={role}
+                onChange={(event) => setRole(event.target.value)}
+                disabled={busy || !canManageUsers}
+                title={!canManageUsers ? "Administrator access required" : undefined}
+                >
+                  <option>Supervisor</option>
+                  <option>Operator</option>
+                  <option>Administrator</option>
+                  </select>
+                  </label>
+                  {/* ADD CONTACT NUMBER AND EMAIL HERE */}
+                  {requiresContactDetails && (
+                    <>
+                    <label className="field">
+                      Contact number
+                      <input
+                      type="tel"
+                      value={contactNumber}
+                      onChange={(event) => setContactNumber(event.target.value)}
+                      placeholder="Enter contact number"
+                      autoComplete="tel"
+                      required
+                      maxLength={20}
+                      disabled={busy || !canManageUsers}
+                      title={!canManageUsers ? "Administrator access required" : undefined}
+                      />
+                      </label>
+                      <label className="field">
+                        Email address
+                        <input
+                        type="email"
+                        value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                        placeholder="Enter email address"
+                        autoComplete="email"
+                        required
+                        maxLength={254}
+                        disabled={busy || !canManageUsers}
+                        title={!canManageUsers ? "Administrator access required" : undefined}
+                        />
+                        </label>
+                        </>
+                      )}
+                      {/* Create account button */}
+                      <button
+                      type="submit"
+                      className="btn-primary"
+                      disabled={busy || !canManageUsers}
+                      title={!canManageUsers ? "Administrator access required" : undefined}
+                      >
+                        {busy ? "Creating…" : "Create account"}
+                        </button>
+                        </form>
+                        </section>
 
       <section className="panel">
         <h2>Existing accounts</h2>

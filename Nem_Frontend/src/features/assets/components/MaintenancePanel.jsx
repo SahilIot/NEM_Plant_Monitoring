@@ -146,6 +146,7 @@ function validateForm(values, requirePlannedDates) {
 export default function MaintenancePanel({ assetId, onChanged }) {
   const confirm = useConfirmation();
   const { user } = useAuth();
+  const canAddMaintenance = user?.role === "Administrator";
   const canManageMaintenance = ["Administrator", "Supervisor"].includes(user?.role);
   const navigate = useNavigate();
   const [records, setRecords] = useState([]);
@@ -720,14 +721,20 @@ const openEdit = (record) => {
           </div>
           <div className="maintenance-heading-actions">
             <button
-              type="button"
-              className="btn-primary"
-              onClick={openCreate}
-              disabled={busy || !canManageMaintenance}
-              title={!canManageMaintenance ? "You do not have permission to create maintenance schedules." : undefined}
-            >
-              Add Maintenance
-            </button>
+            type="button"
+            className="btn-primary"
+            onClick={() => {
+              if (!canAddMaintenance) return;
+            }}
+            disabled={!canAddMaintenance || busy}
+            title={
+              !canAddMaintenance
+              ? "Only Administrators can add maintenance jobs."
+              : "Add Maintenance"
+              }
+              >
+                Add Maintenance
+                </button>
           </div>
         </div>
 
