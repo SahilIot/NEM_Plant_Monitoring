@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { api } from "../../services/api.js";
 import { useAuth } from "./AuthContext.jsx";
+import { Trash2 } from "lucide-react";
+import { useConfirmation } from "../../components/common/UI.jsx";
 
 export default function AdminUsersPage() {
   const { user } = useAuth();
@@ -15,10 +17,37 @@ export default function AdminUsersPage() {
   const [selectedUserId, setSelectedUserId] = useState("");
   const [selectedRole, setSelectedRole] = useState("Supervisor");
   const [selectedActive, setSelectedActive] = useState(true);
+  const [selectedContact, setSelectedContact] = useState("");
+  const [selectedEmail, setSelectedEmail] = useState("");
   const [resetPassword, setResetPassword] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [deletingUserId, setDeletingUserId] = useState("");
+
+  const confirm = useConfirmation();
+
+  const deleteUser = async (userId) => {
+    const confirmed = await confirm(
+      "Are you sure you want to delete this account? This cannot be undone.",
+      { title: "Delete account", confirmLabel: "Delete", cancelLabel: "Cancel", destructive: true }
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    setDeletingUserId(userId);
+    try {
+      await api.del(`/auth/users/${userId}`);
+      setUsers((current) => current.filter((u) => u.id !== userId));
+      setMessage("Account deleted.");
+    } catch (deleteError) {
+      setError(deleteError.message || "Could not delete the account.");
+    } finally {
+      setBusy(false);
+      setDeletingUserId("");
+    }
+  };
 
   const load = useCallback(async () => {
     setUsers(await api.get("/auth/users"));
@@ -37,6 +66,8 @@ export default function AdminUsersPage() {
     const selected = users.find((user) => String(user.id) === selectedUserId);
     setSelectedRole(selected?.role || "Supervisor");
     setSelectedActive(selected?.is_active ?? true);
+    setSelectedContact(selected?.contact_number ?? "");
+    setSelectedEmail(selected?.email_address ?? "");
     setResetPassword("");
   }, [selectedUserId, users]);
 
@@ -81,7 +112,12 @@ export default function AdminUsersPage() {
     setError("");
     setMessage("");
     try {
-      const changes = { role: selectedRole, is_active: selectedActive };
+      const changes = {
+        role: selectedRole,
+        is_active: selectedActive,
+        contact_number: selectedContact.trim() || null,
+        email_address: selectedEmail.trim() || null,
+      };
       if (resetPassword) changes.password = resetPassword;
       const updated = await api.patch(`/auth/users/${selectedUserId}`, changes);
       setUsers((current) => current.map((user) => user.id === updated.id ? updated : user));
@@ -196,13 +232,26 @@ export default function AdminUsersPage() {
         {users.length ? (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Username</th><th>Role</th><th>Status</th></tr></thead>
+              <thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Contact</th><th>Email</th><th>Delete</th></tr></thead>
               <tbody>
                 {users.map((user) => (
                   <tr key={user.id}>
                     <td>{user.username}</td>
                     <td>{user.role}</td>
                     <td>{user.is_active ? "Active" : "Disabled"}</td>
+                    <td>{user.contact_number || ""}</td>
+                    <td>{user.email_address || ""}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn-danger"
+                        onClick={() => deleteUser(user.id)}
+                        disabled={busy || deletingUserId !== "" || user.role === "Administrator"}
+                        title={user.role === "Administrator" ? "Cannot delete an administrator account here" : "Delete account"}
+                      >
+                        {deletingUserId === user.id ? <span>Deleting…</span> : <Trash2 size={16} aria-hidden="true" />}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -235,6 +284,12 @@ export default function AdminUsersPage() {
                   <option value="active">Active</option>
                   <option value="disabled">Disabled</option>
                 </select>
+              </label>
+              <label className="field">Contact number
+                <input type="tel" value={selectedContact} onChange={(event) => setSelectedContact(event.target.value)} placeholder="Enter contact number" autoComplete="tel" maxLength={20} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined} />
+              </label>
+              <label className="field">Email address
+                <input type="email" value={selectedEmail} onChange={(event) => setSelectedEmail(event.target.value)} placeholder="Enter email address" autoComplete="email" maxLength={254} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined} />
               </label>
               <label className="field">Reset password (optional, minimum 12 characters)
                 <input type="password" autoComplete="new-password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} minLength={12} maxLength={1024} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined} />

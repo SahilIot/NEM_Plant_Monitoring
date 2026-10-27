@@ -65,7 +65,7 @@ function UserInfo() {
   <dd>{user?.contact_number || "Not provided"}</dd>
 
   <dt>Email address</dt>
-  <dd>{user?.email || "Not provided"}</dd>
+  <dd>{user?.email_address || "Not provided"}</dd>
 </dl>
 
 <p className="hint">
