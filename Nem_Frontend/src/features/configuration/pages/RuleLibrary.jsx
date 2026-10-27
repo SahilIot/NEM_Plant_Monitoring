@@ -508,11 +508,11 @@ export default function RuleLibrary() {
  const isSupervisor = user?.role === "Supervisor";
  const isOperator = user?.role === "Operator";
 
- const isRestrictedEditor = isSupervisor || isOperator;
+ const isRestrictedEditor = isSupervisor;
 
  const canCreateRules = isAdministrator;
  const canEditRules =
- isAdministrator || isSupervisor || isOperator;
+ isAdministrator || isSupervisor;
  const canAssignRules = isAdministrator || isSupervisor;
 
   const confirm = useConfirmation();
@@ -576,20 +576,26 @@ useEffect(() => {
         editing.threshold == null
       ) {
         throw new Error(
-          "Only the threshold of a numeric parameter rule can be edited with your role."
+          "Only the threshold and check interval of a numeric parameter rule can be edited with your role."
         );
       }
       const newThreshold = Number(values.threshold);
       if (!Number.isFinite(newThreshold)) {
         throw new Error("Please enter a valid threshold.");
       }
+      const newInterval = Number(values.evaluation_interval_seconds);
+      if (!Number.isFinite(newInterval) || newInterval < 1) {
+        throw new Error("Please enter a valid check interval.");
+      }
       payload = {
         ...templatePayload({
         ...initialTemplate(editing),
         threshold: String(newThreshold),
+        evaluation_interval_seconds: newInterval,
       }),
       ...editing,
       threshold: newThreshold,
+      evaluation_interval_seconds: newInterval,
     };
   } else {
     payload = {
@@ -705,7 +711,7 @@ useEffect(() => {
           editing && isRestrictedEditor
           ? FIELDS.map((field) => ({
             ...field,
-            disabled: field.key !== "threshold",
+            disabled: !["threshold", "evaluation_interval_seconds"].includes(field.key),
           }))
           : FIELDS
         )

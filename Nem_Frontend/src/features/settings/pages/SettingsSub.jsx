@@ -105,29 +105,41 @@ function UserInfo() {
 
   return (
     <div className="panel-white profile">
-      <div className="profile-head">
+      <div className="profile-head" style={{ position: "relative", display: "flex", alignItems: "center", gap: 12 }}>
         <div className="avatar">{displayName.charAt(0).toUpperCase()}</div>
         <div className="profile-who">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div className="profile-name">{displayName}</div>
-            {canEdit && (
-              <button
-                type="button"
-                onClick={() => {
-                  setEditContact(user?.contact_number || "");
-                  setEditEmail(user?.email_address || "");
-                  setIsEditing(true);
-                }}
-                title="Edit contact details"
-                className="btn-outline"
-                style={{ height: "32px", padding: "0 10px", fontSize: "13px", borderRadius: "4px" }}
-              >
-                <EditIcon size={14} aria-hidden="true" />
-              </button>
-            )}
           </div>
           <span className="badge role">{role}</span>
         </div>
+        {canEdit && (
+          <button
+            type="button"
+            onClick={() => {
+              setEditContact(user?.contact_number || "");
+              setEditEmail(user?.email_address || "");
+              setIsEditing(true);
+            }}
+            title="Edit contact details"
+            className="btn-outline"
+            style={{
+              position: "absolute",
+              right: 12,
+              top: "50%",
+              transform: "translateY(-50%)",
+              height: "32px",
+              padding: "0 10px",
+              fontSize: "13px",
+              borderRadius: "4px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <EditIcon size={14} aria-hidden="true" />
+          </button>
+        )}
       </div>
 
     <dl className="profile-list">

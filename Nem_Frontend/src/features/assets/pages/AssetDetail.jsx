@@ -43,6 +43,7 @@ import {
   ChevronDown,
   BookmarkIcon,
   FxIcon,
+  EditIcon,
 } from "../../../components/common/Icons.jsx";
 
 const ORDER = { alert: 0, warning: 1, ok: 2 };
@@ -1247,13 +1248,39 @@ const filteredEvents = [...events]
   };
 
   const addRule = async (values) => {
-    if (isSupervisor || !canManageRules) return;
+    if (!canManageRules) return;
     const rule = buildAssetMonitoringRule(values, assetId, {
       variables: availableVariables,
       cycleVariableIds,
       runtimeVariableIds,
     });
-    await api.post(`/assets/${assetId}/rules`, rule);
+
+    const editId = monitoringRuleSelection?.ruleId;
+    if (editId) {
+      if (isSupervisor) {
+        const payload = {};
+        if (values.threshold !== undefined && values.threshold !== null) {
+          payload.threshold = values.threshold;
+        }
+        if (
+          values.evaluation_interval_seconds !== undefined &&
+          values.evaluation_interval_seconds !== null
+        ) {
+          payload.evaluation_interval_seconds =
+            values.evaluation_interval_seconds;
+        }
+        if (Object.keys(payload).length === 0) {
+          throw new Error(
+            "Please enter at least one value (threshold or interval) to update."
+          );
+        }
+        await api.patch(`/rules/${editId}`, payload);
+      } else {
+        await api.patch(`/rules/${editId}`, rule);
+      }
+    } else {
+      await api.post(`/assets/${assetId}/rules`, rule);
+    }
 
     setModal(null);
     setMonitoringRuleSelection(null);
@@ -1262,27 +1289,98 @@ const filteredEvents = [...events]
   };
 
   const openMonitoringRuleForm = (choiceId) => {
-  setModal(null);
-  setMonitoringRuleSelection(null);
+    setModal(null);
+    setMonitoringRuleSelection(null);
 
-  navigate(`/assets/${assetId}/monitoring-rules/new/${choiceId}`);
-};
+    navigate(`/assets/${assetId}/monitoring-rules/new/${choiceId}`);
+  };
+
+  const openEditRuleForm = (rule) => {
+    if (!canManageRules) return;
+
+    const parameters = rule.parameters || {};
+    const initialValues = {
+      name: rule.name || "",
+      description: rule.description || "",
+      rule_type: rule.rule_type || "parameter_threshold",
+      severity: rule.severity || "warning",
+      evaluation_interval_seconds:
+        rule.evaluation_interval_seconds ?? 60,
+    };
+
+    if (rule.rule_type === "parameter_threshold") {
+      initialValues.variable_id = rule.variable_id;
+      initialValues.operator = rule.operator || ">=";
+      initialValues.threshold = rule.threshold;
+    } else if (rule.rule_type === "boolean_count_threshold") {
+      initialValues.cycle_variable_id = rule.variable_id;
+      initialValues.warning_threshold_1 =
+        parameters.warning_threshold_1 ?? null;
+      initialValues.warning_threshold_2 =
+        parameters.warning_threshold_2 ?? null;
+      initialValues.alert_threshold = parameters.alert_threshold ?? null;
+    } else if (rule.rule_type === "runtime_duration") {
+      initialValues.runtime_variable_id = rule.variable_id;
+      initialValues.runtime_warning_hours =
+        parameters.warning_hours ?? null;
+      initialValues.runtime_warning_2_hours =
+        parameters.warning_2_hours ?? null;
+      initialValues.runtime_alert_hours = parameters.alert_hours ?? null;
+    }
+
+    setMonitoringRuleSelection({
+      title: "Edit rule",
+      initialValues,
+      ruleId: rule.id,
+    });
+    setModal("add");
+  };
 
   const monitoringRuleFormFields = useMemo(
-    () =>
-      ruleFormFields.map((field) =>
-        field.key === "rule_type" && monitoringRuleSelection
-          ? {
-              ...field,
-              disabled: true,
-              options: field.options.filter(
-                ([ruleType]) =>
-                  ruleType === monitoringRuleSelection.ruleType
-              ),
-            }
-          : field
-      ),
-    [ruleFormFields, monitoringRuleSelection]
+    () => {
+      const isEditing = Boolean(monitoringRuleSelection?.ruleId);
+      const editingRuleType =
+        monitoringRuleSelection?.initialValues?.rule_type;
+
+      return ruleFormFields.map((field) => {
+        let disabled = false;
+        let options = field.options;
+
+        if (field.key === "rule_type") {
+          if (isEditing) {
+            disabled = true;
+          }
+          if (options && editingRuleType) {
+            options = field.options.filter(
+              ([ruleType]) => ruleType === editingRuleType
+            );
+          }
+        }
+
+        if (isSupervisor && isEditing) {
+          const allowedFields = [
+            "threshold",
+            "evaluation_interval_seconds",
+            "warning_threshold_1",
+            "warning_threshold_2",
+            "alert_threshold",
+            "runtime_warning_hours",
+            "runtime_warning_2_hours",
+            "runtime_alert_hours",
+          ];
+          if (!allowedFields.includes(field.key)) {
+            disabled = true;
+          }
+        }
+
+        return {
+          ...field,
+          disabled,
+          options,
+        };
+      });
+    },
+    [ruleFormFields, monitoringRuleSelection, isSupervisor]
   );
 
   const bulk = async (state) => {
@@ -2036,6 +2134,18 @@ const filteredEvents = [...events]
                               }}
                             >
                               View rule
+                            </button>
+                            <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setRuleActionMenuId(null);
+                              openEditRuleForm(rule);
+                            }}
+                            disabled={!canManageRules}
+                            title={!canManageRules ? "You do not have permission to manage monitoring rules." : undefined}
+                            >
+                            Edit rule
                             </button>
                             {lifecycleStatus(rule) === "in_progress" && (
                               <button
@@ -3037,7 +3147,9 @@ const filteredEvents = [...events]
       {modal === "add" && (
         <CreateModal
           title={monitoringRuleSelection?.title || "Create monitoring rule"}
-          submitLabel="Create rule"
+          submitLabel={
+            monitoringRuleSelection?.ruleId ? "Save rule" : "Create rule"
+          }
           intro={
             !canManageRules
               ? "You do not have permission to create or edit monitoring rules."

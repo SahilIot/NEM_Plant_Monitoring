@@ -5,19 +5,18 @@ from asyncua.ua.uaerrors import UaStringParsingError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.api.routes.auth import get_current_user
 from app.db.session import get_db
-from app.models import Asset, Alert, MonitoringRule, RuleState, Variable
+from app.models import Asset, Alert, MonitoringRule, RuleState, Variable, User
 from app.schemas.rule import RuleCreate, RuleRead, RuleUpdate
 from app.services.monitoring_engine import emit_event, set_rule_enabled_state
 from app.services.monitoring_engine import utc_now
 
 router = APIRouter(prefix="/rules", tags=["monitoring rules"])
 
-
 def is_mapping_bypass_enabled(request: Request) -> bool:
     settings = getattr(request.app.state, "settings", None)
     return bool(getattr(settings, "opc_ua_mapping_bypass_enabled", False))
-
 
 #Configured PLC cycle signal
 def configured_cycle_signal_mapping(request: Request,variable_id: int | None,) -> tuple[int, int] | None:
@@ -79,9 +78,7 @@ def validate_targets(
         raise HTTPException(status_code=404, detail=f"Variable {variable_id} was not found")
     if variable is not None and target_asset_id is not None:
         if variable.asset_id != target_asset_id:
-            raise HTTPException(
-                status_code=422, detail="Target variable does not belong to target asset"
-            )
+            raise HTTPException(status_code=422, detail="Target variable does not belong to target asset")
     if rule_type == "parameter_threshold":
         expected_value = (parameters or {}).get("expected_value")
         if isinstance(expected_value, bool):
@@ -92,10 +89,7 @@ def validate_targets(
                 or operator not in {"==", "!=", "eq", "ne"}
                 or threshold is not None
             ):
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        "Boolean parameter thresholds require an active Boolean "
+                raise HTTPException(status_code=422,detail=("Boolean parameter thresholds require an active Boolean "
                         "variable, an equality operator, and a Boolean expected_value"
                     ),
                 )
@@ -119,9 +113,7 @@ def validate_targets(
                 or interval_seconds <= 0
                 or variable_id is not None
             ):
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
+                raise HTTPException(status_code=422,detail=(
                         "Interval-based rules require an asset target, a positive "
                         "interval_seconds value, and no variable target"
                     ),
@@ -154,8 +146,7 @@ def validate_targets(
                 runtime_signal_mapping != (target_asset_id, variable_id)
                 and not bypass_signal_is_valid
             ):
-                raise HTTPException(
-                    status_code=422,
+                raise HTTPException(status_code=422,
                     detail=("Running-time rules must target this asset's configured "
                         "OPC UA running signal or an asset-owned declared Boolean "
                         "running signal while mapping bypass is enabled"
@@ -317,9 +308,7 @@ def list_rules(
         (is_enabled, MonitoringRule.is_enabled),
     ):
         if condition is not None:
-            query, count_query = query.where(column == condition), count_query.where(
-                column == condition
-            )
+            query, count_query = query.where(column == condition), count_query.where(column == condition)
     items = session.scalars(query.order_by(MonitoringRule.id).offset(offset).limit(limit)).all()
     return {
         "items": [RuleRead.model_validate(item) for item in items],
@@ -340,6 +329,7 @@ def update_rule(
     payload: RuleUpdate,
     request: Request,
     session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> MonitoringRule:
     rule = rule_or_404(session, rule_id)
     changes = payload.model_dump(exclude_unset=True)
@@ -366,14 +356,21 @@ def update_rule(
     # prevent changing targets after evaluation state exits
     target_fields = {"target_asset_id", "variable_id"}
     #Prevent changing targets while alerts are active
-    if target_fields.intersection(changes) and session.scalar(
-        select(RuleState.id).where(RuleState.rule_id == rule.id).limit(1)
-    ):
+    if target_fields.intersection(changes) and session.scalar(select(RuleState.id).where(RuleState.rule_id == rule.id).limit(1)):
         raise HTTPException(status_code=409,detail="A rule target cannot be changed after evaluation state exists",)
-    if target_fields.intersection(changes) and session.scalar(
-        select(Alert.id).where(Alert.rule_id == rule.id, Alert.status == "active").limit(1)
-    ):
+    if target_fields.intersection(changes) and session.scalar(select(Alert.id).where(Alert.rule_id == rule.id, Alert.status == "active").limit(1)):
         raise HTTPException(status_code=409,detail="Resolve active alerts before changing a rule target",)
+
+    # Role-based field restrictions for editing rules
+    if user.role == "Operator":
+        raise HTTPException(status_code=403, detail="Operators are not allowed to edit monitoring rules")
+    if user.role == "Supervisor":
+        allowed_supervisor_fields = {"threshold", "evaluation_interval_seconds"}
+        restricted = set(changes.keys()) - allowed_supervisor_fields
+        if restricted:
+            raise HTTPException(status_code=403,
+                detail=f"Supervisors can only edit threshold and evaluation interval. Restricted fields: {', '.join(sorted(restricted))}",)
+
     #Apply the changes
     for field, value in changes.items():
         if field != "is_enabled":
