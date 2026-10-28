@@ -349,9 +349,21 @@ export default function AdminUsersPage() {
               <label className="field">Reset password (optional, minimum 12 characters)
                 <input type="password" autoComplete="new-password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} minLength={12} maxLength={1024} disabled={busy || !canManageUsers} title={!canManageUsers ? "Administrator access required" : undefined} />
               </label>
-              <button type="button" className="btn-primary" onClick={saveUser} disabled={busy || !canManageUsers || (resetPassword.length > 0 && resetPassword.length < 12)} title={!canManageUsers ? "Administrator access required" : undefined}>
-                {busy ? "Saving…" : "Save account settings"}
-              </button>
+              <div className="account-settings-actions">
+                <button
+                type="button"
+                className="btn-primary"
+                onClick={saveUser}
+                disabled={
+                  busy ||
+                  !canManageUsers ||
+                  (resetPassword.length > 0 && resetPassword.length < 12)
+                }
+                title={!canManageUsers ? "Administrator access required" : undefined}
+                >
+                  {busy ? "Saving…" : "Save account settings"}
+                </button>
+              </div>
             </div>
           </>
         )}

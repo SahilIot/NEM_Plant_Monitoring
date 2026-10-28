@@ -40,13 +40,28 @@ export default function CurrentMaintenanceCards({
   const [editingRecordId, setEditingRecordId] = useState(null);
   const busy = startingRecordId !== null || completingRecordId !== null;
 
-  const openEdit = (record) => {
-    if (!canManageMaintenance) return;
-    setEditingRecordId(record.id);
-    navigate(`/assets/${assetId}/maintenance/schedules/${record.schedule_id || record.id}/edit`, {
+const openEdit = (record) => {
+  if (!canManageMaintenance) return;
+
+  setEditingRecordId(record.id);
+
+  if (record.schedule_id) {
+    navigate(
+      `/assets/${assetId}/maintenance/schedules/${record.schedule_id}/edit`,
+      {
+        state: { maintenanceRecord: record },
+      }
+    );
+    return;
+  }
+
+  navigate(
+    `/assets/${assetId}/maintenance/${record.id}/edit`,
+    {
       state: { maintenanceRecord: record },
-    });
-  };
+    }
+  );
+};
 
   const loadCurrentMaintenance = useCallback(async () => {
     setError("");
