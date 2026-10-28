@@ -1060,7 +1060,7 @@ const reviewRequest = async (request, action) => {
           ? `${displayType(editing)} is a legacy rule type. Its evaluation settings will be preserved while you edit its name, description, severity, and availability.`
           : "Create a reusable rule, then assign it to one or more assets."
     }
-    fields={
+fields={
   editing && !supportsCurrentRuleEditor(editing)
     ? LEGACY_EDIT_FIELDS.map((field) => ({
         ...field,
@@ -1069,9 +1069,10 @@ const reviewRequest = async (request, action) => {
     : editing && isSupervisor
       ? FIELDS.map((field) => ({
           ...field,
-          disabled: !getSupervisorEditableFields(editing).includes(
-            field.key
-          ),
+          disabled: ![
+            ...getSupervisorEditableFields(editing),
+            "threshold",
+          ].includes(field.key),
         }))
       : FIELDS
 }
