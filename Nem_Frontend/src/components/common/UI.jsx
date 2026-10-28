@@ -216,17 +216,12 @@ export function ConfirmationProvider({ children }) {
               {request.cancelLabel}
             </button>
            <button
-          type="button"
-          className={request.destructive ? "btn-danger" : "btn-primary"}
-          onClick={() => finish(true)}
-          aria-label={request.confirmLabel || request.title}
-          title={request.confirmLabel || request.title}
-          >
-            {request.destructive ? (
-              <Trash2 size={16} aria-hidden="true" />
-            ) : (
-              request.confirmLabel
-              )}
+           type="button"
+           className={request.destructive ? "btn-danger" : "btn-primary"}
+           onClick={() => finish(true)}
+           >
+            {request.destructive && <Trash2 size={16} />}
+            {request.confirmLabel}
             </button>
           </div>
         </Modal>

@@ -863,7 +863,7 @@ export default function AssetDetail() {
     if (
       !(await confirm("Permanently delete this event? This cannot be undone.", {
         title: "Delete event",
-        confirmLabel: "",
+        confirmLabel: "Delete permanently",
         destructive: true,
       }))
     ) {
@@ -1319,7 +1319,7 @@ const filteredEvents = [...events]
         `Permanently delete “${rule.name}”? This irreversibly removes the rule, its alerts, and its evaluation history. Maintenance records linked to its alerts must be removed first.`,
         {
           title: "Permanently delete rule",
-          confirmLabel: "",
+          confirmLabel: "Delete permanently",
           destructive: true,
         }
       ))
@@ -1567,7 +1567,7 @@ const filteredEvents = [...events]
         "Permanently delete this maintenance log entry? This cannot be undone.",
         {
           title: "Delete maintenance entry",
-          confirmLabel: "",
+          confirmLabel: "Delete permanently",
           destructive: true,
         }
       ))
@@ -1651,7 +1651,7 @@ const filteredEvents = [...events]
       `Permanently delete asset "${asset.name}" and its asset-scoped event history? This cannot be undone. Deletion is blocked if it still has child assets, variables, readings, rules, alerts, or maintenance records.`,
       {
         title: "Permanently delete asset",
-        confirmLabel: "",
+        confirmLabel: "Delete permanently",
         destructive: true,
       }
     );
@@ -1676,7 +1676,7 @@ const filteredEvents = [...events]
       `Permanently delete variable "${variable.name}"? Variables with readings, monitoring rules, alerts, or an OPC UA mapping cannot be deleted.`,
       {
         title: "Permanently delete variable",
-        confirmLabel: "",
+        confirmLabel: "Delete permanently",
         destructive: true,
       }
     );
@@ -3420,7 +3420,7 @@ const filteredEvents = [...events]
                     aria-label="Delete event permanently"
                     >
                       <Trash2 size={16} />
-                      {deletingEventId === event.id ? "Deleting..." : "Delete"}
+                      {deletingEventId === event.id ? "Deleting..." : ""}
                       </button>
                     </td>
                   </tr>
