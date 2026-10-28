@@ -10,7 +10,7 @@ import React, {
 } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Trash2 } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { EmptyArt } from "./Icons.jsx";
 
 export const EmptyState = ({ title, lines = [], art = true }) => (
@@ -216,11 +216,12 @@ export function ConfirmationProvider({ children }) {
               {request.cancelLabel}
             </button>
            <button
-           type="button"
-           className={request.destructive ? "btn-danger" : "btn-primary"}
-           onClick={() => finish(true)}
-           >
-            {request.destructive && <Trash2 size={16} />}
+          type="button"
+          className={request.destructive ? "btn-danger" : "btn-primary"}
+          onClick={() => finish(true)}
+          aria-label={request.confirmLabel || request.title}
+          title={request.confirmLabel || request.title}
+          >
             {request.confirmLabel}
             </button>
           </div>

@@ -30,6 +30,7 @@ from app.models import (
 
 LOGGER = logging.getLogger("nem_backend.notifications")
 _EMAIL_REGEX = re.compile(r"^[^\s@<>\",;]+@[^\s@<>\",;]+\.[^\s@<>\",;]+$")
+_ADMIN_SENDER = "sky@nem.co.in"
 _RETRY_BASE_SECONDS = 60
 _RETRY_MAX_SECONDS = 3600
 
@@ -85,7 +86,7 @@ def enqueue_alert_notifications(
     rule: MonitoringRule | None,
     settings: Settings | None = None,
 ) -> int:
-    # Queue one email per responsible supervisor for this alert/severity. Never raises.
+    # Queue one email per unique responsible recipient for this alert/severity.
     try:
         with session.begin_nested():
             return _enqueue(session, alert, asset, rule, settings)
@@ -123,6 +124,7 @@ def _enqueue(session: Session, alert: Alert, asset: Asset, rule: MonitoringRule 
         "link": f"{base_url}/assets/{asset.id}" if base_url else None,
     }
     queued = 0
+    queued_addresses: set[str] = set()
     for user in supervisors:
         exists = session.scalar(
             select(EmailNotification.id).where(
@@ -131,14 +133,19 @@ def _enqueue(session: Session, alert: Alert, asset: Asset, rule: MonitoringRule 
                 EmailNotification.user_id == user.id,
             )
         )
-        if exists is not None:
-            continue
         if not valid_email(user.email_address):
-            session.add(EmailNotification(
-                alert_id=alert.id, user_id=user.id, severity=alert.severity, payload=payload,
-                status="skipped", last_error="Supervisor has no valid email address",
-            ))
-            LOGGER.warning("Supervisor user %s has no valid email; skipping alert %s email", user.id, alert.id)
+            if exists is None:
+                session.add(EmailNotification(
+                    alert_id=alert.id, user_id=user.id, severity=alert.severity, payload=payload,
+                    status="skipped", last_error="Supervisor has no valid email address",
+                ))
+                LOGGER.warning("Supervisor user %s has no valid email; skipping alert %s email", user.id, alert.id)
+            continue
+        normalized_email = (user.email_address or "").strip().casefold()
+        if normalized_email in queued_addresses:
+            continue
+        queued_addresses.add(normalized_email)
+        if exists is not None:
             continue
         session.add(EmailNotification(
             alert_id=alert.id, user_id=user.id, severity=alert.severity, payload=payload,
@@ -152,6 +159,17 @@ class SmtpConfigError(RuntimeError):
     pass
 
 
+class SmtpTlsError(RuntimeError):
+    pass
+
+
+class SmtpStageError(RuntimeError):
+    def __init__(self, stage: str, diagnostic: str):
+        self.stage = stage
+        self.diagnostic = diagnostic
+        super().__init__(f"SMTP {stage} failed: {diagnostic}")
+
+
 def _load_smtp_config(session: Session, settings: Settings) -> dict[str, Any]:
     record = session.get(FrontendConfig, "email")
     value = dict(record.value) if record is not None else {}
@@ -163,6 +181,8 @@ def _load_smtp_config(session: Session, settings: Settings) -> dict[str, Any]:
     from_address = sender or username
     if not valid_email(from_address):
         raise SmtpConfigError("Administrator sender address is missing or invalid")
+    if from_address.casefold() != _ADMIN_SENDER:
+        raise SmtpConfigError(f"SMTP sender must be configured as {_ADMIN_SENDER}")
     try:
         port = int(value.get("port") or 587)
     except (TypeError, ValueError) as error:
@@ -220,36 +240,178 @@ def build_message(payload: dict[str, Any], *, sender: str, recipient: str, setti
     return message
 
 
+def _login(client: smtplib.SMTP, username: str, password: str) -> None:
+    # smtplib.login() discards an auth rejection when a later mechanism hits a
+    # dropped connection; keep the first rejection so the real reason is reported.
+    advertised = client.esmtp_features.get("auth", "").split()
+    mechanisms = [
+        (name, getattr(client, f"auth_{name.lower().replace('-', '_')}"))
+        for name in ("CRAM-MD5", "PLAIN", "LOGIN")
+        if name in advertised
+    ]
+    if not mechanisms:
+        raise smtplib.SMTPNotSupportedError("SMTP AUTH mechanism not supported by server")
+    client.user, client.password = username, password
+    first_rejection: smtplib.SMTPAuthenticationError | None = None
+    for name, auth_object in mechanisms:
+        try:
+            client.auth(name, auth_object)
+            return
+        except smtplib.SMTPAuthenticationError as error:
+            first_rejection = first_rejection or error
+        except smtplib.SMTPServerDisconnected:
+            if first_rejection is not None:
+                raise first_rejection from None
+            raise
+    raise first_rejection
+
+
 def _send(config: dict[str, Any], message: EmailMessage, timeout: int) -> None:
     context = ssl.create_default_context()
     if config["port"] == 465:
-        client: smtplib.SMTP = smtplib.SMTP_SSL(config["host"], config["port"], timeout=timeout, context=context)
+        client: smtplib.SMTP = smtplib.SMTP_SSL(
+            timeout=timeout,
+            context=context,
+        )
     else:
-        client = smtplib.SMTP(config["host"], config["port"], timeout=timeout)
-    with client:
-        client.ehlo()
-        if config["port"] != 465 and client.has_extn("starttls"):
-            client.starttls(context=context)
-            client.ehlo()
+        client = smtplib.SMTP(timeout=timeout)
+
+    try:
+        client._host = config["host"]
+        try:
+            client.sock = client._get_socket(config["host"], config["port"], timeout)
+        except Exception as error:
+            raise SmtpStageError("connection", describe_smtp_error(error)) from None
+
+        client.file = None
+        try:
+            code, _ = client.getreply()
+        except Exception as error:
+            raise SmtpStageError("server greeting", describe_smtp_error(error)) from None
+        if code != 220:
+            raise SmtpStageError("server greeting", f"SMTP server returned response {code}")
+
+        try:
+            code, _ = client.ehlo()
+        except Exception as error:
+            raise SmtpStageError("EHLO", describe_smtp_error(error)) from None
+        if code != 250:
+            raise SmtpStageError("EHLO", f"SMTP server returned response {code}")
+
+        if config["port"] != 465:
+            if not client.has_extn("starttls"):
+                raise SmtpStageError(
+                    "STARTTLS capability",
+                    "SMTP server does not advertise STARTTLS",
+                )
+            try:
+                code, _ = client.starttls(context=context)
+            except Exception as error:
+                raise SmtpStageError(
+                    "STARTTLS negotiation",
+                    describe_smtp_error(error),
+                ) from None
+            if code != 220:
+                raise SmtpStageError(
+                    "STARTTLS negotiation",
+                    f"SMTP server returned response {code}",
+                )
+            try:
+                code, _ = client.ehlo()
+            except Exception as error:
+                raise SmtpStageError(
+                    "post-STARTTLS EHLO",
+                    describe_smtp_error(error),
+                ) from None
+            if code != 250:
+                raise SmtpStageError(
+                    "post-STARTTLS EHLO",
+                    f"SMTP server returned response {code}",
+                )
+
         if config["username"] and config["password"]:
-            client.login(config["username"], config["password"])
-        client.send_message(message, from_addr=config["from_address"], to_addrs=[message["To"]])
+            try:
+                _login(client, config["username"], config["password"])
+            except Exception as error:
+                raise SmtpStageError("authentication", describe_smtp_error(error)) from error
+
+        try:
+            code, _ = client.mail(config["from_address"])
+        except Exception as error:
+            raise SmtpStageError("MAIL FROM", describe_smtp_error(error)) from None
+        if code != 250:
+            raise SmtpStageError("MAIL FROM", f"SMTP server returned response {code}")
+
+        try:
+            code, _ = client.rcpt(message["To"])
+        except Exception as error:
+            raise SmtpStageError("RCPT TO", describe_smtp_error(error)) from None
+        if code not in {250, 251, 252}:
+            raise SmtpStageError("RCPT TO", f"SMTP server returned response {code}")
+
+        try:
+            code, _ = client.data(message.as_bytes())
+        except Exception as error:
+            raise SmtpStageError(
+                "message DATA transmission",
+                describe_smtp_error(error),
+            ) from None
+        if code != 250:
+            raise SmtpStageError(
+                "message DATA acceptance",
+                f"SMTP server returned response {code}",
+            )
+    finally:
+        client.close()
 
 
-def _describe_error(error: Exception) -> str:
+def describe_smtp_error(error: Exception) -> str:
+    if isinstance(error, SmtpStageError):
+        return str(error)
     if isinstance(error, SmtpConfigError):
         return str(error)
+    if isinstance(error, SmtpTlsError):
+        return str(error)
+    if isinstance(error, ssl.SSLError):
+        return "SMTP TLS negotiation failed"
+    if isinstance(error, smtplib.SMTPNotSupportedError):
+        return "SMTP server does not support the required TLS feature"
     if isinstance(error, smtplib.SMTPAuthenticationError):
-        return "SMTP authentication failed (check username and password)"
+        detail = error.smtp_error.decode(errors="replace") if isinstance(error.smtp_error, bytes) else str(error.smtp_error)
+        enhanced = re.search(r"\b\d\.\d\.\d{1,3}\b", detail)
+        status = f"response {error.smtp_code}" + (f", status {enhanced.group(0)}" if enhanced else "")
+        if error.smtp_code == 534 and enhanced and enhanced.group(0) == "5.7.9":
+            return f"SMTP server rejected the password; an application-specific password is required ({status})"
+        if error.smtp_code == 535:
+            return f"SMTP server rejected the username or password ({status})"
+        return f"SMTP authentication was rejected ({status})"
     if isinstance(error, smtplib.SMTPRecipientsRefused):
         return "SMTP server rejected the recipient address"
     if isinstance(error, smtplib.SMTPSenderRefused):
-        return "SMTP server rejected the sender address"
+        return f"SMTP server rejected the sender address (response {error.smtp_code})"
     if isinstance(error, (TimeoutError, smtplib.SMTPServerDisconnected)):
         return f"SMTP connection timed out or was closed ({type(error).__name__})"
     if isinstance(error, (OSError, smtplib.SMTPException)):
         return f"SMTP delivery error ({type(error).__name__})"
     return f"Unexpected error ({type(error).__name__})"
+
+
+def send_test_email(session: Session, settings: Settings, recipient: str) -> None:
+    """Send a one-off SMTP test without creating or changing an alert/outbox row."""
+    normalized_recipient = recipient.strip()
+    if not valid_email(normalized_recipient):
+        raise SmtpConfigError("Test recipient email address is invalid")
+
+    config = _load_smtp_config(session, settings)
+    message = EmailMessage()
+    message["Subject"] = "[NEM Monitoring] SMTP test"
+    message["From"] = formataddr(("NEM Plant Monitoring", config["from_address"]))
+    message["To"] = normalized_recipient
+    message.set_content(
+        "This is a test email from NEM Plant Monitoring.\n\n"
+        "No alert or monitoring record was created or changed.\n"
+    )
+    _send(config, message, settings.email_smtp_timeout_seconds)
 
 
 def deliver_pending(session_factory, settings: Settings, *, batch_size: int = 20) -> int:
@@ -292,7 +454,7 @@ def deliver_pending(session_factory, settings: Settings, *, batch_size: int = 20
                 LOGGER.info("Notification %s (%s, alert %s) sent to user %s",
                             item.id, item.severity, item.alert_id, item.user_id)
             except Exception as error:
-                item.last_error = _describe_error(error)
+                item.last_error = describe_smtp_error(error)
                 if item.attempts >= settings.email_notification_max_attempts:
                     item.status = "failed"
                 else:

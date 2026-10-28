@@ -1,21 +1,63 @@
 """Administrator-managed asset supervisor assignments and notification status."""
+import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.api.routes.auth import require_roles
 from app.db.session import get_db
 from app.models import Asset, AssetSupervisor, EmailNotification, User
+from app.services.email_notifications import (
+    SmtpConfigError,
+    describe_smtp_error,
+    send_test_email,
+    valid_email,
+)
 
 router = APIRouter(tags=["notifications"], dependencies=[Depends(require_roles("Administrator"))])
 Db = Annotated[Session, Depends(get_db)]
+LOGGER = logging.getLogger("nem_backend.notifications")
 
 
 class SupervisorAssignment(BaseModel):
     user_ids: list[int] = Field(default_factory=list, max_length=50)
+
+
+class TestEmailRequest(BaseModel):
+    recipient: str = Field(min_length=1, max_length=254)
+
+    @field_validator("recipient")
+    @classmethod
+    def validate_recipient(cls, value: str) -> str:
+        value = value.strip()
+        if not valid_email(value):
+            raise ValueError("Enter a valid test recipient email address")
+        return value
+
+
+@router.post("/notifications/email/test")
+def send_email_test(payload: TestEmailRequest, request: Request, session: Db) -> dict[str, str]:
+    try:
+        send_test_email(session, request.app.state.settings, payload.recipient)
+    except SmtpConfigError as error:
+        LOGGER.warning("SMTP test email configuration failed: %s", str(error))
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except Exception as error:
+        diagnostic = describe_smtp_error(error)
+        LOGGER.warning("SMTP test email failed: %s", diagnostic)
+        raise HTTPException(status_code=502, detail=diagnostic) from error
+
+    LOGGER.info("SMTP test email was accepted by the configured server")
+    return {
+        "status": "accepted",
+        "message": (
+            "The SMTP server accepted the test message for delivery. "
+            "Inbox receipt is not confirmed."
+        ),
+    }
 
 
 def _assignment(session: Session, asset_id: int) -> dict:
