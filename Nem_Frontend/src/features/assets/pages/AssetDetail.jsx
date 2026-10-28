@@ -10,6 +10,7 @@ import {
   createLiveUpdateScheduler,
   subscribeLiveUpdates,
 } from "../../../services/liveUpdates.js";
+import AssetSupervisors from "../components/AssetSupervisors.jsx";
 import CurrentMaintenanceCards from "../components/CurrentMaintenanceCards.jsx";
 import MaintenancePanel from "../components/MaintenancePanel.jsx";
 import "./AssetDetail.css";
@@ -1766,6 +1767,7 @@ const filteredEvents = [...events]
               </span>
             )}
           </div>
+          {isAdministrator && <AssetSupervisors assetId={asset.id} />}
         </div>
 
         <div className="asset-links">
