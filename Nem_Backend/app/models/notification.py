@@ -1,4 +1,4 @@
-"""Supervisor assignments and the persistent email notification outbox."""
+# Supervisor assignments and the persistent email notification outbox.
 from datetime import datetime, timezone
 from typing import Any
 

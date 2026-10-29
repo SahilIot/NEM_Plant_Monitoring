@@ -195,7 +195,7 @@ export default function DocumentCreatePage() {
 
               <div className="field document-attachments-field">
                 <label htmlFor="document-files">
-                  Attach files <span className="muted">(optional)</span>
+                  Attach files <span className="muted"></span>
                 </label>
 
                 <div className="document-upload-zone">

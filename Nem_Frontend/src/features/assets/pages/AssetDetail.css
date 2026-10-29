@@ -1236,3 +1236,53 @@ button:disabled {
   cursor: not-allowed;
   pointer-events: none;
 }
+
+.variable-actions {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.variable-actions .variable-edit-btn,
+.variable-actions .variable-delete-btn {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  margin: 0;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.variable-actions .variable-delete-btn {
+  color: #ff4d5e;
+  border: 1px solid #ff4d5e;
+  background: transparent;
+}
+
+.variable-actions .variable-delete-btn svg {
+  color: #ff4d5e;
+  flex-shrink: 0;
+}
+
+.variable-actions .variable-delete-btn:hover:not(:disabled) {
+  background: rgba(255, 77, 94, 0.12);
+}
+
+.variable-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.variables-table th:last-child,
+.variables-table td:last-child {
+  min-width: 160px;
+  white-space: nowrap;
+}

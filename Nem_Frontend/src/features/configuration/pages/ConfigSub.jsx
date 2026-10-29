@@ -183,7 +183,7 @@ function fieldsFor(sub, variables) {
     },
     {
       key: "files",
-      label: "Attach files (optional)",
+      label: "Attach files",
       type: "files",
       hint: "PDF, DOC, DOCX or TXT. Up to 10 files; 10 MB each.",
     },
