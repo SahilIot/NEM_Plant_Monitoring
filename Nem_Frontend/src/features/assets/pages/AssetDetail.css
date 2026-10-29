@@ -194,6 +194,19 @@
   min-width: 110px;
 }
 
+.asset-page .current-maintenance-action-menu {
+  display: flex;
+  align-items: center;
+}
+
+.asset-page .current-maintenance-action-menu .maintenance-actions-trigger {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+}
+
 .asset-page .rule-card .sev {
   min-height: 40px;
 }
