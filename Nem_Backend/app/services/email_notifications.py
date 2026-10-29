@@ -390,23 +390,6 @@ def describe_smtp_error(error: Exception) -> str:
         return f"SMTP delivery error ({type(error).__name__})"
     return f"Unexpected error ({type(error).__name__})"
 
-#This is function called by test-email feature in settings page
-def send_test_email(session: Session, settings: Settings, recipient: str) -> None:
-    """Send a one-off SMTP test without creating or changing an alert/outbox row."""
-    normalized_recipient = recipient.strip()
-    if not valid_email(normalized_recipient):
-        raise SmtpConfigError("Test recipient email address is invalid")
-
-    config = _load_smtp_config(session, settings)
-    message = EmailMessage()
-    message["Subject"] = "[NEM Monitoring] SMTP test"
-    message["From"] = formataddr(("NEM Plant Monitoring", config["from_address"]))
-    message["To"] = normalized_recipient
-    message.set_content("This is a test email from NEM Plant Monitoring.\n\n"
-        "No alert or monitoring record was created or changed.\n"
-    )
-    _send(config, message, settings.email_smtp_timeout_seconds)
-
 #Background delivery and retry logic , a worker that delivers the persistent outbox jobs.
 def deliver_pending(session_factory, settings: Settings, *, batch_size: int = 20) -> int:
     """Send due outbox rows. Returns the number successfully sent."""
