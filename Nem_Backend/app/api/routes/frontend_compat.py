@@ -1982,9 +1982,7 @@ def import_configuration(
             is_mapping_bypass_enabled(request),
         )
         rule_data = data.model_dump()
-        rule_data["lifecycle_status"] = (
-            "in_progress" if data.is_enabled else "deactivated"
-        )
+        rule_data["lifecycle_status"] = ("in_progress" if data.is_enabled else "deactivated")
         session.add(MonitoringRule(**rule_data))
     session.commit()
     return {"rules": len(rules), "collections": created}
@@ -2096,7 +2094,5 @@ def restore_frontend_backup(
     record = session.get(BackupRecord, backup_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Backup was not found")
-    restore_backup(
-        session, request.app.state.engine, request.app.state.settings, record.file_name
-    )
+    restore_backup(session, request.app.state.engine, request.app.state.settings, record.file_name)
     return {"status": "restored", "name": record.name}

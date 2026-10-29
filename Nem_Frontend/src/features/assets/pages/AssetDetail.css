@@ -459,6 +459,43 @@
   z-index: 30;
 }
 
+.floating-menu .rule-action-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 12px;
+}
+
+.floating-menu .rule-action-menu-item + .rule-action-menu-item {
+  margin-top: 2px;
+}
+
+.floating-menu .rule-action-menu-item svg {
+  flex: 0 0 auto;
+}
+
+.floating-menu .rule-action-menu-item--view,
+.floating-menu button.rule-action-menu-item--view:hover:not(:disabled),
+.floating-menu button.rule-action-menu-item--view:focus-visible {
+  color: var(--ink);
+}
+
+.floating-menu .rule-action-menu-item--edit,
+.floating-menu button.rule-action-menu-item--edit:hover:not(:disabled),
+.floating-menu button.rule-action-menu-item--edit:focus-visible {
+  color: var(--action);
+}
+
+.floating-menu .rule-action-menu-item--delete {
+  color: var(--alert);
+}
+
+.floating-menu .rule-action-menu-item--delete:hover:not(:disabled),
+.floating-menu .rule-action-menu-item--delete:focus-visible {
+  background: var(--alert-soft);
+  color: var(--alert);
+}
+
 .asset-page .rule-toolbar .toolbar-actions-dropdown-menu {
   position: fixed;
   z-index: 1000;

@@ -1,7 +1,7 @@
 ﻿
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
-import { Download, Trash2 } from "lucide-react";
+import { Download, Eye, Pencil, Trash2 } from "lucide-react";
 import CopyRulesModal from "../components/CopyRulesModal.jsx";
 import PredefinedRulesModal from "../../rules/components/PredefinedRulesModal.jsx";
 import { api } from "../../../services/api.js";
@@ -577,6 +577,9 @@ export default function AssetDetail() {
 
   const assetId = Number(id);
   const asset = assets.find((a) => a.id === assetId);
+  const hasChildren = asset
+    ? assets.some((candidate) => candidate.parent_asset_id === asset.id)
+    : false;
 
   const [tab, setTab] = useState(
     location.state?.activeTab === "logbook" ? "logbook" : "status"
@@ -1314,24 +1317,19 @@ const filteredEvents = [...events]
 
   const permanentlyDeleteRule = async (rule) => {
     if (!isAdministrator || permanentDeleteRequest.current) return;
-    if (
-      !(await confirm(
+    permanentDeleteRequest.current = true;
+    setDeletingRuleId(rule.id);
+    setLoadError("");
+    setActionNotice("");
+    try {
+      if (!(await confirm(
         `Permanently delete “${rule.name}”? This irreversibly removes the rule, its alerts, and its evaluation history. Maintenance records linked to its alerts must be removed first.`,
         {
           title: "Permanently delete rule",
           confirmLabel: "Delete permanently",
           destructive: true,
         }
-      ))
-    ) {
-      return;
-    }
-
-    permanentDeleteRequest.current = true;
-    setDeletingRuleId(rule.id);
-    setLoadError("");
-    setActionNotice("");
-    try {
+      ))) return;
       await api.del(`/rules/${rule.id}/permanent`);
       await refreshAll();
       setActionNotice(`Rule “${rule.name}” was permanently deleted.`);
@@ -1768,7 +1766,9 @@ const filteredEvents = [...events]
               </span>
             )}
           </div>
-          {isAdministrator && <AssetSupervisors assetId={asset.id} />}
+          {isAdministrator && hasChildren && (
+            <AssetSupervisors assetId={asset.id} />
+          )}
         </div>
 
         <div className="asset-links">
@@ -2241,21 +2241,22 @@ const filteredEvents = [...events]
 </button>
 {ruleActionMenuId === rule.id && (
   <FloatingMenu align="right" role="menu">
-    {/* View rule: existing behavior unchanged */}
     <button
       type="button"
+      className="rule-action-menu-item rule-action-menu-item--view"
       role="menuitem"
       onClick={() => {
         setRuleActionMenuId(null);
         openRuleDetails(rule);
       }}
     >
-      View rule
+      <Eye size={16} aria-hidden="true" />
+      <span>View rule</span>
     </button>
 
-    {/* Edit rule: existing permission check unchanged */}
     <button
       type="button"
+      className="rule-action-menu-item rule-action-menu-item--edit"
       role="menuitem"
       onClick={() => {
         setRuleActionMenuId(null);
@@ -2268,13 +2269,15 @@ const filteredEvents = [...events]
           : undefined
       }
     >
-      Edit rule
+      <Pencil size={16} aria-hidden="true" />
+      <span>Edit rule</span>
     </button>
 
     {/* Suspend rule */}
     {lifecycleStatus(rule) === "in_progress" && (
       <button
         type="button"
+        className="rule-action-menu-item rule-action-menu-item--lifecycle"
         role="menuitem"
         onClick={() => {
           setRuleActionMenuId(null);
@@ -2295,6 +2298,7 @@ const filteredEvents = [...events]
     {lifecycleStatus(rule) === "suspended" && (
       <button
         type="button"
+        className="rule-action-menu-item rule-action-menu-item--lifecycle"
         role="menuitem"
         onClick={() => {
           setRuleActionMenuId(null);
@@ -2315,6 +2319,7 @@ const filteredEvents = [...events]
     {lifecycleStatus(rule) === "deactivated" && (
       <button
         type="button"
+        className="rule-action-menu-item rule-action-menu-item--lifecycle"
         role="menuitem"
         onClick={() => {
           setRuleActionMenuId(null);
@@ -2335,6 +2340,7 @@ const filteredEvents = [...events]
     {["in_progress", "suspended"].includes(lifecycleStatus(rule)) && (
       <button
         type="button"
+        className="rule-action-menu-item rule-action-menu-item--lifecycle"
         role="menuitem"
         onClick={() => {
           setRuleActionMenuId(null);
@@ -2351,55 +2357,44 @@ const filteredEvents = [...events]
       </button>
     )}
 
-    {/* Archive and Delete: existing behavior unchanged */}
+    {/* Archive */}
     {lifecycleStatus(rule) !== "in_progress" &&
       lifecycleStatus(rule) !== "completed" && (
-        <>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setRuleActionMenuId(null);
-              remove(rule);
-            }}
-            disabled={deletingRuleId !== null || !canManageRules}
-            title={
-              !canManageRules
-                ? "You do not have permission to manage monitoring rules."
-                : undefined
-            }
-          >
-            Archive
-          </button>
-
-          <button
-            type="button"
-            className="btn-outline danger"
-            onClick={() => deleteEvent(event)}
-            disabled={!isAdministrator || deletingEventId !== null}
-            title="Delete event permanently"
-            aria-label="Delete event permanently"
-          >
-            <Trash2 size={16} />
-            Delete
-          </button>
-        </>
+        <button
+          type="button"
+          className="rule-action-menu-item rule-action-menu-item--lifecycle"
+          role="menuitem"
+          onClick={() => {
+            setRuleActionMenuId(null);
+            remove(rule);
+          }}
+          disabled={deletingRuleId !== null || !canManageRules}
+          title={
+            !canManageRules
+              ? "You do not have permission to manage monitoring rules."
+              : undefined
+          }
+        >
+          Archive
+        </button>
       )}
 
-    {lifecycleStatus(rule) === "completed" && (
+    {lifecycleStatus(rule) !== "in_progress" && (
       <button
         type="button"
-        className="btn-outline danger"
-        onClick={() => deleteEvent(event)}
-        disabled={!isAdministrator || deletingEventId !== null}
-        title="Delete event permanently"
-        aria-label="Delete event permanently"
+        className="rule-action-menu-item rule-action-menu-item--delete"
+        role="menuitem"
+        onClick={() => {
+          setRuleActionMenuId(null);
+          permanentlyDeleteRule(rule);
+        }}
+        disabled={!isAdministrator || deletingRuleId !== null}
+        title={!isAdministrator ? "Only Administrators can permanently delete rules." : "Permanently delete rule"}
       >
-        <Trash2 size={16} />
-        Delete
+        <Trash2 size={16} aria-hidden="true" />
+        <span>{deletingRuleId === rule.id ? "Deleting…" : "Delete rule"}</span>
       </button>
-
-                            )}
+    )}
                           </FloatingMenu>
                         )}
                       </div>

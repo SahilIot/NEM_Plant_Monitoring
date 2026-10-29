@@ -15,6 +15,7 @@ from app.services.email_notifications import (
     SmtpConfigError,
     describe_smtp_error,
     send_test_email,
+    supervisor_assignments_for_asset,
     valid_email,
 )
 
@@ -76,9 +77,26 @@ def _assignment(session: Session, asset_id: int) -> dict:
 # Returns an asset`s supervisor assignments.
 @router.get("/assets/{asset_id}/supervisors")
 def get_asset_supervisors(asset_id: int, session: Db) -> dict:
-    if session.get(Asset, asset_id) is None:
+    asset = session.get(Asset, asset_id)
+    if asset is None:
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
-    return _assignment(session, asset_id)
+    assignments = _assignment(session, asset_id)
+    inherited: dict[int, dict] = {}
+    for source_asset_id, source_asset_name, user in supervisor_assignments_for_asset(session, asset):
+        if source_asset_id == asset.id:
+            continue
+        supervisor = inherited.setdefault(user.id, {
+            "id": user.id,
+            "username": user.username,
+            "email_address": user.email_address,
+            "inherited_from": [],
+        })
+        supervisor["inherited_from"].append({
+            "asset_id": source_asset_id,
+            "asset_name": source_asset_name,
+        })
+    assignments["inherited_supervisors"] = list(inherited.values())
+    return assignments
 
 # Replaces an asset`s supervisor assignments after validating the selected users.
 @router.put("/assets/{asset_id}/supervisors")

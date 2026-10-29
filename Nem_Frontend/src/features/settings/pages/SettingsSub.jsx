@@ -189,31 +189,33 @@ function UserInfo() {
             <EditIcon size={14} aria-hidden="true" />
           </button>
         )}
-        <button
-          type="button"
-          onClick={() => {
-            setPasswordError("");
-            setPasswordDialogOpen(true);
-          }}
-          title="Change password"
-          aria-label="Change password"
-          className="btn-outline"
-          style={{
-            position: "absolute",
-            right: canEdit ? 52 : 12,
-            top: "50%",
-            transform: "translateY(-50%)",
-            height: "32px",
-            padding: "0 10px",
-            fontSize: "13px",
-            borderRadius: "4px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <KeyRound size={14} aria-hidden="true" />
-        </button>
+        {canEdit && (
+          <button
+            type="button"
+            onClick={() => {
+              setPasswordError("");
+              setPasswordDialogOpen(true);
+            }}
+            title="Change password"
+            aria-label="Change password"
+            className="btn-outline"
+            style={{
+              position: "absolute",
+              right: 52,
+              top: "50%",
+              transform: "translateY(-50%)",
+              height: "32px",
+              padding: "0 10px",
+              fontSize: "13px",
+              borderRadius: "4px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <KeyRound size={14} aria-hidden="true" />
+          </button>
+        )}
       </div>
 
     <dl className="profile-list">
@@ -345,7 +347,7 @@ function UserInfo() {
 
 <p className="hint">
   Your name and role are taken from your signed-in account.
-  An Administrator can update your role.
+  An Administrator can update your role. Only Administrators can change their password here.
 </p>
     </div>
   );
