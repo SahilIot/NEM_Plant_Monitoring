@@ -1,6 +1,11 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useOutletContext } from "react-router-dom";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useOutletContext,
+} from "react-router-dom";
 import { api } from "../../../services/api.js";
 import {
   createLiveUpdateScheduler,
@@ -14,6 +19,7 @@ import {
 } from "../../../utils/format.js";
 import { EmptyState, Modal } from "../../../components/common/UI.jsx";
 import { CheckIcon } from "../../../components/common/Icons.jsx";
+import { captureNavigationOrigin } from "../../../utils/navigation.js";
 
 const num = (value) =>
   typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -27,13 +33,18 @@ function localCalendarDay(date = new Date()) {
 
 function Tile({ tone, label, value, to, hint }) {
   const nav = useNavigate();
+  const location = useLocation();
   const lit = value > 0;
 
   return (
     <button
       type="button"
       className={"tile " + tone + (lit ? " lit" : "")}
-      onClick={() => nav(to)}
+      onClick={() =>
+        nav(to, {
+          state: { from: captureNavigationOrigin(location) },
+        })
+      }
       title={hint}
     >
       <span className="tile-label">{label}</span>

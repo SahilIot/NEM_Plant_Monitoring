@@ -28,6 +28,11 @@ import {
   formatValue,
 } from "../../../utils/format.js";
 import {
+  captureNavigationOrigin,
+  consumeNavigationFlash,
+  hasNavigationFlash,
+} from "../../../utils/navigation.js";
+import {
   CreateModal,
   EmptyState,
   FloatingMenu,
@@ -577,15 +582,22 @@ export default function AssetDetail() {
     useOutletContext();
 
   const assetId = Number(id);
+  const routeState = location.state || {};
   const asset = assets.find((a) => a.id === assetId);
   const hasChildren = asset
     ? assets.some((candidate) => candidate.parent_asset_id === asset.id)
     : false;
 
   const [tab, setTab] = useState(
-    location.state?.activeTab === "logbook" ? "logbook" : "status"
+    ["status", "logbook", "events"].includes(routeState.activeTab)
+      ? routeState.activeTab
+      : "status"
   );
-  const [list, setList] = useState("activated");
+  const [list, setList] = useState(
+    ["activated", "not_activated"].includes(routeState.assetRuleList)
+      ? routeState.assetRuleList
+      : "activated"
+  );
   const [rules, setRules] = useState([]);
   const [completedMaintenanceCount, setCompletedMaintenanceCount] = useState(0);
   const [maintenanceRefreshKey, setMaintenanceRefreshKey] = useState(0);
@@ -600,9 +612,13 @@ export default function AssetDetail() {
   const [mappingBypassEnabled, setMappingBypassEnabled] = useState(false);
   const [editingVariable, setEditingVariable] = useState(null);
   const [ruleStates, setRuleStates] = useState(new Map());
-  const [children, setChildren] = useState(false);
-  const [sort, setSort] = useState("severity");
-  const [filter, setFilter] = useState("");
+  const [children, setChildren] = useState(
+    Boolean(routeState.assetIncludeChildren)
+  );
+  const [sort, setSort] = useState(
+    routeState.assetRuleSort === "name" ? "name" : "severity"
+  );
+  const [filter, setFilter] = useState(routeState.assetRuleFilter || "");
   const [showFilter, setShowFilter] = useState(false);
   const [menu, setMenu] = useState(false);
   const [bulkSaving, setBulkSaving] = useState(false);
@@ -619,13 +635,25 @@ export default function AssetDetail() {
   const [showPredefinedRules, setShowPredefinedRules] = useState(false);
   const [addRuleMenu, setAddRuleMenu] = useState(false);
   const [logs, setLogs] = useState([]);
-  const [maintenanceTypeFilter, setMaintenanceTypeFilter] = useState("");
-  const [maintenanceStartDateTime, setMaintenanceStartDateTime] = useState("");
-  const [maintenanceEndDateTime, setMaintenanceEndDateTime] = useState("");
+  const [maintenanceTypeFilter, setMaintenanceTypeFilter] = useState(
+    routeState.maintenanceTypeFilter || ""
+  );
+  const [maintenanceStartDateTime, setMaintenanceStartDateTime] = useState(
+    routeState.maintenanceStartDateTime || ""
+  );
+  const [maintenanceEndDateTime, setMaintenanceEndDateTime] = useState(
+    routeState.maintenanceEndDateTime || ""
+  );
   const [events, setEvents] = useState([]);
-  const [eventTypeFilter, setEventTypeFilter] = useState("");
-  const [eventStartDateTime, setEventStartDateTime] = useState("");
-  const [eventEndDateTime, setEventEndDateTime] = useState("");
+  const [eventTypeFilter, setEventTypeFilter] = useState(
+    routeState.eventTypeFilter || ""
+  );
+  const [eventStartDateTime, setEventStartDateTime] = useState(
+    routeState.eventStartDateTime || ""
+  );
+  const [eventEndDateTime, setEventEndDateTime] = useState(
+    routeState.eventEndDateTime || ""
+  );
   const [loadError, setLoadError] = useState("");
   const [deletingAsset, setDeletingAsset] = useState(false);
   const [deletingVariableId, setDeletingVariableId] = useState(null);
@@ -650,6 +678,21 @@ export default function AssetDetail() {
   const plcStatusSeq = useRef(0);
   const bulkRequest = useRef(false);
   const permanentDeleteRequest = useRef(false);
+
+  const assetNavigationState = {
+    ...(location.state || {}),
+    activeTab: tab,
+    assetRuleList: list,
+    assetRuleFilter: filter,
+    assetRuleSort: sort,
+    assetIncludeChildren: children,
+    maintenanceTypeFilter,
+    maintenanceStartDateTime,
+    maintenanceEndDateTime,
+    eventTypeFilter,
+    eventStartDateTime,
+    eventEndDateTime,
+  };
 
   const maintenanceEventRecordId = Number(
     selectedEvent?.metadata?.maintenance_record_id
@@ -936,21 +979,34 @@ export default function AssetDetail() {
 
   
   useEffect(() => {
-    setTab("status");
-    setList("activated");
-    setFilter("");
+    const restoredState = location.state || {};
+    setTab(
+      ["status", "logbook", "events"].includes(restoredState.activeTab)
+        ? restoredState.activeTab
+        : "status"
+    );
+    setList(
+      ["activated", "not_activated"].includes(restoredState.assetRuleList)
+        ? restoredState.assetRuleList
+        : "activated"
+    );
+    setFilter(restoredState.assetRuleFilter || "");
+    setSort(restoredState.assetRuleSort === "name" ? "name" : "severity");
+    setChildren(Boolean(restoredState.assetIncludeChildren));
     setRules([]);
     setAllVariables([]);
     setRuntimeReadings(new Map());
     setVariables([]);
     setLogs([]);
-    setMaintenanceTypeFilter("");
-    setMaintenanceStartDateTime("");
-    setMaintenanceEndDateTime("");
+    setMaintenanceTypeFilter(restoredState.maintenanceTypeFilter || "");
+    setMaintenanceStartDateTime(
+      restoredState.maintenanceStartDateTime || ""
+    );
+    setMaintenanceEndDateTime(restoredState.maintenanceEndDateTime || "");
     setEvents([]);
-    setEventTypeFilter("");
-    setEventStartDateTime("");
-    setEventEndDateTime("");
+    setEventTypeFilter(restoredState.eventTypeFilter || "");
+    setEventStartDateTime(restoredState.eventStartDateTime || "");
+    setEventEndDateTime(restoredState.eventEndDateTime || "");
     setSelectedEvent(null);
     setShowEventDetails(false);
     setLoadError("");
@@ -997,28 +1053,134 @@ export default function AssetDetail() {
     };
   }, [hasRuntimeRules]);
 
+  useEffect(() => {
+    if (
+      location.state?.createdNotice ||
+      hasNavigationFlash(location)
+    ) {
+      return;
+    }
+
+    const storedState = location.state || {};
+    const contextKeys = [
+      "activeTab",
+      "assetRuleList",
+      "assetRuleFilter",
+      "assetRuleSort",
+      "assetIncludeChildren",
+      "maintenanceTypeFilter",
+      "maintenanceStartDateTime",
+      "maintenanceEndDateTime",
+      "eventTypeFilter",
+      "eventStartDateTime",
+      "eventEndDateTime",
+    ];
+    if (
+      contextKeys.every(
+        (key) => storedState[key] === assetNavigationState[key]
+      )
+    ) {
+      return;
+    }
+
+    navigate(
+      `${location.pathname}${location.search}${location.hash}`,
+      {
+        replace: true,
+        state: { ...storedState, ...assetNavigationState },
+      }
+    );
+  }, [
+    tab,
+    list,
+    filter,
+    sort,
+    children,
+    maintenanceTypeFilter,
+    maintenanceStartDateTime,
+    maintenanceEndDateTime,
+    eventTypeFilter,
+    eventStartDateTime,
+    eventEndDateTime,
+    location.pathname,
+    location.search,
+    location.hash,
+    location.key,
+    location.state,
+    navigate,
+  ]);
 
   useEffect(() => {
     const navigationState = location.state;
+    const flash = consumeNavigationFlash(location);
+    const restoredState = flash?.state || navigationState;
 
-    if (navigationState?.activeTab === "logbook") {
-      setTab("status");
+    if (
+      ["status", "logbook", "events"].includes(
+        restoredState?.activeTab
+      )
+    ) {
+      setTab(restoredState.activeTab);
+    }
+    if (
+      ["activated", "not_activated"].includes(
+        restoredState?.assetRuleList
+      )
+    ) {
+      setList(restoredState.assetRuleList);
+    }
+    if (restoredState?.assetRuleFilter != null) {
+      setFilter(restoredState.assetRuleFilter);
+    }
+    if (restoredState?.assetRuleSort) {
+      setSort(restoredState.assetRuleSort);
+    }
+    if (restoredState?.assetIncludeChildren != null) {
+      setChildren(Boolean(restoredState.assetIncludeChildren));
+    }
+    if (restoredState?.maintenanceTypeFilter != null) {
+      setMaintenanceTypeFilter(restoredState.maintenanceTypeFilter);
+    }
+    if (restoredState?.maintenanceStartDateTime != null) {
+      setMaintenanceStartDateTime(restoredState.maintenanceStartDateTime);
+    }
+    if (restoredState?.maintenanceEndDateTime != null) {
+      setMaintenanceEndDateTime(restoredState.maintenanceEndDateTime);
+    }
+    if (restoredState?.eventTypeFilter != null) {
+      setEventTypeFilter(restoredState.eventTypeFilter);
+    }
+    if (restoredState?.eventStartDateTime != null) {
+      setEventStartDateTime(restoredState.eventStartDateTime);
+    }
+    if (restoredState?.eventEndDateTime != null) {
+      setEventEndDateTime(restoredState.eventEndDateTime);
     }
 
     if (navigationState?.createdNotice) {
       setActionNotice(navigationState.createdNotice);
     }
+    if (flash?.text) setActionNotice(flash.text);
 
-    if (
-      navigationState?.activeTab ||
-      navigationState?.createdNotice
-    ) {
-      navigate(location.pathname, {
+    if (navigationState?.createdNotice) {
+      const retainedState = { ...navigationState };
+      delete retainedState.createdNotice;
+      navigate(
+        `${location.pathname}${location.search}${location.hash}`,
+        {
         replace: true,
-        state: null,
-      });
+          state: retainedState,
+        }
+      );
     }
-  }, [location.pathname, location.state, navigate]);
+  }, [
+    location.pathname,
+    location.search,
+    location.hash,
+    location.state,
+    location.key,
+    navigate,
+  ]);
 
 
   useEffect(() => {
@@ -1439,7 +1601,11 @@ const filteredEvents = [...events]
     setModal(null);
     setMonitoringRuleSelection(null);
 
-    navigate(`/assets/${assetId}/monitoring-rules/new/${choiceId}`);
+    navigate(`/assets/${assetId}/monitoring-rules/new/${choiceId}`, {
+      state: {
+        from: captureNavigationOrigin(location, assetNavigationState),
+      },
+    });
   };
 
   const openEditRuleForm = (rule) => {
@@ -2461,6 +2627,7 @@ const filteredEvents = [...events]
             onCompletedRecordsCount={setCompletedMaintenanceCount}
             onCompleted={() => setList("not_activated")}
             showCompleted={list === "not_activated"}
+            navigationState={assetNavigationState}
           />
         </>
       )}
@@ -2470,6 +2637,7 @@ const filteredEvents = [...events]
     <MaintenancePanel
       assetId={assetId}
       onChanged={refreshMaintenanceData}
+      navigationState={assetNavigationState}
     />
 
    
@@ -3072,7 +3240,14 @@ const filteredEvents = [...events]
           className="rule-type-option"
           onClick={() => {
             setModal(null);
-            navigate(legacyRulePath(assetId, choice.kind));
+            navigate(legacyRulePath(assetId, choice.kind), {
+              state: {
+                from: captureNavigationOrigin(
+                  location,
+                  assetNavigationState
+                ),
+              },
+            });
           }}
         >
           <strong>{choice.label}</strong>
@@ -3528,6 +3703,7 @@ const filteredEvents = [...events]
       {showPredefinedRules && (
         <PredefinedRulesModal
           assetId={assetId}
+          navigationState={assetNavigationState}
           onClose={() => setShowPredefinedRules(false)}
           onAssigned={async (result) => {
             setShowPredefinedRules(false);
