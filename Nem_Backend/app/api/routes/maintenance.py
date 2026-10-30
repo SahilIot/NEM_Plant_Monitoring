@@ -582,23 +582,49 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
 
     previous_due_date = schedule.current_due_date
 
-    if ("first_due_date" in changes and changes["first_due_date"] != schedule.first_due_date
-        and (schedule.approval_status == "pending" or schedule.last_completed_at is not None)):
+    administrator_can_reanchor = user.role == "Administrator"
+    if (
+        "first_due_date" in changes
+        and changes["first_due_date"] != schedule.first_due_date
+        and (
+            schedule.approval_status == "pending"
+            or schedule.last_completed_at is not None
+        )
+        and not administrator_can_reanchor
+    ):
         raise HTTPException(status_code=409,detail="The first due date cannot change after an occurrence has been completed",)
 
     if "schedule_start_date" in changes:
-        if schedule.last_completed_at is not None:
+        if schedule.last_completed_at is not None and not administrator_can_reanchor:
             raise HTTPException(status_code=409,detail="The schedule anchor cannot change after an occurrence has been completed",)
 
         if schedule.current_occurrence_id is not None:
             current_occurrence = session.get(MaintenanceRecord,schedule.current_occurrence_id,)
-            if (current_occurrence is None or current_occurrence.status != "planned"):
+            completed_occurrence_reanchor = (
+                administrator_can_reanchor
+                and schedule.last_completed_at is not None
+                and current_occurrence is not None
+                and current_occurrence.status == "completed"
+            )
+            if (
+                not completed_occurrence_reanchor
+                and (
+                    current_occurrence is None
+                    or current_occurrence.status != "planned"
+                )
+            ):
                 raise HTTPException(status_code=409,detail="The schedule start date cannot change after maintenance starts",)
 
     for field, value in changes.items():
         setattr(schedule, field, value)
 
-    if "schedule_start_date" in changes:
+    if "assigned_technician" in changes and schedule.current_occurrence_id is not None:
+        current_occurrence = session.get(MaintenanceRecord,schedule.current_occurrence_id,)
+        if current_occurrence is not None and current_occurrence.status == "planned":
+            current_occurrence.assigned_technician = schedule.assigned_technician
+            current_occurrence.performed_by = (schedule.assigned_technician or "Unassigned")
+
+    if "schedule_start_date" in changes and schedule.last_completed_at is None:
         schedule.current_period_start_date = schedule.schedule_start_date
 
     if schedule.first_due_date < schedule.schedule_start_date:
@@ -662,12 +688,13 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
         schedule.current_due_date = schedule.first_due_date
         schedule.due_alerted_for = None
 
-    # Recalculate the proposed date when the user changes the interval.
+    # Keep a pending proposal aligned with edits to its recurrence anchor or interval.
     if (
         schedule.recurrence_enabled
         and schedule.approval_status == "pending"
         and (
-            "recurrence_interval" in changes
+            "first_due_date" in changes
+            or "recurrence_interval" in changes
             or "recurrence_unit" in changes
         )
     ):
