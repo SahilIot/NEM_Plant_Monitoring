@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { KeyRound } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../../../services/api.js";
 import { formatTime } from "../../../utils/format.js";
@@ -6,6 +7,7 @@ import { useAuth } from "../../auth/AuthContext.jsx";
 import {
   CreateModal,
   EmptyState,
+  Modal,
   useConfirmation,
 } from "../../../components/common/UI.jsx";
 import { BackIcon, EditIcon } from "../../../components/common/Icons.jsx";
@@ -35,6 +37,12 @@ function UserInfo() {
   const [contactError, setContactError] = useState("");
   const [emailError, setEmailError] = useState("");
   const [saveMsg, setSaveMsg] = useState("");
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordBusy, setPasswordBusy] = useState(false);
   const canEdit = user?.role === "Administrator";
   useEffect(() => {
     let active = true;
@@ -103,6 +111,47 @@ function UserInfo() {
     }
   };
 
+  const closePasswordDialog = () => {
+    if (passwordBusy) return;
+    setPasswordDialogOpen(false);
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setPasswordError("");
+  };
+
+  const changePassword = async (event) => {
+    event.preventDefault();
+    setPasswordError("");
+    if (newPassword.length < 6) {
+      setPasswordError("New password must be at least 6 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError("New password and confirmation do not match.");
+      return;
+    }
+
+    setPasswordBusy(true);
+    try {
+      await api.post("/auth/change-password", {
+        current_password: currentPassword,
+        new_password: newPassword,
+      });
+      setPasswordDialogOpen(false);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setSaveMsg("Password changed successfully.");
+    } catch (passwordChangeError) {
+      setPasswordError(
+        passwordChangeError.message || "Could not change the password."
+      );
+    } finally {
+      setPasswordBusy(false);
+    }
+  };
+
   return (
     <div className="panel-white profile">
       <div className="profile-head" style={{ position: "relative", display: "flex", alignItems: "center", gap: 12 }}>
@@ -138,6 +187,33 @@ function UserInfo() {
             }}
           >
             <EditIcon size={14} aria-hidden="true" />
+          </button>
+        )}
+        {canEdit && (
+          <button
+            type="button"
+            onClick={() => {
+              setPasswordError("");
+              setPasswordDialogOpen(true);
+            }}
+            title="Change password"
+            aria-label="Change password"
+            className="btn-outline"
+            style={{
+              position: "absolute",
+              right: 52,
+              top: "50%",
+              transform: "translateY(-50%)",
+              height: "32px",
+              padding: "0 10px",
+              fontSize: "13px",
+              borderRadius: "4px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <KeyRound size={14} aria-hidden="true" />
           </button>
         )}
       </div>
@@ -208,9 +284,70 @@ function UserInfo() {
   </div>
 ) : null}
 
+{passwordDialogOpen && (
+  <Modal title="Change password" onClose={closePasswordDialog}>
+    <form className="maintenance-form" onSubmit={changePassword}>
+      {passwordError && (
+        <p className="notice error" role="alert">{passwordError}</p>
+      )}
+      <label className="field">
+        Current password
+        <input
+          type="password"
+          autoComplete="current-password"
+          value={currentPassword}
+          onChange={(event) => setCurrentPassword(event.target.value)}
+          required
+          maxLength={1024}
+          disabled={passwordBusy}
+        />
+      </label>
+      <label className="field">
+        New password (minimum 6 characters)
+        <input
+          type="password"
+          autoComplete="new-password"
+          value={newPassword}
+          onChange={(event) => setNewPassword(event.target.value)}
+          required
+          minLength={6}
+          maxLength={1024}
+          disabled={passwordBusy}
+        />
+      </label>
+      <label className="field">
+        Confirm new password
+        <input
+          type="password"
+          autoComplete="new-password"
+          value={confirmPassword}
+          onChange={(event) => setConfirmPassword(event.target.value)}
+          required
+          minLength={6}
+          maxLength={1024}
+          disabled={passwordBusy}
+        />
+      </label>
+      <div className="modal-actions">
+        <button
+          type="button"
+          className="btn-outline"
+          onClick={closePasswordDialog}
+          disabled={passwordBusy}
+        >
+          Cancel
+        </button>
+        <button type="submit" className="btn-primary" disabled={passwordBusy}>
+          {passwordBusy ? "Changing…" : "Change password"}
+        </button>
+      </div>
+    </form>
+  </Modal>
+)}
+
 <p className="hint">
   Your name and role are taken from your signed-in account.
-  An Administrator can update your role.
+  An Administrator can update your role. Only Administrators can change their password here.
 </p>
     </div>
   );
@@ -221,9 +358,6 @@ function SettingsForm({ section }) {
   const canManageSettings = user?.role === "Administrator";
   const [v, setV] = useState(null);
   const [msg, setMsg] = useState("");
-  const [testRecipient, setTestRecipient] = useState("");
-  const [testMsg, setTestMsg] = useState("");
-  const [sendingTest, setSendingTest] = useState(false);
   useEffect(() => {
     setMsg(""); setV(null);
     if (!canManageSettings) {
@@ -235,28 +369,12 @@ function SettingsForm({ section }) {
   if (!v) return msg ? <div className="notice error">{msg}</div> : <div className="loading">LoadingÃ¢â‚¬Â¦</div>;
   const save = async () => {
     if (!canManageSettings) return;
-    setTestMsg("");
     try {
       const saved = await api.put(`/settings/${section}`, v);
       setV(saved);
       setMsg("Settings saved.");
     } catch (error) {
       setMsg(`Could not save settings: ${error.message}`);
-    }
-  };
-  const sendTestEmail = async () => {
-    if (!canManageSettings || sendingTest) return;
-    setSendingTest(true);
-    setTestMsg("");
-    try {
-      const result = await api.post("/notifications/email/test", {
-        recipient: testRecipient.trim(),
-      });
-      setTestMsg(result.message);
-    } catch (error) {
-      setTestMsg(`Could not send test email: ${error.message}`);
-    } finally {
-      setSendingTest(false);
     }
   };
   return (
@@ -284,47 +402,6 @@ function SettingsForm({ section }) {
       ))}
       <div><button className="btn-primary" disabled={!canManageSettings} title={!canManageSettings ? "Only Administrators can change global settings." : undefined} onClick={save}>Save</button></div>
       {msg && <p className={"notice" + (/^Could not/.test(msg) ? " error" : "")} role="status">{msg}</p>}
-      {section === "email" && canManageSettings && (
-        <div className="form" style={{ marginTop: 20 }}>
-          <label>
-            Test recipient email
-            <input
-              type="email"
-              maxLength={254}
-              autoComplete="email"
-              value={testRecipient}
-              onChange={(event) => {
-                setTestRecipient(event.target.value);
-                setTestMsg("");
-              }}
-              placeholder="recipient@example.com"
-            />
-          </label>
-          <p className="hint">
-            Save the SMTP settings first. The test uses the saved sender
-            sky@nem.co.in and does not create an alert. SMTP acceptance does
-            not confirm inbox receipt.
-          </p>
-          <div>
-            <button
-              type="button"
-              className="btn-outline"
-              disabled={sendingTest || !testRecipient.trim()}
-              onClick={sendTestEmail}
-            >
-              {sendingTest ? "Sending test…" : "Send test email"}
-            </button>
-          </div>
-          {testMsg && (
-            <p
-              className={"notice" + (/^Could not/.test(testMsg) ? " error" : "")}
-              role="status"
-            >
-              {testMsg}
-            </p>
-          )}
-        </div>
-      )}
     </div>
   );
 }

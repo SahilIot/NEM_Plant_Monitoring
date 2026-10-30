@@ -25,6 +25,18 @@ function todayDateInput() {
     .slice(0, 10);
 }
 
+function localDateTimeInput(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function utcDateTime(value) {
+  return value ? new Date(value).toISOString() : null;
+}
+
 function getErrorMessage(err, fallback) {
   return (
     err?.response?.data?.detail ||
@@ -59,6 +71,7 @@ function getDocumentsArray(response) {
 export default function CreateMaintenanceSchedulePage() {
   const { user } = useAuth();
   const canManageMaintenance = ["Administrator", "Supervisor"].includes(user?.role);
+  const isSupervisor = user?.role === "Supervisor";
   const { id, scheduleId, recordId } = useParams();
   const isStandaloneEdit = Boolean(recordId);
   const isEdit = Boolean(scheduleId || recordId);
@@ -72,6 +85,13 @@ export default function CreateMaintenanceSchedulePage() {
     priority: "medium",
     assigned_technician: "",
     description: "",
+    actual_started_at: "",
+    actual_completed_at: "",
+    completion_notes: "",
+    parts_used: "",
+    checklist: "",
+    next_due_at: "",
+    alert_id: "",
     schedule_start_date: todayDateInput(),
     first_due_date: "",
     recurrence_enabled: true,
@@ -81,6 +101,7 @@ export default function CreateMaintenanceSchedulePage() {
 
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(isEdit);
+  const [editingBlocked, setEditingBlocked] = useState(isEdit);
   const [error, setError] = useState("");
 
   // Instructions and documents picker state.
@@ -107,120 +128,108 @@ export default function CreateMaintenanceSchedulePage() {
 
     async function loadExistingMaintenance() {
       setLoading(true);
+      setEditingBlocked(isEdit);
       setError("");
 
       try {
-        // Normal maintenance record edit
-        if (recordId) {
-          let record = maintenanceRecord;
+        let record;
+        let currentOccurrence = null;
 
-          // If navigation state is missing, fetch the record from the API.
-          if (!record) {
-            const response = await api.get(`/maintenance/${recordId}`);
-            const data = response?.data ?? response;
-            record = data?.maintenance ?? data?.record ?? data;
-          }
-
-          if (!record || typeof record !== "object" || record.title == null) {
-            throw new Error("Maintenance record was not found.");
-          }
-
-          if (cancelled) return;
-
-          setForm((previous) => ({
-            ...previous,
-            title: record.title ?? "",
-            maintenance_type: record.maintenance_type ?? "preventive",
-            priority: record.priority ?? "medium",
-            assigned_technician: record.assigned_technician ?? "",
-            description: record.notes ?? record.description ?? "",
-            schedule_start_date: (
-              record.planned_start_at ??
-              record.schedule_start_date ??
-              ""
-            ).toString().slice(0, 10),
-            first_due_date: (
-              record.planned_end_at ??
-              record.first_due_date ??
-              ""
-            ).toString().slice(0, 10),
-            recurrence_enabled: Boolean(record.recurrence_enabled ?? false),
-            recurrence_interval: String(record.recurrence_interval ?? 1),
-            recurrence_unit: record.recurrence_unit ?? "months",
-          }));
-
-          return;
-        }
-
-        // Existing recurring schedule edit
-        if (!scheduleId) {
-          throw new Error("Maintenance schedule ID is missing.");
-        }
-
-        let schedule = null;
-
-        try {
+        if (scheduleId) {
           const response = await api.get(
             `/maintenance/schedules/${scheduleId}`
           );
           const data = response?.data ?? response;
-          schedule = data?.schedule ?? data;
-        } catch (detailError) {
-          console.warn(
-            "Could not load schedule directly; trying schedule list.",
-            detailError
-          );
+          record = data?.schedule ?? data;
+          const currentOccurrenceId =
+            record?.current_occurrence_id ??
+            (maintenanceRecord?.schedule_id === Number(scheduleId)
+              ? maintenanceRecord.id
+              : null);
+          if (currentOccurrenceId != null) {
+            const occurrenceResponse = await api.get(
+              `/maintenance/${currentOccurrenceId}`
+            );
+            const occurrenceData =
+              occurrenceResponse?.data ?? occurrenceResponse;
+            currentOccurrence = occurrenceData?.record ?? occurrenceData;
+          }
+        } else if (isStandaloneEdit) {
+          const response = await api.get(`/maintenance/${recordId}`);
+          const data = response?.data ?? response;
+          record = data?.record ?? data;
+          currentOccurrence = record;
+        } else {
+          record = maintenanceRecord;
         }
 
         if (
-          !schedule ||
-          typeof schedule !== "object" ||
-          Array.isArray(schedule) ||
-          schedule.title == null
+          !record ||
+          typeof record !== "object" ||
+          Array.isArray(record)
         ) {
-          const response = await api.getAll(
-            `/maintenance/schedules?asset_id=${id}`
-          );
-
-          const data = response?.data ?? response;
-          const list = Array.isArray(response)
-            ? response
-            : Array.isArray(data)
-              ? data
-              : data?.schedules ?? data?.items ?? data?.results ?? [];
-
-          schedule = list.find(
-            (item) => String(item.id) === String(scheduleId)
-          );
-        }
-
-        if (!schedule || schedule.title == null) {
-          throw new Error("Maintenance schedule was not found.");
+          throw new Error("Invalid maintenance data returned.");
         }
 
         if (cancelled) return;
 
-        setForm((previous) => ({
-          ...previous,
-          title: schedule.title ?? "",
-          maintenance_type: schedule.maintenance_type ?? "preventive",
-          priority: schedule.priority ?? "medium",
-          assigned_technician: schedule.assigned_technician ?? "",
-          description: schedule.description ?? "",
-          schedule_start_date: (
-            schedule.schedule_start_date ?? ""
-          ).toString().slice(0, 10),
-          first_due_date: (
-            schedule.first_due_date ?? ""
-          ).toString().slice(0, 10),
-          recurrence_enabled: Boolean(schedule.recurrence_enabled ?? false),
-          recurrence_interval: String(schedule.recurrence_interval ?? 1),
-          recurrence_unit: schedule.recurrence_unit ?? "months",
-        }));
+        const activeOccurrence = currentOccurrence?.status === "in_progress";
+        setEditingBlocked(activeOccurrence);
+        if (activeOccurrence) {
+          setError("In-progress maintenance cannot be edited.");
+        }
+
+        const startDate = isStandaloneEdit
+          ? localDateTimeInput(record.planned_start_at || record.start_date)
+          : record.schedule_start_date ||
+            record.planned_start_at ||
+            record.start_date ||
+            todayDateInput();
+        const dueDate = isStandaloneEdit
+          ? localDateTimeInput(record.planned_end_at || record.next_due_at)
+          : record.first_due_date ||
+            record.planned_end_at ||
+            record.next_due_at ||
+            "";
+
+        setForm({
+          title: record.title ?? "",
+          maintenance_type:
+            record.maintenance_type ?? "preventive",
+          priority: record.priority ?? "medium",
+          assigned_technician:
+            record.assigned_technician ?? "",
+          description:
+            record.description ?? record.notes ?? "",
+          actual_started_at: localDateTimeInput(record.actual_started_at),
+          actual_completed_at: localDateTimeInput(record.actual_completed_at),
+          completion_notes: record.completion_notes ?? "",
+          parts_used: record.parts_used ?? "",
+          checklist: (record.checklist || [])
+            .map((item) => item.item || "")
+            .join("\n"),
+          next_due_at: localDateTimeInput(record.next_due_at),
+          alert_id: record.alert_id ? String(record.alert_id) : "",
+          schedule_start_date: String(startDate).slice(
+            0,
+            isStandaloneEdit ? 16 : 10
+          ),
+          first_due_date: dueDate
+            ? String(dueDate).slice(0, isStandaloneEdit ? 16 : 10)
+            : "",
+          recurrence_enabled: Boolean(record.recurrence_enabled),
+          recurrence_interval: String(
+            record.recurrence_interval ?? 1
+          ),
+          recurrence_unit:
+            record.recurrence_unit ?? "months",
+        });
+        setSelectedDocuments(record.instruction_documents || []);
       } catch (err) {
         console.error("Failed to load maintenance:", err);
 
         if (!cancelled) {
+          if (isEdit) setEditingBlocked(true);
           setError(
             getErrorMessage(err, "Could not load maintenance details.")
           );
@@ -235,7 +244,8 @@ export default function CreateMaintenanceSchedulePage() {
     return () => {
       cancelled = true;
     };
-  }, [isEdit, scheduleId, recordId, id, maintenanceRecord]);
+  }, [isEdit, isStandaloneEdit, scheduleId, recordId, maintenanceRecord]);
+
 
   const updateField = (event) => {
     const { name, value, checked, type } = event.target;
@@ -294,7 +304,7 @@ export default function CreateMaintenanceSchedulePage() {
   const handleSubmit = async (event) => {
     event.preventDefault();
 
-    if (!canManageMaintenance || busy) return;
+    if (!canManageMaintenance || busy || editingBlocked) return;
 
     setError("");
 
@@ -303,7 +313,7 @@ export default function CreateMaintenanceSchedulePage() {
       return;
     }
 
-    if (!form.title.trim()) {
+    if (!isSupervisor && !form.title.trim()) {
       setError("Maintenance title is required.");
       return;
     }
@@ -339,53 +349,73 @@ export default function CreateMaintenanceSchedulePage() {
       return;
     }
 
-    const payload = {
-      asset_id: Number(id),
-      title: form.title.trim(),
-      maintenance_type: form.maintenance_type,
-      priority: form.priority,
-      assigned_technician:
-        form.assigned_technician.trim() || null,
-      description: form.description.trim() || null,
+    const scheduleDates = {
       schedule_start_date: form.schedule_start_date,
       first_due_date: form.first_due_date,
-      recurrence_enabled: form.recurrence_enabled,
-      recurrence_interval: form.recurrence_enabled
-        ? interval
-        : null,
-      recurrence_unit: form.recurrence_enabled
-        ? form.recurrence_unit
-        : null,
-      instruction_document_ids: selectedDocuments.map((item) => item.id),
     };
+    const payload = isSupervisor
+      ? scheduleDates
+      : {
+          title: form.title.trim(),
+          maintenance_type: form.maintenance_type,
+          priority: form.priority,
+          assigned_technician:
+            form.assigned_technician.trim() || null,
+          description: form.description.trim() || null,
+          ...scheduleDates,
+          recurrence_enabled: form.recurrence_enabled,
+          recurrence_interval: form.recurrence_enabled
+            ? interval
+            : null,
+          recurrence_unit: form.recurrence_enabled
+            ? form.recurrence_unit
+            : null,
+          instruction_document_ids: selectedDocuments.map((item) => item.id),
+        };
+    const checklistItems = form.checklist
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => ({ item, completed: false }));
 
     setBusy(true);
 
     try {
-      
-if (recordId) {
-  await api.patch(`/maintenance/${recordId}`, {
-    title: form.title.trim(),
-    maintenance_type: form.maintenance_type,
-    priority: form.priority,
-    assigned_technician:
-      form.assigned_technician.trim() || null,
-    notes: form.description.trim() || null,
-    planned_start_at: form.schedule_start_date
-      ? new Date(`${form.schedule_start_date}T00:00:00`).toISOString()
-      : null,
-    planned_end_at: form.first_due_date
-      ? new Date(`${form.first_due_date}T00:00:00`).toISOString()
-      : null,
-  });
-} else if (scheduleId) {
-  await api.patch(
-    `/maintenance/schedules/${scheduleId}`,
-    payload
-  );
-} else {
-  await api.post("/maintenance/schedules", payload);
-}
+      if (isStandaloneEdit) {
+        const recordPayload = isSupervisor
+          ? {
+              planned_start_at: utcDateTime(form.schedule_start_date),
+              planned_end_at: utcDateTime(form.first_due_date),
+            }
+          : {
+              title: form.title.trim(),
+              maintenance_type: form.maintenance_type,
+              priority: form.priority,
+              assigned_technician:
+                form.assigned_technician.trim() || null,
+              notes: form.description.trim() || null,
+              planned_start_at: utcDateTime(form.schedule_start_date),
+              planned_end_at: utcDateTime(form.first_due_date),
+              actual_started_at: utcDateTime(form.actual_started_at),
+              actual_completed_at: utcDateTime(form.actual_completed_at),
+              completion_notes: form.completion_notes.trim() || null,
+              parts_used: form.parts_used.trim() || null,
+              checklist: checklistItems.length ? checklistItems : null,
+              next_due_at: utcDateTime(form.next_due_at),
+              ...(form.alert_id.trim()
+                ? { alert_id: Number(form.alert_id) }
+                : {}),
+            };
+        await api.patch(`/maintenance/${recordId}`, recordPayload);
+      } else if (isEdit) {
+        await api.patch(`/maintenance/schedules/${scheduleId}`, payload);
+      } else {
+        await api.post("/maintenance/schedules", {
+          asset_id: Number(id),
+          ...payload,
+        });
+      }
+
       navigate(`/assets/${id}`, {
         state: {
           activeTab: "logbook",
@@ -449,8 +479,9 @@ if (recordId) {
             </h1>
 
           <p className="create-schedule-subtitle">
-            Configure the maintenance plan, first due date and
-            recurrence for this asset.
+          {isSupervisor
+            ? "Update only the maintenance schedule dates. Other maintenance details are read-only."
+            : "Configure the maintenance plan, first due date and recurrence for this asset."}
           </p>
         </div>
       </div>
@@ -478,9 +509,9 @@ if (recordId) {
           <>
             <fieldset
               className="create-schedule-fieldset"
-              disabled={busy || !canManageMaintenance}
+              disabled={busy || !canManageMaintenance || editingBlocked}
             >
-              <section className="create-schedule-section">
+              {!isSupervisor && <section className="create-schedule-section">
                 <h2>Schedule details</h2>
 
                 <p className="muted">
@@ -545,24 +576,103 @@ if (recordId) {
                     </select>
                   </label>
                 </div>
-              </section>
+              </section>}
+
+              {isStandaloneEdit && !isSupervisor && (
+                <section className="create-schedule-section">
+                  <h2>Execution details</h2>
+                  <p className="muted">
+                    Update the existing execution and completion fields for this maintenance record.
+                  </p>
+                  <div className="create-schedule-grid">
+                    <label className="field">
+                      <span className="field-label">Actual start</span>
+                      <input
+                        type="datetime-local"
+                        name="actual_started_at"
+                        value={form.actual_started_at}
+                        onChange={updateField}
+                      />
+                    </label>
+                    <label className="field">
+                      <span className="field-label">Actual completion</span>
+                      <input
+                        type="datetime-local"
+                        name="actual_completed_at"
+                        value={form.actual_completed_at}
+                        onChange={updateField}
+                      />
+                    </label>
+                    <label className="field">
+                      <span className="field-label">Next due date and time</span>
+                      <input
+                        type="datetime-local"
+                        name="next_due_at"
+                        value={form.next_due_at}
+                        onChange={updateField}
+                      />
+                    </label>
+                    <label className="field">
+                      <span className="field-label">Alert ID</span>
+                      <input
+                        type="number"
+                        name="alert_id"
+                        min="1"
+                        value={form.alert_id}
+                        onChange={updateField}
+                      />
+                    </label>
+                    <label className="field">
+                      <span className="field-label">Parts used</span>
+                      <textarea
+                        name="parts_used"
+                        value={form.parts_used}
+                        onChange={updateField}
+                        rows={3}
+                        maxLength={10000}
+                      />
+                    </label>
+                    <label className="field">
+                      <span className="field-label">Completion notes</span>
+                      <textarea
+                        name="completion_notes"
+                        value={form.completion_notes}
+                        onChange={updateField}
+                        rows={3}
+                        maxLength={10000}
+                      />
+                    </label>
+                    <label className="field">
+                      <span className="field-label">Checklist items</span>
+                      <textarea
+                        name="checklist"
+                        value={form.checklist}
+                        onChange={updateField}
+                        rows={4}
+                        placeholder="One checklist item per line"
+                      />
+                    </label>
+                  </div>
+                </section>
+              )}
 
               <section className="create-schedule-section">
                 <h2>Dates</h2>
 
                 <p className="muted">
-                  Select when the plan starts and when the first
-                  maintenance is due.
+                  {isSupervisor
+                    ? "Supervisors may update only these schedule dates."
+                    : "Select when the plan starts and when the first maintenance is due."}
                 </p>
 
                 <div className="create-schedule-grid">
                   <label className="field">
                     <span className="field-label">
-                      Schedule start date <span className="req" aria-hidden="true">*</span>
+                      {isStandaloneEdit ? "Planned start date and time" : "Schedule start date"} <span className="req" aria-hidden="true">*</span>
                     </span>
 
                     <input
-                      type="date"
+                      type={isStandaloneEdit ? "datetime-local" : "date"}
                       name="schedule_start_date"
                       value={form.schedule_start_date}
                       onChange={updateField}
@@ -576,14 +686,14 @@ if (recordId) {
 
                   <label className="field">
                     <span className="field-label">
-                      First maintenance due date <span className="req" aria-hidden="true">*</span>
+                      {isStandaloneEdit ? "Planned due date and time" : "First maintenance due date"} <span className="req" aria-hidden="true">*</span>
                     </span>
 
                     <input
-                      type="date"
+                      type={isStandaloneEdit ? "datetime-local" : "date"}
                       name="first_due_date"
                       value={form.first_due_date}
-                      min={form.schedule_start_date}
+                      min={form.schedule_start_date || undefined}
                       onChange={updateField}
                       required
                     />
@@ -596,7 +706,7 @@ if (recordId) {
                 </div>
               </section>
 
-              <section className="create-schedule-section">
+              {!isSupervisor && <section className="create-schedule-section">
                 <h2>Recurring maintenance</h2>
 
                 <p className="muted">
@@ -651,9 +761,9 @@ if (recordId) {
                     </label>
                   </div>
                 )}
-              </section>
+              </section>}
 
-              <section className="create-schedule-section">
+              {!isSupervisor && <section className="create-schedule-section">
                 <h2>Description / work details</h2>
 
                 <p className="muted">
@@ -704,7 +814,7 @@ if (recordId) {
                     ))}
                   </div>
                 )}
-              </section>
+              </section>}
             </fieldset>
 
             <div className="create-schedule-actions">
@@ -720,8 +830,14 @@ if (recordId) {
               <button
                 type="submit"
                 className="btn-primary"
-                disabled={busy || !canManageMaintenance}
-                title={!canManageMaintenance ? "You do not have permission to create or edit maintenance schedules." : undefined}
+                disabled={busy || !canManageMaintenance || editingBlocked}
+                title={
+                  editingBlocked
+                    ? "In-progress maintenance cannot be edited."
+                    : !canManageMaintenance
+                      ? "You do not have permission to create or edit maintenance schedules."
+                      : undefined
+                }
               >
                 {busy
                 ? isEdit

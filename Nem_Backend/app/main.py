@@ -356,7 +356,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 and policy_segments[4].isdecimal()
                 and policy_segments[5] in {"start", "complete"}
             )
-            if admin_only_write or not (operator_acknowledge or operator_maintenance_action):
+            if admin_only_write or not (
+                operator_acknowledge
+                or operator_maintenance_action
+            ):
                 return JSONResponse(status_code=403,content={
                         "detail": (
                             "Operators may acknowledge or complete resolved alerts, "
