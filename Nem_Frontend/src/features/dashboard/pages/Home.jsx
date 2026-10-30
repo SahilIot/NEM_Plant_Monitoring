@@ -632,7 +632,32 @@ export default function Home() {
             )}
           </section>
 
+        </div>
+
+        <aside className="home-right-column">
           <section className="panel">
+            <div className="panel-head">
+              <h2>Monitoring coverage</h2>
+            </div>
+
+            <Link to="/assets" className="coverage">
+              <span className="coverage-num">
+                {monitored}
+                <small> of {total} assets</small>
+              </span>
+
+              <span className="meter" aria-hidden="true">
+                <i style={{ width: `${coverage}%` }} />
+              </span>
+
+              <span className="muted">
+                have enabled rules monitoring active variables
+              </span>
+            </Link>
+          </section>
+        </aside>
+
+        <section className="panel home-evaluated-panel">
             <div className="panel-head">
               <h2>Evaluated / completed alerts</h2>
               <span className="muted">{visibleEvaluatedAlerts.length} today</span>
@@ -711,9 +736,9 @@ export default function Home() {
                 ))}
               </ul>
             )}
-          </section>
+        </section>
 
-          <section className="panel">
+        <section className="panel home-rules-panel">
             <div className="panel-head">
               <h2>Rules by state</h2>
             </div>
@@ -734,31 +759,7 @@ export default function Home() {
                 </li>
                 ))}
             </ul>
-          </section>
-        </div>
-
-        <aside className="home-right-column">
-          <section className="panel">
-            <div className="panel-head">
-              <h2>Monitoring coverage</h2>
-            </div>
-
-            <Link to="/assets" className="coverage">
-              <span className="coverage-num">
-                {monitored}
-                <small> of {total} assets</small>
-              </span>
-
-              <span className="meter" aria-hidden="true">
-                <i style={{ width: `${coverage}%` }} />
-              </span>
-
-              <span className="muted">
-                have enabled rules monitoring active variables
-              </span>
-            </Link>
-          </section>
-        </aside>
+        </section>
       </div>
       {alertAction && (
         <Modal
