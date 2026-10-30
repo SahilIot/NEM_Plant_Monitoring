@@ -64,6 +64,7 @@ export default function Home() {
   const [summary, setSummary] = useState(null);
   const [plcStatus, setPlcStatus] = useState(null);
   const [monitoringStates, setMonitoringStates] = useState([]);
+  const previousRuleStatusSignature = useRef(null);
   const [liveStatusError, setLiveStatusError] = useState("");
   const liveStatusRequest = useRef(false);
   const [error, setError] = useState("");
@@ -217,13 +218,36 @@ export default function Home() {
   );
 
   useEffect(() => {
+    const signature = monitoringStates
+      .map((state) => `${state.rule_id}:${state.status}`)
+      .sort()
+      .join("|");
+
+    if (
+      previousRuleStatusSignature.current === null &&
+      monitoringStates.length === 0
+    ) {
+      return;
+    }
+
+    if (previousRuleStatusSignature.current === null) {
+      previousRuleStatusSignature.current = signature;
+      return;
+    }
+
+    if (previousRuleStatusSignature.current !== signature) {
+      previousRuleStatusSignature.current = signature;
+      summaryScheduler();
+    }
+  }, [monitoringStates, summaryScheduler]);
+
+  useEffect(() => {
     refreshLiveStatus();
     return subscribeLiveUpdates((update) => {
       if (update.resync_required) {
         refreshLiveScheduler();
         summaryScheduler();
         evaluatedAlertsScheduler();
-        refreshStatus?.();
         return;
       }
       if (update.type === "disconnected") {
@@ -251,10 +275,8 @@ export default function Home() {
       if (
         [
           "assets",
-          "readings",
-          "nem_readings",
+          "variables",
           "nem_monitoring_rules",
-          "nem_rule_states",
           "nem_alerts",
           "nem_maintenance_schedules",
         ].some((table) => changedTables.has(table))
@@ -267,18 +289,10 @@ export default function Home() {
       ) {
         evaluatedAlertsScheduler();
       }
-      if (
-        ["nem_monitoring_rules", "nem_rule_states", "nem_alerts"].some(
-          (table) => changedTables.has(table)
-        )
-      ) {
-        refreshStatus?.();
-      }
     });
   }, [
     evaluatedAlertsScheduler,
     refreshLiveScheduler,
-    refreshStatus,
     summaryScheduler,
   ]);
 

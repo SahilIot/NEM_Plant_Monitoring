@@ -678,6 +678,7 @@ export default function AssetDetail() {
   const plcStatusSeq = useRef(0);
   const bulkRequest = useRef(false);
   const permanentDeleteRequest = useRef(false);
+  const skipNextRouteStateRestore = useRef(false);
 
   const assetNavigationState = {
     ...(location.state || {}),
@@ -792,18 +793,23 @@ export default function AssetDetail() {
       ) {
         const loadedRules = Array.isArray(r.value) ? r.value : [];
         setRules(loadedRules);
-        const runtimeRules = loadedRules.filter((rule) =>
-          rule.rule_type === "runtime_duration"
-        );
+        const runtimeVariableIds = [
+          ...new Set(
+            loadedRules
+              .filter((rule) => rule.rule_type === "runtime_duration")
+              .map((rule) => rule.variable_id)
+              .filter((variableId) => variableId != null)
+          ),
+        ];
         const signalReadings = await Promise.all(
-          runtimeRules.map(async (rule) => {
+          runtimeVariableIds.map(async (variableId) => {
             try {
               return [
-                rule.variable_id,
-                await api.get(`/readings/variables/${rule.variable_id}/latest`),
+                variableId,
+                await api.get(`/readings/variables/${variableId}/latest`),
               ];
             } catch (error) {
-              if (error.status === 404) return [rule.variable_id, null];
+              if (error.status === 404) return [variableId, null];
               throw error;
             }
           })
@@ -899,10 +905,12 @@ export default function AssetDetail() {
   );
 
   const loadVariables = useCallback(async () => {
+    const generation = seq.current;
     try {
       const items = await api.getAll(
         `/assets/${assetId}/variables`
       );
+      if (generation !== seq.current) return;
 
       const loadedVariables = Array.isArray(items) ? items : [];
       setAllVariables(loadedVariables);
@@ -910,6 +918,7 @@ export default function AssetDetail() {
         loadedVariables.filter((variable) => variable.is_active)
       );
     } catch (error) {
+      if (generation !== seq.current) return;
       setVariables([]);
       setAllVariables([]);
       setLoadError(
@@ -919,12 +928,15 @@ export default function AssetDetail() {
   }, [assetId]);
 
   const loadLogs = useCallback(() => {
+    const generation = seq.current;
     return api
       .get(`/assets/${assetId}/logbook`)
       .then((items) => {
+        if (generation !== seq.current) return;
         setLogs(Array.isArray(items) ? items : []);
       })
       .catch((error) => {
+        if (generation !== seq.current) return;
         setLoadError(
           error.message || "Unable to load logbook."
         );
@@ -932,10 +944,13 @@ export default function AssetDetail() {
   }, [assetId]);
 
   const loadEvents = useCallback(async () => {
+    const generation = seq.current;
     try {
       const items = await api.get(`/assets/${assetId}/events`);
+      if (generation !== seq.current) return;
       setEvents(Array.isArray(items) ? items : []);
     } catch (error) {
+      if (generation !== seq.current) return;
       setLoadError(error.message || "Unable to load events.");
     }
   }, [assetId]);
@@ -1011,14 +1026,17 @@ export default function AssetDetail() {
     setShowEventDetails(false);
     setLoadError("");
 
-  loadVariables();
-  loadLogs();
-  loadLive();
+    loadVariables();
+    loadLogs();
 
     return () => {
       seq.current += 1;
     };
-  }, [assetId, loadVariables, loadLogs, loadLive]);
+  }, [assetId, loadVariables, loadLogs]);
+
+  useEffect(() => {
+    loadLive();
+  }, [loadLive]);
 
   const hasRuntimeRules = rules.some(
     (rule) => rule.rule_type === "runtime_duration"
@@ -1083,6 +1101,7 @@ export default function AssetDetail() {
       return;
     }
 
+    skipNextRouteStateRestore.current = true;
     navigate(
       `${location.pathname}${location.search}${location.hash}`,
       {
@@ -1111,6 +1130,11 @@ export default function AssetDetail() {
   ]);
 
   useEffect(() => {
+    if (skipNextRouteStateRestore.current) {
+      skipNextRouteStateRestore.current = false;
+      return;
+    }
+
     const navigationState = location.state;
     const flash = consumeNavigationFlash(location);
     const restoredState = flash?.state || navigationState;
