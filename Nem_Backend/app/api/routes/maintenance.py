@@ -765,23 +765,26 @@ def confirm_next_occurrence(
     schedule.status = "active"
 
     # Create the next planned maintenance occurrence.
-    _create_occurrence(
-        session,
-        schedule,
-        due_date=selected_date,
-    )
-    if previous_due_date is not None:
-        schedule.current_period_start_date = previous_due_date + timedelta(days=1)
-    
-    _emit_schedule_event(
-        session,
-        schedule,
-        event_type="maintenance_next_occurrence_approved",
-        message=f"Next maintenance confirmed for {selected_date}.",
-        due_date=selected_date,
-    )
+    try:
+        _create_occurrence(
+            session,
+            schedule,
+            due_date=selected_date,
+        )
+        if previous_due_date is not None:
+            schedule.current_period_start_date = previous_due_date + timedelta(days=1)
 
-    session.commit()
+        _emit_schedule_event(
+            session,
+            schedule,
+            event_type="maintenance_next_occurrence_approved",
+            message=f"Next maintenance confirmed for {selected_date}.",
+            due_date=selected_date,
+        )
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        raise HTTPException(status_code=409,detail="The next maintenance occurrence already exists or the schedule changed concurrently.", ) from error
     session.refresh(schedule)
 
     return _schedule_read(session, schedule)
@@ -977,10 +980,7 @@ def permanently_delete_archived_maintenance_record(
             "schedule_id": schedule_id,
         },
     )
-    _commit_deletion(
-        session,
-        "Related maintenance history prevents deleting this record.",
-    )
+    _commit_deletion(session, "Related maintenance history prevents deleting this record.",)
 
 
 #Modifies a maintenance record,but not allow completed or archived records to be edited 
@@ -997,15 +997,9 @@ def update_maintenance_record(
         .with_for_update()
     )
     if record is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Maintenance record {record_id} was not found",
-        )
+        raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
     if record.status == "in_progress":
-        raise HTTPException(
-            status_code=409,
-            detail="In-progress maintenance cannot be edited.",
-        )
+        raise HTTPException(status_code=409,detail="In-progress maintenance cannot be edited.",)
 
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
@@ -1078,6 +1072,18 @@ def complete_maintenance_record(
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> MaintenanceRecord:
+    record = session.get(MaintenanceRecord, record_id)
+    if record is None:
+        raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
+    schedule = None
+    if record.schedule_id is not None:
+        schedule = session.scalar(
+            select(MaintenanceSchedule)
+            .where(MaintenanceSchedule.id == record.schedule_id)
+            .with_for_update()
+        )
+        if schedule is None:
+            raise HTTPException(status_code=404, detail="The maintenance schedule was not found")
     record = session.scalar(
         select(MaintenanceRecord)
         .where(MaintenanceRecord.id == record_id)
@@ -1090,6 +1096,11 @@ def complete_maintenance_record(
     )
     if record.status in {"completed", "cancelled"}:
         raise HTTPException(status_code=409,detail="Completed or cancelled maintenance cannot be completed",)
+    if schedule is not None and (
+        schedule.current_occurrence_id != record.id
+        or schedule.current_due_date != record.planned_due_date
+    ):
+        raise HTTPException(status_code=409,detail="Only the current scheduled maintenance occurrence can be completed.",)
     completed_at = record.actual_completed_at or utc_now()
     record.actual_completed_at = completed_at
     record.actual_started_at = record.actual_started_at or completed_at
@@ -1099,8 +1110,7 @@ def complete_maintenance_record(
     record.archived_at = completed_at
     actual_start = _normalized(record.actual_started_at)
     normalized_completed_at = _normalized(completed_at)
-    if record.schedule_id is not None:
-        schedule = _schedule_or_404(session, record.schedule_id)
+    if schedule is not None:
         due_alert = session.scalar(
             select(Alert).where(
                 Alert.maintenance_schedule_id == schedule.id,
@@ -1176,7 +1186,11 @@ def complete_maintenance_record(
             ),
         },
     )
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        raise HTTPException(status_code=409,detail="Maintenance could not be completed because related data changed concurrently.",) from error
     session.refresh(record)
     return record
 
