@@ -47,13 +47,18 @@ export default function AssetSupervisors({ assetId }) {
       <div style={{ display: "grid", gap: 6, padding: "8px 0" }}>
         {inherited.length > 0 && (
           <div aria-label="Inherited email notification supervisors">
-            <strong>Inherited supervisors</strong>
+            <strong>Parent-assigned supervisors</strong>
             {inherited.map((u) => (
               <div key={u.id}>
                 {u.username} {u.email_address ? `(${u.email_address})` : "(no email address)"} — Inherited from{" "}
                 {u.inherited_from.map((source) => source.asset_name).join(", ")}
               </div>
             ))}
+            <span>
+              {selected.length > 0
+                ? "Direct selections take precedence; these parent-assigned supervisors will not receive notifications for this asset."
+                : "No direct supervisors are selected, so these parent-assigned supervisors will receive notifications for this asset."}
+            </span>
           </div>
         )}
         {users.length === 0 && <span>No active supervisors available.</span>}

@@ -143,8 +143,10 @@ suspend/resume/activate/deactivate and verify legacy rule records.
 - Email notification jobs are enqueued for alert/severity/recipient when
   eligible. Delivery is via a separate retrying SMTP outbox worker and depends
   on settings, recipient assignments, valid addresses, and SMTP availability.
-  At delivery time, pending jobs are checked against current direct and
-  inherited supervisor assignments; removed recipients are skipped.
+  Direct supervisors selected on the alert's asset take precedence. Parent
+  assignments are inherited only when the alert asset has no direct supervisor
+  assignments. At delivery time, pending jobs are checked against this effective
+  recipient set; removed or superseded recipients are skipped.
 
 ## Maintenance rules
 

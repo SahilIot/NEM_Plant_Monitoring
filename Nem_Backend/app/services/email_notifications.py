@@ -72,9 +72,15 @@ def supervisor_assignments_for_asset(
 
 
 def _assigned_supervisors_for_asset(session: Session, asset: Asset) -> list[User]:
-    users_by_id = {
+    assignments = supervisor_assignments_for_asset(session, asset)
+    direct_users = {
         user.id: user
-        for _, _, user in supervisor_assignments_for_asset(session, asset)
+        for source_asset_id, _, user in assignments
+        if source_asset_id == asset.id
+    }
+    users_by_id = direct_users or {
+        user.id: user
+        for _, _, user in assignments
     }
     return [users_by_id[user_id] for user_id in sorted(users_by_id)]
 

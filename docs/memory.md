@@ -50,9 +50,10 @@ roadmap.
 3. **Email behavior is conditional.** The outbox path is implemented, but
    delivery depends on the email feature setting, saved SMTP configuration,
    valid supervisor assignment/email addresses, and SMTP reachability. Pending
-   jobs are revalidated at delivery time against current direct and inherited
-   assignments; jobs for recipients no longer assigned are skipped. Actual
-   delivery still requires a safe SMTP verification.
+   jobs are revalidated at delivery time against the effective assignments:
+   direct asset selections take precedence, with parent assignments inherited
+   only when no direct selections exist. Removed or superseded recipients are
+   skipped. Actual delivery still requires a safe SMTP verification.
 4. **Maintenance recurrence is calendar-based.** The schema and service support
    days, weeks, months, and years plus confirm/decline of proposed dates.
    Running-hour/cycle-based maintenance scheduling is not implemented in the
