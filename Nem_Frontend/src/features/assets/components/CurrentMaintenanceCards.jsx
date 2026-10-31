@@ -52,6 +52,7 @@ export default function CurrentMaintenanceCards({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [selectedRecord, setSelectedRecord] = useState(null);
+  const [clockNow, setClockNow] = useState(Date.now());
   const [editingRecordId, setEditingRecordId] = useState(null);
   const [actionMenuRecordId, setActionMenuRecordId] = useState(null);
   const actionMenuTriggerRef = useRef(null);
@@ -285,6 +286,12 @@ const openEdit = (record) => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [loadCurrentMaintenance]);
+
+  useEffect(() => {
+    if (selectedRecord?.status !== "in_progress") return undefined;
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [selectedRecord?.id, selectedRecord?.status]);
 
   const startMaintenance = async (record) => {
     if (
