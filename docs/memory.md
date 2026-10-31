@@ -45,13 +45,14 @@ roadmap.
    email/SMS delivery are not implemented. Current source implements local
    bearer sessions and roles (`api/routes/auth.py`, `services/auth_security.py`)
    and an email outbox/delivery loop (`services/email_notifications.py`,
-   `main.py`). The root README also says no outbound notification is sent,
-   which conflicts with the code. Review and reconcile that README before
-   relying on it for deployment guidance.
+   `main.py`). The root README was reconciled with the implemented email
+   behavior; production SMTP delivery still requires environment verification.
 3. **Email behavior is conditional.** The outbox path is implemented, but
    delivery depends on the email feature setting, saved SMTP configuration,
-   valid supervisor assignment/email addresses, and SMTP reachability. Actual
-   delivery and retry behavior cannot be confirmed from source alone.
+   valid supervisor assignment/email addresses, and SMTP reachability. Pending
+   jobs are revalidated at delivery time against current direct and inherited
+   assignments; jobs for recipients no longer assigned are skipped. Actual
+   delivery still requires a safe SMTP verification.
 4. **Maintenance recurrence is calendar-based.** The schema and service support
    days, weeks, months, and years plus confirm/decline of proposed dates.
    Running-hour/cycle-based maintenance scheduling is not implemented in the
@@ -90,4 +91,3 @@ frontend production build succeeded after the correction.
   assignment behavior, including WebSocket events, before deployment.
 - Verify SMTP credentials, supervisor recipients, retries, and actual message
   delivery in a safe test environment.
-

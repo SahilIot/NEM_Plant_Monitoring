@@ -410,11 +410,47 @@ def deliver_pending(session_factory, settings: Settings, *, batch_size: int = 20
             config = _load_smtp_config(session, settings)
         except Exception as error:
             config_error = error
+        assigned_user_ids_by_asset: dict[int, set[int]] = {}
         for item in due:
             item.attempts += 1
             try:
                 if config_error is not None:
                     raise config_error
+                alert = session.get(Alert, item.alert_id)
+                asset = (
+                    session.get(Asset, alert.target_asset_id)
+                    if alert is not None
+                    else None
+                )
+                if asset is None:
+                    item.status = "skipped"
+                    item.last_error = "Alert asset is no longer available"
+                    LOGGER.warning(
+                        "Notification %s skipped: %s",
+                        item.id,
+                        item.last_error,
+                    )
+                    continue
+                if asset.id not in assigned_user_ids_by_asset:
+                    assigned_user_ids_by_asset[asset.id] = {
+                        supervisor.id
+                        for supervisor in _assigned_supervisors_for_asset(
+                            session, asset
+                        )
+                    }
+                if item.user_id not in assigned_user_ids_by_asset[asset.id]:
+                    item.status = "skipped"
+                    item.last_error = (
+                        "Supervisor is no longer assigned to this asset"
+                    )
+                    LOGGER.info(
+                        "Notification %s skipped because user %s is no longer "
+                        "assigned to asset %s",
+                        item.id,
+                        item.user_id,
+                        asset.id,
+                    )
+                    continue
                 user = session.get(User, item.user_id)
                 if user is None or not user.is_active or not valid_email(user.email_address):
                     item.status = "skipped"
