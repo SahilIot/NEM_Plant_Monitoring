@@ -12,7 +12,7 @@ from app.api.routes.auth import require_roles
 from app.db.session import get_db
 from app.models import (
     Alert, 
-    Asset,
+    Asset, 
     MaintenanceRecord,
     MaintenanceSchedule,
     MonitoringEvent,
