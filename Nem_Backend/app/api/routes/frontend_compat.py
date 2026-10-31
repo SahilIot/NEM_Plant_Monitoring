@@ -519,7 +519,7 @@ def _template_rule_definition(
         )
         return definition
 
-#LIsting templates - builds a db query and optionally filters by name,type,status
+#Listing templates - builds a db query and optionally filters by name,type,status
 @router.get("/rule-templates", response_model=list[RuleTemplateRead])
 def list_rule_templates(
         search: str | None = None,
@@ -540,9 +540,7 @@ def list_rule_templates(
             query = query.where(MonitoringRuleTemplate.rule_type == rule_type)
         if is_enabled is not None:
             query = query.where(MonitoringRuleTemplate.is_enabled.is_(is_enabled))
-        return session.scalars(
-            query.order_by(MonitoringRuleTemplate.name, MonitoringRuleTemplate.id)
-        ).all()
+        return session.scalars(query.order_by(MonitoringRuleTemplate.name, MonitoringRuleTemplate.id)).all()
 
 
 def _validate_template_collection(
@@ -617,7 +615,7 @@ def _authenticated_user(request: Request, session: Session) -> User:
 
     return user
 
-
+#Allow supervisor to suggest a resuable Monitoring rule or Maintenance Schedule for Admin approval.
 @router.post("/rule-template-requests", status_code=201)
 def submit_rule_template_request(
     payload: RuleTemplateCreate | MaintenanceSuggestionPayload,
@@ -632,10 +630,7 @@ def submit_rule_template_request(
     if isinstance(payload, MaintenanceSuggestionPayload):
         maintenance = payload.maintenance
         if session.get(Asset, maintenance.asset_id) is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Asset {maintenance.asset_id} was not found",
-            )
+            raise HTTPException(status_code=404,detail=f"Asset {maintenance.asset_id} was not found",)
         from app.api.routes.maintenance import _validate_instruction_documents
 
         maintenance = maintenance.model_copy(
@@ -671,7 +666,7 @@ def submit_rule_template_request(
 
     return _rule_template_request_row(item, session)
 
-
+#List suggestion-> Allow Admin to view suggestions submitted by Supervisor
 @router.get("/rule-template-requests")
 def list_rule_template_requests(
     request: Request,
@@ -699,7 +694,7 @@ def list_rule_template_requests(
 
     return [_rule_template_request_row(item, session) for item in items]
 
-
+#Apprpve the suggestion -> allow an admin to approve a pending suggestion
 @router.post("/rule-template-requests/{request_id}/approve")
 def approve_rule_template_request(
     request_id: int,
@@ -725,16 +720,11 @@ def approve_rule_template_request(
 
     if item.suggestion_type == "maintenance":
         if not item.maintenance_details:
-            raise HTTPException(
-                status_code=409,
-                detail="The maintenance suggestion is missing its schedule details.",
-            )
+            raise HTTPException(status_code=409,detail="The maintenance suggestion is missing its schedule details.",)
         from app.api.routes.maintenance import _create_maintenance_schedule
 
         try:
-            maintenance = MaintenanceScheduleCreate.model_validate(
-                item.maintenance_details
-            )
+            maintenance = MaintenanceScheduleCreate.model_validate(item.maintenance_details)
             schedule = _create_maintenance_schedule(session, maintenance)
             item.status = "approved"
             item.reviewed_by = user.id
@@ -745,16 +735,10 @@ def approve_rule_template_request(
             raise
         except ValidationError as error:
             session.rollback()
-            raise HTTPException(
-                status_code=409,
-                detail="The maintenance suggestion contains invalid schedule details.",
-            ) from error
+            raise HTTPException(status_code=409,detail="The maintenance suggestion contains invalid schedule details.",) from error
         except IntegrityError as error:
             session.rollback()
-            raise HTTPException(
-                status_code=409,
-                detail="The maintenance schedule could not be created because related data changed.",
-            ) from error
+            raise HTTPException(status_code=409,detail="The maintenance schedule could not be created because related data changed.",) from error
         return {
             "status": "approved",
             "request_id": item.id,
@@ -793,7 +777,7 @@ def approve_rule_template_request(
         "template": RuleTemplateRead.model_validate(template).model_dump(mode="json"),
     }
 
-
+#Decline the suggestion 
 @router.post("/rule-template-requests/{request_id}/decline")
 def decline_rule_template_request(
     request_id: int,
@@ -1036,16 +1020,8 @@ def frontend_predefined_rules(
                     else None
                 )
                 if is_mapping_bypass_enabled(request) and required_role:
-                    raise HTTPException(status_code=422,detail=(
-                            f"Set an active Boolean variable's purpose to "
-                            f"'{required_role}' in the asset's Variables panel"
-                        ),
-                    )
-                raise HTTPException(status_code=422,detail=(
-                        f"No active compatible variable is available for "
-                        f"'{template.name}' on the target asset"
-                    ),
-                )
+                    raise HTTPException(status_code=422,detail=(f"Set an active Boolean variable's purpose to '{required_role}' in the asset's Variables panel"),)
+                raise HTTPException(status_code=422,detail=(f"No active compatible variable is available for '{template.name}' on the target asset"),)
             if not mapping_required:
                 definition = _template_rule_definition(
                     session,
@@ -1085,7 +1061,9 @@ def frontend_predefined_rules(
         )
     return result
 
-
+# Create Asset Rule - this endpoint creates a new rule for a specific asset, validating the input and ensuring that the rule is compatible with the asset's variables and configuration. 
+# It also emits an event to notify the system of the new rule creation.
+# helps frontend to decide which predefined rules to display as available,unavailable,already assigned or require varibale mapping.
 @router.post("/assets/{asset_id}/rules/assign", status_code=201)
 def frontend_assign_predefined_rules(
     asset_id: int,
@@ -1326,7 +1304,7 @@ def frontend_create_usage_rule(
     session.refresh(rule)
     return _rule_row(session, rule)
 
-
+#It deliberately blocks an old way of creating time-based maintenance through the monitoring rules API
 @router.post("/assets/{asset_id}/rules/time", status_code=410)
 def frontend_create_time_rule(
     asset_id: int,
@@ -1334,14 +1312,9 @@ def frontend_create_time_rule(
 ) -> None:
     if session.get(Asset, asset_id) is None:
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
-    raise HTTPException(status_code=410,
-        detail=(
-            "Time-based maintenance is not a monitoring rule. Create a planned "
-            "maintenance record through POST /maintenance instead."
-        ),
-    )
+    raise HTTPException(status_code=410,detail=("Time-based maintenance is not a monitoring rule. Create a planned maintenance record through POST /maintenance instead."),)
 
-
+# endpoint allows the frontend to change the state of multiple monitoring rules belonging to one asset
 @router.post("/assets/{asset_id}/rules/bulk")
 def frontend_bulk_rule_state(
     asset_id: int,
@@ -1404,7 +1377,7 @@ def frontend_bulk_rule_state(
     session.commit()
     return {"updated": len(updated), "updated_rule_ids": updated, "skipped": skipped}
 
-
+#Shared lifecycle function -> central function for managing an individual rule`s lifecycle
 def _transition_rule_lifecycle(
     rule_id: int,
     action: str,
@@ -1462,10 +1435,8 @@ def _transition_rule_lifecycle(
     emit_event(
         session,
         event_type=event_type,
-        message=(
-            f"Rule '{rule.name}' "
-            f"{ {'suspend': 'suspended', 'resume': 'resumed', 'activate': 'activated', 'deactivate': 'deactivated'}[action] }."
-        ),
+        message=(f"Rule '{rule.name}' "
+            f"{ {'suspend': 'suspended', 'resume': 'resumed', 'activate': 'activated', 'deactivate': 'deactivated'}[action] }."),
         occurred_at=now,
         asset_id=rule.target_asset_id,
         rule_id=rule.id,
@@ -1563,11 +1534,7 @@ def frontend_hard_delete_rule(
         .where(MaintenanceRecord.alert_id.in_(alert_ids))
         .limit(1)
     ):
-        raise HTTPException(status_code=409,detail=(
-                "This rule has maintenance records linked to its alerts. "
-                "Remove those links before permanently deleting the rule."
-            ),
-        )
+        raise HTTPException(status_code=409,detail=("This rule has maintenance records linked to its alerts. Remove those links before permanently deleting the rule."),)
 
     deleted_name = rule.name
     deleted_asset_id = rule.target_asset_id

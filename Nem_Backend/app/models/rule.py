@@ -36,9 +36,7 @@ class MonitoringRuleTemplate(Base):
     threshold: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
     parameters: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
-    is_enabled: Mapped[bool] = mapped_column(
-        Boolean, default=True, nullable=False
-    )
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     evaluation_interval_seconds: Mapped[int | None] = mapped_column()
     stale_after_seconds: Mapped[int | None] = mapped_column()
 
