@@ -28,8 +28,8 @@ export default function DocumentViewerPage() {
         }
       });
 
-    const token = getAuthToken();
-    fetch(`${API_BASE}/documents/${documentId}/files/${fileId}/view`, {
+      const token = getAuthToken();
+      fetch(`${API_BASE}/documents/${documentId}/files/${fileId}/view`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       signal: controller.signal,
     })

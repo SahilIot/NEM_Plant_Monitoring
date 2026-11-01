@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
+import { LoadingIndicator } from "../../../components/common/UI.jsx";
 import {
   createLiveUpdateScheduler,
   subscribeLiveUpdates,
@@ -454,9 +455,7 @@ export default function Plc() {
         </p>
 
         {latestLoading && (
-          <p className="muted" role="status">
-            Loading latest readings…
-          </p>
+          <LoadingIndicator compact message="Loading latest readings" />
         )}
 
         {latestError && (
@@ -544,9 +543,7 @@ export default function Plc() {
           </p>
         )}
         {monitoringLoading && (
-          <p className="muted" role="status">
-            Loading PLC monitoring status…
-          </p>
+          <LoadingIndicator compact message="Loading PLC monitoring status" />
         )}
 
         {monitoringError && (

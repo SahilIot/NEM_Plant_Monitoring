@@ -7,6 +7,7 @@ import { captureNavigationOrigin } from "../../../utils/navigation.js";
 import {
   EmptyState,
   FloatingMenu,
+  LoadingIndicator,
   Modal,
   useConfirmation,
 } from "../../../components/common/UI.jsx";
@@ -982,7 +983,7 @@ const openEdit = (record) => {
             </section>
           ))}
         {loading ? (
-          <p className="muted" role="status">Loading maintenance history…</p>
+          <LoadingIndicator compact message="Loading maintenance history" />
         ) : visibleRecords.length === 0 ? (
           <EmptyState
             art={false}

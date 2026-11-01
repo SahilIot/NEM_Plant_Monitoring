@@ -11,6 +11,7 @@ import {
 } from "react-router-dom";
 
 import { api } from "../../../services/api.js";
+import { LoadingIndicator } from "../../../components/common/UI.jsx";
 import {
   rememberNavigationOrigin,
   returnToNavigationOrigin,
@@ -611,9 +612,10 @@ export default function CreateMonitoringRulePage() {
 
   if (loading) {
     return (
-      <div className="loading">
-        Loading monitoring rule form…
-      </div>
+      <LoadingIndicator
+        className="loading"
+        message="Loading monitoring rule form"
+      />
     );
   }
 

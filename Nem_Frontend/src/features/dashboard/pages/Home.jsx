@@ -17,7 +17,11 @@ import {
   formatValue,
   timeAgo,
 } from "../../../utils/format.js";
-import { EmptyState, Modal } from "../../../components/common/UI.jsx";
+import {
+  EmptyState,
+  LoadingIndicator,
+  Modal,
+} from "../../../components/common/UI.jsx";
 import { CheckIcon } from "../../../components/common/Icons.jsx";
 import { captureNavigationOrigin } from "../../../utils/navigation.js";
 
@@ -378,11 +382,7 @@ export default function Home() {
   }
 
   if (!summary) {
-    return (
-      <div className="loading" role="status">
-        Loading overview…
-      </div>
-    );
+    return <LoadingIndicator className="loading" message="Loading overview" />;
   }
 
   const rulesAlert = num(summary.rules_alert);

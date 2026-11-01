@@ -7,6 +7,7 @@ import { useAuth } from "../../auth/AuthContext.jsx";
 import {
   CreateModal,
   EmptyState,
+  LoadingIndicator,
   Modal,
   useConfirmation,
 } from "../../../components/common/UI.jsx";
@@ -52,7 +53,7 @@ function UserInfo() {
     return () => { active = false; };
   }, [refreshUser]);
   if (err) return <div className="panel"><p className="notice error flush" role="alert">Could not load the profile: {err}</p></div>;
-  if (!user) return <div className="loading">Loading…</div>;
+  if (!user) return <LoadingIndicator className="loading" />;
 
   const displayName = user.username || "—";
   const role = user.role || "—";
@@ -366,7 +367,7 @@ function SettingsForm({ section }) {
     }
     api.get(`/settings/${section}`).then(setV).catch((error) => setMsg(`Could not load settings: ${error.message}`));
   }, [canManageSettings, section]);
-  if (!v) return msg ? <div className="notice error">{msg}</div> : <div className="loading">LoadingÃ¢â‚¬Â¦</div>;
+  if (!v) return msg ? <div className="notice error">{msg}</div> : <LoadingIndicator className="loading" />;
   const save = async () => {
     if (!canManageSettings) return;
     try {
@@ -411,7 +412,7 @@ function Usage() {
   const [error, setError] = useState("");
   useEffect(() => { api.get("/usage").then(setU).catch((e) => setError(e.message)); }, []);
   if (error) return <div className="notice error">Could not load usage: {error}</div>;
-  if (!u) return <div className="loading">LoadingÃ¢â‚¬Â¦</div>;
+  if (!u) return <LoadingIndicator className="loading" />;
   return (
     <div className="usage-grid">
       {Object.entries(u).map(([k, v]) => (

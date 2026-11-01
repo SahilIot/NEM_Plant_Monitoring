@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../../../services/api.js";
+import { LoadingIndicator } from "../../../components/common/UI.jsx";
 import "./CopyRulesModal.css";
 
 export default function CopyRulesModal({
@@ -448,10 +449,8 @@ export default function CopyRulesModal({
           )}
 
           {loading && (
-  <p className="copy-rules-loading">
-    Loading rules and variables...
-  </p>
-)}
+            <LoadingIndicator compact message="Loading rules and variables" />
+          )}
 
           {sourceId && !loading && (
             <>

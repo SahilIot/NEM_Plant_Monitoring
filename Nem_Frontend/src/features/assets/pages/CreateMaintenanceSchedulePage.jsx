@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
+import { LoadingIndicator } from "../../../components/common/UI.jsx";
 import "./CreateMaintenanceSchedulePage.css";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import {
@@ -595,9 +596,7 @@ export default function CreateMaintenanceSchedulePage() {
         )}
 
         {loading ? (
-          <p className="muted">
-            Loading maintenance schedule...
-          </p>
+          <LoadingIndicator compact message="Loading maintenance schedule" />
         ) : (
           <>
             <fieldset
@@ -1022,7 +1021,7 @@ export default function CreateMaintenanceSchedulePage() {
       />
 
       {instructionsLoading && (
-        <p className="muted">Loading documents...</p>
+        <LoadingIndicator compact message="Loading documents" />
       )}
 
       {instructionsError && (

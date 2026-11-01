@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { api } from "../../../services/api.js";
-import { EmptyState, StatusBadge } from "../../../components/common/UI.jsx";
+import {
+  EmptyState,
+  LoadingIndicator,
+  StatusBadge,
+} from "../../../components/common/UI.jsx";
 import { BackIcon } from "../../../components/common/Icons.jsx";
 import { returnToNavigationOrigin } from "../../../utils/navigation.js";
 
@@ -50,7 +54,7 @@ export default function AlertRules() {
         {error ? (
           <div className="notice error" role="alert">{error}</div>
         ) : !rules ? (
-          <div className="loading" role="status">Loading…</div>
+          <LoadingIndicator className="loading" />
         ) : rules.length === 0 ? (
           <EmptyState
             title={
@@ -80,7 +84,16 @@ export default function AlertRules() {
                 <tr
                   key={r.id}
                   className={r.asset_id ? "clickable" : ""}
-                  onClick={() => r.asset_id && nav(`/assets/${r.asset_id}`)}
+                  onClick={() =>
+                    r.asset_id &&
+                    nav(`/assets/${r.asset_id}`, {
+                      state: {
+                        ...(location.state || {}),
+                        selectedRuleId: r.id,
+                        selectedRule: r,
+                      },
+                    })
+                  }
                 >
                   <td>{r.name}</td>
                   <td>{r.asset_name || <span className="muted">-</span>}</td>

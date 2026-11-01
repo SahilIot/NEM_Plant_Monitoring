@@ -44,6 +44,7 @@ import {
   CreateModal,
   EmptyState,
   FloatingMenu,
+  LoadingIndicator,
   Modal,
   StatusBadge,
   useConfirmation,
@@ -693,6 +694,14 @@ export default function AssetDetail() {
   const bulkMaintenanceDeleteRequest = useRef(false);
   const bulkEventDeleteRequest = useRef(false);
   const skipNextRouteStateRestore = useRef(false);
+  const assetRouteGeneration = useRef(0);
+
+  useEffect(() => {
+    assetRouteGeneration.current += 1;
+    return () => {
+      assetRouteGeneration.current += 1;
+    };
+  }, [assetId]);
 
   useEffect(() => {
     setSelectedMaintenanceLogIds([]);
@@ -1530,13 +1539,33 @@ const filteredEvents = [...events]
     return "Deactivated";
   };
 
-  const openRuleDetails = async (rule) => {
+  const clearSelectedRuleContext = () => {
+    if (routeState.selectedRuleId == null) return;
+    const nextState = { ...routeState };
+    delete nextState.selectedRuleId;
+    delete nextState.selectedRule;
+    navigate(
+      `${location.pathname}${location.search}${location.hash}`,
+      { replace: true, state: nextState }
+    );
+  };
+
+  const selectRuleList = (nextList) => {
+    clearSelectedRuleContext();
+    setViewRule(null);
+    setCompletionDetails(null);
+    setCompletionDetailsError("");
+    setList(nextList);
+  };
+
+  const openRuleDetails = async (rule, isActive = () => true) => {
     setViewRule(rule);
     setCompletionDetails(null);
     setCompletionDetailsError("");
 
     try {
       const response = await api.get(`/events?rule_id=${rule.id}&limit=100`);
+      if (!isActive()) return;
       const ruleEvents = response.items || [];
       const acknowledgement = ruleEvents.find(
         (item) => item.event_type === "alert_acknowledged"
@@ -1557,11 +1586,53 @@ const filteredEvents = [...events]
           completion?.metadata?.completed_at || completion?.occurred_at,
       });
     } catch (error) {
+      if (!isActive()) return;
       setCompletionDetailsError(
         error.message || "Could not load completion details."
       );
     }
   };
+
+  useEffect(() => {
+    const selectedRuleId = Number(routeState.selectedRuleId);
+    if (!Number.isInteger(selectedRuleId) || selectedRuleId <= 0) return undefined;
+
+    const routeGeneration = assetRouteGeneration.current;
+    const isActive = () =>
+      routeGeneration === assetRouteGeneration.current;
+    const nextState = { ...routeState };
+    delete nextState.selectedRuleId;
+    delete nextState.selectedRule;
+    navigate(
+      `${location.pathname}${location.search}${location.hash}`,
+      { replace: true, state: nextState }
+    );
+
+    const loadSelectedRule = async () => {
+      try {
+        const selectedRule = await api.get(`/rules/${selectedRuleId}`);
+        if (!isActive()) return;
+        if (Number(selectedRule.target_asset_id) !== assetId) {
+          throw new Error("The selected rule does not belong to this asset.");
+        }
+
+        const ruleContext =
+          Number(routeState.selectedRule?.id) === selectedRuleId
+            ? routeState.selectedRule
+            : {};
+        await openRuleDetails(
+          { ...ruleContext, ...selectedRule },
+          isActive
+        );
+      } catch (error) {
+        if (isActive()) {
+          setLoadError(error.message || "Could not load the selected rule.");
+        }
+      }
+    };
+
+    loadSelectedRule();
+  }, [assetId, location.key]);
 
   const remove = async (rule) => {
     if (!isAdministrator) return;
@@ -2100,9 +2171,7 @@ const filteredEvents = [...events]
         />
       </div>
     ) : (
-      <div className="loading" role="status">
-        Loading…
-      </div>
+      <LoadingIndicator className="loading" />
     );
   }
 
@@ -2261,7 +2330,7 @@ const filteredEvents = [...events]
                 className={
                   list === "activated" ? "active" : ""
                 }
-                onClick={() => setList("activated")}
+                onClick={() => selectRuleList("activated")}
               >
                 Activated <span>({nAct})</span>
               </button>
@@ -2270,7 +2339,7 @@ const filteredEvents = [...events]
                 className={
                   list === "not_activated" ? "active" : ""
                 }
-                onClick={() => setList("not_activated")}
+                onClick={() => selectRuleList("not_activated")}
               >
                 Not activated <span>({nNot})</span>
               </button>
@@ -3401,7 +3470,7 @@ const filteredEvents = [...events]
           <p className="event-log-error" role="alert">{maintenanceEventError}</p>
         )}
         {maintenanceEventLoading ? (
-          <p role="status">Loading maintenance details…</p>
+          <LoadingIndicator compact message="Loading maintenance details" />
         ) : maintenanceEventRecord ? (
           <MaintenanceDetails record={maintenanceEventRecord} />
         ) : (
@@ -3646,6 +3715,7 @@ const filteredEvents = [...events]
       setViewRule(null);
       setCompletionDetails(null);
       setCompletionDetailsError("");
+      clearSelectedRuleContext();
     }}
     wide
   >
@@ -3668,6 +3738,19 @@ const filteredEvents = [...events]
       <div>
         <dt>Lifecycle</dt>
         <dd>{lifecycleLabel(viewRule)}</dd>
+      </div>
+      <div>
+        <dt>Asset</dt>
+        <dd>
+          {assets.find(
+            (candidate) =>
+              candidate.id === Number(viewRule.target_asset_id)
+          )?.name ||
+            viewRule.asset_name ||
+            (viewRule.target_asset_id != null
+              ? `Asset ${viewRule.target_asset_id}`
+              : "—")}
+        </dd>
       </div>
       <div>
         <dt>Evaluation status</dt>
@@ -3761,6 +3844,7 @@ const filteredEvents = [...events]
         setViewRule(null);
         setCompletionDetails(null);
         setCompletionDetailsError("");
+        clearSelectedRuleContext();
       }}>
         Close
       </button>

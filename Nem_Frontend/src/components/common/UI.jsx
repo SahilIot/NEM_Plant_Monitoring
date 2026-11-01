@@ -23,6 +23,30 @@ export const EmptyState = ({ title, lines = [], art = true }) => (
   </div>
 );
 
+export function LoadingIndicator({
+  message = "Loading",
+  compact = false,
+  className = "",
+}) {
+  return (
+    <div
+      className={`loading-indicator${compact ? " compact" : ""}${className ? ` ${className}` : ""}`}
+      role="status"
+      aria-live="polite"
+    >
+      <span className="loading-spinner" aria-hidden="true" />
+      <span className="loading-message">
+        {message}
+        <span className="loading-dots" aria-hidden="true">
+          <span>.</span>
+          <span>.</span>
+          <span>.</span>
+        </span>
+      </span>
+    </div>
+  );
+}
+
 export const CardLink = ({ to, icon: Icon, title, desc }) => (
   <Link to={to} className="cardlink">
     <div className="cardlink-ico">

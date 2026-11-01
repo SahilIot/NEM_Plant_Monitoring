@@ -28,7 +28,10 @@ import CreateMonitoringRulePage from "../features/assets/pages/CreateMonitoringR
 import LoginPage from "../features/auth/LoginPage.jsx";
 import AdminUsersPage from "../features/auth/AdminUsersPage.jsx";
 import { useAuth } from "../features/auth/AuthContext.jsx";
-import { ConfirmationProvider } from "../components/common/UI.jsx";
+import {
+  ConfirmationProvider,
+  LoadingIndicator,
+} from "../components/common/UI.jsx";
 import ExportConfigurationPage from "../features/configuration/pages/ExportConfigurationPage.jsx";
 
 function NotFoundPage() {
@@ -48,7 +51,11 @@ export default function App() {
   const location = useLocation();
 
   if (loading) {
-    return <main className="auth-page"><p role="status">Checking session…</p></main>;
+    return (
+      <main className="auth-page">
+        <LoadingIndicator message="Checking session" />
+      </main>
+    );
   }
 
   return (

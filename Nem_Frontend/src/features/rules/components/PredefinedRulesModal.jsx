@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../../../services/api.js";
+import { LoadingIndicator } from "../../../components/common/UI.jsx";
 import { captureNavigationOrigin } from "../../../utils/navigation.js";
 import "./PredefinedRulesModal.css";
 import {
@@ -212,7 +213,7 @@ export default function PredefinedRulesModal({
 
         <div className="prm-list">
           {loading ? (
-            <p className="prm-empty" role="status">Loading rules…</p>
+            <LoadingIndicator compact message="Loading rules" />
           ) : visibleRules.length === 0 ? (
             <p className="prm-empty">
               {rules.length

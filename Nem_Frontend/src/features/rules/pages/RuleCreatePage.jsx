@@ -9,6 +9,9 @@ import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { buildAssetMonitoringRule } from "../../assets/rules/monitoringRuleFlow.js";
 import {
+  LoadingIndicator,
+} from "../../../components/common/UI.jsx";
+import {
   rememberNavigationOrigin,
   returnToNavigationOrigin,
 } from "../../../utils/navigation.js";
@@ -207,11 +210,7 @@ export default function RuleCreatePage() {
   }
 
  if (loading) {
-  return (
-    <div className="loading" role="status">
-      Loading variables…
-    </div>
-  );
+  return <LoadingIndicator className="loading" message="Loading variables" />;
 }
 
   const disableSubmit =

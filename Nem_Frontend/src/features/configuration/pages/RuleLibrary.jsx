@@ -6,6 +6,7 @@ import {
   Pencil,
   Plus,
   Search,
+  RefreshCw,
   Trash2,
   X,
 } from "lucide-react";
@@ -19,6 +20,7 @@ import {
 import {
   CreateModal,
   EmptyState,
+  LoadingIndicator,
   Modal,
   useConfirmation,
 } from "../../../components/common/UI.jsx";
@@ -518,7 +520,7 @@ function AssignmentModal({ template, onClose, onComplete }) {
         </header>
         {error && <p className="notice error" role="alert">{error}</p>}
         <div className="rule-library-asset-list">
-          {loading ? <p className="muted">Loading assets…</p> : assets.length === 0 ? <p className="muted">No assets are available.</p> : assets.map((asset) => {
+          {loading ? <LoadingIndicator compact message="Loading assets" /> : assets.length === 0 ? <p className="muted">No assets are available.</p> : assets.map((asset) => {
             const chosen = selected.has(asset.id);
             const compatible = variables[asset.id] || [];
             return (
@@ -1007,18 +1009,18 @@ const reviewRequest = async (request, action) => {
       </select>
       <button
         type="button"
-        className="btn-outline"
+        className="icon-outline"
         onClick={() => loadPendingRequests(requestStatus)}
         disabled={requestsLoading || reviewingId !== null}
+        title="Refresh suggestions"
+        aria-label="Refresh suggestions"
       >
-        {requestsLoading ? "Refreshing…" : "Refresh"}
+        <RefreshCw size={17} aria-hidden="true" />
       </button>
     </div>
 
     {requestsLoading && ruleRequests.length === 0 ? (
-      <p className="muted">
-        Loading pending suggestions…
-      </p>
+      <LoadingIndicator message="Loading suggestions" />
     ) : ruleRequests.length === 0 ? (
       <EmptyState
         art={false}
@@ -1149,7 +1151,7 @@ const reviewRequest = async (request, action) => {
             <option value="false">Disabled</option>
           </select>
         </div>
-        {templates === null ? <div className="loading" role="status">Loading rules…</div> : visible.length === 0 ? (
+        {templates === null ? <LoadingIndicator className="loading" message="Loading rules" /> : visible.length === 0 ? (
           <EmptyState art={false} title={templates.length === 0 ? "The rule library is empty" : "No rules match"} lines={[templates.length === 0 ? "Create a reusable rule here. Asset-specific rules do not appear in this library." : "Try a different search or availability filter."]} />
         ) : (
           <div className="rule-library-list">

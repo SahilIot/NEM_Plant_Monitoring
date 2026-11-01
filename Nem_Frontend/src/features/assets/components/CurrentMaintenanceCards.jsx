@@ -7,6 +7,7 @@ import { captureNavigationOrigin } from "../../../utils/navigation.js";
 import {
   EmptyState,
   FloatingMenu,
+  LoadingIndicator,
   Modal,
   useConfirmation,
 } from "../../../components/common/UI.jsx";
@@ -339,7 +340,9 @@ const openEdit = (record) => {
     }
   };
 
-  if (loading && records.length === 0) return null;
+  if (loading && records.length === 0) {
+    return <LoadingIndicator compact message="Loading maintenance" />;
+  }
 
   const displayedRecords = showCompleted ? completedRecords : records;
 

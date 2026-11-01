@@ -20,6 +20,7 @@ import { conditionText } from "../../../utils/format.js";
 import {
   CreateModal,
   EmptyState,
+  LoadingIndicator,
   useConfirmation,
 } from "../../../components/common/UI.jsx";
 import {
@@ -1092,9 +1093,7 @@ const edit = async (values) => {
         )}
 
         {rows === null ? (
-          <div className="loading" role="status">
-            Loading...
-          </div>
+          <LoadingIndicator className="loading" />
         ) : visibleRows.length === 0 ? (
           <EmptyState
             art={false}
