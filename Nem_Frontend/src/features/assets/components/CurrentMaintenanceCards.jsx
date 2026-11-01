@@ -31,7 +31,6 @@ export default function CurrentMaintenanceCards({
   assetId,
   refreshKey = 0,
   onChanged,
-  onCompleted,
   onCompletedRecordsCount,
   showCompleted = false,
   navigationState,
@@ -302,13 +301,14 @@ const openEdit = (record) => {
     if (startingRecordId !== null) return;
     setStartingRecordId(record.id);
     setError("");
+    setNotice("");
     try {
       await api.post(`/maintenance/${record.id}/start`);
       await Promise.all([
         loadCurrentMaintenance(),
         Promise.resolve(onChanged?.()),
       ]);
-      onCompleted?.();
+      setNotice("Maintenance started.");
     } catch (startError) {
       setError(startError.message || "Could not start maintenance.");
     } finally {

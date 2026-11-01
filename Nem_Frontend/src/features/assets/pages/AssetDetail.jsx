@@ -2649,7 +2649,6 @@ const filteredEvents = [...events]
             refreshKey={maintenanceRefreshKey}
             onChanged={refreshMaintenanceData}
             onCompletedRecordsCount={setCompletedMaintenanceCount}
-            onCompleted={() => setList("not_activated")}
             showCompleted={list === "not_activated"}
             navigationState={assetNavigationState}
           />

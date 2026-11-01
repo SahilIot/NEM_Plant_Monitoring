@@ -3,14 +3,14 @@
 #Alert creation only enqueues rows (same transaction, never raises). A background
 # loop delivers them using the SMTP settings saved by an Administrator, so SMTP
 # failures can never block or lose an alert.
-import logging
-import re
-import smtplib
-import ssl
+import logging # Records erros and diagnostic information
+import re # Validates email addresses and clean text
+import smtplib # Connect to an smtp email server
+import ssl # provides encrpyted communication
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage # Constructs email messages
 from email.utils import formataddr #formats the sender name and address
-from typing import Any
+from typing import Any 
 from zoneinfo import ZoneInfo #Displays event times in a configured timezone
 
 from cryptography.fernet import Fernet, InvalidToken #Decrypts saved SMTP password
@@ -42,6 +42,7 @@ def _now() -> datetime:
 def valid_email(value: str | None) -> bool:
     return bool(value) and len(value) <= 254 and bool(_EMAIL_REGEX.match(value.strip()))
 
+# This function determines who receives email notifications for an asset.
 def supervisor_assignments_for_asset(
     session: Session,
     asset: Asset,
@@ -70,21 +71,89 @@ def supervisor_assignments_for_asset(
         ).all()
     )
 
-
+# Recipient selection function -> check child has any direct assignments, if yes then only send to those supervisors, otherwise check parent assets for supervisors
 def _assigned_supervisors_for_asset(session: Session, asset: Asset) -> list[User]:
     assignments = supervisor_assignments_for_asset(session, asset)
-    direct_users = {
-        user.id: user
+    # Direct assignments override ancestors even when their users are ineligible.
+    has_direct_assignments = session.scalar(
+        select(AssetSupervisor.id)
+        .where(AssetSupervisor.asset_id == asset.id)
+        .limit(1)
+    ) is not None
+    effective_assignments = [
+        (source_asset_id, user)
         for source_asset_id, _, user in assignments
-        if source_asset_id == asset.id
-    }
-    users_by_id = direct_users or {
-        user.id: user
-        for _, _, user in assignments
-    }
-    return [users_by_id[user_id] for user_id in sorted(users_by_id)]
+        if not has_direct_assignments or source_asset_id == asset.id
+    ]
+    users_by_email: dict[str, User] = {}
+    users_without_email: dict[int, User] = {}
+    for _, user in effective_assignments:
+        if valid_email(user.email_address):
+            users_by_email.setdefault(user.email_address.strip().casefold(), user)
+        else:
+            users_without_email[user.id] = user
+    return sorted(
+        [*users_by_email.values(), *users_without_email.values()],
+        key=lambda user: user.id,
+    )
 
+#hides most of the email`s local part when writing daigonstic logs`
+def _masked_email(value: str | None) -> str:
+    if not valid_email(value):
+        return "(invalid or missing)"
+    local, domain = value.strip().casefold().split("@", 1)
+    return f"{local[:1]}***@{domain}"
 
+#diagnostic logging of the recipient resolution process, including direct and ancestor assignments, and the final resolved recipients.
+def _log_recipient_resolution(
+    session: Session,
+    asset: Asset,
+    recipients: list[User],
+    notification_type: str | None,
+) -> None:
+    if not LOGGER.isEnabledFor(logging.DEBUG):
+        return
+    ancestry_ids: list[int] = []
+    seen: set[int] = set()
+    current: Asset | None = asset
+    while current is not None and current.id not in seen:
+        ancestry_ids.append(current.id)
+        seen.add(current.id)
+        current = (
+            session.get(Asset, current.parent_asset_id)
+            if current.parent_asset_id is not None
+            else None
+        )
+    assignment_rows = session.execute(
+        select(AssetSupervisor.asset_id, AssetSupervisor.user_id)
+        .where(AssetSupervisor.asset_id.in_(ancestry_ids))
+        .order_by(AssetSupervisor.asset_id, AssetSupervisor.user_id)
+    ).all()
+    direct_ids = sorted(
+        user_id for asset_id, user_id in assignment_rows if asset_id == asset.id
+    )
+    ancestor_ids = [
+        (asset_id, user_id)
+        for asset_id, user_id in assignment_rows
+        if asset_id != asset.id
+    ]
+    LOGGER.debug(
+        "Notification recipient resolution type=%s asset_id=%s asset_name=%r "
+        "parent_asset_id=%s direct_assignment_user_ids=%s "
+        "ancestor_assignment_asset_user_ids=%s resolved_recipients=%s",
+        notification_type or "unspecified",
+        asset.id,
+        asset.name,
+        asset.parent_asset_id,
+        direct_ids,
+        ancestor_ids,
+        [
+            {"user_id": user.id, "email": _masked_email(user.email_address)}
+            for user in recipients
+        ],
+    )
+
+# Helper function that returns only supervisors with valid email addresses
 def supervisors_for_asset(session: Session, asset: Asset) -> list[User]:
     return [
         user
@@ -92,7 +161,7 @@ def supervisors_for_asset(session: Session, asset: Asset) -> list[User]:
         if valid_email(user.email_address)
     ]
 
-
+# Builds the full asset heirarchy as a readable string 
 def _location(session: Session, asset: Asset) -> str:
     names = [asset.name]
     parent_id = asset.parent_asset_id
@@ -131,6 +200,7 @@ def _enqueue(session: Session, alert: Alert, asset: Asset, rule: MonitoringRule 
     if alert.id is None:
         session.flush()
     assigned_supervisors = _assigned_supervisors_for_asset(session, asset)
+    _log_recipient_resolution(session, asset, assigned_supervisors, alert.severity)
     if not assigned_supervisors:
         LOGGER.warning("No supervisor assigned to asset %s (%s); %s email for alert %s not sent",
             asset.id, asset.name, alert.severity, alert.id,
@@ -152,7 +222,7 @@ def _enqueue(session: Session, alert: Alert, asset: Asset, rule: MonitoringRule 
         "status": alert.status,
         "link": f"{base_url}/assets/{asset.id}" if base_url else None,
     }
-    queued = 0
+    queued_notifications: list[EmailNotification] = []
     existing_user_ids = set(
         session.scalars(
             select(EmailNotification.user_id).where(
@@ -168,17 +238,41 @@ def _enqueue(session: Session, alert: Alert, asset: Asset, rule: MonitoringRule 
         if user.id in existing_user_ids:
             continue
         if not valid_email(user.email_address):
-            session.add(EmailNotification(
+            notification = EmailNotification(
                 alert_id=alert.id, user_id=user.id, severity=alert.severity,
                 payload=payload, status="skipped",
                 last_error="Supervisor has no valid email address",
-            ))
+            )
+            session.add(notification)
+            queued_notifications.append(notification)
             LOGGER.warning("Supervisor user %s has no valid email; skipping alert %s email",user.id, alert.id,)
             continue
-        session.add(EmailNotification(alert_id=alert.id, user_id=user.id, severity=alert.severity, payload=payload,))
-        queued += 1
+        notification = EmailNotification(
+            alert_id=alert.id,
+            user_id=user.id,
+            severity=alert.severity,
+            payload=payload,
+        )
+        session.add(notification)
+        queued_notifications.append(notification)
     session.flush()
-    return queued
+    for notification in queued_notifications:
+        user = next(user for user in assigned_supervisors if user.id == notification.user_id)
+        LOGGER.debug(
+            "Notification outbox enqueue type=%s asset_id=%s notification_id=%s "
+            "alert_id=%s recipient_user_id=%s recipient_email=%s status=%s",
+            alert.severity,
+            asset.id,
+            notification.id,
+            alert.id,
+            notification.user_id,
+            _masked_email(user.email_address),
+            notification.status,
+        )
+    return sum(
+        notification.status == "pending"
+        for notification in queued_notifications
+    )
 
 #Custom exceptions classes for SMTP errors 
 #reports a problem with the saved SMTP configuration (host, port, sender, username, password)
@@ -438,17 +532,14 @@ def deliver_pending(session_factory, settings: Settings, *, batch_size: int = 20
                     )
                     continue
                 if asset.id not in assigned_user_ids_by_asset:
+                    current_recipients = _assigned_supervisors_for_asset(session, asset)
+                    _log_recipient_resolution(session, asset, current_recipients, item.severity)
                     assigned_user_ids_by_asset[asset.id] = {
-                        supervisor.id
-                        for supervisor in _assigned_supervisors_for_asset(
-                            session, asset
-                        )
+                        supervisor.id for supervisor in current_recipients
                     }
                 if item.user_id not in assigned_user_ids_by_asset[asset.id]:
                     item.status = "skipped"
-                    item.last_error = (
-                        "Supervisor is no longer assigned to this asset"
-                    )
+                    item.last_error = ("Supervisor is no longer assigned to this asset")
                     LOGGER.info(
                         "Notification %s skipped because user %s is no longer "
                         "assigned to asset %s",
@@ -465,6 +556,15 @@ def deliver_pending(session_factory, settings: Settings, *, batch_size: int = 20
                     continue
                 message = build_message(item.payload, sender=config["from_address"],
                                         recipient=user.email_address.strip(), settings=settings)
+                LOGGER.debug(
+                    "Notification outbox delivery type=%s asset_id=%s "
+                    "notification_id=%s recipient_user_id=%s recipient_email=%s",
+                    item.severity,
+                    asset.id,
+                    item.id,
+                    user.id,
+                    _masked_email(message["To"]),
+                )
                 _send(config, message, settings.email_smtp_timeout_seconds)
                 item.status = "sent"
                 item.sent_at = _now()
