@@ -32,9 +32,7 @@ class RuleCollection(Base):
 
     @property
     def labels(self) -> list[str]:
-        if self.label_records:
-            return [label.name for label in self.label_records]
-        return list(self.legacy_labels or [])
+        return [label.name for label in self.label_records]
 
 # storing document information
 class InstructionDocument(Base):

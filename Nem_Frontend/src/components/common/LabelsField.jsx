@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, X } from "lucide-react";
 import { api } from "../../services/api.js";
 import "./LabelsField.css";
@@ -18,6 +18,22 @@ export default function LabelsField({
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
+  const fieldRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (!fieldRef.current?.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [open]);
 
   useEffect(() => {
     let active = true;
@@ -89,7 +105,7 @@ export default function LabelsField({
 
   if (mode === "filter") {
     return (
-      <div className="labels-filter">
+      <div className="labels-filter" ref={fieldRef}>
         <button
           type="button"
           className="labels-filter-toggle"
@@ -159,7 +175,7 @@ export default function LabelsField({
   }
 
   return (
-    <div className="labels-field">
+    <div className="labels-field" ref={fieldRef}>
       <div className="labels-input-row">
         <input
           id={id}
