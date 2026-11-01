@@ -85,13 +85,17 @@ Primary operational tables and their roles:
 
 Asset, variable, reading, rule, alert, maintenance, and history deletion is
 guarded where dependants would otherwise be orphaned. Startup calls
-`Base.metadata.create_all()` and applies additive, in-code schema updates in
+`Base.metadata.create_all()` and applies in-code schema updates in
 `app/db/init_db.py`; production database changes should be backed up first.
 The versioned `app/db/migrations/shared_labels.py` migration imports legacy
 document JSON labels into the shared catalog and associations. New document
 assignments are stored in the normalized associations; the legacy column
 remains for compatibility and is restored from associations by migration
 downgrade.
+Startup also removes the legacy rule and maintenance visibility-marker
+columns. It drops only those columns, preserving all rule and maintenance
+records; previously filtered rows are included in normal listings and
+evaluation queries according to their existing lifecycle/status fields.
 
 ## Request and monitoring data flow
 

@@ -33,6 +33,12 @@ roadmap.
   initialization; a SQLite in-memory check verified repeat initialization,
   reuse/filtering, the 10-label limit, and rollback. A live PostgreSQL upgrade
   has not been exercised.
+- Startup drops the legacy rule and maintenance visibility-marker columns
+  without deleting rows. Rows previously hidden by those markers now follow
+  their existing lifecycle/status fields in normal listings. Deleting a
+  completed scheduled occurrence retains its schedule; deleting a
+  noncompleted scheduled occurrence keeps the pre-existing explicit
+  delete-the-schedule behavior.
 - Demo data created by `Nem_Backend/seed.py` is explicitly marked as simulated
   and must not be interpreted as live equipment telemetry.
 

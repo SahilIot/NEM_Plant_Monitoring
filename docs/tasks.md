@@ -20,6 +20,10 @@ deployment configuration or field validation.
   instruction documents; create/edit assignment, compact chips, and
   server-side AND filtering. Existing document label data is imported by a
   reversible, idempotent startup migration.
+- Removed legacy visibility-marker behavior for rules and maintenance.
+  Startup drops those marker columns without deleting rows; previously hidden
+  records use their normal lifecycle/status fields and maintenance deletion
+  preserves the established schedule behavior.
 - Read-only OPC UA test/read/discovery and continuous collector, mappings,
   reconnect behavior, machine cycle/runtime state, freshness handling, and
   status endpoint.
@@ -66,6 +70,9 @@ deployment configuration or field validation.
   SQLite checks covered migration idempotency, shared-name reuse,
   association-only removal, AND filtering, and the 10-label maximum; live
   PostgreSQL behavior remains unverified.
+- Exercise the legacy marker-column removal against an isolated PostgreSQL
+  database and verify row retention; SQLite verification should cover schedule
+  reference cleanup when deleting a completed occurrence.
 - Against a PLC simulator/approved test server, verify NodeId mappings,
   variable ownership/types, signal roles, source/server timestamps, data
   quality, negotiated publishing intervals, reconnection, and freshness.

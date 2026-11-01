@@ -102,7 +102,6 @@ def monitoring_status(
 ) -> dict[str, object]:
     query = select(MonitoringRule).where(
         MonitoringRule.is_enabled.is_(True),
-        MonitoringRule.is_archived.is_(False),
     )
     if rule_id is not None:
         query = query.where(MonitoringRule.id == rule_id)
@@ -138,7 +137,6 @@ def asset_monitoring_status(
         select(MonitoringRule)
         .where(
             MonitoringRule.is_enabled.is_(True),
-            MonitoringRule.is_archived.is_(False),
             or_(
                 MonitoringRule.target_asset_id == asset_id,
                 MonitoringRule.variable_id.in_(
@@ -155,7 +153,7 @@ def asset_monitoring_status(
 @router.get("/rules/{rule_id}/status", response_model=RuleStateRead)
 def rule_status(rule_id: int, session: Session = Depends(get_db)) -> RuleStateRead:
     rule = session.get(MonitoringRule, rule_id)
-    if rule is None or rule.is_archived:
+    if rule is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id} was not found")
     return state_for_rule(session, rule)
 
@@ -194,7 +192,6 @@ def alert_query(
                         Alert.maintenance_schedule_id.is_not(None),
                         and_(
                             MonitoringRule.is_enabled.is_(True),
-                            MonitoringRule.is_archived.is_(False),
                         ),
                     ),
                 ]

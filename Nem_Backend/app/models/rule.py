@@ -205,12 +205,6 @@ class MonitoringRule(Base):
     is_enabled: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False, index=True
     )
-    is_archived: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
-        server_default=text("false"),
-        nullable=False,
-    )
     lifecycle_status: Mapped[str] = mapped_column(
         String(20),
         default="in_progress",

@@ -875,7 +875,6 @@ def decline_next_occurrence(schedule_id: int,
 def list_maintenance_records(
     asset_id: int | None = Query(default=None, gt=0),
     alert_id: int | None = Query(default=None, gt=0),
-    include_archived: bool = False,
     start_time: datetime | None = None,
     end_time: datetime | None = None,
     limit: int = Query(default=50, ge=1, le=200),
@@ -887,9 +886,6 @@ def list_maintenance_records(
         raise HTTPException(status_code=422,detail="start_time must not be later than end_time",)
 
     conditions = []
-    if not include_archived:
-        conditions.append(MaintenanceRecord.archived_at.is_(None))
-        conditions.append(MaintenanceRecord.status != "completed")
     if asset_id is not None:
         conditions.append(MaintenanceRecord.asset_id == asset_id)
     if alert_id is not None:
@@ -929,53 +925,9 @@ def get_maintenance_record(
 ) -> MaintenanceRecord:
     return _record_or_404(session, record_id)
 
-# code does not pysically delete the db row, instead performs  a soft delete also called archiving
 @router.delete("/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
-def archive_completed_maintenance_record(
-    record_id: int,
-    session: Session = Depends(get_db),
-    user: User = Depends(require_roles("Administrator")),
-) -> None:
-    record = session.scalar(
-        select(MaintenanceRecord)
-        .where(MaintenanceRecord.id == record_id)
-        .with_for_update()
-    )
-    if record is None:
-        raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
-    if record.status != "completed":
-        raise HTTPException(status_code=409,detail="Only completed maintenance can be removed from the active list",)
-    if record.archived_at is not None:
-        return None
-    record.archived_at = utc_now()
-    emit_event(
-        session,
-        event_type="maintenance_record_archived",
-        message=f"Completed maintenance moved to the archive: {record.summary}.",
-        occurred_at=record.archived_at,
-        asset_id=record.asset_id,
-        alert_id=record.alert_id,
-        metadata={
-            "maintenance_record_id": record.id,
-            "schedule_id": record.schedule_id,
-            "planned_due_date": (
-                record.planned_due_date.isoformat()
-                if record.planned_due_date
-                else None
-            ),
-            "actual_completed_at": (
-                record.actual_completed_at.isoformat()
-                if record.actual_completed_at
-                else None
-            ),
-        },
-    )
-    session.commit()
-    return None
-
-#used to delete the maintenance record permanently
 @router.delete("/{record_id}/permanent", status_code=status.HTTP_204_NO_CONTENT)
-def permanently_delete_archived_maintenance_record(
+def permanently_delete_maintenance_record(
     record_id: int,
     session: Session = Depends(get_db),
     user: User = Depends(require_roles("Administrator")),
@@ -987,13 +939,13 @@ def permanently_delete_archived_maintenance_record(
     )
     if record is None:
         raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
-    if record.schedule_id is not None and not (record.status == "completed" and record.archived_at is not None):
+    if record.schedule_id is not None and record.status != "completed":
         permanently_delete_maintenance_schedule(record.schedule_id, session, user)
         return None
     if record.status == "in_progress":
         raise HTTPException(status_code=409,detail="Maintenance currently in progress cannot be permanently deleted.",)
 
-    if record.status == "completed" and record.archived_at is not None:
+    if record.status == "completed" and record.schedule_id is not None:
         schedule_id = record.schedule_id
         schedule = (
             session.scalar(
@@ -1031,7 +983,7 @@ def permanently_delete_archived_maintenance_record(
     _commit_deletion(session, "Related maintenance history prevents deleting this record.",)
 
 
-#Modifies a maintenance record,but not allow completed or archived records to be edited 
+# Modifies a maintenance record; completed records cannot be edited.
 @router.patch("/{record_id}", response_model=MaintenanceRead)
 def update_maintenance_record(
     record_id: int,
@@ -1062,8 +1014,8 @@ def update_maintenance_record(
         if restricted:
             raise HTTPException(status_code=403,detail=f"Supervisors can only edit planned maintenance dates. Restricted fields: {', '.join(sorted(restricted))}",)
 
-    if record.status == "completed" or record.archived_at is not None:
-        raise HTTPException(status_code=409,detail="Completed or archived maintenance cannot be edited",)
+    if record.status == "completed":
+        raise HTTPException(status_code=409,detail="Completed maintenance cannot be edited",)
     if record.schedule_id is not None and {
         "planned_start_at",
         "planned_end_at",
@@ -1153,7 +1105,6 @@ def complete_maintenance_record(
     _validate_record_dates(record)
     record.performed_at = completed_at
     record.status = "completed"
-    record.archived_at = completed_at
     actual_start = _normalized(record.actual_started_at)
     normalized_completed_at = _normalized(completed_at)
     if schedule is not None:

@@ -78,7 +78,7 @@ def configured_runtime_signal_mapping(
 #Find the rule safely
 def rule_or_404(session: Session, rule_id: int) -> MonitoringRule:
     rule = session.get(MonitoringRule, rule_id)
-    if rule is None or rule.is_archived:
+    if rule is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id} was not found")
     return rule
 
@@ -319,14 +319,12 @@ def list_rules(
 ) -> dict[str, object]:
     #Build the database queries
     query = select(MonitoringRule).where(
-        MonitoringRule.is_archived.is_(False),
         MonitoringRule.target_asset_id.is_not(None),
     )
     count_query = (
         select(func.count())
         .select_from(MonitoringRule)
         .where(
-            MonitoringRule.is_archived.is_(False),
             MonitoringRule.target_asset_id.is_not(None),
         )
     )

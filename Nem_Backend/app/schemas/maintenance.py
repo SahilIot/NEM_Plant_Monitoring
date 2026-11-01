@@ -106,7 +106,6 @@ class MaintenanceRead(ORMModel):
     checklist: list[dict[str, object]] | None
     schedule_id: int | None = None
     planned_due_date: date | None = None
-    archived_at: datetime | None = None
     created_at: datetime
 
 #Defines which maintenance record fields can be updated,editing a job

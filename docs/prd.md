@@ -52,7 +52,7 @@ is therefore a verification requirement, not a confirmed product guarantee.
 | FR-03 | Ingest single and batch readings, validate asset-variable ownership and types, and retrieve latest/history data. | Implemented |
 | FR-04 | Subscribe read-only to configured OPC UA signals; test, discover, and read nodes; show connection state. | Implemented; live PLC/server verification required |
 | FR-05 | Count cycle-signal false-to-true edges and accumulate runtime only during trustworthy true running signals. | Implemented; physical/signal behavior requires verification |
-| FR-06 | Create/edit, assign/copy, evaluate, suspend, deactivate, archive, and inspect supported monitoring rules. | Implemented with type-specific limitations documented in `rules.md` |
+| FR-06 | Create/edit, assign/copy, evaluate, suspend, deactivate, complete, and inspect supported monitoring rules. | Implemented with type-specific limitations documented in `rules.md` |
 | FR-07 | Raise and update alerts; acknowledge alerts; complete eligible alerts; preserve event history. | Implemented |
 | FR-08 | Record, schedule, start, complete, cancel, and review maintenance; manage calendar recurrence and proposed next dates. | Implemented |
 | FR-09 | Show operational status and affected-data refreshes in the React dashboard. | Implemented through a combination of WebSocket notifications and REST refresh/polling |

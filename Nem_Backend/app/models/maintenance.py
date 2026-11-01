@@ -97,7 +97,6 @@ class MaintenanceRecord(Base):
     checklist: Mapped[list[dict[str, object]] | None] = mapped_column(JSON)
     schedule_id: Mapped[int | None] = mapped_column(ForeignKey("nem_maintenance_schedules.id", ondelete="RESTRICT"), index=True)
     planned_due_date: Mapped[date | None] = mapped_column(Date)
-    archived_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     @property

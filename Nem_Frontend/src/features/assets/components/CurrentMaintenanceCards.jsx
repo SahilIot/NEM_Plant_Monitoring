@@ -107,8 +107,7 @@ const openEdit = (record) => {
   const permanentlyDeleteRecord = async (record) => {
     if (!isAdministrator || busy || record.status === "in_progress") return;
     const scheduled =
-      Boolean(record.schedule_id) &&
-      !(record.status === "completed" && record.archived_at);
+      Boolean(record.schedule_id) && record.status !== "completed";
     const plannedDate = record.planned_start_at
       ? formatTime(record.planned_start_at)
       : null;
@@ -142,7 +141,7 @@ const openEdit = (record) => {
     setError("");
     setNotice("");
     try {
-      await api.del(`/maintenance/${record.id}/permanent`);
+      await api.del(`/maintenance/${record.id}`);
       setSelectedRecord(null);
       setNotice("Maintenance was permanently deleted.");
       await Promise.all([
@@ -163,7 +162,7 @@ const openEdit = (record) => {
     try {
       const [schedules, maintenanceRecords] = await Promise.all([
         api.getAll(`/maintenance/schedules?asset_id=${assetId}`),
-        api.getAll(`/maintenance?asset_id=${assetId}&include_archived=true`),
+        api.getAll(`/maintenance?asset_id=${assetId}`),
       ]);
       const recordsById = new Map(
         maintenanceRecords.map((record) => [record.id, record])

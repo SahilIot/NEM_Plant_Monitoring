@@ -54,7 +54,7 @@ from app.schemas.rule import (
 )
 from app.schemas.maintenance import MaintenanceScheduleCreate
 from app.services.frontend_backup import create_backup, restore_backup
-from app.services.monitoring_engine import (emit_event,resolve_active_rule_alerts,set_rule_enabled_state,)
+from app.services.monitoring_engine import (emit_event, set_rule_enabled_state,)
 from app.api.routes.rules import (
     configured_cycle_signal_mapping,
     configured_runtime_signal_mapping,
@@ -309,7 +309,6 @@ def frontend_summary(session: Session = Depends(get_db)) -> dict[str, Any]:
             .select_from(MonitoringRule)
             .where(
                 MonitoringRule.lifecycle_status == status,
-                MonitoringRule.is_archived.is_(False),
             )
         )
         or 0
@@ -346,7 +345,6 @@ def frontend_rules_by_lifecycle(
         select(MonitoringRule)
         .where(
             MonitoringRule.lifecycle_status == lifecycle_status,
-            MonitoringRule.is_archived.is_(False),
             MonitoringRule.target_asset_id.is_not(None),
         )
         .order_by(MonitoringRule.target_asset_id, MonitoringRule.id)
@@ -362,7 +360,6 @@ def frontend_rules_by_status(kind: str, session: Session = Depends(get_db)) -> l
     rows = session.scalars(
         select(MonitoringRule)
         .where(
-            MonitoringRule.is_archived.is_(False),
             MonitoringRule.target_asset_id.is_not(None),
         )
         .order_by(MonitoringRule.id)
@@ -383,7 +380,6 @@ def frontend_asset_rules(asset_id: int,include_children: bool = False,session: S
         select(MonitoringRule)
         .where(
             MonitoringRule.target_asset_id.in_(asset_ids),
-            MonitoringRule.is_archived.is_(False),
         )
         .order_by(MonitoringRule.id)
     ).all()
@@ -962,7 +958,6 @@ def update_rule_template(
             assigned_rules = session.scalars(
                 select(MonitoringRule).where(
                     MonitoringRule.source_template_id == template.id,
-                    MonitoringRule.is_archived.is_(False),
                 )
             ).all()
             for rule in assigned_rules:
@@ -1035,7 +1030,6 @@ def assign_template_to_assets(
                 select(MonitoringRule)
                 .where(
                     MonitoringRule.target_asset_id == asset_id,
-                    MonitoringRule.is_archived.is_(False),
                 )
                 .with_for_update()
             ).all()
@@ -1083,7 +1077,6 @@ def frontend_predefined_rules(
     assigned = session.scalars(
         select(MonitoringRule).where(
             MonitoringRule.target_asset_id == asset_id,
-            MonitoringRule.is_archived.is_(False),
         )
     ).all()
     result = []
@@ -1184,7 +1177,6 @@ def frontend_assign_predefined_rules(
     existing = session.scalars(
         select(MonitoringRule).where(
             MonitoringRule.target_asset_id == asset_id,
-            MonitoringRule.is_archived.is_(False),
         )
     ).all()
     prepared: list[tuple[MonitoringRuleTemplate, dict[str, Any]]] = []
@@ -1244,7 +1236,6 @@ def frontend_copy_asset_rules(
         .where(
             MonitoringRule.id.in_(payload.rule_ids),
             MonitoringRule.target_asset_id == payload.source_asset_id,
-            MonitoringRule.is_archived.is_(False),
         )
         .order_by(MonitoringRule.id)
         .with_for_update()
@@ -1259,7 +1250,6 @@ def frontend_copy_asset_rules(
     existing = session.scalars(
         select(MonitoringRule).where(
             MonitoringRule.target_asset_id == asset_id,
-            MonitoringRule.is_archived.is_(False),
         )
     ).all()
     prepared = []
@@ -1436,7 +1426,6 @@ def frontend_bulk_rule_state(
         select(MonitoringRule)
         .where(
             MonitoringRule.target_asset_id.in_(asset_ids),
-            MonitoringRule.is_archived.is_(False),
         )
         .order_by(MonitoringRule.id)
         .with_for_update()
@@ -1492,7 +1481,7 @@ def _transition_rule_lifecycle(
         .where(MonitoringRule.id == rule_id)
         .with_for_update()
     )
-    if rule is None or rule.is_archived:
+    if rule is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id} was not found")
 
     now = datetime.now(timezone.utc)
@@ -1583,38 +1572,9 @@ def deactivate_rule(
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     return _transition_rule_lifecycle(rule_id, "deactivate", request, session)
-
-
-#Deleting a rule(Soft deletion,also called archiving rather than deleting the db row)
 @router.delete("/rules/{rule_id}", status_code=204)
-def frontend_delete_rule(
-    rule_id: int,
-    session: Session = Depends(get_db),
-    user: User = Depends(require_roles("Administrator")),
-) -> None:
-    rule = session.get(MonitoringRule, rule_id)
-    if rule is None or rule.is_archived:
-        raise HTTPException(status_code=404, detail=f"Rule {rule_id} was not found")
-    if rule.is_enabled:
-        raise HTTPException( status_code=409, detail="Deactivate the rule before archiving it.")
-    set_rule_enabled_state(session, rule, False)
-    resolve_active_rule_alerts(session, rule.id)
-    rule.is_archived = True
-    if rule.lifecycle_status != "completed":
-        rule.lifecycle_status = "deactivated"
-    emit_event(
-        session,
-        event_type="rule_archived",
-        message=f"Rule '{rule.name}' archived; evaluation and alert history retained.",
-        occurred_at=datetime.now(timezone.utc),
-        asset_id=rule.target_asset_id,
-        rule_id=rule.id,
-    )
-    session.commit()
-
-
 @router.delete("/rules/{rule_id}/permanent", status_code=204)
-def frontend_hard_delete_rule(
+def frontend_delete_rule(
     rule_id: int,
     session: Session = Depends(get_db),
     user: User = Depends(require_roles("Administrator")),
@@ -1759,9 +1719,6 @@ def frontend_bulk_delete_asset_logbook(
     records = _lock_rows_by_ids(session, MaintenanceRecord, payload.ids)
     if any(record.asset_id != asset_id or record.status != "completed" for record in records):
         raise HTTPException(status_code=404, detail="One or more selected records do not belong to this maintenance logbook.",)
-    if any(record.schedule_id is not None and record.archived_at is None for record in records):
-        raise HTTPException(status_code=409,detail="Scheduled maintenance must be archived before its logbook record can be permanently deleted.",)
-
     record_ids_by_schedule: dict[int, set[int]] = {}
     for record in records:
         if record.schedule_id is not None:

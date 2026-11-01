@@ -114,7 +114,6 @@ def update_variable(variable_id: int,payload: VariableUpdate,session: Session = 
                 select(MonitoringRule.rule_type).where(
                     MonitoringRule.variable_id == variable.id,
                     MonitoringRule.is_enabled.is_(True),
-                    MonitoringRule.is_archived.is_(False),
                     MonitoringRule.rule_type.in_(
                         {"runtime_duration", "boolean_count_threshold"}
                     ),

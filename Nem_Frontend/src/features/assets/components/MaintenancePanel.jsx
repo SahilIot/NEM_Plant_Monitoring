@@ -196,8 +196,7 @@ export default function MaintenancePanel({
   const permanentlyDeleteRecord = async (record) => {
     if (!isAdministrator || busy) return;
     const scheduled =
-      Boolean(record.schedule_id) &&
-      !(record.status === "completed" && record.archived_at);
+      Boolean(record.schedule_id) && record.status !== "completed";
     const plannedDate = record.planned_start_at
       ? formatTime(record.planned_start_at)
       : null;
@@ -228,7 +227,7 @@ export default function MaintenancePanel({
     setError("");
     setNotice("");
     try {
-      await api.del(`/maintenance/${record.id}/permanent`);
+      await api.del(`/maintenance/${record.id}`);
       setNotice("Maintenance was permanently deleted.");
       await Promise.all([loadRecords(), loadSchedules()]);
       await onChanged?.();
@@ -901,7 +900,7 @@ const openEdit = (record) => {
               disabled={busy || record.status === "in_progress"}
               title={record.status === "in_progress"
                 ? "In-progress maintenance cannot be deleted."
-                : record.schedule_id
+                : record.schedule_id && record.status !== "completed"
                   ? "Permanently delete schedule"
                   : "Permanently delete maintenance"}
             >

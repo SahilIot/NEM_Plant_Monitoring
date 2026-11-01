@@ -244,7 +244,6 @@ def update_rule_signal_states(
             MonitoringRule.rule_type.in_(
                 {"boolean_count_threshold", "runtime_duration"}
             ),
-            MonitoringRule.is_archived.is_(False),
         )
         .order_by(MonitoringRule.id)
         .with_for_update()
@@ -1311,11 +1310,7 @@ def evaluate_rules(
 ) -> dict[str, int]:
     now = evaluated_at or utc_now()
 
-    query = (
-        select(MonitoringRule)
-        .where(MonitoringRule.is_archived.is_(False))
-        .order_by(MonitoringRule.id)
-    )
+    query = select(MonitoringRule).order_by(MonitoringRule.id)
 
     if rule_id is not None:
         query = query.where(MonitoringRule.id == rule_id)
@@ -1438,7 +1433,6 @@ def evaluate_reading_rules(
         select(MonitoringRule)
         .where(
             MonitoringRule.is_enabled.is_(True),
-            MonitoringRule.is_archived.is_(False),
             MonitoringRule.variable_id == variable_id,
         )
         .order_by(MonitoringRule.id)

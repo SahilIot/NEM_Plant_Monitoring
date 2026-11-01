@@ -15,6 +15,24 @@ from app.models import (
 )
 from app.db.migrations.shared_labels import upgrade as upgrade_shared_labels
 
+
+def _drop_column_if_present(engine: Engine, table_name: str, column_name: str) -> None:
+    columns = {
+        column["name"]
+        for column in inspect(engine).get_columns(table_name)
+    }
+    if column_name not in columns:
+        return
+    if engine.dialect.name not in {"postgresql", "sqlite"}:
+        raise RuntimeError(
+            f"Column removal is not implemented for {engine.dialect.name}"
+        )
+    with engine.begin() as connection:
+        connection.execute(
+            text(f"ALTER TABLE {table_name} DROP COLUMN {column_name}")
+        )
+
+
 #creates tables defined in SQLAlchemy models if they do not exist
 def _migrate_auth_roles(engine: Engine) -> None:
     with engine.begin() as connection:
@@ -240,21 +258,6 @@ def initialize_database(engine: Engine) -> None:
                             "ADD COLUMN completed_at " + column_type
                         )
                     )
-            if "is_archived" not in rule_columns:
-                if engine.dialect.name == "postgresql":
-                    connection.execute(text(
-                            "ALTER TABLE nem_monitoring_rules "
-                            "ADD COLUMN IF NOT EXISTS is_archived "
-                            "BOOLEAN NOT NULL DEFAULT FALSE"
-                        )
-                    )
-                else:
-                    connection.execute(text(
-                            "ALTER TABLE nem_monitoring_rules "
-                            "ADD COLUMN is_archived "
-                            "BOOLEAN NOT NULL DEFAULT FALSE"
-                        )
-                    )
             if "source_template_id" not in rule_columns:
                 if engine.dialect.name == "postgresql":
                     connection.execute(text(
@@ -278,6 +281,7 @@ def initialize_database(engine: Engine) -> None:
                     "ON nem_monitoring_rules (source_template_id)"
                 )
             )
+        _drop_column_if_present(engine, "nem_monitoring_rules", "is_archived")
     _migrate_legacy_rule_templates(engine)
     _migrate_boolean_duration_templates(engine)
     _migrate_existing_rule_counters(engine)
@@ -338,7 +342,6 @@ def initialize_database(engine: Engine) -> None:
                 "ON DELETE RESTRICT"
             ),
             "planned_due_date": "DATE",
-            "archived_at": "TIMESTAMP",
         }
         with engine.begin() as connection:
             for name, definition in record_column_definitions.items():
@@ -353,12 +356,11 @@ def initialize_database(engine: Engine) -> None:
                     "WHERE status = 'completed' AND actual_completed_at IS NULL"
                 )
             )
-            connection.execute(text(
-                    "UPDATE nem_maintenance_records "
-                    "SET archived_at = COALESCE(actual_completed_at, performed_at, CURRENT_TIMESTAMP) "
-                    "WHERE status = 'completed' AND archived_at IS NULL"
-                )
-            )
+        _drop_column_if_present(
+            engine,
+            "nem_maintenance_records",
+            "archived_at",
+        )
         record_inspector = inspect(engine)
         has_occurrence_unique = any(
             constraint.get("name") == "uq_maintenance_occurrence_schedule_due"
@@ -469,7 +471,6 @@ def _migrate_legacy_rule_templates(engine: Engine) -> None:
         legacy_rules = session.scalars(
             select(MonitoringRule).where(
                 MonitoringRule.target_asset_id.is_(None),
-                MonitoringRule.is_archived.is_(False),
                 MonitoringRule.rule_type.in_(supported_types),
             )
         ).all()
@@ -511,7 +512,6 @@ def _migrate_legacy_rule_templates(engine: Engine) -> None:
                 )
             )
             rule.is_enabled = False
-            rule.is_archived = True
         session.commit()
 
 #fixes old duration-rule templates 
@@ -556,7 +556,6 @@ def _migrate_existing_rule_counters(engine: Engine) -> None:
             select(MonitoringRule).where(
                 MonitoringRule.rule_type == "boolean_count_threshold",
                 MonitoringRule.target_asset_id.is_not(None),
-                MonitoringRule.is_archived.is_(False),
             )
         ).all()
         for rule in rules:

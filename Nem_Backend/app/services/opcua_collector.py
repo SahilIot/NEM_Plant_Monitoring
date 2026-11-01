@@ -634,7 +634,6 @@ class OpcUaCollector:
                                 {"runtime_duration", "boolean_count_threshold"}
                             ),
                             MonitoringRule.is_enabled.is_(True),
-                            MonitoringRule.is_archived.is_(False),
                             Variable.data_type == "boolean",
                             Variable.id.in_(declared_variable_ids),
                         )
@@ -702,7 +701,6 @@ class OpcUaCollector:
             session.scalars(
                 select(MonitoringRule.variable_id).where(
                     MonitoringRule.is_enabled.is_(True),
-                    MonitoringRule.is_archived.is_(False),
                     MonitoringRule.variable_id.is_not(None),
                 )
             ).all()
@@ -1139,7 +1137,6 @@ def machine_status_rows(
                 Alert.maintenance_schedule_id.is_not(None),
                 and_(
                     MonitoringRule.is_enabled.is_(True),
-                    MonitoringRule.is_archived.is_(False),
                 ),
             ),
         )

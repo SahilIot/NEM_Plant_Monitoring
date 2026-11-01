@@ -1185,7 +1185,6 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
   margin-top: 18px;
 }
 
@@ -1193,34 +1192,6 @@
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.event-delete-icon {
-  display: inline-flex;
-  width: 34px;
-  height: 34px;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  color: var(--alert, #b42318);
-  background: transparent;
-  border: 1px solid var(--line, #e5e7eb);
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.event-delete-icon:hover:not(:disabled) {
-  background: var(--alert-soft, #fef3f2);
-}
-
-.event-delete-icon:focus-visible {
-  outline: 2px solid var(--alert, #b42318);
-  outline-offset: 2px;
-}
-
-.event-delete-icon:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
 }
 
 .event-log-section .table-responsive {

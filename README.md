@@ -227,8 +227,8 @@ fixed ticks. It pauses when the signal becomes false or is no longer
 trustworthy; time across disconnects is not inferred. Missing, invalid,
 future-dated, or stale data is reported as unknown rather than normal.
 
-Rules can be suspended, resumed, activated, deactivated, completed, archived,
-or permanently deleted subject to lifecycle and role restrictions. `generic`
+Rules can be suspended, resumed, activated, deactivated, completed, or
+permanently deleted subject to lifecycle and role restrictions. `generic`
 rules have no evaluator and remain unknown. The database permits
 `boolean_condition`, but the main `RuleCreate` schema does not accept it; treat
 that type as legacy/compatibility behavior requiring verification.

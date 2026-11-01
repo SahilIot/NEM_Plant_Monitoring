@@ -24,14 +24,12 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
     rule_total = session.scalar(
         select(func.count())
         .select_from(MonitoringRule)
-        .where(MonitoringRule.is_archived.is_(False))
     ) or 0
     enabled = session.scalar(
         select(func.count())
         .select_from(MonitoringRule)
         .where(
             MonitoringRule.is_enabled.is_(True),
-            MonitoringRule.is_archived.is_(False),
         )
     ) or 0
     disabled = rule_total - enabled
@@ -44,7 +42,6 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
             Variable.is_active.is_(True),
             Asset.is_active.is_(True),
             MonitoringRule.is_enabled.is_(True),
-            MonitoringRule.is_archived.is_(False),
         )
     ) or 0
     # Getting the latest reading timestamp
@@ -57,7 +54,6 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
             .join(MonitoringRule, MonitoringRule.id == RuleState.rule_id)
             .where(
                 MonitoringRule.is_enabled.is_(True),
-                MonitoringRule.is_archived.is_(False),
                 RuleState.status == status,
             )
         ) or 0
@@ -73,7 +69,6 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
             Alert.severity == "alert",
             Alert.maintenance_schedule_id.is_(None),
             MonitoringRule.is_enabled.is_(True),
-            MonitoringRule.is_archived.is_(False),
         )
     ) or 0
     #Counting assets currenly in alert and warning state
@@ -85,7 +80,6 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
             Alert.severity == "warning",
             Alert.maintenance_schedule_id.is_(None),
             MonitoringRule.is_enabled.is_(True),
-            MonitoringRule.is_archived.is_(False),
         )
     ) or 0
     #Counting total active alerts and unacknowledged active alerts
@@ -99,7 +93,6 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
                 Alert.maintenance_schedule_id.is_not(None),
                 and_(
                     MonitoringRule.is_enabled.is_(True),
-                    MonitoringRule.is_archived.is_(False),
                 ),
             ),
         )
@@ -115,7 +108,6 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
                 Alert.maintenance_schedule_id.is_not(None),
                 and_(
                     MonitoringRule.is_enabled.is_(True),
-                    MonitoringRule.is_archived.is_(False),
                 ),
             ),
         )

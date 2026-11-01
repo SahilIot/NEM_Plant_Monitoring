@@ -110,9 +110,9 @@ Lifecycle behavior in `frontend_compat.py` and `monitoring_engine.py`:
   history.
 - **Completed:** terminal in the UI/API lifecycle; completed rules cannot be
   reactivated. Create a new rule for a new monitoring period.
-- **Archived:** hidden from normal rule lists/evaluation, retains history;
-  archive requires a disabled rule. Permanent deletion is an Administrator
-  action and is also restricted to disabled rules.
+- **Permanent deletion:** an Administrator action restricted to disabled
+  rules; it removes the rule and its associated evaluation and alert history
+  subject to linked maintenance-record constraints.
 
 Some endpoints and `set_rule_enabled_state` normalize enabled/disabled states
 without expressing every lifecycle label. Use lifecycle endpoints for
@@ -174,8 +174,9 @@ suspend/resume/activate/deactivate and verify legacy rule records.
 
 - Individual records use `planned`, `in_progress`, `completed`, and `cancelled`
   statuses. Start/completion record actual timestamps. Completed records are
-  read-only in the standard workflow; archival/permanent deletion behavior
-  differs between the normal list and Administrator-only actions.
+  read-only in the standard workflow. Maintenance records remain in normal
+  listings after completion; Administrator deletion removes eligible records
+  permanently.
 - A schedule belongs to one asset and has a current occurrence/due date.
   Recurrence units are `days`, `weeks`, `months`, and `years`, with a positive
   interval. Schedule creation creates its first planned occurrence.

@@ -1029,8 +1029,6 @@ export default function AssetDetail() {
       setSelectedEventIds((current) =>
         current.filter((id) => id !== event.id)
       );
-      setShowEventDetails(false);
-      setSelectedEvent(null);
       setActionNotice("Event was permanently deleted.");
     } catch (error) {
       setEventDeleteError(error.message || "Could not delete this event.");
@@ -1635,29 +1633,6 @@ const filteredEvents = [...events]
     loadSelectedRule();
   }, [assetId, location.key]);
 
-  const remove = async (rule) => {
-    if (!isAdministrator) return;
-    if (
-      !(await confirm(
-        `Archive the rule “${rule.name}”? It will be hidden from the rule list, and its alert and evaluation history will be retained.`,
-        {
-          title: "Archive rule",
-          confirmLabel: "Archive",
-          destructive: true,
-        }
-      ))
-    ) {
-      return;
-    }
-
-    try {
-      await api.del(`/rules/${rule.id}`);
-      await refreshAll();
-    } catch (error) {
-      setLoadError(error.message);
-    }
-  };
-
   const permanentlyDeleteRule = async (rule) => {
     if (!isAdministrator || permanentDeleteRequest.current) return;
     permanentDeleteRequest.current = true;
@@ -1673,7 +1648,7 @@ const filteredEvents = [...events]
           destructive: true,
         }
       ))) return;
-      await api.del(`/rules/${rule.id}/permanent`);
+      await api.del(`/rules/${rule.id}`);
       await refreshAll();
       setActionNotice(`Rule “${rule.name}” was permanently deleted.`);
     } catch (error) {
@@ -2788,10 +2763,11 @@ const filteredEvents = [...events]
         disabled={deletingRuleId !== null || !isAdministrator}
         title={
           !isAdministrator
-            ? "Only Administrators can archive rules."
+              ? "Only Administrators can activate suspended rules."
             : undefined
         }
       >
+        <Power size={16} aria-hidden="true" />
         Activate rule
       </button>
     )}
@@ -2813,6 +2789,7 @@ const filteredEvents = [...events]
             : undefined
         }
       >
+        <Power size={16} aria-hidden="true" />
         Activate rule
       </button>
     )}
@@ -2838,28 +2815,6 @@ const filteredEvents = [...events]
         Deactivate rule
       </button>
     )}
-
-    {/* Archive */}
-    {lifecycleStatus(rule) !== "in_progress" &&
-      lifecycleStatus(rule) !== "completed" && (
-        <button
-          type="button"
-          className="rule-action-menu-item rule-action-menu-item--lifecycle"
-          role="menuitem"
-          onClick={() => {
-            setRuleActionMenuId(null);
-            remove(rule);
-          }}
-          disabled={deletingRuleId !== null || !canManageRules}
-          title={
-            !canManageRules
-              ? "You do not have permission to manage monitoring rules."
-              : undefined
-          }
-        >
-          Archive
-        </button>
-      )}
 
     {lifecycleStatus(rule) !== "in_progress" && (
       <button
@@ -3422,7 +3377,6 @@ const filteredEvents = [...events]
                             role="menuitem"
                             onClick={() => {
                               setRuleActionMenuId(null);
-                              setEventDeleteError("");
                               setSelectedEvent(event);
                               setShowEventDetails(true);
                             }}
@@ -3471,14 +3425,11 @@ const filteredEvents = [...events]
       setShowEventDetails(false);
       setSelectedEvent(null);
     }}
-  >
-      <div className="event-details-content">
-        {eventDeleteError && (
-          <p className="event-log-error" role="alert">{eventDeleteError}</p>
-        )}
-        {maintenanceEventError && (
-          <p className="event-log-error" role="alert">{maintenanceEventError}</p>
-        )}
+    >
+        <div className="event-details-content">
+          {maintenanceEventError && (
+            <p className="event-log-error" role="alert">{maintenanceEventError}</p>
+          )}
         {maintenanceEventLoading ? (
           <LoadingIndicator compact message="Loading maintenance details" />
         ) : maintenanceEventRecord ? (
@@ -3555,20 +3506,6 @@ const filteredEvents = [...events]
           </>
         )}
         <div className="event-details-actions">
-          <button
-            type="button"
-            className="event-delete-icon"
-            title={!isAdministrator ? "Administrator access required to delete events." : "Permanently delete event"}
-            aria-label="Permanently delete event"
-            disabled={
-              deletingEventId === selectedEvent.id ||
-              bulkDeletingEvents ||
-              !isAdministrator
-            }
-            onClick={() => deleteEvent(selectedEvent)}
-          >
-            <Trash2 size={17} aria-hidden="true" />
-          </button>
           <button
             type="button"
             className="btn-outline"
