@@ -384,6 +384,80 @@
   white-space: nowrap;
 }
 
+.asset-page .maintenance-notes-table .logbook-select-col {
+  width: 36px;
+  padding-right: 6px;
+  padding-left: 6px;
+  text-align: center;
+}
+
+.asset-page .logbook-select-col input[type="checkbox"],
+.event-log-table .logbook-select-col input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent, #6366f1);
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.asset-page .logbook-bulk-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.asset-page .event-log-heading > .logbook-bulk-actions {
+  margin-left: auto;
+}
+
+.asset-page .maintenance-log-notes-head > .logbook-bulk-actions {
+  margin-left: auto;
+}
+
+.asset-page .logbook-bulk-actions button {
+  white-space: nowrap;
+}
+
+.asset-page .logbook-bulk-delete {
+  color: var(--alert, #b42318);
+}
+
+.modal .variables-table .variable-actions-cell {
+  width: 112px;
+  min-width: 112px;
+  white-space: nowrap;
+}
+
+.modal .variables-table .variable-row-actions {
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+}
+
+.modal .variables-table .variable-action-icon {
+  flex: 0 0 auto;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.modal .variables-table .variable-action-icon:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.modal .variables-table .variable-action-delete {
+  color: var(--alert);
+}
+
+.modal .variables-table .variable-action-delete:hover:not(:disabled) {
+  background: var(--alert-soft);
+  border-color: var(--alert);
+  color: var(--alert);
+}
+
 .asset-page .maintenance-log-actions {
   display: inline-flex;
   width: fit-content;
@@ -395,6 +469,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 16px;
 }
 
@@ -504,6 +579,16 @@
 }
 
 .floating-menu .rule-action-menu-item svg {
+  flex: 0 0 auto;
+}
+
+.floating-menu .rule-bulk-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.floating-menu .rule-bulk-menu-item svg {
   flex: 0 0 auto;
 }
 
@@ -1023,18 +1108,22 @@
 
 
 .event-log-section {
+  min-width: 0;
+  max-width: 100%;
   color: var(--ink, #1f2937);
   background: var(--surface, #ffffff);
   border: 1px solid var(--line, #e5e7eb);
   border-radius: 10px;
   margin-top: 18px;
   overflow: hidden;
+  container: event-log / inline-size;
 }
 
 .event-log-filters {
   display: flex;
   flex-wrap: wrap;
   align-items: end;
+  min-width: 0;
   gap: 12px;
   padding: 14px 18px;
   border-bottom: 1px solid var(--line, #e5e7eb);
@@ -1052,7 +1141,9 @@
 
 .event-log-filters label {
   display: grid;
-  min-width: 150px;
+  flex: 1 1 190px;
+  max-width: 260px;
+  min-width: 0;
   gap: 5px;
   color: var(--muted, #6b7280);
   font-size: 12px;
@@ -1067,13 +1158,19 @@
   border: 1px solid var(--line, #e5e7eb);
   border-radius: 6px;
   font: inherit;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .event-filter-count {
+  flex: 0 1 auto;
   margin-left: auto;
   padding-bottom: 8px;
   color: var(--muted, #6b7280);
   font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .event-details-content p {
@@ -1124,22 +1221,27 @@
 
 .event-log-section .table-responsive {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
 }
 
 .event-log-section .event-log-table {
   width: 100%;
-  min-width: 900px;
-  border-collapse: collapse;
-  table-layout: auto;
+  min-width: 720px;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
   color: var(--ink, #1f2937);
   background: var(--surface, #ffffff);
 }
 
 .event-log-section .event-log-table thead th {
-  padding: 14px 18px;
+  padding: 14px clamp(10px, 1.25vw, 18px);
   text-align: left;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
   font-size: 13px;
   font-weight: 600;
   color: var(--ink, #1f2937);
@@ -1148,7 +1250,7 @@
 }
 
 .event-log-section .event-log-table tbody td {
-  padding: 14px 18px;
+  padding: 14px clamp(10px, 1.25vw, 18px);
   font-size: 14px;
   line-height: 1.5;
   vertical-align: middle;
@@ -1165,31 +1267,65 @@
   background: var(--surface-2, #f3f4f6);
 }
 
-.event-log-section .event-log-table th:first-child,
-.event-log-section .event-log-table td:first-child {
-  min-width: 175px;
+.event-log-section .event-log-table .event-col-time {
+  width: 19%;
+}
+
+.event-log-section .event-log-table .event-col-event {
+  width: 33%;
+}
+
+.event-log-section .event-log-table .event-col-asset {
+  width: 16%;
+}
+
+.event-log-section .event-log-table .event-col-rule {
+  width: 19%;
+}
+
+.event-log-section .event-log-table.event-log-table--selectable .logbook-select-col {
+  width: 36px;
+  padding-right: 6px;
+  padding-left: 6px;
+  text-align: center;
+}
+
+.event-log-section .event-log-table.event-log-table--selectable .event-col-time {
+  width: 18%;
+}
+
+.event-log-section .event-log-table.event-log-table--selectable .event-col-event {
+  width: 31%;
+}
+
+.event-log-section .event-log-table.event-log-table--selectable .event-col-asset {
+  width: 15%;
+}
+
+.event-log-section .event-log-table.event-log-table--selectable .event-col-rule {
+  width: 18%;
+}
+
+.event-log-section .event-log-table .event-col-actions {
   white-space: nowrap;
+  width: 13%;
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: var(--surface, #ffffff);
 }
 
-.event-log-section .event-log-table th:nth-child(2),
-.event-log-section .event-log-table td:nth-child(2) {
-  min-width: 200px;
+.event-log-section .event-log-table thead th:last-child {
+  z-index: 2;
+  background: var(--surface-2, #f3f4f6);
 }
 
-.event-log-section .event-log-table th:nth-child(3),
-.event-log-section .event-log-table td:nth-child(3) {
-  min-width: 160px;
+.event-log-section .event-log-table tbody tr:hover td:last-child {
+  background: var(--surface-2, #f3f4f6);
 }
 
-.event-log-section .event-log-table th:nth-child(4),
-.event-log-section .event-log-table td:nth-child(4) {
-  min-width: 160px;
-}
-
-.event-log-section .event-log-table th:last-child,
-.event-log-section .event-log-table td:last-child {
-  min-width: 100px;
-  white-space: nowrap;
+.event-log-section .event-log-table .event-row-actions {
+  justify-content: flex-start;
 }
 
 
@@ -1243,12 +1379,13 @@
   }
 
   .event-log-filters label {
-    flex: 1 1 180px;
+    flex: 1 1 190px;
   }
 
   .event-filter-count {
     flex: 1 1 100%;
     margin-left: 0;
+    padding-bottom: 0;
   }
 
   .event-log-section {
@@ -1260,6 +1397,24 @@
   .event-log-section .event-log-table tbody td {
     padding: 11px 12px;
     font-size: 13px;
+  }
+}
+
+@container event-log (max-width: 520px) {
+  .event-log-heading {
+    align-items: flex-start;
+    padding: 12px;
+  }
+
+  .event-log-heading .logbook-bulk-actions {
+    flex-basis: 100%;
+    order: 1;
+    margin-left: 0;
+  }
+
+  .event-log-filters {
+    gap: 10px;
+    padding: 12px;
   }
 }
 
@@ -1284,6 +1439,15 @@ html[data-theme="dark"] .event-log-section .event-log-table thead th {
 html[data-theme="dark"] .event-log-section .event-log-table tbody td {
   color: var(--ink, #e5e7eb);
   border-color: var(--line, #303944);
+}
+
+html[data-theme="dark"] .event-log-section .event-log-table th:last-child,
+html[data-theme="dark"] .event-log-section .event-log-table td:last-child {
+  background: var(--surface, #151b23);
+}
+
+html[data-theme="dark"] .event-log-section .event-log-table thead th:last-child {
+  background: var(--surface-2, #202833);
 }
 
 html[data-theme="dark"] .event-log-section .event-log-table tbody tr:hover td {

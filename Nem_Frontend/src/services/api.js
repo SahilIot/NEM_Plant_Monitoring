@@ -111,5 +111,9 @@ export const api = {
     req(p, { method: "POST", body: formData }),
   put: (p, body) => req(p, { method: "PUT", body: JSON.stringify(body) }),
   patch: (p, body) => req(p, { method: "PATCH", body: JSON.stringify(body) }),
-  del: (p) => req(p, { method: "DELETE" }),
+  del: (p, body) =>
+    req(p, {
+      method: "DELETE",
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }),
 };

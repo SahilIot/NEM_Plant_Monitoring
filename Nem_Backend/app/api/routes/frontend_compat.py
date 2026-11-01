@@ -13,7 +13,7 @@ from typing import Any, Literal
 from cryptography.fernet import Fernet # encrypts and decrypts sensitive values, such as a saved email password
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
-from pydantic import BaseModel, Field, ValidationError, field_validator 
+from pydantic import BaseModel, Field, StrictInt, ValidationError, field_validator
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError # Handles database constraint failures,such as duplicate collection name
 from sqlalchemy.orm import Session 
@@ -29,6 +29,7 @@ from app.models import (
     InstructionDocument,
     InstructionDocumentFile,
     MaintenanceRecord,
+    MaintenanceSchedule,
     MonitoringEvent,
     MonitoringRule,
     MonitoringRuleTemplate,
@@ -122,6 +123,33 @@ class LogbookEntry(BaseModel):
         if not value:
             raise ValueError("Logbook entry cannot be empty")
         return value
+
+#Request validation for bulk deletion of logbook entries. Ensures that the list of IDs is not empty, contains only positive integers, and has no duplicates.
+class BulkLogbookDelete(BaseModel):
+    ids: list[StrictInt] = Field(min_length=1)
+
+    @field_validator("ids")
+    @classmethod
+    def validate_ids(cls, values: list[StrictInt]) -> list[StrictInt]:
+        if any(isinstance(value, bool) or value <= 0 for value in values):
+            raise ValueError("Record IDs must be positive integers")
+        if len(set(values)) != len(values):
+            raise ValueError("Record IDs must not contain duplicates")
+        return values
+
+#Locking db records  -> retrieves selected db records and locks them for current transaction. -> Selection
+def _lock_rows_by_ids(session: Session, model: Any, ids: list[int]) -> list[Any]:
+    rows = []
+    for offset in range(0, len(ids), 500):
+        rows.extend(
+            session.scalars(
+                select(model)
+                .where(model.id.in_(ids[offset : offset + 500]))
+                .with_for_update()
+            ).all()
+        )
+    return rows
+
 #All the above classes are use to make sure invalid data is rejected before it reaches the database, and to provide clear error messages to the frontend.
 
 #Retrieves a saved configuration record
@@ -1642,6 +1670,89 @@ def frontend_asset_logbook(
         for record, rule_name in rows
     ]
 
+
+@router.delete("/assets/{asset_id}/logbook")
+def frontend_bulk_delete_asset_logbook(
+    asset_id: int,
+    payload: BulkLogbookDelete,
+    session: Session = Depends(get_db),
+    user: User = Depends(require_roles("Administrator")),
+) -> dict[str, int]:
+    if session.get(Asset, asset_id) is None:
+        raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+
+    records = _lock_rows_by_ids(session, MaintenanceRecord, payload.ids)
+    if any(
+        record.asset_id != asset_id or record.status != "completed"
+        for record in records
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail="One or more selected records do not belong to this maintenance logbook.",
+        )
+    if any(
+        record.schedule_id is not None and record.archived_at is None
+        for record in records
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Scheduled maintenance must be archived before its logbook record can be permanently deleted.",
+        )
+
+    record_ids_by_schedule: dict[int, set[int]] = {}
+    for record in records:
+        if record.schedule_id is not None:
+            record_ids_by_schedule.setdefault(record.schedule_id, set()).add(
+                record.id
+            )
+    schedule_ids = set(record_ids_by_schedule)
+    if schedule_ids:
+        schedules = []
+        schedule_id_values = list(schedule_ids)
+        for offset in range(0, len(schedule_id_values), 500):
+            schedules.extend(
+                session.scalars(
+                    select(MaintenanceSchedule)
+                    .where(
+                        MaintenanceSchedule.id.in_(
+                            schedule_id_values[offset : offset + 500]
+                        )
+                    )
+                    .with_for_update()
+                ).all()
+            )
+        for schedule in schedules:
+            if schedule.current_occurrence_id in record_ids_by_schedule.get(
+                schedule.id, set()
+            ):
+                schedule.current_occurrence_id = None
+
+    for record in records:
+        emit_event(
+            session,
+            event_type="maintenance_record_permanently_deleted",
+            message=f"Maintenance '{record.summary}' was permanently deleted.",
+            occurred_at=datetime.now(timezone.utc),
+            asset_id=record.asset_id,
+            alert_id=record.alert_id,
+            metadata={
+                "deleted_record_id": record.id,
+                "deleted_record_title": record.summary,
+                "schedule_id": record.schedule_id,
+            },
+        )
+        session.delete(record)
+    try:
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Related records prevent deleting one or more maintenance logbook entries.",
+        ) from error
+    return {"deleted_count": len(records)}
+
+
 #Add an entry (future implementation -> these records will be saved automatically when maintenance is done or pending or required)
 @router.post("/assets/{asset_id}/logbook", status_code=201)
 def frontend_add_logbook_entry(
@@ -1702,6 +1813,42 @@ def frontend_asset_events(
         }
         for event, asset_name, rule_name in events
     ]
+
+
+@router.delete("/assets/{asset_id}/events")
+def frontend_bulk_delete_asset_events(
+    asset_id: int,
+    payload: BulkLogbookDelete,
+    session: Session = Depends(get_db),
+    user: User = Depends(require_roles("Administrator")),
+) -> dict[str, int]:
+    if session.get(Asset, asset_id) is None:
+        raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+
+    events = _lock_rows_by_ids(session, MonitoringEvent, payload.ids)
+    if any(
+        event.asset_id != asset_id
+        or event.rule_id is None
+        or event.event_type.startswith("maintenance_")
+        for event in events
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail="One or more selected records do not belong to this event logbook.",
+        )
+
+    for event in events:
+        session.delete(event)
+    try:
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Related history prevents deleting one or more event logbook entries.",
+        ) from error
+    return {"deleted_count": len(events)}
+
 
 #Rule Collections -> 
 # List collections

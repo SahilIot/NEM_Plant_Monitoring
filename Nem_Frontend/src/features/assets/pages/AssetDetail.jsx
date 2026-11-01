@@ -1,7 +1,15 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
-import { Download, Eye, Pencil, Trash2 } from "lucide-react";
+import {
+  Download,
+  Eye,
+  Pencil,
+  Pause,
+  Power,
+  PowerOff,
+  Trash2,
+} from "lucide-react";
 import CopyRulesModal from "../components/CopyRulesModal.jsx";
 import PredefinedRulesModal from "../../rules/components/PredefinedRulesModal.jsx";
 import { api } from "../../../services/api.js";
@@ -635,6 +643,8 @@ export default function AssetDetail() {
   const [showPredefinedRules, setShowPredefinedRules] = useState(false);
   const [addRuleMenu, setAddRuleMenu] = useState(false);
   const [logs, setLogs] = useState([]);
+  const [selectedMaintenanceLogIds, setSelectedMaintenanceLogIds] = useState([]);
+  const [bulkDeletingMaintenanceLogs, setBulkDeletingMaintenanceLogs] = useState(false);
   const [maintenanceTypeFilter, setMaintenanceTypeFilter] = useState(
     routeState.maintenanceTypeFilter || ""
   );
@@ -645,6 +655,8 @@ export default function AssetDetail() {
     routeState.maintenanceEndDateTime || ""
   );
   const [events, setEvents] = useState([]);
+  const [selectedEventIds, setSelectedEventIds] = useState([]);
+  const [bulkDeletingEvents, setBulkDeletingEvents] = useState(false);
   const [eventTypeFilter, setEventTypeFilter] = useState(
     routeState.eventTypeFilter || ""
   );
@@ -678,7 +690,23 @@ export default function AssetDetail() {
   const plcStatusSeq = useRef(0);
   const bulkRequest = useRef(false);
   const permanentDeleteRequest = useRef(false);
+  const bulkMaintenanceDeleteRequest = useRef(false);
+  const bulkEventDeleteRequest = useRef(false);
   const skipNextRouteStateRestore = useRef(false);
+
+  useEffect(() => {
+    setSelectedMaintenanceLogIds([]);
+  }, [
+    assetId,
+    tab,
+    maintenanceTypeFilter,
+    maintenanceStartDateTime,
+    maintenanceEndDateTime,
+  ]);
+
+  useEffect(() => {
+    setSelectedEventIds([]);
+  }, [assetId, tab, eventTypeFilter, eventStartDateTime, eventEndDateTime]);
 
   const assetNavigationState = {
     ...(location.state || {}),
@@ -966,7 +994,13 @@ export default function AssetDetail() {
   }, [loadLogs, refreshStatus]);
 
   const deleteEvent = async (event) => {
-    if (!isAdministrator || deletingEventId !== null) return;
+    if (
+      !isAdministrator ||
+      deletingEventId !== null ||
+      bulkEventDeleteRequest.current
+    ) {
+      return;
+    }
     if (
       !(await confirm("Permanently delete this event? This cannot be undone.", {
         title: "Delete event",
@@ -982,6 +1016,9 @@ export default function AssetDetail() {
     try {
       await api.del(`/events/${event.id}`);
       await loadEvents();
+      setSelectedEventIds((current) =>
+        current.filter((id) => id !== event.id)
+      );
       setShowEventDetails(false);
       setSelectedEvent(null);
       setActionNotice("Event was permanently deleted.");
@@ -1797,7 +1834,13 @@ const filteredEvents = [...events]
   };
 
   const deleteLogEntry = async (entry) => {
-    if (!isAdministrator || deletingLogId !== null) return;
+    if (
+      !isAdministrator ||
+      deletingLogId !== null ||
+      bulkMaintenanceDeleteRequest.current
+    ) {
+      return;
+    }
     if (
       !(await confirm(
         "Permanently delete this maintenance log entry? This cannot be undone.",
@@ -1815,14 +1858,126 @@ const filteredEvents = [...events]
     setDeletingLogId(entry.id);
     setLoadError("");
     try {
-      await api.del(`/maintenance/${entry.id}/permanent`);
+      const result = await api.del(`/assets/${assetId}/logbook`, {
+        ids: [entry.id],
+      });
+      setSelectedMaintenanceLogIds((current) =>
+        current.filter((id) => id !== entry.id)
+      );
+      setActionNotice(
+        result.deleted_count
+          ? "Maintenance log entry was permanently deleted."
+          : "Maintenance log entry was already deleted."
+      );
       await loadLogs();
-      await refreshStatus?.();
-      setActionNotice("Maintenance log entry was permanently deleted.");
+      try {
+        await refreshStatus?.();
+      } catch (error) {
+        setLoadError(
+          `The entry was deleted, but maintenance status could not be refreshed: ${error.message || "Unknown error"}`
+        );
+      }
     } catch (error) {
       setLoadError(error.message || "Could not permanently delete this maintenance entry.");
     } finally {
       setDeletingLogId(null);
+    }
+  };
+
+  const deleteSelectedMaintenanceLogs = async () => {
+    if (
+      !isAdministrator ||
+      bulkMaintenanceDeleteRequest.current ||
+      deletingLogId !== null ||
+      selectedMaintenanceLogIds.length === 0
+    ) {
+      return;
+    }
+
+    bulkMaintenanceDeleteRequest.current = true;
+    const ids = [...new Set(selectedMaintenanceLogIds)];
+    if (
+      !(await confirm(
+        `You are about to permanently delete ${ids.length} records. This action cannot be undone.`,
+        {
+          title: "Delete selected records permanently?",
+          confirmLabel: "Delete Permanently",
+          cancelLabel: "Cancel",
+          destructive: true,
+        }
+      ))
+    ) {
+      bulkMaintenanceDeleteRequest.current = false;
+      return;
+    }
+
+    setBulkDeletingMaintenanceLogs(true);
+    setActionNotice("");
+    setLoadError("");
+    try {
+      const result = await api.del(`/assets/${assetId}/logbook`, { ids });
+      setSelectedMaintenanceLogIds([]);
+      setActionNotice(
+        `${result.deleted_count} maintenance logbook record(s) permanently deleted.`
+      );
+      await loadLogs();
+      try {
+        await refreshStatus?.();
+      } catch (error) {
+        setLoadError(
+          `Records were deleted, but maintenance status could not be refreshed: ${error.message || "Unknown error"}`
+        );
+      }
+    } catch (error) {
+      setLoadError(error.message || "Could not delete the selected maintenance records.");
+    } finally {
+      bulkMaintenanceDeleteRequest.current = false;
+      setBulkDeletingMaintenanceLogs(false);
+    }
+  };
+
+  const deleteSelectedEvents = async () => {
+    if (
+      !isAdministrator ||
+      bulkEventDeleteRequest.current ||
+      deletingEventId !== null ||
+      selectedEventIds.length === 0
+    ) {
+      return;
+    }
+
+    bulkEventDeleteRequest.current = true;
+    const ids = [...new Set(selectedEventIds)];
+    if (
+      !(await confirm(
+        `You are about to permanently delete ${ids.length} records. This action cannot be undone.`,
+        {
+          title: "Delete selected records permanently?",
+          confirmLabel: "Delete Permanently",
+          cancelLabel: "Cancel",
+          destructive: true,
+        }
+      ))
+    ) {
+      bulkEventDeleteRequest.current = false;
+      return;
+    }
+
+    setBulkDeletingEvents(true);
+    setActionNotice("");
+    setEventDeleteError("");
+    try {
+      const result = await api.del(`/assets/${assetId}/events`, { ids });
+      setSelectedEventIds([]);
+      await loadEvents();
+      setActionNotice(
+        `${result.deleted_count} event logbook record(s) permanently deleted.`
+      );
+    } catch (error) {
+      setEventDeleteError(error.message || "Could not delete the selected events.");
+    } finally {
+      bulkEventDeleteRequest.current = false;
+      setBulkDeletingEvents(false);
     }
   };
 
@@ -2221,20 +2376,26 @@ const filteredEvents = [...events]
                   <FloatingMenu align="right" role="menu">
                       <button
                       type="button"
+                      className="rule-bulk-menu-item"
                       disabled={bulkSaving || !canManageRules}
                       title={!canManageRules ? "You do not have permission to manage monitoring rules." : undefined}
                       role="menuitem"
                       onClick={() => bulk("activated")}
                       >
-                        {bulkSaving ? "Updating rules…" : "Activate all rules"}
+                        <Power size={16} aria-hidden="true" />
+                        <span>{bulkSaving ? "Updating rules…" : "Activate all rules"}</span>
                       </button>
                         <button
                         type="button"
+                        className="rule-bulk-menu-item"
                         disabled={bulkSaving || !canManageRules}
                         title={!canManageRules ? "You do not have permission to manage monitoring rules." : undefined}
                       role="menuitem"
                         onClick={() => bulk("not_activated")}
-                        >Deactivate all rules</button>
+                        >
+                          <PowerOff size={16} aria-hidden="true" />
+                          <span>Deactivate all rules</span>
+                        </button>
                         </FloatingMenu>
                       )}
                     </div>
@@ -2530,6 +2691,7 @@ const filteredEvents = [...events]
             : undefined
         }
       >
+        <Pause size={16} aria-hidden="true" />
         Suspend rule
       </button>
     )}
@@ -2593,6 +2755,7 @@ const filteredEvents = [...events]
             : undefined
         }
       >
+        <Power size={16} aria-hidden="true" />
         Deactivate rule
       </button>
     )}
@@ -2672,9 +2835,31 @@ const filteredEvents = [...events]
         {filteredLogs.length} maintenance entries
       </span>
     </div>
-    <button
-      type="button"
-      className="icon-outline sm export-icon"
+  {isAdministrator && selectedMaintenanceLogIds.length > 0 && (
+    <div className="logbook-bulk-actions">
+      <button
+        type="button"
+        className="btn-outline logbook-bulk-delete"
+        onClick={deleteSelectedMaintenanceLogs}
+        disabled={bulkDeletingMaintenanceLogs || deletingLogId !== null}
+      >
+        {bulkDeletingMaintenanceLogs
+          ? "Deleting…"
+          : `Delete Selected (${selectedMaintenanceLogIds.length})`}
+      </button>
+      <button
+        type="button"
+        className="btn-outline"
+        onClick={() => setSelectedMaintenanceLogIds([])}
+        disabled={bulkDeletingMaintenanceLogs}
+      >
+        Clear selection
+      </button>
+    </div>
+  )}
+  <button
+    type="button"
+    className="icon-outline sm export-icon"
       title={exporting ? "Preparing Excel export" : "Export filtered maintenance logbook entries to Excel"}
       aria-label="Export maintenance logbook entries to Excel"
       disabled={filteredLogs.length === 0 || exporting}
@@ -2766,6 +2951,28 @@ const filteredEvents = [...events]
       <table className="table maintenance-notes-table">
         <thead>
           <tr>
+            {isAdministrator && (
+              <th className="logbook-select-col">
+                <input
+                  type="checkbox"
+                  aria-label="Select all filtered maintenance logbook records"
+                  checked={
+                    filteredLogs.length > 0 &&
+                    filteredLogs.every((entry) =>
+                      selectedMaintenanceLogIds.includes(entry.id)
+                    )
+                  }
+                  onChange={(event) =>
+                    setSelectedMaintenanceLogIds(
+                      event.target.checked
+                        ? filteredLogs.map((entry) => entry.id)
+                        : []
+                    )
+                  }
+                  disabled={bulkDeletingMaintenanceLogs || deletingLogId !== null}
+                />
+              </th>
+            )}
             <th className="col-time">Date and time</th>
             <th>Entry</th>
             <th>Entry type</th>
@@ -2780,6 +2987,23 @@ const filteredEvents = [...events]
 
             return (
               <tr key={entry.id}>
+                {isAdministrator && (
+                  <td className="logbook-select-col">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select maintenance logbook record ${entry.id}: ${entry.title || entry.summary || entry.id}`}
+                      checked={selectedMaintenanceLogIds.includes(entry.id)}
+                      onChange={(event) =>
+                        setSelectedMaintenanceLogIds((current) =>
+                          event.target.checked
+                            ? [...new Set([...current, entry.id])]
+                            : current.filter((id) => id !== entry.id)
+                        )
+                      }
+                      disabled={bulkDeletingMaintenanceLogs || deletingLogId !== null}
+                    />
+                  </td>
+                )}
                 <td className="col-time">
                   {timestamp ? formatTime(timestamp) : "—"}
                 </td>
@@ -2810,7 +3034,9 @@ const filteredEvents = [...events]
                           current === menuId ? null : menuId
                         );
                       }}
-                      disabled={deletingLogId !== null}
+                      disabled={
+                        deletingLogId !== null || bulkDeletingMaintenanceLogs
+                      }
                     >
                       <DotsIcon size={17} />
                     </button>
@@ -2839,7 +3065,10 @@ const filteredEvents = [...events]
                               setRuleActionMenuId(null);
                               deleteLogEntry(entry);
                             }}
-                            disabled={deletingLogId !== null}
+                            disabled={
+                              deletingLogId !== null ||
+                              bulkDeletingMaintenanceLogs
+                            }
                           >
                             <Trash2 size={16} aria-hidden="true" />
                             <span>Delete</span>
@@ -2871,6 +3100,28 @@ const filteredEvents = [...events]
         <h2>Event log</h2>
         <span className="muted">{filteredEvents.length} events</span>
       </div>
+      {isAdministrator && selectedEventIds.length > 0 && (
+        <div className="logbook-bulk-actions">
+          <button
+            type="button"
+            className="btn-outline logbook-bulk-delete"
+            onClick={deleteSelectedEvents}
+            disabled={bulkDeletingEvents || deletingEventId !== null}
+          >
+            {bulkDeletingEvents
+              ? "Deleting…"
+              : `Delete Selected (${selectedEventIds.length})`}
+          </button>
+          <button
+            type="button"
+            className="btn-outline"
+            onClick={() => setSelectedEventIds([])}
+            disabled={bulkDeletingEvents}
+          >
+            Clear selection
+          </button>
+        </div>
+      )}
       <button
         type="button"
         className="icon-outline sm export-icon"
@@ -2970,21 +3221,45 @@ const filteredEvents = [...events]
     </div>
 
     <div className="table-responsive">
-      <table className="data-table event-log-table">
+      <table
+        className={`data-table event-log-table${isAdministrator ? " event-log-table--selectable" : ""}`}
+      >
         <thead>
           <tr>
-            <th>Date &amp; Time</th>
-            <th>Event</th>
-            <th>Asset</th>
-            <th>Assigned Rule</th>
-            <th>Actions</th>
+            {isAdministrator && (
+              <th className="logbook-select-col">
+                <input
+                  type="checkbox"
+                  aria-label="Select all filtered event log records"
+                  checked={
+                    filteredEvents.length > 0 &&
+                    filteredEvents.every((event) =>
+                      selectedEventIds.includes(event.id)
+                    )
+                  }
+                  onChange={(event) =>
+                    setSelectedEventIds(
+                      event.target.checked
+                        ? filteredEvents.map((item) => item.id)
+                        : []
+                    )
+                  }
+                  disabled={bulkDeletingEvents || deletingEventId !== null}
+                />
+              </th>
+            )}
+            <th className="event-col-time">Date &amp; Time</th>
+            <th className="event-col-event">Event</th>
+            <th className="event-col-asset">Asset</th>
+            <th className="event-col-rule">Assigned Rule</th>
+            <th className="event-col-actions">Actions</th>
           </tr>
         </thead>
 
         <tbody>
           {filteredEvents.length === 0 ? (
             <tr>
-              <td colSpan={5} className="empty-state">
+              <td colSpan={isAdministrator ? 6 : 5} className="empty-state">
                 {events.length === 0
                   ? "No events found."
                   : "No events match these filters."}
@@ -3009,9 +3284,26 @@ const filteredEvents = [...events]
 
               return (
                 <tr key={event.id}>
-                  <td>{eventTime}</td>
+                  {isAdministrator && (
+                    <td className="logbook-select-col">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select event ${event.id}: ${eventActionLabel(event.event_type)}`}
+                        checked={selectedEventIds.includes(event.id)}
+                        onChange={(inputEvent) =>
+                          setSelectedEventIds((current) =>
+                            inputEvent.target.checked
+                              ? [...new Set([...current, event.id])]
+                              : current.filter((id) => id !== event.id)
+                          )
+                        }
+                        disabled={bulkDeletingEvents || deletingEventId !== null}
+                      />
+                    </td>
+                  )}
+                  <td className="event-col-time">{eventTime}</td>
 
-                  <td>
+                  <td className="event-col-event">
                     <strong>{eventActionLabel(event.event_type)}</strong>
                     <div>{event.text || event.message || "—"}</div>
                     {eventAuditSummary(event) && (
@@ -3019,14 +3311,14 @@ const filteredEvents = [...events]
                     )}
                   </td>
 
-                  <td>
+                  <td className="event-col-asset">
                     {event.asset_name ||
                       (event.asset_id != null ? `Asset ${event.asset_id}` : "System")}
                   </td>
 
-                  <td>{assignedRule}</td>
+                  <td className="event-col-rule">{assignedRule}</td>
 
-                  <td>
+                  <td className="event-col-actions">
                     <div className="event-row-actions">
                       <button
                         type="button"
@@ -3066,7 +3358,9 @@ const filteredEvents = [...events]
                               role="menuitem"
                               title="Permanently delete event"
                               aria-label={`Permanently delete ${eventActionLabel(event.event_type)} event`}
-                              disabled={deletingEventId !== null}
+                              disabled={
+                                deletingEventId !== null || bulkDeletingEvents
+                              }
                               onClick={() => {
                                 setRuleActionMenuId(null);
                                 deleteEvent(event);
@@ -3187,7 +3481,11 @@ const filteredEvents = [...events]
             className="event-delete-icon"
             title={!isAdministrator ? "Administrator access required to delete events." : "Permanently delete event"}
             aria-label="Permanently delete event"
-            disabled={deletingEventId === selectedEvent.id || !isAdministrator}
+            disabled={
+              deletingEventId === selectedEvent.id ||
+              bulkDeletingEvents ||
+              !isAdministrator
+            }
             onClick={() => deleteEvent(selectedEvent)}
           >
             <Trash2 size={17} aria-hidden="true" />
@@ -3629,7 +3927,7 @@ const filteredEvents = [...events]
             </p>
           )}
           {allVariables.length ? (
-            <table className="table">
+            <table className="table variables-table">
               <thead>
                 <tr>
                   <th>Variable</th>
@@ -3664,30 +3962,32 @@ const filteredEvents = [...events]
                       {variable.opcua_node_id || "—"}
                     </td>
                     <td>{variable.is_active ? "Active" : "Inactive"}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn-outline"
-                        onClick={() => {
-                          setEditingVariable(variable);
-                          setModal("editVariable");
-                        }}
-                        disabled={deletingVariableId !== null || !isAdministrator}
-                        title={!isAdministrator ? "Administrator access required to manage variables." : undefined}
-                      >
-                        Edit
-                      </button>
-                     <button
-                     type="button"
-                     className="btn-outline danger"
-                     onClick={() => deleteEvent(event)}
-                    disabled={!isAdministrator || deletingEventId !== null}
-                    title="Delete event permanently"
-                    aria-label="Delete event permanently"
-                    >
-                      <Trash2 size={16} />
-                      {deletingEventId === event.id ? "Deleting..." : ""}
-                      </button>
+                    <td className="variable-actions-cell">
+                      <div className="variable-row-actions">
+                        <button
+                          type="button"
+                          className="icon-outline variable-action-icon"
+                          onClick={() => {
+                            setEditingVariable(variable);
+                            setModal("editVariable");
+                          }}
+                          disabled={deletingVariableId !== null || !isAdministrator}
+                          title="Edit variable"
+                          aria-label="Edit variable"
+                        >
+                          <Pencil size={16} aria-hidden="true" />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-outline variable-action-icon variable-action-delete"
+                          onClick={() => deleteVariable(variable)}
+                          disabled={!isAdministrator || deletingVariableId !== null}
+                          title="Delete variable"
+                          aria-label="Delete variable"
+                        >
+                          <Trash2 size={16} aria-hidden="true" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

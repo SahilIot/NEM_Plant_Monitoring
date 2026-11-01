@@ -1163,7 +1163,7 @@ const reviewRequest = async (request, action) => {
                 </div>
                 <div className="rule-library-actions">
                   <button className="btn-outline" onClick={() => setAssigning(template)} disabled={!canAssignRules || !template.is_enabled || needsRuntimeThresholdConfiguration(template)} title={!canAssignRules ? "You do not have permission to assign rules." : needsRuntimeThresholdConfiguration(template) ? "Edit this rule and configure running-time thresholds before assigning it." : undefined}><Copy size={15} /> Assign rule</button>
-                  <button className="btn-outline"onClick={() => {setSuggesting(false);setEditing(template);setModalOpen(true);}}disabled={!canEditRules}title={!canEditRules? "Only Administrators and Supervisors can edit reusable rules.": undefined}><Pencil size={15} />Edit</button>
+                  <button className="btn-outline" onClick={() => {setSuggesting(false);setEditing(template);setModalOpen(true);}} disabled={!canEditRules} title="Edit rule" aria-label="Edit rule"><Pencil size={15} /></button>
                   <button className="btn-outline danger" onClick={() => remove(template)} disabled={busyId === template.id || !isAdministrator} title={!isAdministrator ? "Administrator access required to delete reusable rules." : undefined}>{busyId === template.id ? "Deleting…" : <><Trash2 size={15} /></>}</button>
                 </div>
               </article>
