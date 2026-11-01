@@ -4,6 +4,7 @@ from decimal import Decimal
 import math
 from typing import Any, Literal
 from pydantic import Field, field_validator, model_validator
+from app.core.labels import normalize_label_names
 from app.schemas.common import ORMModel
 
 #This function checks the thresholds used by a running-time monitoring rule
@@ -35,6 +36,7 @@ def validate_runtime_thresholds(parameters: dict[str, Any] | None) -> None:
 class RuleCreate(ORMModel):
     name: str = Field(min_length=1, max_length=200)
     description: str | None = None
+    labels: list[str] = Field(default_factory=list, max_length=10)
     rule_type: Literal[
         "parameter_threshold",
         "runtime_duration",
@@ -66,6 +68,11 @@ class RuleCreate(ORMModel):
         if not value:
             raise ValueError("Rule name cannot be empty")
         return value
+
+    @field_validator("labels")
+    @classmethod
+    def clean_labels(cls, value: list[str]) -> list[str]:
+        return normalize_label_names(value)
 #main model validator , it can inspect the rule type and compare multiple fields
     @model_validator(mode="after")
     def validate_rule_definition(self):
@@ -184,6 +191,7 @@ class RuleCreate(ORMModel):
 class RuleTemplateCreate(ORMModel):
     name: str = Field(min_length=1, max_length=200)
     description: str | None = None
+    labels: list[str] = Field(default_factory=list, max_length=10)
     collection_id: int | None = Field(default=None, ge=1)
     rule_type: Literal[
         "parameter_threshold",
@@ -209,6 +217,11 @@ class RuleTemplateCreate(ORMModel):
         if not value:
             raise ValueError("Template name cannot be empty")
         return value
+
+    @field_validator("labels")
+    @classmethod
+    def clean_labels(cls, value: list[str]) -> list[str]:
+        return normalize_label_names(value)
 
     @field_validator("required_variable_types")
     @classmethod
@@ -356,6 +369,7 @@ class RuleTemplateAssetAssignment(ORMModel):
 class RuleUpdate(ORMModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = None
+    labels: list[str] | None = Field(default=None, max_length=10)
     rule_type: Literal[
         "parameter_threshold",
         "runtime_duration",
@@ -412,11 +426,17 @@ class RuleUpdate(ORMModel):
             raise ValueError("Rule name cannot be empty")
         return value
 
+    @field_validator("labels")
+    @classmethod
+    def clean_labels(cls, value: list[str] | None) -> list[str] | None:
+        return normalize_label_names(value) if value is not None else None
+
 # returning a rule to the frontend
 class RuleRead(ORMModel):
     id: int
     name: str
     description: str | None
+    labels: list[str] = Field(default_factory=list)
     rule_type: str
     target_asset_id: int | None
     source_template_id: int | None = None
@@ -437,6 +457,7 @@ class RuleRead(ORMModel):
 class FrontendRuleCreate(ORMModel):
     name: str = Field(min_length=1, max_length=200)
     description: str | None = None
+    labels: list[str] = Field(default_factory=list, max_length=10)
     severity: Literal["warning", "alert"]
 
     @field_validator("name")
@@ -446,6 +467,11 @@ class FrontendRuleCreate(ORMModel):
         if not value:
             raise ValueError("Rule name cannot be empty")
         return value
+
+    @field_validator("labels")
+    @classmethod
+    def clean_labels(cls, value: list[str]) -> list[str]:
+        return normalize_label_names(value)
 
 
 class UsageRuleCreate(FrontendRuleCreate):

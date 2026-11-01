@@ -10,6 +10,7 @@ from app.models.frontend_data import (
     RuleCollection,
 )
 from app.models.notification import AssetSupervisor, EmailNotification
+from app.models.labels import Label
 from app.models.reading import Reading
 from app.models.rule import (
     Alert,
@@ -30,5 +31,6 @@ __all__ = [
     "MachineMonitoringState",
     "RuleCounterState",
     "AssetSupervisor", "EmailNotification",
+    "Label",
     "FrontendConfig", "RuleCollection", "InstructionDocument", "BackupRecord", "InstructionDocumentFile",
 ]

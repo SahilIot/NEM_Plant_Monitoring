@@ -95,7 +95,16 @@ export default function AlertRules() {
                     })
                   }
                 >
-                  <td>{r.name}</td>
+                  <td>
+                    <div>{r.name}</div>
+                    {r.labels?.length > 0 && (
+                      <span className="labels-chips">
+                        {r.labels.map((label) => (
+                          <span className="label-chip" key={label}>{label}</span>
+                        ))}
+                      </span>
+                    )}
+                  </td>
                   <td>{r.asset_name || <span className="muted">-</span>}</td>
                   <td className="cap">{r.severity}</td>
                   {lifecycleStatus && (

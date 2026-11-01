@@ -118,6 +118,28 @@ Some endpoints and `set_rule_enabled_state` normalize enabled/disabled states
 without expressing every lifecycle label. Use lifecycle endpoints for
 suspend/resume/activate/deactivate and verify legacy rule records.
 
+## Shared labels
+
+- Labels are optional and reusable across asset-specific monitoring rules,
+  reusable rule templates, rule collections, and instruction documents.
+- Entry saves accept label names and resolve them to shared catalog IDs. Names
+  are whitespace-normalized and compared case-insensitively; a unique
+  normalized key prevents concurrent requests from creating duplicate labels.
+  Duplicate names in one selection are collapsed.
+- Each entry may have at most 10 labels. A save replaces that entry's
+  associations with the submitted selection. Removing a label from an entry
+  does not delete the shared label or affect other entries.
+- Listing filters accept repeated `label_ids` parameters and use AND behavior:
+  a result must have every selected label. This applies to rules, reusable
+  templates, collections, and documents, alongside their existing filters.
+- Legacy document label JSON is imported into shared label associations during
+  the `001_shared_labels` startup migration. The old column remains for
+  compatibility; downgrade copies current associations back before removing
+  the shared tables.
+- Authorization remains governed by each entry's existing route permission.
+  Collection and document metadata updates are Administrator-only; rule and
+  template updates continue to use their existing role restrictions.
+
 ## Alerts and events
 
 - The rule evaluator maintains at most one active alert per rule and target

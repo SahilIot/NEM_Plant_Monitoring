@@ -6,15 +6,19 @@ import {
   initialTemplate,
   templatePayload,
 } from "./RuleLibrary.jsx";
+import LabelsField from "../../../components/common/LabelsField.jsx";
 
 const MAX_RULES = 5;
 
 export default function RuleCollectionCreateModal({
   onClose,
   onCreate,
+  onSave,
+  collection = null,
 }) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
+  const [name, setName] = useState(collection?.name || "");
+  const [description, setDescription] = useState(collection?.description || "");
+  const [labels, setLabels] = useState(collection?.labels || []);
   const [rules, setRules] = useState([]);
   const [ruleModalOpen, setRuleModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -32,7 +36,7 @@ export default function RuleCollectionCreateModal({
       setError("Collection name is required.");
       return;
     }
-    if (rules.length === 0) {
+    if (!collection && rules.length === 0) {
       setError("Add at least one monitoring rule to the collection.");
       return;
     }
@@ -40,11 +44,16 @@ export default function RuleCollectionCreateModal({
     setSaving(true);
     setError("");
     try {
-      await onCreate({
+      const payload = {
         name: name.trim(),
         description: description.trim() || null,
-        rules,
-      });
+        labels,
+      };
+      if (collection) {
+        await onSave(payload);
+      } else {
+        await onCreate({ ...payload, rules });
+      }
     } catch (requestError) {
       setError(requestError.message || "Could not create the rule collection.");
     } finally {
@@ -55,10 +64,16 @@ export default function RuleCollectionCreateModal({
   return (
     <>
       {!ruleModalOpen && (
-      <Modal title="Create rule collection" onClose={saving ? undefined : onClose} wide>
+      <Modal
+        title={collection ? "Edit collection" : "Create rule collection"}
+        onClose={saving ? undefined : onClose}
+        wide
+      >
         <form onSubmit={save}>
           <p className="muted modal-intro">
-            Name the collection, then add between one and five reusable monitoring rules.
+            {collection
+              ? "Update the collection details and shared labels."
+              : "Name the collection, add labels, then add between one and five reusable monitoring rules."}
           </p>
           <label className="field">
             Collection name <span className="req">*</span>
@@ -81,7 +96,17 @@ export default function RuleCollectionCreateModal({
             />
           </label>
 
-          <section aria-label="Collection rules">
+          <div className="field">
+            <label htmlFor="collection-labels">Labels</label>
+            <LabelsField
+              id="collection-labels"
+              value={labels}
+              onChange={setLabels}
+              disabled={saving}
+            />
+          </div>
+
+          {!collection && <section aria-label="Collection rules">
             <div className="panel-head">
               <h4>Monitoring rules ({rules.length}/{MAX_RULES})</h4>
               <button
@@ -117,7 +142,7 @@ export default function RuleCollectionCreateModal({
                 ))}
               </ol>
             )}
-          </section>
+          </section>}
 
           {error && <p className="notice error" role="alert">{error}</p>}
           <div className="modal-actions">
@@ -125,7 +150,9 @@ export default function RuleCollectionCreateModal({
               Cancel
             </button>
             <button type="submit" className="btn-primary" disabled={saving}>
-              {saving ? "Creating…" : "Create collection"}
+              {saving
+                ? collection ? "Saving…" : "Creating…"
+                : collection ? "Save changes" : "Create collection"}
             </button>
           </div>
         </form>

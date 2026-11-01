@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -24,6 +24,7 @@ import {
   Modal,
   useConfirmation,
 } from "../../../components/common/UI.jsx";
+import LabelsField from "../../../components/common/LabelsField.jsx";
 import "./RuleLibrary.css";
 
 const RULE_TYPES = [
@@ -48,6 +49,7 @@ const BOOLEAN_COMPARISON_OPTIONS = [
 export const FIELDS = [
   { key: "name", label: "Rule name", required: true, placeholder: "e.g. High motor temperature" },
   { key: "description", label: "Description", type: "textarea" },
+  { key: "labels", label: "Labels", type: "labels" },
   { key: "rule_type", label: "Rule type", type: "select", required: true, default: "interval_based", options: RULE_TYPES },
   {
     key: "variable_type",
@@ -97,6 +99,7 @@ export const FIELDS = [
 export const LEGACY_EDIT_FIELDS = [
   { key: "name", label: "Rule name", required: true },
   { key: "description", label: "Description", type: "textarea" },
+  { key: "labels", label: "Labels", type: "labels" },
   { key: "severity", label: "Severity", type: "select", required: true, options: [["warning", "Warning"], ["alert", "Alert"]] },
   { key: "is_enabled", label: "Rule status", type: "select", required: true, options: [["true", "Available"], ["false", "Disabled"]] },
 ];
@@ -189,6 +192,7 @@ export function legacyTemplatePayload(values, template) {
   return {
     name: values.name,
     description: values.description || null,
+    labels: values.labels || template.labels || [],
     rule_type: template.rule_type,
     required_variable_types: template.required_variable_types,
     variable_key: template.variable_key,
@@ -408,6 +412,7 @@ export function templatePayload(values) {
     parameters,
     severity: values.severity,
     is_enabled: values.is_enabled !== "false",
+    labels: values.labels || [],
     evaluation_interval_seconds: values.evaluation_interval_seconds || null,
     stale_after_seconds: values.stale_after_seconds || null,
   };
@@ -595,16 +600,27 @@ export default function RuleLibrary() {
       ? location.state.ruleLibraryStatus
       : "all"
   );
+  const [labelIds, setLabelIds] = useState([]);
+  const [labelsRevision, setLabelsRevision] = useState(0);
+  const templateLoadGeneration = useRef(0);
+  const labelFilterQuery = labelIds
+    .map((id) => `label_ids=${encodeURIComponent(id)}`)
+    .join("&");
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [suggesting, setSuggesting] = useState(false);
   const [assigning, setAssigning] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [message, setMessage] = useState({ text: "", error: false });
-  const load = async () => {
-    const result = await api.get("/rule-templates");
-    setTemplates(Array.isArray(result) ? result : []);
-  };
+  const load = useCallback(async () => {
+    const generation = ++templateLoadGeneration.current;
+    const result = await api.get(
+      `/rule-templates${labelFilterQuery ? `?${labelFilterQuery}` : ""}`
+    );
+    if (generation === templateLoadGeneration.current) {
+      setTemplates(Array.isArray(result) ? result : []);
+    }
+  }, [labelFilterQuery]);
 
 
 const loadPendingRequests = async (filterStatus = requestStatus) => {
@@ -707,13 +723,16 @@ useEffect(() => {
 }, [requestStatus, isAdministrator]);
 
   useEffect(() => {
-    let alive = true;
-    api.get("/rule-templates")
-      .then((items) => alive && setTemplates(Array.isArray(items) ? items : []))
-      .catch((error) => alive && setMessage({ text: error.message || "Could not load the monitoring rule library.", error: true }))
-      .finally(() => {});
-    return () => { alive = false; };
-  }, []);
+    load().catch((error) =>
+      setMessage({
+        text: error.message || "Could not load the monitoring rule library.",
+        error: true,
+      })
+    );
+    return () => {
+      templateLoadGeneration.current += 1;
+    };
+  }, [load]);
 
   const visible = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -830,6 +849,7 @@ useEffect(() => {
 
 if (suggesting) {
   const suggestionPayload = templatePayload(values);
+  delete suggestionPayload.labels;
 
   await api.post("/rule-template-requests", {
     ...suggestionPayload,
@@ -857,9 +877,17 @@ if (suggesting) {
 }
 
 setModalOpen(false);
+if (!suggesting) setLabelsRevision((revision) => revision + 1);
 setEditing(null);
 setSuggesting(false);
-await load();
+try {
+  await load();
+} catch (error) {
+  setMessage({
+    text: `The change was saved, but the list could not be refreshed: ${error.message}`,
+    error: true,
+  });
+}
 };
 
 
@@ -1150,6 +1178,12 @@ const reviewRequest = async (request, action) => {
             <option value="true">Available</option>
             <option value="false">Disabled</option>
           </select>
+          <LabelsField
+            mode="filter"
+            value={labelIds}
+            onChange={setLabelIds}
+            refreshKey={labelsRevision}
+          />
         </div>
         {templates === null ? <LoadingIndicator className="loading" message="Loading rules" /> : visible.length === 0 ? (
           <EmptyState art={false} title={templates.length === 0 ? "The rule library is empty" : "No rules match"} lines={[templates.length === 0 ? "Create a reusable rule here. Asset-specific rules do not appear in this library." : "Try a different search or availability filter."]} />
@@ -1162,6 +1196,13 @@ const reviewRequest = async (request, action) => {
                   <div className="rule-library-card-title"><h2>{template.name}</h2><span className={`rule-library-status ${template.is_enabled ? "available" : "disabled"}`}>{template.is_enabled ? "Available" : "Disabled"}</span></div>
                   <p>{template.description || "No description provided."}</p>
                   <small>{displayType(template)} · {templateSummary(template)}</small>
+                  {template.labels?.length > 0 && (
+                    <span className="labels-chips rule-library-labels">
+                      {template.labels.map((label) => (
+                        <span className="label-chip" key={label}>{label}</span>
+                      ))}
+                    </span>
+                  )}
                 </div>
                 <div className="rule-library-actions">
                   <button className="btn-outline" onClick={() => setAssigning(template)} disabled={!canAssignRules || !template.is_enabled || needsRuntimeThresholdConfiguration(template)} title={!canAssignRules ? "You do not have permission to assign rules." : needsRuntimeThresholdConfiguration(template) ? "Edit this rule and configure running-time thresholds before assigning it." : undefined}><Copy size={15} /> Assign rule</button>
@@ -1237,7 +1278,9 @@ const reviewRequest = async (request, action) => {
           : "Create a reusable rule, then assign it to one or more assets."
     }
 fields={
-  editing && !supportsCurrentRuleEditor(editing)
+  suggesting && !editing
+    ? FIELDS.filter((field) => field.key !== "labels")
+    : editing && !supportsCurrentRuleEditor(editing)
     ? LEGACY_EDIT_FIELDS.map((field) => ({
         ...field,
         disabled: isSupervisor,

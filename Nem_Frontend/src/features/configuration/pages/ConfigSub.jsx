@@ -2,6 +2,7 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -23,6 +24,7 @@ import {
   LoadingIndicator,
   useConfirmation,
 } from "../../../components/common/UI.jsx";
+import LabelsField from "../../../components/common/LabelsField.jsx";
 import {
   BackIcon,
   PlusCircle,
@@ -58,6 +60,7 @@ const CRUD = {
       ["condition", "Condition"],
       ["severity", "Severity"],
       ["state", "State"],
+      ["labels", "Labels"],
     ],
   },
   collections: {
@@ -68,6 +71,7 @@ const CRUD = {
     cols: [
       ["name", "Name"],
       ["description", "Description"],
+      ["labels", "Labels"],
       ["rules", "Rules"],
     ],
   },
@@ -102,6 +106,7 @@ function fieldsFor(sub, variables) {
         type: "textarea",
         placeholder: "What should this rule watch?",
       },
+      { key: "labels", label: "Labels", type: "labels" },
       {
         key: "variable_id",
         label: "Machine / numeric variable",
@@ -160,6 +165,7 @@ function fieldsFor(sub, variables) {
         label: "Description",
         type: "textarea",
       },
+      { key: "labels", label: "Labels", type: "labels" },
     ];
   }
 
@@ -182,6 +188,7 @@ function fieldsFor(sub, variables) {
       label: "Description",
       type: "textarea",
     },
+    { key: "labels", label: "Labels", type: "labels" },
     {
       key: "files",
       label: "Attach files (optional)",
@@ -242,10 +249,12 @@ function cell(key, row, variableNames) {
 
   if (key === "labels") {
     return Array.isArray(value) && value.length ? (
-      value.join(", ")
-    ) : (
-      <span className="muted">-</span>
-    );
+      <span className="labels-chips">
+        {value.map((label) => (
+          <span className="label-chip" key={label}>{label}</span>
+        ))}
+      </span>
+    ) : <span className="muted">-</span>;
   }
 
   if (key === "severity") {
@@ -361,25 +370,33 @@ export default function ConfigSub() {
     error: false,
   });
   const [activeCollection, setActiveCollection] = useState(null);
+  const [editingCollection, setEditingCollection] = useState(null);
+  const [editingDocument, setEditingDocument] = useState(null);
   const [busyRuleId, setBusyRuleId] = useState(null);
 
   const [search, setSearch] = useState("");
   const [severityFilter, setSeverityFilter] = useState("all");
   const [stateFilter, setStateFilter] = useState("all");
+  const [labelIds, setLabelIds] = useState([]);
+  const [labelsRevision, setLabelsRevision] = useState(0);
+  const labelQuery = labelIds.map((id) => `label_ids=${encodeURIComponent(id)}`).join("&");
+  const loadGeneration = useRef(0);
   const [sortKey, setSortKey] = useState("name");
   const [sortDirection, setSortDirection] = useState("asc");
   const [page, setPage] = useState(1);
 
   const load = useCallback(async () => {
     if (!cfg) return;
+    const generation = ++loadGeneration.current;
 
     if (sub === "rules") {
       const [rules, currentAssets, statuses] =
         await Promise.all([
-          api.getAll("/rules"),
+          api.getAll(`/rules${labelQuery ? `?${labelQuery}` : ""}`),
           api.getAll("/assets"),
           api.getAll("/monitoring/status", 500),
         ]);
+      if (generation !== loadGeneration.current) return;
 
       const assetNames = new Map(
         currentAssets.map((asset) => [
@@ -418,10 +435,13 @@ export default function ConfigSub() {
       return;
     }
 
-    const items = await api.get(`/${cfg.endpoint}`);
+    const items = await api.get(
+      `/${cfg.endpoint}${labelQuery ? `?${labelQuery}` : ""}`
+    );
+    if (generation !== loadGeneration.current) return;
 
     setRows(Array.isArray(items) ? items : []);
-  }, [cfg, sub]);
+  }, [cfg, labelQuery, sub]);
 
   const loadVariables = useCallback(async () => {
     if (sub !== "rules") return;
@@ -504,6 +524,7 @@ export default function ConfigSub() {
 
     return () => {
       alive = false;
+      loadGeneration.current += 1;
     };
   }, [sub, load, loadVariables]);
 
@@ -720,6 +741,7 @@ export default function ConfigSub() {
         threshold,
         severity: values.severity,
         is_enabled: true,
+        labels: values.labels || [],
       });
     } else if (sub === "documents") {
       const files = values.files || [];
@@ -730,6 +752,7 @@ export default function ConfigSub() {
         form.append("title", values.title);
         form.append("kind", values.kind);
         form.append("description", values.description || "");
+        form.append("labels", JSON.stringify(values.labels || []));
 
         files.forEach((file) =>
           form.append("files", file)
@@ -741,12 +764,14 @@ export default function ConfigSub() {
           title: values.title,
           kind: values.kind,
           description: values.description || null,
+          labels: values.labels || [],
         });
       }
     } else {
       await api.post(`/${cfg.endpoint}`, values);
     }
 
+    setLabelsRevision((revision) => revision + 1);
     setOpen(false);
     setEditingRule(null);
     setMsg({
@@ -776,7 +801,9 @@ const edit = async (values) => {
   // Edit mode mein sirf threshold update hoga.
   await api.patch(`/rules/${original.id}`, {
     threshold,
+    labels: values.labels || [],
   });
+  setLabelsRevision((revision) => revision + 1);
 
   setOpen(false);
   setEditingRule(null);
@@ -1005,6 +1032,7 @@ const edit = async (values) => {
   }
   onClick={() => {
     setEditingRule(null);
+    setEditingCollection(null);
     setMsg({ text: "", error: false });
 
     if (sub === "documents") {
@@ -1089,6 +1117,19 @@ const edit = async (values) => {
               <option value="enabled">Enabled</option>
               <option value="disabled">Disabled</option>
             </select>
+          </div>
+        )}
+        {["rules", "collections", "documents"].includes(sub) && (
+          <div className="config-label-filter" style={{ marginBottom: 16 }}>
+            <LabelsField
+              mode="filter"
+              value={labelIds}
+              refreshKey={labelsRevision}
+              onChange={(next) => {
+                setLabelIds(next);
+                setPage(1);
+              }}
+            />
           </div>
         )}
 
@@ -1303,6 +1344,20 @@ const edit = async (values) => {
       Edit Rule
     </button>
 
+    <button
+      type="button"
+      className="config-icon-btn edit"
+      title="Edit collection"
+      aria-label="Edit collection"
+      disabled={!canManageConfiguration}
+      onClick={() => {
+        setEditingCollection(row);
+        setOpen(true);
+      }}
+    >
+      <Pencil size={17} />
+    </button>
+
     {/* Delete Collection */}
     <button
       type="button"
@@ -1318,6 +1373,18 @@ const edit = async (values) => {
 
                         ) : (
                           <div className="config-action-icons">
+                            {sub === "documents" && (
+                              <button
+                                type="button"
+                                className="config-icon-btn edit"
+                                title="Edit document"
+                                aria-label="Edit document"
+                                disabled={!canManageConfiguration}
+                                onClick={() => setEditingDocument(row)}
+                              >
+                                <Pencil size={17} />
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="config-icon-btn delete"
@@ -1408,9 +1475,14 @@ const edit = async (values) => {
 
       {open && sub === "collections" && (
         <RuleCollectionCreateModal
-          onClose={() => setOpen(false)}
+          collection={editingCollection}
+          onClose={() => {
+            setOpen(false);
+            setEditingCollection(null);
+          }}
           onCreate={async (payload) => {
             await api.post("/collections", payload);
+            setLabelsRevision((revision) => revision + 1);
             setOpen(false);
             setMsg({
               text: "Collection and monitoring rules created.",
@@ -1421,6 +1493,21 @@ const edit = async (values) => {
             } catch (error) {
               setMsg({
                 text: `Collection created, but the list could not be refreshed: ${error.message}`,
+                error: true,
+              });
+            }
+          }}
+          onSave={async (payload) => {
+            await api.patch(`/collections/${editingCollection.id}`, payload);
+            setLabelsRevision((revision) => revision + 1);
+            setOpen(false);
+            setEditingCollection(null);
+            setMsg({ text: "Collection updated.", error: false });
+            try {
+              await load();
+            } catch (error) {
+              setMsg({
+                text: `Collection updated, but the list could not be refreshed: ${error.message}`,
                 error: true,
               });
             }
@@ -1456,7 +1543,7 @@ fields={
   sub === "rules" && editingRule
     ? ruleFields.map((field) => ({
         ...field,
-        disabled: field.key !== "threshold",
+disabled: field.key !== "threshold" && field.key !== "labels",
       }))
     : sub === "rules"
       ? ruleFields
@@ -1472,6 +1559,7 @@ fields={
                   operator: editingRule.operator || ">=",
                   threshold: editingRule.threshold ?? "",
                   severity: editingRule.severity || "warning",
+                  labels: editingRule.labels || [],
                 }
               : {}
           }
@@ -1484,6 +1572,36 @@ fields={
             setOpen(false);
             setEditingRule(null);
           }}
+        />
+      )}
+      {editingDocument && (
+        <CreateModal
+          title="Edit document"
+          submitLabel="Save changes"
+          fields={fieldsFor("documents", variables).filter(
+            (field) => field.key !== "files"
+          )}
+          initialValues={{
+            title: editingDocument.title,
+            kind: editingDocument.kind,
+            description: editingDocument.description || "",
+            labels: editingDocument.labels || [],
+          }}
+          onSubmit={async (values) => {
+            await api.patch(`/documents/${editingDocument.id}`, values);
+            setLabelsRevision((revision) => revision + 1);
+            setEditingDocument(null);
+            setMsg({ text: "Document updated.", error: false });
+            try {
+              await load();
+            } catch (error) {
+              setMsg({
+                text: `Document updated, but the list could not be refreshed: ${error.message}`,
+                error: true,
+              });
+            }
+          }}
+          onClose={() => setEditingDocument(null)}
         />
       )}
       {activeCollection && (

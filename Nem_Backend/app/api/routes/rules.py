@@ -12,6 +12,7 @@ from app.api.routes.auth import get_current_user
 from app.db.session import get_db
 from app.models import Asset, Alert, MonitoringRule, RuleState, Variable, User
 from app.schemas.rule import RuleCreate, RuleRead, RuleUpdate
+from app.services.labels import apply_label_filter, assign_labels
 from app.services.monitoring_engine import emit_event, set_rule_enabled_state
 from app.services.monitoring_engine import utc_now
 
@@ -285,11 +286,12 @@ def create_rule(
         configured_runtime_signal_mapping(request, payload.variable_id),
         is_mapping_bypass_enabled(request),
     )
-    rule_data = payload.model_dump()
+    rule_data = payload.model_dump(exclude={"labels"})
     rule_data["lifecycle_status"] = ("in_progress" if payload.is_enabled else "deactivated")
     rule = MonitoringRule(**rule_data)
     session.add(rule)
     session.flush()
+    assign_labels(session, rule, payload.labels)
 
     emit_event(
         session,
@@ -310,6 +312,7 @@ def list_rules(
     rule_type: str | None = None,
     severity: str | None = None,
     is_enabled: bool | None = None,
+    label_ids: list[int] | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_db),
@@ -335,6 +338,11 @@ def list_rules(
     ):
         if condition is not None:
             query, count_query = query.where(column == condition), count_query.where(column == condition)
+    try:
+        query = apply_label_filter(query, MonitoringRule, label_ids)
+        count_query = apply_label_filter(count_query, MonitoringRule, label_ids)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     items = session.scalars(query.order_by(MonitoringRule.id).offset(offset).limit(limit)).all()
     return {
         "items": [RuleRead.model_validate(item) for item in items],
@@ -444,8 +452,10 @@ def update_rule(
 
     #Apply the changes
     for field, value in changes.items():
-        if field != "is_enabled":
+        if field not in {"is_enabled", "labels"}:
             setattr(rule, field, value)
+    if "labels" in changes:
+        assign_labels(session, rule, changes["labels"])
     if "is_enabled" in changes:
         set_rule_enabled_state(session, rule, changes["is_enabled"])
     session.commit()

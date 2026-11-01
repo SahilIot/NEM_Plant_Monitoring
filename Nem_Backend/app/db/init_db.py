@@ -13,6 +13,7 @@ from app.models import (
     RuleCounterState,
     Variable,
 )
+from app.db.migrations.shared_labels import upgrade as upgrade_shared_labels
 
 #creates tables defined in SQLAlchemy models if they do not exist
 def _migrate_auth_roles(engine: Engine) -> None:
@@ -280,6 +281,7 @@ def initialize_database(engine: Engine) -> None:
     _migrate_legacy_rule_templates(engine)
     _migrate_boolean_duration_templates(engine)
     _migrate_existing_rule_counters(engine)
+    upgrade_shared_labels(engine)
 
     if "nem_maintenance_schedules" in table_names:
         schedule_columns = {column["name"]

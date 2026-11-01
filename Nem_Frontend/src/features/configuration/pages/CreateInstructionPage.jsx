@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
+import LabelsField from "../../../components/common/LabelsField.jsx";
 import "./CreateInstructionPage.css";
 
 export default function CreateInstructionPage() {
@@ -13,42 +14,11 @@ export default function CreateInstructionPage() {
 
   const [name, setName] = useState("");
   const [labels, setLabels] = useState([]);
-  const [labelInput, setLabelInput] = useState("");
   const [duration, setDuration] = useState("30");
   const [text, setText] = useState("");
   const [files, setFiles] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-
-  function addLabel() {
-    if (!canManageInstructions) return;
-    const label = labelInput.trim();
-
-    if (!label) return;
-
-    if (label.length < 2 || label.length > 50) {
-      setError("Label must contain 2–50 characters.");
-      return;
-    }
-
-    if (labels.length >= 10) {
-      setError("Maximum 10 labels are allowed.");
-      return;
-    }
-
-    if (
-      labels.some(
-        (item) => item.toLowerCase() === label.toLowerCase()
-      )
-    ) {
-      setError("This label already exists.");
-      return;
-    }
-
-    setLabels((current) => [...current, label]);
-    setLabelInput("");
-    setError("");
-  }
 
   async function submit(event) {
     event.preventDefault();
@@ -168,60 +138,12 @@ export default function CreateInstructionPage() {
           <label htmlFor="instruction-label">
             Labels
           </label>
-
-          <div className="instruction-label-entry">
-            <input
-              id="instruction-label"
-              value={labelInput}
-              maxLength={50}
-              placeholder="Enter a label"
-              onChange={(e) =>
-                setLabelInput(e.target.value)
-              }
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addLabel();
-                }
-              }}
-            />
-
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={addLabel}
-              disabled={labels.length >= 10}
-            >
-              Add
-            </button>
-          </div>
-
-          <div className="instruction-label-list">
-            {labels.map((label) => (
-              <span
-                className="instruction-label-chip"
-                key={label}
-              >
-                {label}
-
-                <button
-                  type="button"
-                  aria-label={`Remove ${label}`}
-                  onClick={() =>
-                    setLabels((current) =>
-                      current.filter(
-                        (item) => item !== label
-                      )
-                    )
-                  }
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-
-          <small>{labels.length}/10 labels</small>
+          <LabelsField
+            id="instruction-label"
+            value={labels}
+            onChange={setLabels}
+            disabled={!canManageInstructions || busy}
+          />
         </div>
 
         <div className="instruction-field">

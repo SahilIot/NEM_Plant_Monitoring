@@ -333,6 +333,7 @@ const ruleFields = (
     type: "textarea",
     placeholder: "What should this rule watch?",
   },
+  { key: "labels", label: "Labels", type: "labels" },
   {
     key: "rule_type",
     label: "Rule type",
@@ -1707,6 +1708,7 @@ const filteredEvents = [...events]
         cycleVariableIds,
         runtimeVariableIds,
       });
+      rule.labels = values.labels || [];
 
       if (editId) {
         // Editing must not change activation state or the stale timeout.
@@ -1747,6 +1749,7 @@ const filteredEvents = [...events]
     const initialValues = {
       name: rule.name || "",
       description: rule.description || "",
+      labels: rule.labels || [],
       rule_type: rule.rule_type || "parameter_threshold",
       severity: rule.severity || "warning",
       evaluation_interval_seconds:
@@ -2633,6 +2636,13 @@ const filteredEvents = [...events]
                         >
                           {ruleConditionSummary(rule)}
                         </small>
+                      )}
+                      {rule.labels?.length > 0 && (
+                        <span className="labels-chips asset-rule-labels">
+                          {rule.labels.map((label) => (
+                            <span className="label-chip" key={label}>{label}</span>
+                          ))}
+                        </span>
                       )}
                     </div>
 

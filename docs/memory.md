@@ -25,6 +25,14 @@ roadmap.
   additive startup updates in code. The repository instructions advise backup
   before schema changes. Existing database files in the workspace are not
   proof of the active deployment database or schema.
+- Shared labels use the `labels` catalog and many-to-many links for monitoring
+  rules, reusable rule templates, collections, and instruction documents.
+  `001_shared_labels` migrates existing document JSON labels into the shared
+  catalog, clears the legacy JSON values after import, and restores document
+  labels to that column on downgrade. The migration is invoked during database
+  initialization; a SQLite in-memory check verified repeat initialization,
+  reuse/filtering, the 10-label limit, and rollback. A live PostgreSQL upgrade
+  has not been exercised.
 - Demo data created by `Nem_Backend/seed.py` is explicitly marked as simulated
   and must not be interpreted as live equipment telemetry.
 
@@ -66,6 +74,11 @@ roadmap.
    `Nem_Frontend`'s `npm test` command is `node --test`; the prior interactive
    maintenance-fix session observed zero tests. A successful build from that
    session verified compilation, not runtime behavior or acceptance coverage.
+7. **Shared labels have local verification only.** Case/whitespace
+   normalization, duplicate reuse, AND filtering, document-label migration
+   and rollback, and the 10-label maximum passed temporary SQLite checks.
+   The production PostgreSQL migration and role-specific API/UI flows still
+   require verification against an isolated deployment-like environment.
 
 ## Recently corrected UI root cause
 

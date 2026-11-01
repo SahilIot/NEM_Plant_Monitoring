@@ -17,10 +17,11 @@ from sqlalchemy import (
     Text,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.db.session import UTCDateTime
+from app.models.labels import Label, rule_labels, rule_template_labels
 
 
 class MonitoringRuleTemplate(Base):
@@ -57,6 +58,14 @@ class MonitoringRuleTemplate(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+    label_records: Mapped[list[Label]] = relationship(
+        secondary=rule_template_labels,
+        lazy="selectin",
+    )
+
+    @property
+    def labels(self) -> list[str]:
+        return [label.name for label in self.label_records]
 
 
 class MonitoringRuleTemplateRequest(Base):
@@ -224,6 +233,14 @@ class MonitoringRule(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+    label_records: Mapped[list[Label]] = relationship(
+        secondary=rule_labels,
+        lazy="selectin",
+    )
+
+    @property
+    def labels(self) -> list[str]:
+        return [label.name for label in self.label_records]
 
 
 # Stores the current result of a monitoring rule.

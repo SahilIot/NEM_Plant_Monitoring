@@ -11,6 +11,7 @@ import { buildAssetMonitoringRule } from "../../assets/rules/monitoringRuleFlow.
 import {
   LoadingIndicator,
 } from "../../../components/common/UI.jsx";
+import LabelsField from "../../../components/common/LabelsField.jsx";
 import {
   rememberNavigationOrigin,
   returnToNavigationOrigin,
@@ -26,6 +27,7 @@ const TITLES = {
 const INITIAL_VALUES = {
   name: "",
   description: "",
+  labels: [],
   cycle_variable_id: "",
   runtime_variable_id: "",
   severity: "warning",
@@ -184,6 +186,7 @@ export default function RuleCreatePage() {
           runtimeVariableIds,
         }
       );
+      rule.labels = values.labels || [];
       await api.post(`/assets/${assetId}/rules`, rule);
       returnToNavigationOrigin(
         navigate,
@@ -281,6 +284,18 @@ export default function RuleCreatePage() {
                   value={values.description}
                   onChange={updateField}
                   placeholder="Add context for operators who will review this rule."
+                  disabled={saving || !canManageRules}
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="rule-labels">Labels <span className="optional-label">Optional</span></label>
+                <LabelsField
+                  id="rule-labels"
+                  value={values.labels}
+                  onChange={(labels) =>
+                    setValues((current) => ({ ...current, labels }))
+                  }
                   disabled={saving || !canManageRules}
                 />
               </div>

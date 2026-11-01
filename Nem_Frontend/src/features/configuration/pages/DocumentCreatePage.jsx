@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { BackIcon } from "../../../components/common/Icons.jsx";
+import LabelsField from "../../../components/common/LabelsField.jsx";
 import "./DocumentCreatePage.css";
 
 const DOC_TYPES = [
@@ -22,6 +23,7 @@ export default function DocumentCreatePage() {
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState("Instruction");
   const [description, setDescription] = useState("");
+  const [labels, setLabels] = useState([]);
   const [files, setFiles] = useState([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -54,6 +56,7 @@ export default function DocumentCreatePage() {
         form.append("title", title.trim());
         form.append("kind", kind);
         form.append("description", description.trim());
+        form.append("labels", JSON.stringify(labels));
         files.forEach((file) => form.append("files", file));
 
         await api.postForm("/documents/with-files", form);
@@ -62,6 +65,7 @@ export default function DocumentCreatePage() {
           title: title.trim(),
           kind,
           description: description.trim() || null,
+          labels,
         });
       }
 
@@ -190,6 +194,16 @@ export default function DocumentCreatePage() {
                   placeholder="Add useful details about this document..."
                   disabled={busy}
                   onChange={(event) => setDescription(event.target.value)}
+                />
+              </div>
+
+              <div className="field">
+                <label htmlFor="document-labels">Labels</label>
+                <LabelsField
+                  id="document-labels"
+                  value={labels}
+                  onChange={setLabels}
+                  disabled={busy}
                 />
               </div>
 

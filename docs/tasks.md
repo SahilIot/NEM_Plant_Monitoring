@@ -16,6 +16,10 @@ deployment configuration or field validation.
 - Monitoring rule and reusable template workflows; threshold, duration,
   runtime and cycle-counter evaluation; persisted states, alerts, events and
   lifecycle actions.
+- Shared reusable labels for rules, reusable templates, collections, and
+  instruction documents; create/edit assignment, compact chips, and
+  server-side AND filtering. Existing document label data is imported by a
+  reversible, idempotent startup migration.
 - Read-only OPC UA test/read/discovery and continuous collector, mappings,
   reconnect behavior, machine cycle/runtime state, freshness handling, and
   status endpoint.
@@ -57,6 +61,11 @@ deployment configuration or field validation.
   product/backend documentation based on observed intended behavior.
 - Against an isolated PostgreSQL database, exercise schema initialization and
   upgrade behavior with representative legacy data and a verified backup.
+- Exercise the shared-label migration and rollback against an isolated
+  PostgreSQL database, including existing document labels and repeat startup.
+  SQLite checks covered migration idempotency, shared-name reuse,
+  association-only removal, AND filtering, and the 10-label maximum; live
+  PostgreSQL behavior remains unverified.
 - Against a PLC simulator/approved test server, verify NodeId mappings,
   variable ownership/types, signal roles, source/server timestamps, data
   quality, negotiated publishing intervals, reconnection, and freshness.
@@ -82,4 +91,3 @@ No approved future feature list or product roadmap was found in the repository.
 Accordingly, no unimplemented feature is labeled as planned here. The above
 verification and documentation tasks concern existing behavior and known
 gaps; they are not product commitments.
-

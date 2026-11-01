@@ -1,9 +1,14 @@
 #four db models these model store frontendconfig,rule collection,instruction documents,backup records
 from datetime import datetime, timezone
 from sqlalchemy import JSON, ForeignKey, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 from app.db.session import UTCDateTime
+from app.models.labels import (
+    Label,
+    instruction_document_labels,
+    rule_collection_labels,
+)
 
 #storing frontend settings
 class FrontendConfig(Base):
@@ -20,6 +25,16 @@ class RuleCollection(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
     description: Mapped[str | None] = mapped_column(Text)
+    label_records: Mapped[list[Label]] = relationship(
+        secondary=rule_collection_labels,
+        lazy="selectin",
+    )
+
+    @property
+    def labels(self) -> list[str]:
+        if self.label_records:
+            return [label.name for label in self.label_records]
+        return list(self.legacy_labels or [])
 
 # storing document information
 class InstructionDocument(Base):
@@ -28,8 +43,18 @@ class InstructionDocument(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     kind: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    labels: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    legacy_labels: Mapped[list[str]] = mapped_column(
+        "labels", JSON, nullable=False, default=list
+    )
     duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    label_records: Mapped[list[Label]] = relationship(
+        secondary=instruction_document_labels,
+        lazy="selectin",
+    )
+
+    @property
+    def labels(self) -> list[str]:
+        return [label.name for label in self.label_records]
 
 
 #Keeping track of backups

@@ -255,6 +255,10 @@
   overflow-wrap: anywhere;
 }
 
+.asset-rule-labels {
+  margin-top: 4px;
+}
+
 .asset-page .rule-name .rule-description {
   color: var(--ink-2);
 }

@@ -12,6 +12,7 @@ import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { AlertTriangle, Trash2 } from "lucide-react";
 import { EmptyArt } from "./Icons.jsx";
+import LabelsField from "./LabelsField.jsx";
 
 export const EmptyState = ({ title, lines = [], art = true }) => (
   <div className="empty">
@@ -256,6 +257,7 @@ export function ConfirmationProvider({ children }) {
 
 const initialValue = (field) => {
   if (field.type === "files") return [];
+  if (field.type === "labels") return [];
   if (field.default !== undefined && field.default !== null) {
     return String(field.default);
   }
@@ -278,7 +280,9 @@ export function CreateModal({
         field.key,
         initialValues[field.key] !== undefined &&
         initialValues[field.key] !== null
-          ? String(initialValues[field.key])
+          ? field.type === "labels" && Array.isArray(initialValues[field.key])
+            ? initialValues[field.key]
+            : String(initialValues[field.key])
           : initialValue(field),
       ])
     )
@@ -337,7 +341,9 @@ export function CreateModal({
           let value = hasCurrent
             ? current[field.key]
             : hasInitial
-              ? String(initialValues[field.key] ?? "")
+              ? field.type === "labels" && Array.isArray(initialValues[field.key])
+                ? initialValues[field.key]
+                : String(initialValues[field.key] ?? "")
               : initialValue(field);
 
           if (
@@ -387,9 +393,9 @@ export function CreateModal({
     for (const field of fields) {
       const value =
         values[field.key] ??
-        (field.type === "files" ? [] : "");
+        (field.type === "files" || field.type === "labels" ? [] : "");
 
-      if (field.type === "files") {
+      if (field.type === "files" || field.type === "labels") {
         normalized[field.key] = value;
       } else if (
         field.type === "number" &&
@@ -433,7 +439,14 @@ export function CreateModal({
               {isRequired(field) && <span className="req"> *</span>}
             </label>
 
-            {field.type === "files" ? (
+            {field.type === "labels" ? (
+              <LabelsField
+                id={"f-" + field.key}
+                value={values[field.key] || []}
+                onChange={(next) => set(field.key, next)}
+                disabled={Boolean(field.disabled || busy || disabled)}
+              />
+            ) : field.type === "files" ? (
               <>
                 <input
                   id={"f-" + field.key}

@@ -71,6 +71,10 @@
   border-radius: var(--r-ctl);
 }
 
+.rule-library-tools .labels-filter {
+  flex: 0 0 auto;
+}
+
 .rule-library-list {
   display: flex;
   flex-direction: column;
@@ -125,6 +129,10 @@
 .rule-library-card-main small {
   color: var(--muted);
   font-size: 12px;
+}
+
+.rule-library-labels {
+  margin-top: 5px;
 }
 
 .rule-library-status {

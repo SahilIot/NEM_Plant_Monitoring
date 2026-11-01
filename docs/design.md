@@ -69,6 +69,14 @@ Shared UI in `components/common/UI.jsx` includes `EmptyState`, `StatusBadge`,
 dialogs are used for consequential and destructive actions. Floating action
 menus are rendered in a portal and positioned to remain in the viewport.
 
+The reusable `components/common/LabelsField.jsx` is used in rule/template,
+collection, and instruction/document forms and as a listing filter. Assignment
+mode supports searching existing labels or typing a new one, confirming with
+the plus control, and removing selected chips. Filter mode searches the shared
+catalog and permits multiple selections; matching entries must contain every
+selected label. Chips share compact styling and wrap long names without
+requiring changes to the existing dark theme or page layout.
+
 ## Interaction requirements evident in current code
 
 - Keep live refreshes from overwriting form input. Asset/configuration views
@@ -88,6 +96,10 @@ menus are rendered in a portal and positioned to remain in the viewport.
   and keyboard focus indicators. Menus close on outside pointer/Escape in the
   affected components; dialogs close on Escape or backdrop unless the caller
   prevents it.
+- Keep labels optional and capped at 10 per entry. Save label associations with
+  the existing entry form; removing a chip removes only that entry's
+  association, not the shared catalog label. Keep label filtering server-side
+  and consistent across rule templates, collections, and documents.
 - Running duration is derived from backend timestamps and refreshed locally
   while active. Live machine counters are backend-owned; the frontend does not
   increment cycle counts.
@@ -111,4 +123,3 @@ menus are rendered in a portal and positioned to remain in the viewport.
 
 No separate design-system specification, accessibility conformance report,
 browser support matrix, or user research artifact was found in the repository.
-

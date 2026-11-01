@@ -11,7 +11,7 @@ from zipfile import BadZipFile
 from typing import Any, Literal
 
 from cryptography.fernet import Fernet # encrypts and decrypts sensitive values, such as a saved email password
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field, StrictInt, ValidationError, field_validator
 from sqlalchemy import delete, func, or_, select
@@ -21,6 +21,7 @@ from docx import Document as WordDocument
 from docx.opc.exceptions import PackageNotFoundError
 
 from app.db.session import get_db
+from app.core.labels import normalize_label_names
 from app.models import (
     Alert,
     Asset,
@@ -28,6 +29,7 @@ from app.models import (
     FrontendConfig,
     InstructionDocument,
     InstructionDocumentFile,
+    Label,
     MaintenanceRecord,
     MaintenanceSchedule,
     MonitoringEvent,
@@ -61,6 +63,7 @@ from app.api.routes.rules import (
 )
 from app.api.routes.monitoring import state_for_rule
 from app.api.routes.auth import get_current_user, require_roles
+from app.services.labels import apply_label_filter, assign_labels
 
 router = APIRouter(tags=["frontend compatibility"])
 
@@ -76,6 +79,7 @@ ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt"}
 class CollectionCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str | None = None
+    labels: list[str] = Field(default_factory=list, max_length=10)
     rules: list[RuleTemplateCreate] | None = Field(default=None, min_length=1, max_length=5)
 
     @field_validator("name")
@@ -85,6 +89,32 @@ class CollectionCreate(BaseModel):
         if not value:
             raise ValueError("Collection name cannot be empty")
         return value
+
+    @field_validator("labels")
+    @classmethod
+    def clean_labels(cls, value: list[str]) -> list[str]:
+        return normalize_label_names(value)
+
+
+class CollectionUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = None
+    labels: list[str] | None = Field(default=None, max_length=10)
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("Collection name cannot be empty")
+        return value
+
+    @field_validator("labels")
+    @classmethod
+    def clean_labels(cls, value: list[str] | None) -> list[str] | None:
+        return normalize_label_names(value) if value is not None else None
 
 
 class MaintenanceSuggestionPayload(BaseModel):
@@ -106,6 +136,34 @@ class DocumentCreate(BaseModel):
         if not value:
             raise ValueError("This field cannot be empty")
         return value
+
+    @field_validator("labels")
+    @classmethod
+    def clean_labels(cls, value: list[str]) -> list[str]:
+        return normalize_label_names(value)
+
+#This defines the data accepted when updating an existing instruction document.
+class DocumentUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    kind: str | None = Field(default=None, min_length=1, max_length=50)
+    description: str | None = None
+    labels: list[str] | None = Field(default=None, max_length=10)
+    duration_minutes: int | None = Field(default=None, ge=1)
+
+    @field_validator("title", "kind")
+    @classmethod
+    def strip_required_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("This field cannot be empty")
+        return value
+
+    @field_validator("labels")
+    @classmethod
+    def clean_labels(cls, value: list[str] | None) -> list[str] | None:
+        return normalize_label_names(value) if value is not None else None
 
 #Accepts an optional backup name and note
 class BackupCreate(BaseModel):
@@ -175,6 +233,7 @@ def _rule_row(session: Session, rule: MonitoringRule) -> dict[str, Any]:
         "id": rule.id,
         "name": rule.name,
         "description": rule.description,
+        "labels": rule.labels,
         "asset_id": rule.target_asset_id,
         "asset_name": asset.name if asset else "",
         "severity": rule.severity,
@@ -553,6 +612,7 @@ def list_rule_templates(
         search: str | None = None,
         rule_type: str | None = None,
         is_enabled: bool | None = None,
+        label_ids: list[int] | None = Query(default=None),
         session: Session = Depends(get_db),
 ) -> list[MonitoringRuleTemplate]:
         query = select(MonitoringRuleTemplate)
@@ -568,9 +628,13 @@ def list_rule_templates(
             query = query.where(MonitoringRuleTemplate.rule_type == rule_type)
         if is_enabled is not None:
             query = query.where(MonitoringRuleTemplate.is_enabled.is_(is_enabled))
+        try:
+            query = apply_label_filter(query, MonitoringRuleTemplate, label_ids)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
         return session.scalars(query.order_by(MonitoringRuleTemplate.name, MonitoringRuleTemplate.id)).all()
 
-
+# Checks whether a rule template can be assigned to a particular rule collection.
 def _validate_template_collection(
     session: Session,
     collection_id: int | None,
@@ -586,7 +650,7 @@ def _validate_template_collection(
         if (session.scalar(query) or 0) >= 5:
             raise HTTPException(status_code=422,detail="A rule collection can contain no more than five rules",)
 
-
+# Converts a MonitoringRuleTemplateRequest db record into a dict suitable for returning through an API.
 def _rule_template_request_row(
     item: MonitoringRuleTemplateRequest,
     session: Session,
@@ -633,7 +697,7 @@ def _rule_template_request_row(
         "maintenance_asset_name": asset.name if asset else None,
     }
 
-
+# Identifies the currently authenticated user and confirms that the account is active.
 def _authenticated_user(request: Request, session: Session) -> User:
     user_id = getattr(request.state, "auth_user_id", None)
     user = session.get(User, user_id) if user_id is not None else None
@@ -843,8 +907,11 @@ def create_rule_template(
         payload: RuleTemplateCreate, session: Session = Depends(get_db)
 ) -> MonitoringRuleTemplate:
         _validate_template_collection(session, payload.collection_id)
-        template = MonitoringRuleTemplate(**payload.model_dump())
+        values = payload.model_dump(exclude={"labels"})
+        template = MonitoringRuleTemplate(**values)
         session.add(template)
+        session.flush()
+        assign_labels(session, template, payload.labels)
         session.commit()
         session.refresh(template)
         return template
@@ -869,7 +936,7 @@ def update_rule_template(
         template = session.get(MonitoringRuleTemplate, template_id)
         if template is None:
             raise HTTPException(status_code=404, detail="Rule template was not found")
-        values = payload.model_dump()
+        values = payload.model_dump(exclude={"labels"})
         if values["collection_id"] != template.collection_id:
             _validate_template_collection(session, values["collection_id"], excluded_template_id=template.id)
         semantic_fields = (
@@ -889,6 +956,8 @@ def update_rule_template(
         )
         for field, value in values.items():
             setattr(template, field, value)
+        if "labels" in payload.model_fields_set:
+            assign_labels(session, template, payload.labels)
         if definition_changed:
             assigned_rules = session.scalars(
                 select(MonitoringRule).where(
@@ -984,6 +1053,7 @@ def assign_template_to_assets(
             rule = MonitoringRule(**definition)
             session.add(rule)
             session.flush()
+            assign_labels(session, rule, template.labels)
             emit_event(
                 session,
                 event_type="rule_created",
@@ -1142,6 +1212,7 @@ def frontend_assign_predefined_rules(
         rule = MonitoringRule(**definition)
         session.add(rule)
         session.flush()
+        assign_labels(session, rule, template.labels)
         emit_event(
             session,
             event_type="rule_created",
@@ -1225,6 +1296,7 @@ def frontend_copy_asset_rules(
         rule = MonitoringRule(**definition)
         session.add(rule)
         session.flush()
+        assign_labels(session, rule, source.labels)
         emit_event(
             session,
             event_type="rule_created",
@@ -1258,13 +1330,14 @@ def frontend_create_asset_rule(
         configured_runtime_signal_mapping(request, payload.variable_id),
         is_mapping_bypass_enabled(request),
     )
-    rule_data = payload.model_dump()
+    rule_data = payload.model_dump(exclude={"labels"})
     rule_data["lifecycle_status"] = (
         "in_progress" if payload.is_enabled else "deactivated"
     )
     rule = MonitoringRule(**rule_data)
     session.add(rule)
     session.flush()
+    assign_labels(session, rule, payload.labels)
     emit_event(
         session,
         event_type="rule_created",
@@ -1297,6 +1370,7 @@ def frontend_create_usage_rule(
     rule_payload = RuleCreate(
         name=payload.name,
         description=payload.description,
+        labels=payload.labels,
         rule_type="parameter_threshold",
         target_asset_id=asset_id,
         variable_id=payload.variable_id,
@@ -1317,9 +1391,10 @@ def frontend_create_usage_rule(
         configured_runtime_signal_mapping(request, rule_payload.variable_id),
         is_mapping_bypass_enabled(request),
     )
-    rule = MonitoringRule(**rule_payload.model_dump())
+    rule = MonitoringRule(**rule_payload.model_dump(exclude={"labels"}))
     session.add(rule)
     session.flush()
+    assign_labels(session, rule, rule_payload.labels)
     emit_event(
         session,
         event_type="rule_created",
@@ -1670,7 +1745,7 @@ def frontend_asset_logbook(
         for record, rule_name in rows
     ]
 
-
+# Permanent bulk deletion of completed maintenance logbook records for a specific asset.
 @router.delete("/assets/{asset_id}/logbook")
 def frontend_bulk_delete_asset_logbook(
     asset_id: int,
@@ -1682,29 +1757,15 @@ def frontend_bulk_delete_asset_logbook(
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
 
     records = _lock_rows_by_ids(session, MaintenanceRecord, payload.ids)
-    if any(
-        record.asset_id != asset_id or record.status != "completed"
-        for record in records
-    ):
-        raise HTTPException(
-            status_code=404,
-            detail="One or more selected records do not belong to this maintenance logbook.",
-        )
-    if any(
-        record.schedule_id is not None and record.archived_at is None
-        for record in records
-    ):
-        raise HTTPException(
-            status_code=409,
-            detail="Scheduled maintenance must be archived before its logbook record can be permanently deleted.",
-        )
+    if any(record.asset_id != asset_id or record.status != "completed" for record in records):
+        raise HTTPException(status_code=404, detail="One or more selected records do not belong to this maintenance logbook.",)
+    if any(record.schedule_id is not None and record.archived_at is None for record in records):
+        raise HTTPException(status_code=409,detail="Scheduled maintenance must be archived before its logbook record can be permanently deleted.",)
 
     record_ids_by_schedule: dict[int, set[int]] = {}
     for record in records:
         if record.schedule_id is not None:
-            record_ids_by_schedule.setdefault(record.schedule_id, set()).add(
-                record.id
-            )
+            record_ids_by_schedule.setdefault(record.schedule_id, set()).add(record.id)
     schedule_ids = set(record_ids_by_schedule)
     if schedule_ids:
         schedules = []
@@ -1722,9 +1783,7 @@ def frontend_bulk_delete_asset_logbook(
                 ).all()
             )
         for schedule in schedules:
-            if schedule.current_occurrence_id in record_ids_by_schedule.get(
-                schedule.id, set()
-            ):
+            if schedule.current_occurrence_id in record_ids_by_schedule.get(schedule.id, set()):
                 schedule.current_occurrence_id = None
 
     for record in records:
@@ -1746,10 +1805,7 @@ def frontend_bulk_delete_asset_logbook(
         session.commit()
     except IntegrityError as error:
         session.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail="Related records prevent deleting one or more maintenance logbook entries.",
-        ) from error
+        raise HTTPException(status_code=409,detail="Related records prevent deleting one or more maintenance logbook entries.",) from error
     return {"deleted_count": len(records)}
 
 
@@ -1814,7 +1870,7 @@ def frontend_asset_events(
         for event, asset_name, rule_name in events
     ]
 
-
+#Bulk delete event logbook records for a specific asset.
 @router.delete("/assets/{asset_id}/events")
 def frontend_bulk_delete_asset_events(
     asset_id: int,
@@ -1824,7 +1880,6 @@ def frontend_bulk_delete_asset_events(
 ) -> dict[str, int]:
     if session.get(Asset, asset_id) is None:
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
-
     events = _lock_rows_by_ids(session, MonitoringEvent, payload.ids)
     if any(
         event.asset_id != asset_id
@@ -1832,29 +1887,38 @@ def frontend_bulk_delete_asset_events(
         or event.event_type.startswith("maintenance_")
         for event in events
     ):
-        raise HTTPException(
-            status_code=404,
-            detail="One or more selected records do not belong to this event logbook.",
-        )
-
+        raise HTTPException(status_code=404,detail="One or more selected records do not belong to this event logbook.",)
     for event in events:
         session.delete(event)
     try:
         session.commit()
     except IntegrityError as error:
         session.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail="Related history prevents deleting one or more event logbook entries.",
-        ) from error
+        raise HTTPException(status_code=409,detail="Related history prevents deleting one or more event logbook entries.",) from error
     return {"deleted_count": len(events)}
 
 
 #Rule Collections -> 
+# Shared labels for rules, collections, and instruction documents.
+@router.get("/labels")
+def list_labels(session: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    labels = session.scalars(
+        select(Label).order_by(Label.normalized_name, Label.id)
+    ).all()
+    return [{"id": label.id, "name": label.name} for label in labels]
+
+
 # List collections
 @router.get("/collections")
-def list_collections(session: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    rows = session.scalars(select(RuleCollection).order_by(RuleCollection.id)).all()
+def list_collections(
+    label_ids: list[int] | None = Query(default=None),
+    session: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    try:
+        query = apply_label_filter(select(RuleCollection), RuleCollection, label_ids)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    rows = session.scalars(query.order_by(RuleCollection.id)).all()
     templates = session.scalars(
         select(MonitoringRuleTemplate)
         .where(MonitoringRuleTemplate.collection_id.is_not(None))
@@ -1872,6 +1936,7 @@ def list_collections(session: Session = Depends(get_db)) -> list[dict[str, Any]]
             "id": row.id,
             "name": row.name,
             "description": row.description,
+            "labels": row.labels,
             "rules": templates_by_collection.get(row.id, []),
             "rule_count": len(templates_by_collection.get(row.id, [])),
         }
@@ -1885,13 +1950,19 @@ def create_collection(payload: CollectionCreate, session: Session = Depends(get_
     session.add(collection)
     try:
         session.flush()
-        templates = [
-            MonitoringRuleTemplate(
-                **rule.model_dump(exclude={"collection_id"}),
+        assign_labels(session, collection, payload.labels)
+        templates = []
+        for rule_payload in payload.rules or []:
+            template = MonitoringRuleTemplate(
+                **rule_payload.model_dump(
+                    exclude={"collection_id", "labels"}
+                ),
                 collection_id=collection.id,
             )
-            for rule in (payload.rules or [])
-        ]
+            session.add(template)
+            session.flush()
+            assign_labels(session, template, rule_payload.labels)
+            templates.append(template)
         session.add_all(templates)
         session.commit()
     except IntegrityError as error:
@@ -1902,8 +1973,40 @@ def create_collection(payload: CollectionCreate, session: Session = Depends(get_
         "id": collection.id,
         "name": collection.name,
         "description": collection.description,
+        "labels": collection.labels,
         "rules": [{"id": item.id, "name": item.name} for item in templates],
         "rule_count": len(templates),
+    }
+
+
+@router.patch(
+    "/collections/{collection_id}",
+    dependencies=[Depends(require_roles("Administrator"))],
+)
+def update_collection(
+    collection_id: int,
+    payload: CollectionUpdate,
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    collection = session.get(RuleCollection, collection_id)
+    if collection is None:
+        raise HTTPException(status_code=404, detail="Collection was not found")
+    changes = payload.model_dump(exclude_unset=True)
+    try:
+        for field in ("name", "description"):
+            if field in changes:
+                setattr(collection, field, changes[field])
+        if "labels" in changes:
+            assign_labels(session, collection, changes["labels"])
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        raise HTTPException(status_code=409,detail="A collection with this name already exists",) from error
+    return {
+        "id": collection.id,
+        "name": collection.name,
+        "description": collection.description,
+        "labels": collection.labels,
     }
 
 #Delete a collection
@@ -1925,8 +2028,17 @@ def delete_collection(collection_id: int, session: Session = Depends(get_db)) ->
 #Instruction Documents
 # Lists documents
 @router.get("/documents")
-def list_documents(session: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    rows = session.scalars(select(InstructionDocument).order_by(InstructionDocument.id)).all()
+def list_documents(
+    label_ids: list[int] | None = Query(default=None),
+    session: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    try:
+        query = apply_label_filter(select(InstructionDocument), InstructionDocument, label_ids)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    rows = session.scalars(
+        query.order_by(InstructionDocument.id)
+    ).all()
     result: list[dict[str, Any]] = []
     for row in rows:
         attachments = session.scalars(
@@ -1951,15 +2063,43 @@ def create_document(payload: DocumentCreate, session: Session = Depends(get_db))
         title=payload.title.strip(),
         kind=payload.kind.strip(),
         description=payload.description,
-        labels=[label.strip() for label in payload.labels if label.strip()],
         duration_minutes=payload.duration_minutes,
     )
     session.add(document)
+    assign_labels(session, document, payload.labels)
     session.commit()
     session.refresh(document)
     return {"id": document.id, "title": document.title, "kind": document.kind,
             "description": document.description, "labels": document.labels,
             "duration_minutes": document.duration_minutes}
+
+# updating an existing instruction document. 
+@router.patch("/documents/{document_id}",dependencies=[Depends(require_roles("Administrator"))],)
+def update_document(
+    document_id: int,
+    payload: DocumentUpdate,
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    document = session.get(InstructionDocument, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document was not found")
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=422, detail="Provide at least one field to update")
+    for field in ("title", "kind", "description", "duration_minutes"):
+        if field in changes:
+            setattr(document, field, changes[field])
+    if "labels" in changes:
+        assign_labels(session, document, changes["labels"])
+    session.commit()
+    return {
+        "id": document.id,
+        "title": document.title,
+        "kind": document.kind,
+        "description": document.description,
+        "labels": document.labels,
+        "duration_minutes": document.duration_minutes,
+    }
 
 # Create a document and store multiple attachments in the backend uploads directory.
 @router.post("/documents/with-files", status_code=201)
@@ -1979,14 +2119,14 @@ async def create_document_with_files(
         raise HTTPException(status_code=413, detail=f"Choose no more than {MAX_FILES_PER_DOCUMENT} files")
     try:
         parsed_labels = json.loads(labels)
-    except json.JSONDecodeError as error:
-        raise HTTPException(status_code=422, detail="Labels must be a JSON array") from error
-    if (
-        not isinstance(parsed_labels, list)
-        or len(parsed_labels) > 10
-        or any(not isinstance(label, str) or not label.strip() for label in parsed_labels)
-    ):
-        raise HTTPException(status_code=422, detail="Labels must contain up to 10 non-empty strings")
+        if not isinstance(parsed_labels, list):
+            raise ValueError("Labels must be a JSON array")
+        parsed_labels = normalize_label_names(parsed_labels)
+    except (json.JSONDecodeError, TypeError, ValueError) as error:
+        raise HTTPException(
+            status_code=422,
+            detail=str(error) or "Labels must be a JSON array of text values",
+        ) from error
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     saved_paths: list[Path] = []
     total = 0
@@ -1995,11 +2135,11 @@ async def create_document_with_files(
             title=title,
             kind=kind,
             description=description.strip() or None,
-            labels=[label.strip() for label in parsed_labels],
             duration_minutes=duration_minutes,
         )
         session.add(document)
         session.flush()
+        assign_labels(session, document, parsed_labels)
         for upload in files:
             original = Path(upload.filename or "document").name
             suffix = Path(original).suffix.lower()
@@ -2200,7 +2340,13 @@ def import_configuration(
         except ValidationError as error:
             raise HTTPException(status_code=422, detail="Invalid collection in import file") from error
         if not session.scalar(select(RuleCollection.id).where(RuleCollection.name == data.name)):
-            session.add(RuleCollection(name=data.name.strip(), description=data.description))
+            collection = RuleCollection(
+                name=data.name.strip(),
+                description=data.description,
+            )
+            session.add(collection)
+            session.flush()
+            assign_labels(session, collection, data.labels)
             created += 1
     rules = payload.get("rules", [])
     if not isinstance(rules, list):
@@ -2217,9 +2363,12 @@ def import_configuration(
             configured_runtime_signal_mapping(request, data.variable_id),
             is_mapping_bypass_enabled(request),
         )
-        rule_data = data.model_dump()
+        rule_data = data.model_dump(exclude={"labels"})
         rule_data["lifecycle_status"] = ("in_progress" if data.is_enabled else "deactivated")
-        session.add(MonitoringRule(**rule_data))
+        rule = MonitoringRule(**rule_data)
+        session.add(rule)
+        session.flush()
+        assign_labels(session, rule, data.labels)
     session.commit()
     return {"rules": len(rules), "collections": created}
 
@@ -2257,7 +2406,7 @@ def get_frontend_settings(section: str, session: Session = Depends(get_db)) -> d
         return public_value
     return value or {"databus_host": "mqtt://ie-databus:1883", "databus_port": "1883", "enabled": "false"}
 
-
+#endpoint for updating frontend settings.
 @router.put("/settings/{section}")
 def update_frontend_settings(
     section: str,

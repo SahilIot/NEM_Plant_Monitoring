@@ -75,6 +75,11 @@ Primary operational tables and their roles:
 - Dashboard data includes frontend settings, rule collections, instruction
   documents and files, and backup metadata. Rule templates and review requests
   are stored separately from asset-specific rules.
+- The shared `labels` catalog is linked by many-to-many association tables to
+  asset-specific rules, reusable rule templates, collections, and instruction
+  documents. Composite association keys prevent duplicate links; a normalized
+  unique label key prevents duplicate names differing only by case or
+  whitespace.
 - `scheduler_leases` elects a single owner for scheduled work and the OPC UA
   collector.
 
@@ -82,6 +87,11 @@ Asset, variable, reading, rule, alert, maintenance, and history deletion is
 guarded where dependants would otherwise be orphaned. Startup calls
 `Base.metadata.create_all()` and applies additive, in-code schema updates in
 `app/db/init_db.py`; production database changes should be backed up first.
+The versioned `app/db/migrations/shared_labels.py` migration imports legacy
+document JSON labels into the shared catalog and associations. New document
+assignments are stored in the normalized associations; the legacy column
+remains for compatibility and is restored from associations by migration
+downgrade.
 
 ## Request and monitoring data flow
 
@@ -165,6 +175,13 @@ All routers are mounted under `/api/v1` in `app/main.py`:
 | `dashboard.py` | Dashboard summary |
 | `frontend_compat.py` | Existing dashboard rule, collection, document, settings, import, and backup workflows |
 
+The shared label endpoints and filters are part of the existing API surface:
+`GET /api/v1/labels` lists reusable labels; rules, rule templates, collections,
+and documents accept repeated `label_ids` query parameters. Filtering uses
+AND semantics across selected labels. Entry create/update requests accept
+label names, which the shared service normalizes and resolves to existing or
+new catalog rows.
+
 Health/readiness endpoints and login are unauthenticated. Other `/api/v1`
 requests require a valid bearer session. Request bodies with a declared
 Content-Length above 25 MiB are rejected. CORS is applied only for configured
@@ -178,4 +195,3 @@ database and expose aware UTC datetimes to Python. The test-database setting,
 when present, is checked not to point at the production or a system database.
 The deployment environment, database contents, actual PLC mapping values, SMTP
 server, and live sensor quality cannot be confirmed from source code.
-

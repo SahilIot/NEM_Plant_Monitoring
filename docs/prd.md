@@ -59,6 +59,7 @@ is therefore a verification requirement, not a confirmed product guarantee.
 | FR-10 | Manage local accounts, roles, profile/email settings, collections/documents, and database backups through existing workflows. | Implemented to varying degrees; deployment configuration and access scope require verification |
 | FR-11 | Use OPC UA to write PLC values or control/stop machinery. | Explicitly not implemented |
 | FR-12 | Schedule maintenance from machine running-hour or cycle thresholds. | Not implemented |
+| FR-13 | Assign reusable shared labels to rules, rule collections, and instruction documents; filter listings by one or more labels. | Implemented; PostgreSQL migration and deployment verification required |
 
 ## Principal workflows
 
@@ -70,6 +71,16 @@ is therefore a verification requirement, not a confirmed product guarantee.
    mappings; verify freshness and machine status.
 4. Create compatible monitoring rules and configure thresholds/conditions.
 5. Review the asset Current status, Overview alerts, and event history.
+
+### Organize configuration with labels
+
+1. In a rule, reusable rule template, collection, or instruction/document
+   form, select an existing shared label or type a new label and confirm it.
+2. Assign up to 10 optional labels to an entry. Removing a label removes only
+   that entry's association; the shared label remains available elsewhere.
+3. Filter the corresponding listing by one or more labels. The backend returns
+   entries containing all selected labels (AND behavior), alongside the
+   listing's existing filters.
 
 ### Respond to an alert
 
@@ -130,6 +141,10 @@ is therefore a verification requirement, not a confirmed product guarantee.
   resolution.
 - The dashboard renders the asset, rule state, alert and maintenance actions
   permitted by role, while the API independently enforces permissions.
+- Labels can be reused across rules, templates, collections, and documents;
+  duplicate names differing by case/whitespace resolve to one catalog entry,
+  no entry exceeds 10 labels, and multi-label filters return only entries
+  containing every selected label.
 - Recurrence uses calendar intervals and requires review of proposed dates
   when the schedule is in an approval state.
 - No workflow writes to the PLC or claims safety-interlock behavior.
