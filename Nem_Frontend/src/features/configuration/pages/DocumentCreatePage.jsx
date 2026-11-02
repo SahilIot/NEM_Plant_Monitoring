@@ -189,7 +189,7 @@ export default function DocumentCreatePage() {
                 <label htmlFor="document-description">Description</label>
                 <textarea
                   id="document-description"
-                  rows={4}
+                  rows={1}
                   value={description}
                   placeholder="Add useful details about this document..."
                   disabled={busy}
@@ -209,7 +209,7 @@ export default function DocumentCreatePage() {
 
               <div className="field document-attachments-field">
                 <label htmlFor="document-files">
-                  Attach files <span className="muted">(optional)</span>
+                  Attach files <span className="muted">(required)</span>
                 </label>
 
                 <div className="document-upload-zone">
@@ -237,15 +237,16 @@ export default function DocumentCreatePage() {
                   <div className="document-upload-subtitle">
                     PDF, DOC, DOCX or TXT · Up to 10 files · 10 MB each
                   </div>
-
+                  
                   <input
-                    id="document-files"
-                    type="file"
-                    multiple
-                    accept=".pdf,.doc,.docx,.txt"
-                    disabled={busy}
-                    onChange={(event) =>
-                      setFiles(Array.from(event.target.files || []))
+                  id="document-files"
+                  type="file"
+                  multiple
+                  required
+                  accept=".pdf,.doc,.docx,.txt"
+                  disabled={busy}
+                  onChange={(event) =>
+                    setFiles(Array.from(event.target.files || []))
                     }
                   />
 

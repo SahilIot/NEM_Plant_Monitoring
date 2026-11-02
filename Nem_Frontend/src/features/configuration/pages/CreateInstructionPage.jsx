@@ -120,7 +120,7 @@ export default function CreateInstructionPage() {
         >
         <div className="instruction-field">
           <label htmlFor="instruction-name">
-            Name *
+            Name 
           </label>
 
           <input
@@ -148,7 +148,7 @@ export default function CreateInstructionPage() {
 
         <div className="instruction-field">
           <label htmlFor="instruction-duration">
-            Duration in minutes *
+            Duration in minutes 
           </label>
 
           <input
@@ -166,12 +166,12 @@ export default function CreateInstructionPage() {
 
         <div className="instruction-field">
           <label htmlFor="instruction-text">
-            Instructions Text *
+            Instructions Text 
           </label>
 
           <textarea
             id="instruction-text"
-            rows={8}
+            rows={2}
             maxLength={10000}
             required
             value={text}
