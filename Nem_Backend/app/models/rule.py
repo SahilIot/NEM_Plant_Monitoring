@@ -174,15 +174,9 @@ class MonitoringRule(Base):
     description: Mapped[str | None] = mapped_column(Text)
     rule_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
 
-    target_asset_id: Mapped[int | None] = mapped_column(
-        ForeignKey("assets.id", ondelete="RESTRICT"),
-        index=True,
-    )
+    target_asset_id: Mapped[int | None] = mapped_column(ForeignKey("assets.id", ondelete="RESTRICT"),index=True,)
     source_template_id: Mapped[int | None] = mapped_column(
-        ForeignKey(
-            "nem_monitoring_rule_templates.id",
-            ondelete="RESTRICT",
-        ),
+        ForeignKey( "nem_monitoring_rule_templates.id",ondelete="RESTRICT",),
         index=True,
     )
     variable_id: Mapped[int | None] = mapped_column(
@@ -195,9 +189,7 @@ class MonitoringRule(Base):
     parameters: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
 
-    is_enabled: Mapped[bool] = mapped_column(
-        Boolean, default=True, nullable=False, index=True
-    )
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
     lifecycle_status: Mapped[str] = mapped_column(
         String(20),
         default="in_progress",
@@ -220,10 +212,7 @@ class MonitoringRule(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
-    label_records: Mapped[list[Label]] = relationship(
-        secondary=rule_labels,
-        lazy="selectin",
-    )
+    label_records: Mapped[list[Label]] = relationship(secondary=rule_labels, lazy="selectin",)
 
     @property
     def labels(self) -> list[str]:
@@ -258,9 +247,7 @@ class RuleState(Base):
         index=True,
     )
 
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="unknown"
-    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")
     latest_value: Mapped[Any | None] = mapped_column(JSON)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     last_evaluated_at: Mapped[datetime] = mapped_column(
@@ -350,15 +337,9 @@ class Alert(Base):
     trigger_value: Mapped[Any | None] = mapped_column(JSON)
     threshold: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
 
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="active"
-    )
-    started_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(), nullable=False
-    )
-    last_updated_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(), nullable=False
-    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    last_updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     acknowledged_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     acknowledged_by: Mapped[str | None] = mapped_column(String(200))
@@ -382,31 +363,23 @@ class MonitoringEvent(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    event_type: Mapped[str] = mapped_column(
-        String(50), nullable=False, index=True
-    )
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     severity: Mapped[str | None] = mapped_column(String(20))
 
     asset_id: Mapped[int | None] = mapped_column(
         ForeignKey("assets.id", ondelete="RESTRICT"),
         index=True,
     )
-    rule_id: Mapped[int | None] = mapped_column(
-        ForeignKey("nem_monitoring_rules.id", ondelete="RESTRICT"),
+    rule_id: Mapped[int | None] = mapped_column(ForeignKey("nem_monitoring_rules.id", ondelete="RESTRICT"),
         index=True,
     )
-    alert_id: Mapped[int | None] = mapped_column(
-        ForeignKey("nem_alerts.id", ondelete="RESTRICT"),
+    alert_id: Mapped[int | None] = mapped_column( ForeignKey("nem_alerts.id", ondelete="RESTRICT"),
         index=True,
     )
 
     message: Mapped[str] = mapped_column(Text, nullable=False)
-    occurred_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(), nullable=False
-    )
-    event_metadata: Mapped[dict[str, Any] | None] = mapped_column(
-        "metadata", JSON
-    )
+    occurred_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    event_metadata: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSON)
 
 
 # A lease is a temporary claim to perform scheduled work.
@@ -415,9 +388,5 @@ class SchedulerLease(Base):
 
     name: Mapped[str] = mapped_column(String(100), primary_key=True)
     owner_id: Mapped[str] = mapped_column(String(100), nullable=False)
-    lease_until: Mapped[datetime] = mapped_column(
-        UTCDateTime(), nullable=False, index=True
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(), nullable=False
-    )
+    lease_until: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, index=True)
+    updated_at: Mapped[datetime] = mapped_column( UTCDateTime(), nullable=False)
