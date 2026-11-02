@@ -29,7 +29,7 @@ from app.schemas.asset import AssetCreate, AssetRead, AssetTree, AssetUpdate # p
 
 router = APIRouter(prefix="/assets", tags=["assets"]) 
 
-#check if an asset exists in the database, if not raise a 404 error
+#check if an asset exists in the database and the user can access an asset, if not raise a 404 error
 def asset_or_404(session: Session, asset_id: int) -> Asset:
     asset = session.get(Asset, asset_id)
     # An asset outside the caller's assignment scope is indistinguishable from a missing one.

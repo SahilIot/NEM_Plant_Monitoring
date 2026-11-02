@@ -1,4 +1,4 @@
-"""Standard-library password hashing and opaque session token helpers."""
+# Standard-library password hashing and opaque session token helpers.
 import hashlib
 import hmac
 import secrets
