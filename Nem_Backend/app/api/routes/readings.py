@@ -27,7 +27,7 @@ def latest_readings(
     limit: int = Query(default=100, ge=1, le=1000),
     session: Session = Depends(get_db),
 ) -> list[ReadingRead]:
-    """Return the newest reading for each asset-variable pair the caller may reach."""
+    # Return the newest reading for each asset-variable pair the caller may reach.
     # Rank inside the database instead of loading every reading into memory.
     ranked = (
         select(

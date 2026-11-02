@@ -423,10 +423,7 @@ def complete_alert(
                 .with_for_update()
             )
             if rule is None:
-                raise HTTPException(
-                    status_code=409,
-                    detail="The alert's monitoring rule could not be found.",
-                )
+                raise HTTPException(status_code=409,detail="The alert's monitoring rule could not be found.",)
             if rule.is_enabled:
                 set_rule_enabled_state(session, rule, False, at=now)
             rule.lifecycle_status = "completed"

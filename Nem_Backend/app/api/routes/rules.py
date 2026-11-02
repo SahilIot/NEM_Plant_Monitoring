@@ -25,7 +25,7 @@ SUPERVISOR_PARAMETER_KEYS: dict[str, frozenset[str]] = {
     "boolean_count_threshold": frozenset({"warning_thresholds", "alert_threshold"}),
 }
 
-
+# This checks whether a new value is genuinely different from the existing value.
 def _field_differs(current, new) -> bool:
     if isinstance(current, Decimal) or isinstance(new, Decimal):
         if current is None or new is None:
@@ -33,7 +33,7 @@ def _field_differs(current, new) -> bool:
         return Decimal(str(current)) != Decimal(str(new))
     return current != new
 
-
+# This converts a Pydantic validation errors into readable messages. Makes frontend error handling easier.
 def _validation_message(error: ValidationError) -> str:
     parts = []
     for item in error.errors(include_url=False):
@@ -42,6 +42,7 @@ def _validation_message(error: ValidationError) -> str:
         parts.append(f"{location}: {message}" if location else message)
     return "; ".join(parts)
 
+# Check whether the OPC UA mapping bypass feature is enabled in application settings.
 def is_mapping_bypass_enabled(request: Request) -> bool:
     settings = getattr(request.app.state, "settings", None)
     return bool(getattr(settings, "opc_ua_mapping_bypass_enabled", False))
@@ -59,7 +60,7 @@ def configured_cycle_signal_mapping(request: Request,variable_id: int | None,) -
         None,
     )
 
-
+# Rules need to know whether a selected variable is already configured as the machine`s cycle or running signal.`
 def configured_runtime_signal_mapping(
     request: Request,
     variable_id: int | None,
@@ -76,7 +77,7 @@ def configured_runtime_signal_mapping(
     )
 
 
-#Find the rule safely
+#Find the rule safely - whether rule exists and is within the caller`s access scope. If not, raise a 404 error.
 def rule_or_404(session: Session, rule_id: int) -> MonitoringRule:
     rule = session.get(MonitoringRule, rule_id)
     # A rule on an asset outside the caller's scope is reported as not found.
@@ -120,9 +121,7 @@ def validate_targets(
                 or threshold is not None
             ):
                 raise HTTPException(status_code=422,detail=("Boolean parameter thresholds require an active Boolean "
-                        "variable, an equality operator, and a Boolean expected_value"
-                    ),
-                )
+                        "variable, an equality operator, and a Boolean expected_value"),)
         else:
             if variable is None or variable.data_type not in {"number", "integer"}:
                 raise HTTPException(status_code=422,detail="Parameter threshold rules require a numeric variable",)
@@ -143,16 +142,11 @@ def validate_targets(
                 or interval_seconds <= 0
                 or variable_id is not None
             ):
-                raise HTTPException(status_code=422,detail=(
-                        "Interval-based rules require an asset target, a positive "
-                        "interval_seconds value, and no variable target"
-                    ),
-                )
+                raise HTTPException(status_code=422,detail=("Interval-based rules require an asset target, a positive "
+                        "interval_seconds value, and no variable target"),)
             return
         duration = parameters.get("duration_seconds") if parameters else None
-        if rule_type == "runtime_duration" and parameters and (
-            "warning_thresholds_seconds" in parameters
-        ):
+        if rule_type == "runtime_duration" and parameters and ("warning_thresholds_seconds" in parameters):
             if (
                 asset is None
                 or not asset.is_active
@@ -176,12 +170,9 @@ def validate_targets(
                 runtime_signal_mapping != (target_asset_id, variable_id)
                 and not bypass_signal_is_valid
             ):
-                raise HTTPException(status_code=422,
-                    detail=("Running-time rules must target this asset's configured "
+                raise HTTPException(status_code=422,detail=("Running-time rules must target this asset's configured "
                         "OPC UA running signal or an asset-owned declared Boolean "
-                        "running signal while mapping bypass is enabled"
-                    ),
-                )
+                        "running signal while mapping bypass is enabled"),)
         else:
             if (
                 not isinstance(duration, int)
@@ -218,13 +209,9 @@ def validate_targets(
                         runtime_signal_mapping != (target_asset_id, variable_id)
                         and not bypass_signal_is_valid
                     ):
-                        raise HTTPException(status_code=422,
-                            detail=(
-                                "Boolean duration rules must target this asset's "
+                        raise HTTPException(status_code=422,detail=("Boolean duration rules must target this asset's "
                                 "configured running signal or a declared variable "
-                                "marked as Machine running state."
-                            ),
-                        )
+                                "marked as Machine running state."),)
     if rule_type == "boolean_count_threshold":
         if (
             asset is None
@@ -251,9 +238,7 @@ def validate_targets(
         ):
             raise HTTPException(status_code=422,detail=("Boolean count threshold rules must target the active Boolean "
                     "variable configured as this asset's OPC UA cycle signal, or "
-                    "an asset-owned declared Boolean variable while mapping bypass is enabled."
-                ),
-            )
+                    "an asset-owned declared Boolean variable while mapping bypass is enabled." ),)
         parameters = parameters or {}
         warning_thresholds = parameters.get("warning_thresholds")
         alert_threshold = parameters.get("alert_threshold")
@@ -390,13 +375,8 @@ def update_rule(
             allowed_keys = SUPERVISOR_PARAMETER_KEYS.get(rule.rule_type, frozenset())
             disallowed = set(incoming) - allowed_keys
             if disallowed:
-                raise HTTPException(
-                    status_code=403,
-                    detail=(
-                        "Supervisors can only edit threshold parameters. "
-                        f"Restricted parameters: {', '.join(sorted(disallowed))}"
-                    ),
-                )
+                raise HTTPException(status_code=403,detail=( "Supervisors can only edit threshold parameters. "
+                        f"Restricted parameters: {', '.join(sorted(disallowed))}"),)
         changes["parameters"] = {**(rule.parameters or {}), **incoming}
 
     # Only genuine modifications count; values equal to the stored ones are no-ops.
@@ -416,13 +396,8 @@ def update_rule(
             allowed_fields.add("threshold")
         restricted = set(changes) - allowed_fields
         if restricted:
-            raise HTTPException(
-                status_code=403,
-                detail=(
-                    "Supervisors can only edit threshold and evaluation interval values. "
-                    f"Restricted fields: {', '.join(sorted(restricted))}"
-                ),
-            )
+            raise HTTPException(status_code=403,detail=("Supervisors can only edit threshold and evaluation interval values. "
+                    f"Restricted fields: {', '.join(sorted(restricted))}"),)
 
     if rule.lifecycle_status == "completed" and changes.get("is_enabled") is True:
         raise HTTPException(status_code=409,detail="Completed rules cannot be reactivated. Create a new rule instead.",)

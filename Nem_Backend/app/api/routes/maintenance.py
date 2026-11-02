@@ -41,7 +41,7 @@ def _flush_deletion(session: Session, detail: str) -> None:
         session.rollback()
         raise HTTPException(status_code=409, detail=detail) from error
 
-
+# Performs the actual transaction commit.
 def _commit_deletion(session: Session, detail: str) -> None:
     try:
         session.commit()
@@ -78,7 +78,7 @@ def _schedule_in_scope(
         raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
     return schedule
 
-
+# does same thing as _schedule_in_scope but for an individual maintenance record instead of a schedule
 def _record_in_scope(
     session: Session,
     record: MaintenanceRecord | None,
@@ -88,7 +88,7 @@ def _record_in_scope(
         raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
     return record
 
-
+# Important : restrict operators so they can only start or complete maintenance that is due today or overdue.
 def _authorize_operator_due_occurrence(
     session: Session,
     record: MaintenanceRecord,
@@ -593,10 +593,7 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
         }
         restricted = set(changes.keys()) - allowed_supervisor_fields
         if restricted:
-            raise HTTPException(
-                status_code=403,
-                detail=(
-                    "Supervisors can only edit schedule dates and recurrence "
+            raise HTTPException(status_code=403,detail=("Supervisors can only edit schedule dates and recurrence "
                     f"intervals. Restricted fields: {', '.join(sorted(restricted))}"
                 ),
             )
@@ -604,10 +601,7 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
             {"recurrence_interval", "recurrence_unit"}.intersection(changes)
             and not schedule.recurrence_enabled
         ):
-            raise HTTPException(
-                status_code=409,
-                detail="Only recurring maintenance schedules have editable recurrence intervals.",
-            )
+            raise HTTPException(status_code=409,detail="Only recurring maintenance schedules have editable recurrence intervals.",)
 
     if "instruction_document_ids" in changes:
         changes["instruction_document_ids"] = _validate_instruction_documents(session, changes["instruction_document_ids"] or [])

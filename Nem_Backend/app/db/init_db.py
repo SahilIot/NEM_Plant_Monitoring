@@ -15,7 +15,7 @@ from app.models import (
 )
 from app.db.migrations.shared_labels import upgrade as upgrade_shared_labels
 
-
+# Removes a db column only if that column currently exists.
 def _drop_column_if_present(engine: Engine, table_name: str, column_name: str) -> None:
     columns = {
         column["name"]
@@ -24,13 +24,9 @@ def _drop_column_if_present(engine: Engine, table_name: str, column_name: str) -
     if column_name not in columns:
         return
     if engine.dialect.name not in {"postgresql", "sqlite"}:
-        raise RuntimeError(
-            f"Column removal is not implemented for {engine.dialect.name}"
-        )
+        raise RuntimeError(f"Column removal is not implemented for {engine.dialect.name}")
     with engine.begin() as connection:
-        connection.execute(
-            text(f"ALTER TABLE {table_name} DROP COLUMN {column_name}")
-        )
+        connection.execute(text(f"ALTER TABLE {table_name} DROP COLUMN {column_name}"))
 
 
 #creates tables defined in SQLAlchemy models if they do not exist
@@ -110,7 +106,7 @@ def _migrate_auth_roles(engine: Engine) -> None:
 # Arbitrary constant shared by every process that upgrades this schema.
 _SCHEMA_UPGRADE_LOCK_KEY = 0x4E454D01
 
-
+# Main entry point
 def initialize_database(engine: Engine) -> None:
     """Create/upgrade the schema. Safe to call repeatedly and from several processes.
 
@@ -129,12 +125,10 @@ def initialize_database(engine: Engine) -> None:
             lock_connection.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _SCHEMA_UPGRADE_LOCK_KEY})
 
 
-_RULE_TYPES = (
-    "parameter_threshold", "runtime_duration", "duration",
-    "generic", "boolean_condition", "boolean_count_threshold",
-)
+_RULE_TYPES = ("parameter_threshold", "runtime_duration", "duration",
+    "generic", "boolean_condition", "boolean_count_threshold",)
 
-
+# This function checks whether an existing PostgreSQL db has the correct allowed rule types.
 def _reconcile_rule_type_constraint(engine: Engine) -> None:
     """Widen ck_nem_monitoring_rules_type on databases created before every type existed.
 
@@ -153,16 +147,12 @@ def _reconcile_rule_type_constraint(engine: Engine) -> None:
         if definition is not None and all(f"'{name}'" in definition for name in _RULE_TYPES):
             return
         if definition is not None:
-            connection.execute(text(
-                "ALTER TABLE nem_monitoring_rules DROP CONSTRAINT ck_nem_monitoring_rules_type"
-            ))
+            connection.execute(text("ALTER TABLE nem_monitoring_rules DROP CONSTRAINT ck_nem_monitoring_rules_type"))
         allowed = ", ".join(f"'{name}'" for name in _RULE_TYPES)
-        connection.execute(text(
-            "ALTER TABLE nem_monitoring_rules ADD CONSTRAINT ck_nem_monitoring_rules_type "
-            f"CHECK (rule_type IN ({allowed})) NOT VALID"
-        ))
+        connection.execute(text("ALTER TABLE nem_monitoring_rules ADD CONSTRAINT ck_nem_monitoring_rules_type "
+            f"CHECK (rule_type IN ({allowed})) NOT VALID"))
 
-
+# Largest and important function this creates missing tables and other supported objects described in the SQLAlchemy models.
 def _initialize_schema(engine: Engine) -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_auth_roles(engine)
@@ -217,8 +207,7 @@ def _initialize_schema(engine: Engine) -> None:
                     )
                 )
             if "maintenance_details" not in request_columns:
-                connection.execute(
-                    text(
+                connection.execute(text(
                         "ALTER TABLE nem_monitoring_rule_template_requests "
                         "ADD COLUMN maintenance_details JSON"
                     )
@@ -230,27 +219,23 @@ def _initialize_schema(engine: Engine) -> None:
         }
         with engine.begin() as connection:
             if "labels" not in document_columns:
-                connection.execute(
-                    text(
+                connection.execute(text(
                         "ALTER TABLE instruction_documents "
                         "ADD COLUMN labels JSON NOT NULL DEFAULT '[]'"
                     )
                 )
             if "duration_minutes" not in document_columns:
-                connection.execute(
-                    text(
+                connection.execute(text(
                         "ALTER TABLE instruction_documents "
                         "ADD COLUMN duration_minutes INTEGER"
                     )
                 )
 
     if "variables" in table_names:
-        variable_columns = {column["name"] for column in inspector.get_columns("variables")
-        }
+        variable_columns = {column["name"] for column in inspector.get_columns("variables")}
         if "opcua_node_id" not in variable_columns:
             with engine.begin() as connection:
-                connection.execute(
-                    text("ALTER TABLE variables "
+                connection.execute(text("ALTER TABLE variables "
                         "ADD COLUMN opcua_node_id VARCHAR(512)"
                     )
                 )
@@ -260,8 +245,7 @@ def _initialize_schema(engine: Engine) -> None:
         with engine.begin() as connection:
             connection.execute(text("DROP INDEX IF EXISTS uq_variables_opcua_node_id"))
             connection.execute(text("DROP INDEX IF EXISTS ix_variables_opcua_node_id"))
-            connection.execute(
-                text(
+            connection.execute(text(
                     "CREATE INDEX IF NOT EXISTS ix_variables_opcua_node_id "
                     "ON variables (opcua_node_id)"
                 )
@@ -274,23 +258,20 @@ def _initialize_schema(engine: Engine) -> None:
         with engine.begin() as connection:
             if "lifecycle_status" not in rule_columns:
                 if engine.dialect.name == "postgresql":
-                    connection.execute(
-                        text(
+                    connection.execute(text(
                             "ALTER TABLE nem_monitoring_rules "
                             "ADD COLUMN IF NOT EXISTS lifecycle_status "
                             "VARCHAR(20) NOT NULL DEFAULT 'deactivated'"
                         )
                     )
                 else:
-                    connection.execute(
-                        text(
+                    connection.execute(text(
                             "ALTER TABLE nem_monitoring_rules "
                             "ADD COLUMN lifecycle_status "
                             "VARCHAR(20) NOT NULL DEFAULT 'deactivated'"
                         )
                     )
-                connection.execute(
-                    text(
+                connection.execute(text(
                         "UPDATE nem_monitoring_rules SET lifecycle_status = "
                         "CASE WHEN is_enabled = TRUE "
                         "THEN 'in_progress' ELSE 'deactivated' END"
@@ -302,8 +283,7 @@ def _initialize_schema(engine: Engine) -> None:
                     else "DATETIME"
                 )
                 if engine.dialect.name == "postgresql":
-                    connection.execute(
-                        text("ALTER TABLE nem_monitoring_rules "
+                    connection.execute(text("ALTER TABLE nem_monitoring_rules "
                             "ADD COLUMN IF NOT EXISTS completed_at "
                             + column_type
                         )
@@ -347,20 +327,16 @@ def _initialize_schema(engine: Engine) -> None:
 
     if "nem_maintenance_schedules" in table_names:
         schedule_columns = {column["name"]
-            for column in inspect(engine).get_columns(
-                "nem_maintenance_schedules"
-            )
+            for column in inspect(engine).get_columns("nem_maintenance_schedules")
         }
         if "instruction_document_ids" not in schedule_columns:
             with engine.begin() as connection:
-                connection.execute(text(
-                    "ALTER TABLE nem_maintenance_schedules "
+                connection.execute(text("ALTER TABLE nem_maintenance_schedules "
                     "ADD COLUMN instruction_document_ids JSON NOT NULL DEFAULT '[]'"
                 ))
         if "current_period_start_date" not in schedule_columns:
             with engine.begin() as connection:
-                connection.execute(text(
-                        "ALTER TABLE nem_maintenance_schedules "
+                connection.execute(text( "ALTER TABLE nem_maintenance_schedules "
                         "ADD COLUMN current_period_start_date DATE"
                     )
                 )
@@ -422,9 +398,7 @@ def _initialize_schema(engine: Engine) -> None:
         record_inspector = inspect(engine)
         has_occurrence_unique = any(
             constraint.get("name") == "uq_maintenance_occurrence_schedule_due"
-            for constraint in record_inspector.get_unique_constraints(
-                "nem_maintenance_records"
-            )
+            for constraint in record_inspector.get_unique_constraints("nem_maintenance_records")
         ) or any(
             index.get("name") == "uq_maintenance_occurrence_schedule_due"
             and index.get("unique")
@@ -457,16 +431,11 @@ def _initialize_schema(engine: Engine) -> None:
                     )
 
     if "nem_alerts" in table_names and "nem_maintenance_schedules" in table_names:
-        alert_columns = {column["name"]
-            for column in inspect(engine).get_columns("nem_alerts")
-        }
+        alert_columns = {column["name"] for column in inspect(engine).get_columns("nem_alerts")}
 
         with engine.begin() as connection:
             if "maintenance_schedule_id" not in alert_columns:
-                connection.execute(text("ALTER TABLE nem_alerts "
-                        "ADD COLUMN maintenance_schedule_id INTEGER"
-                    )
-                )
+                connection.execute(text("ALTER TABLE nem_alerts ADD COLUMN maintenance_schedule_id INTEGER"))
             if "maintenance_due_date" not in alert_columns:
                 connection.execute(text("ALTER TABLE nem_alerts "
                         "ADD COLUMN maintenance_due_date DATE"

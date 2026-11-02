@@ -76,10 +76,7 @@ def set_asset_supervisors(asset_id: int, payload: SupervisorAssignment, session:
     user_ids = sorted(set(payload.user_ids))
     if user_ids and asset.parent_asset_id is not None:
         # Clearing is still allowed so stale rows on a child can be removed.
-        raise HTTPException(
-            status_code=422,
-            detail="Users can only be assigned to a top-level (parent) asset; child assets inherit access from their parent.",
-        )
+        raise HTTPException(status_code=422,detail="Users can only be assigned to a top-level (parent) asset; child assets inherit access from their parent.",)
     if user_ids:
         valid = set(session.scalars(
             select(User.id).where(

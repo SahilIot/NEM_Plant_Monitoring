@@ -11,23 +11,20 @@ from app.schemas.variable import VariableCreate, VariableRead, VariableUpdate
 
 router = APIRouter(tags=["variables"])
 
+# Handles db uniqueness conflicts for variable API. 
 def variable_integrity_conflict(error: IntegrityError) -> HTTPException | None:
-    constraint_name = getattr(
-        getattr(error.orig, "diag", None),
+    constraint_name = getattr(getattr(error.orig, "diag", None),
         "constraint_name",
         None,
     )
     if constraint_name == "uq_variables_asset_key" or ("variables.asset_id, variables.key" in str(error.orig)):
         return HTTPException(status_code=409,detail="Variable key already exists for this asset",)
     if constraint_name == "uq_variables_opcua_node_id" or ("variables.opcua_node_id" in str(error.orig)):
-        return HTTPException(status_code=409,detail=(
-                "This OPC UA NodeId is already registered. "
+        return HTTPException(status_code=409,detail=( "This OPC UA NodeId is already registered. "
                 "NodeIds can be shared across different assets after the "
-                "database schema has been updated."
-            ),
-        )
+                "database schema has been updated."),)
+        
     return None
-
 
 #Find a variable by its database ID
 def variable_or_404(session: Session, variable_id: int) -> Variable:
@@ -131,11 +128,8 @@ def update_variable(variable_id: int,payload: VariableUpdate,session: Session = 
             or resulting_signal_role not in required_roles
             or resulting_data_type != "boolean"
         ):
-            raise HTTPException(status_code=409,detail=(
-                    "Deactivate or remap the active rules using this variable "
-                    "before changing its Boolean purpose."
-                ),
-            )
+            raise HTTPException(status_code=409,detail=("Deactivate or remap the active rules using this variable "
+                    "before changing its Boolean purpose."),)
 
     for field, value in changes.items():
         setattr(variable, field, value)
@@ -166,17 +160,11 @@ def delete_variable(
         (Alert, Alert.target_variable_id),
     )
     if any(
-        session.scalar(
-            select(column).where(column == variable.id).limit(1)
-        )
+        session.scalar(select(column).where(column == variable.id).limit(1))
         for model, column in references
     ):
-        raise HTTPException( status_code=409,
-            detail=(
-                "Cannot delete a variable referenced by readings, monitoring "
-                "rules, rule states, or alerts. Deactivate it instead."
-            ),
-        )
+        raise HTTPException( status_code=409,detail=("Cannot delete a variable referenced by readings, monitoring "
+                "rules, rule states, or alerts. Deactivate it instead."),)
 
     collector = getattr(request.app.state, "opcua_collector", None)
     if collector is not None and any(
@@ -189,12 +177,8 @@ def delete_variable(
         )
         if signal is not None
     ):
-        raise HTTPException(status_code=409,
-            detail=(
-                "Cannot delete a variable used by OPC UA_MACHINE_MAPPINGS. "
-                "Remove its mapping and restart the backend first."
-            ),
-        )
+        raise HTTPException(status_code=409,detail=("Cannot delete a variable used by OPC UA_MACHINE_MAPPINGS. "
+                "Remove its mapping and restart the backend first."),)
 
     session.delete(variable)
     session.commit()

@@ -25,10 +25,7 @@ class RuleCollection(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
     description: Mapped[str | None] = mapped_column(Text)
-    label_records: Mapped[list[Label]] = relationship(
-        secondary=rule_collection_labels,
-        lazy="selectin",
-    )
+    label_records: Mapped[list[Label]] = relationship(secondary=rule_collection_labels,lazy="selectin",)
 
     @property
     def labels(self) -> list[str]:
@@ -41,14 +38,9 @@ class InstructionDocument(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     kind: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    legacy_labels: Mapped[list[str]] = mapped_column(
-        "labels", JSON, nullable=False, default=list
-    )
+    legacy_labels: Mapped[list[str]] = mapped_column( "labels", JSON, nullable=False, default=list)
     duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    label_records: Mapped[list[Label]] = relationship(
-        secondary=instruction_document_labels,
-        lazy="selectin",
-    )
+    label_records: Mapped[list[Label]] = relationship(secondary=instruction_document_labels,lazy="selectin",)
 
     @property
     def labels(self) -> list[str]:

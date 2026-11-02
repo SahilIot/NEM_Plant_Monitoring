@@ -58,10 +58,7 @@ class MonitoringRuleTemplate(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
-    label_records: Mapped[list[Label]] = relationship(
-        secondary=rule_template_labels,
-        lazy="selectin",
-    )
+    label_records: Mapped[list[Label]] = relationship(secondary=rule_template_labels,lazy="selectin",)
 
     @property
     def labels(self) -> list[str]:
@@ -105,9 +102,7 @@ class MonitoringRuleTemplateRequest(Base):
     threshold: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
     parameters: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
-    is_enabled: Mapped[bool] = mapped_column(
-        Boolean, default=True, nullable=False
-    )
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     evaluation_interval_seconds: Mapped[int | None] = mapped_column()
     stale_after_seconds: Mapped[int | None] = mapped_column()
 
@@ -130,9 +125,7 @@ class MonitoringRuleTemplateRequest(Base):
         nullable=False,
         index=True,
     )
-    reviewed_by: Mapped[int | None] = mapped_column(
-        ForeignKey("auth_users.id", ondelete="RESTRICT"),
-    )
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="RESTRICT"),)
     reviewed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     review_comment: Mapped[str | None] = mapped_column(Text)
 
