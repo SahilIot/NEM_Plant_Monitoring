@@ -29,8 +29,8 @@ from app.schemas.reading import ReadingCreate
 from app.services.monitoring_engine import (acquire_scheduler_lease,
     emit_event,evaluate_reading_rules,utc_now,
 )
-from app.services.opcua_client import (OpcUaConfigurationError,
-    create_configured_opcua_client,
+from app.services.opcua_client import (OpcUaConfigurationError, OpcUaConnectionError,
+    create_configured_opcua_client, opcua_security_summary,
 )
 from app.services.reading_ingestion import ingest_reading
 
@@ -221,6 +221,7 @@ class OpcUaCollector:
             "last_notification_at": None,
             "last_error": None,
             "negotiated_publishing_interval_ms": None,
+            "security": opcua_security_summary(settings),
         }
         self._stop_event = asyncio.Event()
         self._configuration_refresh_requested = asyncio.Event()
@@ -443,7 +444,12 @@ class OpcUaCollector:
                 self.status.update(
                     state="disconnected",
                     connected=False,
-                    last_error=f"OPC UA collector unavailable ({type(error).__name__}).",
+                    # These two error types carry fixed, secret-free messages written for operators.
+                    last_error=(
+                        str(error)
+                        if isinstance(error, (OpcUaConfigurationError, OpcUaConnectionError))
+                        else f"OPC UA collector unavailable ({type(error).__name__})."
+                    ),
                 )
                 self._notify_status_changed()
                 await asyncio.to_thread(self._release_lease)

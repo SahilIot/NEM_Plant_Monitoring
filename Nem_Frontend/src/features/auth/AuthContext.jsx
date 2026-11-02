@@ -1,10 +1,25 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, AUTH_TOKEN_KEY, getAuthToken } from "../../services/api.js";
+import { resetLiveUpdates } from "../../services/liveUpdates.js";
 
 const AuthContext = createContext(null);
 
+// Per-user browser state (saved form/navigation state) must not leak to the next
+// account that signs in on the same browser tab.
+function clearUserScopedBrowserState() {
+  try {
+    Object.keys(window.sessionStorage)
+      .filter((key) => key.startsWith("nem-navigation-flash:"))
+      .forEach((key) => window.sessionStorage.removeItem(key));
+  } catch (error) {
+    // Storage may be unavailable; there is nothing to clear in that case.
+  }
+}
+
 function storeToken(token) {
+  clearUserScopedBrowserState();
+  resetLiveUpdates();
   try {
     if (token) localStorage.setItem(AUTH_TOKEN_KEY, token);
     else localStorage.removeItem(AUTH_TOKEN_KEY);
@@ -34,6 +49,18 @@ export function AuthProvider({ children }) {
       })
       .finally(() => active && setLoading(false));
     return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    // The session token is shared by every tab of this browser. When another tab signs in
+    // (possibly as a different user) or out, this tab's in-memory assets, rules and alerts
+    // belong to the previous user while its next request already carries the new token.
+    // "storage" events fire only in the *other* tabs, so reloading here starts clean.
+    const onStorage = (event) => {
+      if (event.key === AUTH_TOKEN_KEY || event.key === null) window.location.reload();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   useEffect(() => {

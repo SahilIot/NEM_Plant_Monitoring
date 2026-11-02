@@ -595,9 +595,6 @@ export default function AssetDetail() {
   const assetId = Number(id);
   const routeState = location.state || {};
   const asset = assets.find((a) => a.id === assetId);
-  const hasChildren = asset
-    ? assets.some((candidate) => candidate.parent_asset_id === asset.id)
-    : false;
 
   const [tab, setTab] = useState(
     ["status", "logbook", "events"].includes(routeState.activeTab)
@@ -2243,7 +2240,8 @@ const filteredEvents = [...events]
               </span>
             )}
           </div>
-          {isAdministrator && hasChildren && (
+          {/* Assignment is parent-only: only a top-level asset can be assigned; child assets inherit access from it. */}
+          {isAdministrator && asset.parent_asset_id == null && (
             <AssetSupervisors assetId={asset.id} />
           )}
         </div>

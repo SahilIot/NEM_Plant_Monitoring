@@ -32,6 +32,7 @@ from app.api.routes import (
     variables,
 )
 from app.models import AuthSession, User
+from app.services.access_scope import scope_for_user
 from app.services.auth_security import hash_session_token
 from app.core.config import Settings, get_settings
 from app.db.init_db import initialize_database
@@ -40,6 +41,7 @@ from app.services.email_notifications import deliver_pending
 from app.services.maintenance_schedule import emit_due_schedule_events
 from app.services.monitoring_engine import (
     acquire_scheduler_lease,
+    release_scheduler_lease,
     evaluate_rules,
     utc_now,
 )
@@ -50,27 +52,43 @@ LOGGER = logging.getLogger("nem_backend")
 MAX_REQUEST_BODY_BYTES = 25 * 1024 * 1024  
 
 #function run repeatedly in the background to check whether maintenance schedules are due
-async def _maintenance_due_alert_loop(session_factory, owner_id: str) -> None:
-    while True:
-        try:
-            #Run db work outside the event loop
-            def evaluate_due_schedules() -> None:
-                with session_factory() as session:
-                    if not acquire_scheduler_lease(
-                        session,
-                        owner_id=owner_id,
-                        now=utc_now(),
-                        lease_seconds=90,
-                        name="maintenance-due-alerts",
-                    ):
-                        return
-                    #Generate due schedule events
-                    emit_due_schedule_events(session, today=utc_now().date())
+async def _release_lease_quietly(session_factory, owner_id: str, name: str) -> None:
+    """Hand the lease back on shutdown so a restarted instance does not wait for expiry."""
+    def release() -> None:
+        with session_factory() as session:
+            release_scheduler_lease(session, owner_id=owner_id, name=name)
 
-            await asyncio.to_thread(evaluate_due_schedules)
-        except SQLAlchemyError:
-            LOGGER.exception("Maintenance due-date evaluation failed")
-        await asyncio.sleep(60)
+    try:
+        await asyncio.to_thread(release)
+    except Exception:
+        LOGGER.warning("Could not release lease %s on shutdown; it will expire on its own", name)
+
+
+async def _maintenance_due_alert_loop(session_factory, owner_id: str) -> None:
+    try:
+        while True:
+            try:
+                #Run db work outside the event loop
+                def evaluate_due_schedules() -> None:
+                    with session_factory() as session:
+                        if not acquire_scheduler_lease(
+                            session,
+                            owner_id=owner_id,
+                            now=utc_now(),
+                            lease_seconds=90,
+                            name="maintenance-due-alerts",
+                        ):
+                            return
+                        #Generate due schedule events
+                        emit_due_schedule_events(session, today=utc_now().date())
+
+                await asyncio.to_thread(evaluate_due_schedules)
+            except Exception:
+                # Any failure is logged and retried next cycle; one bad pass must not end the worker.
+                LOGGER.exception("Maintenance due-date evaluation failed")
+            await asyncio.sleep(60)
+    finally:
+        await _release_lease_quietly(session_factory, owner_id, "maintenance-due-alerts")
 
 
 async def _email_delivery_loop(session_factory, settings: Settings) -> None:
@@ -89,40 +107,53 @@ async def _monitoring_evaluation_loop(
     interval_seconds: int,
     stale_after_seconds: int,
 ) -> None:
-    while True:
-        try:
-            def evaluate_monitoring_rules() -> None:
-                with session_factory() as session:
-                    if not acquire_scheduler_lease(
-                        session,
-                        owner_id=owner_id,
-                        now=utc_now(),
-                        lease_seconds=max(90, interval_seconds * 3),
-                        name="monitoring-evaluation",
-                    ):
-                        return
-                    evaluate_rules(
-                        session,
-                        evaluated_at=utc_now(),
-                        stale_after_seconds=stale_after_seconds,
-                        respect_rule_intervals=True,
-                    )
-                    session.commit()
+    try:
+        while True:
+            try:
+                def evaluate_monitoring_rules() -> None:
+                    with session_factory() as session:
+                        if not acquire_scheduler_lease(
+                            session,
+                            owner_id=owner_id,
+                            now=utc_now(),
+                            lease_seconds=max(90, interval_seconds * 3),
+                            name="monitoring-evaluation",
+                        ):
+                            return
+                        evaluate_rules(
+                            session,
+                            evaluated_at=utc_now(),
+                            stale_after_seconds=stale_after_seconds,
+                            respect_rule_intervals=True,
+                        )
+                        session.commit()
 
-            await asyncio.to_thread(evaluate_monitoring_rules)
-        except SQLAlchemyError:
-            LOGGER.exception("Monitoring rule evaluation failed")
-        await asyncio.sleep(interval_seconds)
+                await asyncio.to_thread(evaluate_monitoring_rules)
+            except Exception:
+                # Any failure is logged and retried next cycle; one bad pass must not end the worker.
+                LOGGER.exception("Monitoring rule evaluation failed")
+            await asyncio.sleep(interval_seconds)
+    finally:
+        await _release_lease_quietly(session_factory, owner_id, "monitoring-evaluation")
 
 #Serving the frontend help serve a built React frontend
 class FrontendStaticFiles(StaticFiles):
     async def get_response(self, path: str, scope):
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except StarletteHTTPException as error:
             if error.status_code == 404 and not Path(path).suffix:
-                return await super().get_response("index.html", scope)
-            raise
+                response = await super().get_response("index.html", scope)
+            else:
+                raise
+        # Hashed build assets never change, so they may be cached for good. index.html (and
+        # any other un-hashed file) must be revalidated on every load; otherwise a browser
+        # can keep running an old bundle, with old authentication/state handling, after a rebuild.
+        if path.replace("\\", "/").startswith("assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
 #Building the application
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -445,16 +476,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         or not current_user.is_active
                     ):
                         return False, None
-                    return True, None
+                    # Recomputed for every message so assignment, hierarchy and role
+                    # changes take effect immediately. None = unrestricted (Administrator);
+                    # any other user receives updates for their assigned assets only
+                    # (an empty set means nothing is forwarded).
+                    scope = scope_for_user(db, current_user)
+                    return True, (None if scope.unrestricted else set(scope.asset_ids))
 
             return await asyncio.to_thread(read_current_access)
 
+        # authorized_asset_ids is refreshed by reauthorize_socket before any message is sent.
         await serve_live_updates(
             websocket,
             live_updates,
-            authorized_asset_ids=None,
+            authorized_asset_ids=set(),
             authorization_check=reauthorize_socket,
         )
+
+# API responses are per-user and must never be stored or reused by a browser or proxy.
+    @application.middleware("http")
+    async def forbid_api_response_caching(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
 #Checking request size
     @application.middleware("http")

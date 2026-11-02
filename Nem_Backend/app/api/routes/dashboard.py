@@ -10,26 +10,32 @@ from app.db.session import get_db
 from app.models import Alert, Asset, MonitoringRule, Reading, RuleState, Variable
 # Defines the structure of the response returned by the endpoint
 from app.schemas.dashboard import DashboardSummary
+from app.services.access_scope import access_scope, rule_clause
 
 #Creating an API endpoint
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 @router.get("/summary", response_model=DashboardSummary)
 def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
+    # Every figure below counts only assets (and their rules/alerts/readings) the caller may reach.
+    scope = access_scope(session)
+    rules_in_scope = rule_clause(scope)
     # total assets
-    total = session.scalar(select(func.count()).select_from(Asset)) or 0
+    total = session.scalar(select(func.count()).select_from(Asset).where(scope.clause(Asset.id))) or 0
     #active assest
-    active = session.scalar(select(func.count()).select_from(Asset).where(Asset.is_active.is_(True))) or 0
+    active = session.scalar(select(func.count()).select_from(Asset).where(Asset.is_active.is_(True), scope.clause(Asset.id))) or 0
     #Counting Monitoring Rules
     rule_total = session.scalar(
         select(func.count())
         .select_from(MonitoringRule)
+        .where(rules_in_scope)
     ) or 0
     enabled = session.scalar(
         select(func.count())
         .select_from(MonitoringRule)
         .where(
             MonitoringRule.is_enabled.is_(True),
+            rules_in_scope,
         )
     ) or 0
     disabled = rule_total - enabled
@@ -42,10 +48,11 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
             Variable.is_active.is_(True),
             Asset.is_active.is_(True),
             MonitoringRule.is_enabled.is_(True),
+            scope.clause(Variable.asset_id),
         )
     ) or 0
     # Getting the latest reading timestamp
-    latest = session.scalar(select(func.max(Reading.recorded_at)))
+    latest = session.scalar(select(func.max(Reading.recorded_at)).where(scope.clause(Reading.asset_id)))
     #Counting rules by their current status (normal, warning, alert, unknown) for enabled rules. If there are any enabled rules that do not have a corresponding RuleState entry, they are counted as "unknown".
     state_counts = {
         status: session.scalar(
@@ -55,6 +62,7 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
             .where(
                 MonitoringRule.is_enabled.is_(True),
                 RuleState.status == status,
+                scope.clause(RuleState.target_asset_id),
             )
         ) or 0
         for status in ("normal", "warning", "alert", "unknown")
@@ -69,6 +77,7 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
             Alert.severity == "alert",
             Alert.maintenance_schedule_id.is_(None),
             MonitoringRule.is_enabled.is_(True),
+            scope.clause(Alert.target_asset_id),
         )
     ) or 0
     #Counting assets currenly in alert and warning state
@@ -80,6 +89,7 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
             Alert.severity == "warning",
             Alert.maintenance_schedule_id.is_(None),
             MonitoringRule.is_enabled.is_(True),
+            scope.clause(Alert.target_asset_id),
         )
     ) or 0
     #Counting total active alerts and unacknowledged active alerts
@@ -89,6 +99,7 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
         .outerjoin(MonitoringRule, MonitoringRule.id == Alert.rule_id)
         .where(
             Alert.status == "active",
+            scope.clause(Alert.target_asset_id),
             or_(
                 Alert.maintenance_schedule_id.is_not(None),
                 and_(
@@ -104,6 +115,7 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
         .where(
             Alert.status == "active",
             Alert.acknowledged_at.is_(None),
+            scope.clause(Alert.target_asset_id),
             or_(
                 Alert.maintenance_schedule_id.is_not(None),
                 and_(

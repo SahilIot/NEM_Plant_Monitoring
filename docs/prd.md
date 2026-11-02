@@ -38,10 +38,10 @@ The source defines `Administrator`, `Supervisor`, and `Operator`.
   alerts subject to their state, and start/complete the active scheduled
   maintenance occurrence due today or overdue.
 
-`auth.py`, `main.py`, and route-level checks enforce role capabilities. The
-backend README claims assigned-asset scoping, but inspected standard read routes
-and WebSocket setup do not establish that scope; asset-assignment enforcement
-is therefore a verification requirement, not a confirmed product guarantee.
+`auth.py`, `main.py`, and route-level checks enforce role capabilities. Beyond
+role, Supervisors and Operators are limited server-side to their assigned assets
+and those assets' descendants, in REST responses and WebSocket events; with no
+assignments they see no assets. Administrators are unrestricted.
 
 ## Functional requirements and status
 
@@ -119,9 +119,10 @@ is therefore a verification requirement, not a confirmed product guarantee.
   leases to avoid duplicate scheduled evaluators/collectors across instances.
 - **Security:** Authenticate `/api/v1` except health/readiness/login; enforce
   role capabilities; protect credentials and use trusted HTTPS in deployment.
-  Asset assignment scope requires verification.
-- **Operational safety:** No PLC write/control path. Current OPC UA transport
-  settings are development-only and not suitable for untrusted networks.
+  Asset assignment scope is enforced on the server (not yet runtime-tested).
+- **Operational safety:** No PLC write/control path. OPC UA transport security
+  is configurable (`Sign`/`SignAndEncrypt` with server-certificate validation)
+  but defaults to unsecured; use a secure mode on untrusted networks.
 - **Usability:** Provide visible status, error, empty, and loading feedback;
   preserve typed form input through refresh; support responsive layout and
   accessible focus/dialog/menu semantics already used by the UI.

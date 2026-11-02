@@ -20,7 +20,10 @@ Db = Annotated[Session, Depends(get_db)]
 class SupervisorAssignment(BaseModel):
     user_ids: list[int] = Field(default_factory=list, max_length=50)
 
-#Retrives supervisors currently assigned to an asset
+#Retrives the users currently assigned to an asset.
+# An assignment grants a Supervisor or Operator access to the asset and its child
+# assets; Supervisor assignments also select the email recipients (see
+# services/email_notifications.py). Operators never receive alert emails.
 def _assignment(session: Session, asset_id: int) -> dict:
     users = session.scalars(
         select(User).join(AssetSupervisor, AssetSupervisor.user_id == User.id)
@@ -29,7 +32,12 @@ def _assignment(session: Session, asset_id: int) -> dict:
     return {
         "asset_id": asset_id,
         "supervisors": [
-            {"id": u.id, "username": u.username, "email_address": u.email_address} for u in users
+            {"id": u.id, "username": u.username, "email_address": u.email_address}
+            for u in users if u.role == "Supervisor"
+        ],
+        "operators": [
+            {"id": u.id, "username": u.username, "email_address": u.email_address}
+            for u in users if u.role == "Operator"
         ],
     }
 
@@ -40,6 +48,8 @@ def get_asset_supervisors(asset_id: int, session: Db) -> dict:
     if asset is None:
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     assignments = _assignment(session, asset_id)
+    # Only top-level assets can be assigned; child assets inherit from their parent.
+    assignments["assignable"] = asset.parent_asset_id is None
     inherited: dict[int, dict] = {}
     for source_asset_id, source_asset_name, user in supervisor_assignments_for_asset(session, asset):
         if source_asset_id == asset.id:
@@ -60,16 +70,27 @@ def get_asset_supervisors(asset_id: int, session: Db) -> dict:
 # Replaces an asset`s supervisor assignments after validating the selected users.
 @router.put("/assets/{asset_id}/supervisors")
 def set_asset_supervisors(asset_id: int, payload: SupervisorAssignment, session: Db) -> dict:
-    if session.get(Asset, asset_id) is None:
+    asset = session.get(Asset, asset_id)
+    if asset is None:
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     user_ids = sorted(set(payload.user_ids))
+    if user_ids and asset.parent_asset_id is not None:
+        # Clearing is still allowed so stale rows on a child can be removed.
+        raise HTTPException(
+            status_code=422,
+            detail="Users can only be assigned to a top-level (parent) asset; child assets inherit access from their parent.",
+        )
     if user_ids:
         valid = set(session.scalars(
-            select(User.id).where(User.id.in_(user_ids), User.role == "Supervisor", User.is_active.is_(True))
+            select(User.id).where(
+                User.id.in_(user_ids),
+                User.role.in_(("Supervisor", "Operator")),
+                User.is_active.is_(True),
+            )
         ).all())
         invalid = [i for i in user_ids if i not in valid]
         if invalid:
-            raise HTTPException(status_code=422, detail=f"Not active Supervisor accounts: {invalid}")
+            raise HTTPException(status_code=422, detail=f"Not active Supervisor or Operator accounts: {invalid}")
     session.execute(delete(AssetSupervisor).where(AssetSupervisor.asset_id == asset_id))
     session.add_all(AssetSupervisor(asset_id=asset_id, user_id=i) for i in user_ids)
     session.commit()

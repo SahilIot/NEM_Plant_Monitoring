@@ -27,6 +27,9 @@ from app.services.email_notifications import enqueue_alert_notifications
 
 LOGGER = logging.getLogger("nem_backend.monitoring")
 
+# Rule types the database accepts but the engine cannot evaluate yet.
+UNEVALUATED_RULE_TYPES = frozenset({"generic", "boolean_condition"})
+
 OPERATORS: dict[str, Callable[[Any, Any], bool]] = {
     ">": operator.gt,
     ">=": operator.ge,
@@ -383,9 +386,27 @@ def _transition_state(
                 started_at=evaluated_at,
                 last_updated_at=evaluated_at,
             )
-            session.add(alert)
-            session.flush()
-            enqueue_alert_notifications(session, alert, asset, rule)
+            try:
+                with session.begin_nested():
+                    session.add(alert)
+                    session.flush()
+            except IntegrityError:
+                # Another worker raised the same alert first (unique index on active
+                # rule/asset alerts). Reuse it; it was notified by whoever created it.
+                alert = session.scalar(
+                    select(Alert)
+                    .where(
+                        Alert.rule_id == rule.id,
+                        Alert.target_asset_id == asset.id,
+                        Alert.status == "active",
+                    )
+                    .order_by(Alert.id.desc())
+                    .limit(1)
+                )
+                if alert is None:
+                    raise
+            else:
+                enqueue_alert_notifications(session, alert, asset, rule)
         elif alert is not None:
             if alert.severity != next_status:
                 previous_severity = alert.severity
@@ -1051,7 +1072,10 @@ def evaluate_rule(
             condition_started_at=None,
         )
 
-    if rule.rule_type == "generic":
+    if rule.rule_type in UNEVALUATED_RULE_TYPES:
+        # Allowed by the database constraint (so existing rows load) but no evaluator
+        # exists. Never treat such a rule as normal or let it fall into another
+        # evaluator: its state is unknown and it can neither raise nor clear alerts.
         return _transition_state(
             session,
             rule,
@@ -1059,7 +1083,11 @@ def evaluate_rule(
             state,
             next_status="unknown",
             value=None,
-            message="Generic rule type has no evaluator configured.",
+            message=(
+                "Generic rule type has no evaluator configured."
+                if rule.rule_type == "generic"
+                else f"Rule type '{rule.rule_type}' has no evaluator configured."
+            ),
             evaluated_at=now,
             condition_started_at=None,
         )
@@ -1419,6 +1447,26 @@ def acquire_scheduler_lease(
     except IntegrityError:
         session.rollback()
         return False
+
+
+def release_scheduler_lease(
+    session: Session,
+    *,
+    owner_id: str,
+    name: str = "monitoring-evaluation",
+) -> None:
+    """Give up a lease this owner holds so another instance can take over immediately.
+
+    Only the current owner's row is touched; a lease that already expired or moved to
+    another owner is left alone.
+    """
+    released_at = utc_now()
+    session.execute(
+        update(SchedulerLease)
+        .where(SchedulerLease.name == name, SchedulerLease.owner_id == owner_id)
+        .values(lease_until=released_at, updated_at=released_at)
+    )
+    session.commit()
 
 
 def evaluate_reading_rules(

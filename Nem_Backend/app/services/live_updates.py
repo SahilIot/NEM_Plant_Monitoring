@@ -12,7 +12,8 @@ _CRITICAL_TABLES = {
     "nem_alerts", # alert records
     "nem_monitoring_events", # monitoring events
 }
-_MAX_RETAINED_CRITICAL_EVENTS = 256 #Maximum number of critical events retained 
+_MAX_RETAINED_CRITICAL_EVENTS = 256 #Maximum number of critical events retained
+_ASSIGNMENT_TABLE = "nem_asset_supervisors" # asset assignments; a change alters which assets users may see
 #Tracking which db entities changed ,tells the code which IDs to collect for each table.
 _ENTITY_ID_ATTRIBUTES = {
     "assets": ("id",),
@@ -270,8 +271,13 @@ async def serve_live_updates(
                             "asset_ids": sorted(visible_asset_ids),
                             "entity_ids": {},
                             "critical_events": [],
+                            # Flags may originate from changes to assets this user cannot reach.
+                            "critical": False,
+                            "critical_events_truncated": False,
                         }
-                    elif update.get("resync_required"):
+                    elif update.get("resync_required") or _ASSIGNMENT_TABLE in update.get("changed_tables", ()):
+                        # Also sent when assignments change so a user who just gained or
+                        # lost access refreshes immediately. Carries no asset information.
                         update = {
                             "type": "database_change",
                             "asset_ids": [],
@@ -283,16 +289,17 @@ async def serve_live_updates(
                     else:
                         continue
                 elif update["type"] == "opcua_status":
-                    if not update.get("resync_required"):
-                        continue
-                    update = {
-                        "type": "database_change",
-                        "asset_ids": [],
-                        "changed_tables": [],
-                        "entity_ids": {},
-                        "critical_events": [],
-                        "resync_required": True,
-                    }
+                    # A plain connection-state notice names no asset, so it is forwarded as is.
+                    # A resync marker is reduced to the generic form below.
+                    if update.get("resync_required"):
+                        update = {
+                            "type": "database_change",
+                            "asset_ids": [],
+                            "changed_tables": [],
+                            "entity_ids": {},
+                            "critical_events": [],
+                            "resync_required": True,
+                        }
                 elif update.get("resync_required"):
                     update = {
                         "type": "database_change",

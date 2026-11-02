@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../../../services/api.js";
+import { useAuth } from "../../auth/AuthContext.jsx";
 import { CreateModal } from "../../../components/common/UI.jsx";
 import { captureNavigationOrigin } from "../../../utils/navigation.js";
 import {
@@ -27,6 +28,9 @@ export default function AssetTree({ assets = [], selectedId, onRefresh }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState({});
   const [onlyRules, setOnlyRules] = useState(false);
+  const { user } = useAuth();
+  // Creating assets is Administrator-only on the server; other roles only see assigned assets.
+  const isAdmin = user?.role === "Administrator";
   const [adding, setAdding] = useState(false);
 
   const ancestorsOfSelected = useMemo(() => {
@@ -253,7 +257,9 @@ export default function AssetTree({ assets = [], selectedId, onRefresh }) {
         ) : (
           <p className="tree-empty">
             {assets.length === 0
-              ? "No assets yet. Add the first machine below."
+              ? isAdmin
+                ? "No assets yet. Add the first machine below."
+                : "No assets are assigned to your account. Ask an administrator to assign assets to you."
               : onlyRules
                 ? "No matching assets have monitoring rules."
                 : "No assets match your search."}
@@ -261,15 +267,17 @@ export default function AssetTree({ assets = [], selectedId, onRefresh }) {
         )}
       </div>
 
-      <div className="tree-foot">
-        <button
-          type="button"
-          className="btn-outline wide-btn"
-          onClick={() => setAdding(true)}
-        >
-          <PlusIcon size={16} /> Add asset
-        </button>
-      </div>
+      {isAdmin && (
+        <div className="tree-foot">
+          <button
+            type="button"
+            className="btn-outline wide-btn"
+            onClick={() => setAdding(true)}
+          >
+            <PlusIcon size={16} /> Add asset
+          </button>
+        </div>
+      )}
 
       {adding && (
         <CreateModal

@@ -7,10 +7,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status 
 #Build SQL queries using SQLAlchemy, func provide sql functions such as count, session represents a database session
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, false, func, or_, select
 from sqlalchemy.orm import Session
 #get_db supplies the database session to an endpoint
 from app.db.session import get_db
+from app.services.access_scope import access_scope
 from app.models import (
     Alert,
     Asset,
@@ -31,16 +32,24 @@ router = APIRouter(prefix="/assets", tags=["assets"])
 #check if an asset exists in the database, if not raise a 404 error
 def asset_or_404(session: Session, asset_id: int) -> Asset:
     asset = session.get(Asset, asset_id)
-    if asset is None:
+    # An asset outside the caller's assignment scope is indistinguishable from a missing one.
+    if asset is None or not access_scope(session).allows(asset.id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     return asset
+
+# Asset response that never exposes the id of a parent outside the caller's scope.
+def _asset_read(session: Session, asset: Asset) -> AssetRead:
+    item = AssetRead.model_validate(asset)
+    if not access_scope(session).allows(item.parent_asset_id):
+        item = item.model_copy(update={"parent_asset_id": None})
+    return item
 
 #Protecting the asset heirarchy
 def validate_parent(session: Session, parent_id: int | None, asset_id: int | None = None) -> None:
     if parent_id is None:
         return
     parent = session.get(Asset, parent_id)
-    if parent is None:
+    if parent is None or not access_scope(session).allows(parent.id):
         raise HTTPException(status_code=404, detail=f"Parent asset {parent_id} was not found")
     if asset_id is None:
         return
@@ -61,8 +70,13 @@ def to_tree(session: Session, asset: Asset, ancestors: frozenset[int] = frozense
     if asset.id in ancestors:
         raise HTTPException(status_code=409, detail="Existing asset hierarchy contains a cycle")
     next_ancestors = ancestors | {asset.id}
-    children = session.scalars(select(Asset).where(Asset.parent_asset_id == asset.id).order_by(Asset.id)).all()
-    return AssetTree(**AssetRead.model_validate(asset).model_dump(),
+    scope = access_scope(session)
+    children = session.scalars(
+        select(Asset)
+        .where(Asset.parent_asset_id == asset.id, scope.clause(Asset.id))
+        .order_by(Asset.id)
+    ).all()
+    return AssetTree(**_asset_read(session, asset).model_dump(),
         children=[to_tree(session, child, next_ancestors) for child in children],
     )
 
@@ -74,7 +88,7 @@ def create_asset(payload: AssetCreate, session: Session = Depends(get_db)) -> As
     session.add(asset)
     session.commit()
     session.refresh(asset)
-    return asset
+    return _asset_read(session, asset)
 
 # Listing assets
 @router.get("")
@@ -88,14 +102,30 @@ def list_assets(
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
     
-    query = select(Asset)
-    count_query = select(func.count()).select_from(Asset)
+    scope = access_scope(session)
+    # Only assets the caller may reach are listed (administrators: all assets).
+    query = select(Asset).where(scope.clause(Asset.id))
+    count_query = select(func.count()).select_from(Asset).where(scope.clause(Asset.id))
     if parent_asset_id is not None:
-        query = query.where(Asset.parent_asset_id == parent_asset_id)
-        count_query = count_query.where(Asset.parent_asset_id == parent_asset_id)
+        # A parent the caller cannot reach is treated like a parent that does not exist.
+        parent_condition = (
+            Asset.parent_asset_id == parent_asset_id
+            if scope.allows(parent_asset_id)
+            else false()
+        )
+        query = query.where(parent_condition)
+        count_query = count_query.where(parent_condition)
     if root_only:
-        query = query.where(Asset.parent_asset_id.is_(None))
-        count_query = count_query.where(Asset.parent_asset_id.is_(None))
+        # For a scoped user the roots are the top-most assets they were assigned.
+        if scope.unrestricted:
+            root_condition = Asset.parent_asset_id.is_(None)
+        else:
+            root_condition = or_(
+                Asset.parent_asset_id.is_(None),
+                Asset.parent_asset_id.not_in(sorted(scope.asset_ids) or [0]),
+            )
+        query = query.where(root_condition)
+        count_query = count_query.where(root_condition)
     if asset_type is not None:
         query = query.where(Asset.asset_type == asset_type)
         count_query = count_query.where(Asset.asset_type == asset_type)
@@ -104,16 +134,16 @@ def list_assets(
         count_query = count_query.where(Asset.is_active == is_active)
     rows = session.scalars(query.order_by(Asset.id).offset(offset).limit(limit)).all()
     return {
-        "items": [AssetRead.model_validate(row) for row in rows],
+        "items": [_asset_read(session, row) for row in rows],
         "total": session.scalar(count_query) or 0,
         "limit": limit,
         "offset": offset,
     }
 
-#Getting one asset 
+#Getting one asset
 @router.get("/{asset_id}", response_model=AssetRead)
-def get_asset(asset_id: int, session: Session = Depends(get_db)) -> Asset:
-    return asset_or_404(session, asset_id)
+def get_asset(asset_id: int, session: Session = Depends(get_db)) -> AssetRead:
+    return _asset_read(session, asset_or_404(session, asset_id))
 
 #Updating the assets
 @router.patch("/{asset_id}", response_model=AssetRead)
@@ -131,7 +161,7 @@ def update_asset(asset_id: int, payload: AssetUpdate, session: Session = Depends
         setattr(asset, field, value)
     session.commit()
     session.refresh(asset)
-    return asset
+    return _asset_read(session, asset)
 
 # Getting the children of a specific asset
 @router.get("/{asset_id}/children")
@@ -142,11 +172,12 @@ def list_children(
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
     asset_or_404(session, asset_id)
-    query = select(Asset).where(Asset.parent_asset_id == asset_id)
-    total = session.scalar(select(func.count()).select_from(Asset).where(Asset.parent_asset_id == asset_id)) or 0
+    scope = access_scope(session)
+    query = select(Asset).where(Asset.parent_asset_id == asset_id, scope.clause(Asset.id))
+    total = session.scalar(select(func.count()).select_from(Asset).where(Asset.parent_asset_id == asset_id, scope.clause(Asset.id))) or 0
     items = session.scalars(query.order_by(Asset.id).offset(offset).limit(limit)).all()
     return {
-        "items": [AssetRead.model_validate(item) for item in items],
+        "items": [_asset_read(session, item) for item in items],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -156,8 +187,10 @@ def list_children(
 @router.get("/{asset_id}/hierarchy", response_model=AssetTree)
 def asset_hierarchy(asset_id: int, session: Session = Depends(get_db)) -> AssetTree:
     asset = asset_or_404(session, asset_id)
+    scope = access_scope(session)
     seen: set[int] = set()
-    while asset.parent_asset_id is not None:
+    # Climb to the root, but never above the top-most asset the caller may reach.
+    while asset.parent_asset_id is not None and scope.allows(asset.parent_asset_id):
         if asset.id in seen:
             raise HTTPException(status_code=409, detail="Existing asset hierarchy contains a cycle")
         seen.add(asset.id)
@@ -177,7 +210,7 @@ def move_asset(asset_id: int,
     asset.parent_asset_id = parent_asset_id
     session.commit()
     session.refresh(asset)
-    return asset
+    return _asset_read(session, asset)
 
 # Deleting an asset, ensuring it has no children, variables, readings, or rules associated with it before deletion. If any of these exist, a 409 conflict error is raised, suggesting deactivation instead of deletion.
 @router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)

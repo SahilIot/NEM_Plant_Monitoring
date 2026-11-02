@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models import Asset, Reading, Variable
 from app.schemas.reading import ReadingBatch, ReadingCreate, ReadingRead
+from app.services.access_scope import access_scope
 from app.services.monitoring_engine import evaluate_reading_rules
 from app.services.reading_ingestion import (ingest_reading as persist_reading,make_reading,validate_reading,)
 
@@ -26,21 +27,27 @@ def latest_readings(
     limit: int = Query(default=100, ge=1, le=1000),
     session: Session = Depends(get_db),
 ) -> list[ReadingRead]:
-    """Return the newest reading for each asset-variable pair."""
-    rows = session.scalars(
-        select(Reading).order_by(
-            Reading.recorded_at.desc(),
-            Reading.id.desc(),
+    """Return the newest reading for each asset-variable pair the caller may reach."""
+    # Rank inside the database instead of loading every reading into memory.
+    ranked = (
+        select(
+            Reading.id.label("reading_id"),
+            func.row_number().over(
+                partition_by=(Reading.asset_id, Reading.variable_id),
+                order_by=(Reading.recorded_at.desc(), Reading.id.desc()),
+            ).label("rank"),
         )
+        .where(access_scope(session).clause(Reading.asset_id))
+        .subquery()
+    )
+    rows = session.scalars(
+        select(Reading)
+        .join(ranked, ranked.c.reading_id == Reading.id)
+        .where(ranked.c.rank == 1)
+        .order_by(Reading.recorded_at.desc(), Reading.id.desc())
+        .limit(limit)
     ).all()
-    latest: dict[tuple[int, int], Reading] = {}
-    for row in rows:
-        key = (row.asset_id, row.variable_id)
-        if key not in latest:
-            latest[key] = row
-        if len(latest) >= limit:
-            break
-    return [ReadingRead.model_validate(row) for row in latest.values()]
+    return [ReadingRead.model_validate(row) for row in rows]
 
 #Submit multiple readings in one request
 @router.post("/batch", response_model=list[ReadingRead], status_code=status.HTTP_201_CREATED)
@@ -71,22 +78,32 @@ def latest_asset_readings(
     asset_id: int,
     session: Session = Depends(get_db),
 ) -> list[ReadingRead]:
-    if session.get(Asset, asset_id) is None:
+    if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+    ranked = (
+        select(
+            Reading.id.label("reading_id"),
+            func.row_number().over(
+                partition_by=Reading.variable_id,
+                order_by=(Reading.recorded_at.desc(), Reading.id.desc()),
+            ).label("rank"),
+        )
+        .where(Reading.asset_id == asset_id)
+        .subquery()
+    )
     rows = session.scalars(
         select(Reading)
-        .where(Reading.asset_id == asset_id)
+        .join(ranked, ranked.c.reading_id == Reading.id)
+        .where(ranked.c.rank == 1)
         .order_by(Reading.recorded_at.desc(), Reading.id.desc())
-    )
-    latest: dict[int, Reading] = {}
-    for row in rows:
-        latest.setdefault(row.variable_id, row)
-    return [ReadingRead.model_validate(row) for row in latest.values()]
+    ).all()
+    return [ReadingRead.model_validate(row) for row in rows]
 
 #Get the latest reading for one variable
 @router.get("/variables/{variable_id}/latest", response_model=ReadingRead)
 def latest_variable_reading(variable_id: int, session: Session = Depends(get_db)) -> Reading:
-    if session.get(Variable, variable_id) is None:
+    variable = session.get(Variable, variable_id)
+    if variable is None or not access_scope(session).allows(variable.asset_id):
         raise HTTPException(status_code=404, detail=f"Variable {variable_id} was not found")
     reading = session.scalar(
         select(Reading)
@@ -108,7 +125,8 @@ def list_variable_readings(
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
-    if session.get(Variable, variable_id) is None:
+    variable = session.get(Variable, variable_id)
+    if variable is None or not access_scope(session).allows(variable.asset_id):
         raise HTTPException(status_code=404, detail=f"Variable {variable_id} was not found")
     #Converts timestamps to UTC
     def normalize(value: datetime | None) -> datetime | None:

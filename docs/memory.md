@@ -15,9 +15,10 @@ roadmap.
   accepted cycle/running signal is rejected. Legacy shifted timestamps must be
   investigated and repaired deliberately; a blind timezone offset is unsafe.
 - The PLC integration is read-only. No application endpoint or collector
-  method writes PLC values. The configured development OPC UA client currently
-  omits transport encryption/certificate validation; this is a deployment
-  limitation, not an accepted production security configuration.
+  method writes PLC values. The OPC UA client supports signed/encrypted
+  connections with server-certificate validation, but defaults to the
+  unsecured mode for compatibility; production must set a secure mode. Secure
+  mode has not been verified against a live PLC.
 - Machine cycle/runtime state and rule-specific counters are persisted. Rule
   counters are isolated per rule and asset so a new rule does not reset or
   inherit another rule's counter.
@@ -44,16 +45,12 @@ roadmap.
 
 ## Current discrepancies and verification items
 
-1. **Access scope needs verification.** `Nem_Backend/README.md` says
-   non-Administrator asset operations are restricted to assigned machine IDs
-   and WebSockets recheck machine access. In the inspected implementation,
-   `db/session.py:get_db` attaches the user ID but does not apply an asset
-   filter; standard asset/reading list routes do not show assignment filtering;
-   and `main.py` calls `serve_live_updates` with
-   `authorized_asset_ids=None`. WebSocket reauthorization checks that the
-   session remains valid and the user active, but does not compute assigned
-   asset IDs. Intended authorization scope and deployed behavior require
-   confirmation. Do not treat the README's scope claim as verified.
+1. **Access scope is implemented but not runtime-tested.** Supervisors and
+   Operators are limited to assigned assets (and descendants) by
+   `services/access_scope.py`, applied in the REST routes and the WebSocket
+   (`authorized_asset_ids`, per-message re-check). Users with no assignments see
+   nothing. Verified by code review and compilation only; exercise every role
+   against a real database before relying on it.
 2. **Root README is stale in places.** Its Safety and Limitations sections say
    the API has no authentication and that authentication/roles and
    email/SMS delivery are not implemented. Current source implements local
@@ -107,7 +104,9 @@ frontend production build succeeded after the correction.
 - Exercise fresh/stale/reordered samples, false-to-true cycle edges, running
   timer pauses, alert acknowledgement/resolution, maintenance due alerts, and
   recurrence approvals against a controlled database and simulator.
-- Confirm Administrator/Supervisor/Operator API permissions and asset
-  assignment behavior, including WebSocket events, before deployment.
+- Exercise Administrator/Supervisor/Operator API permissions and asset
+  assignment scope (REST and WebSocket) against a real database.
+- Exercise OPC UA `Sign`/`SignAndEncrypt` against the target PLC (policy
+  support, trusted certificates, expiry handling).
 - Verify SMTP credentials, supervisor recipients, retries, and actual message
   delivery in a safe test environment.

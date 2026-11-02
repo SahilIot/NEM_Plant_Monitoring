@@ -68,7 +68,7 @@ export default function App() {
       <Route
         element={
           user
-            ? <Layout />
+            ? <Layout key={user.id} /> /* remount per user so assets/rules/alerts never carry over */
             : <Navigate to="/login" replace state={{ from: location }} />
         }
       >

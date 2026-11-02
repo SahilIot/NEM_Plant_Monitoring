@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Asset, Reading, Variable
 from app.schemas.reading import ReadingCreate
+from app.services.access_scope import access_scope
 from app.services.monitoring_engine import (
     evaluate_reading_rules,
     update_rule_signal_states,
@@ -28,11 +29,12 @@ def validate_value(data_type: str, value: object) -> None:
 
 #Checking asset and variable relationships
 def validate_reading(session: Session, payload: ReadingCreate) -> Variable:
+    scope = access_scope(session)  # system sessions (collector) are unrestricted
     asset = session.get(Asset, payload.asset_id)
-    if asset is None:
+    if asset is None or not scope.allows(asset.id):
         raise HTTPException(status_code=404, detail=f"Asset {payload.asset_id} was not found")
     variable = session.get(Variable, payload.variable_id)
-    if variable is None:
+    if variable is None or not scope.allows(variable.asset_id):
         raise HTTPException(status_code=404, detail=f"Variable {payload.variable_id} was not found")
     if variable.asset_id != payload.asset_id:
         raise HTTPException(status_code=422, detail="Variable does not belong to the specified asset")

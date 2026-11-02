@@ -316,7 +316,9 @@ export default function Plc() {
     setBusy("test");
     setConnection({
       state: "testing",
-      message: "Testing unencrypted OPC UA connection…",
+      message: insecureTransport
+        ? "Testing unencrypted OPC UA connection…"
+        : "Testing secured OPC UA connection…",
     });
 
     try {
@@ -381,6 +383,12 @@ export default function Plc() {
   };
 
   const conn = monitoring?.connection;
+  // Transport security reported by the backend (no secrets). Unknown is treated as unsecured.
+  const security = conn?.security;
+  const insecureTransport = !security || security.mode === "None";
+  const securityLabel = security && !insecureTransport
+    ? `${security.policy}, ${security.mode === "SignAndEncrypt" ? "signed and encrypted" : "signed"}`
+    : "";
 
   const connText = !conn
     ? ""
@@ -432,8 +440,9 @@ export default function Plc() {
       </div>
 
       <p className="muted lede">
-        Monitor PLC values. This development connection does not encrypt OPC UA
-        traffic; use it only on a trusted test network.
+        {insecureTransport
+          ? "Monitor PLC values. This connection does not encrypt OPC UA traffic; use it only on a trusted test network."
+          : `Monitor PLC values. OPC UA traffic is secured (${securityLabel}) and the server certificate is verified.`}
       </p>
 
       <section className="panel plc-panel wide">
@@ -756,12 +765,12 @@ export default function Plc() {
       </section>
 
       <section className="panel plc-panel">
-        <h2>Development connection</h2>
+        <h2>{insecureTransport ? "Development connection" : "OPC UA connection"}</h2>
 
         <p className="muted">
-          Uses the configured OPC UA endpoint without transport encryption or
-          certificates. This client is read-only; only use it on a trusted test
-          network.
+          {insecureTransport
+            ? "Uses the configured OPC UA endpoint without transport encryption or certificates. This client is read-only; only use it on a trusted test network."
+            : `Uses the configured OPC UA endpoint over a secured channel (${securityLabel}) with server certificate verification. This client is read-only.`}
         </p>
 
         <button

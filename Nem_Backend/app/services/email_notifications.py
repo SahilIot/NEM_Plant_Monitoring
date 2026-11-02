@@ -66,6 +66,8 @@ def supervisor_assignments_for_asset(
             .where(
                 User.is_active.is_(True),
                 User.role == "Supervisor",
+                # Parent-only assignment: only a top-level asset's assignments are valid.
+                ancestry.c.parent_asset_id.is_(None),
             )
             .order_by(ancestry.c.id, User.id)
         ).all()
@@ -74,10 +76,14 @@ def supervisor_assignments_for_asset(
 # Recipient selection function -> check child has any direct assignments, if yes then only send to those supervisors, otherwise check parent assets for supervisors
 def _assigned_supervisors_for_asset(session: Session, asset: Asset) -> list[User]:
     assignments = supervisor_assignments_for_asset(session, asset)
-    # Direct assignments override ancestors even when their users are ineligible.
-    has_direct_assignments = session.scalar(
+    # Direct Supervisor assignments override ancestors even when those users are
+    # ineligible (inactive or without an email address). Operator assignments only
+    # grant asset access and never take part in email routing, so they must not
+    # suppress the ancestors' Supervisors.
+    has_direct_assignments = asset.parent_asset_id is None and session.scalar(
         select(AssetSupervisor.id)
-        .where(AssetSupervisor.asset_id == asset.id)
+        .join(User, User.id == AssetSupervisor.user_id)
+        .where(AssetSupervisor.asset_id == asset.id, User.role == "Supervisor")
         .limit(1)
     ) is not None
     effective_assignments = [

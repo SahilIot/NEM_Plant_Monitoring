@@ -27,6 +27,12 @@ from app.schemas.monitoring import (
     EventRead,
     RuleStateRead,
 )
+from app.services.access_scope import (
+    access_scope,
+    require_asset_access,
+    require_rule_access,
+    rule_clause,
+)
 from app.services.monitoring_engine import (
     emit_event,
     evaluate_rules,
@@ -35,6 +41,12 @@ from app.services.monitoring_engine import (
 )
 
 router = APIRouter(tags=["monitoring", "alerts", "events"])
+
+# Alerts and events carry their asset directly; one outside the caller's scope is reported as not found.
+def _alert_in_scope(session: Session, alert: Alert | None, alert_id: int) -> Alert:
+    if alert is None or not access_scope(session).allows(alert.target_asset_id):
+        raise HTTPException(status_code=404, detail=f"Alert {alert_id} was not found")
+    return alert
 
 # normalized -> Ensures that a datetime value is in UTC format, converting it if necessary. If the input is None, it returns None. This is useful for consistent timestamp handling across the application.
 def normalized(value: datetime | None) -> datetime | None:
@@ -74,11 +86,19 @@ def manually_evaluate(
     session: Session = Depends(get_db),
 ) -> dict[str, int]:
     #Validate the asset
-    if asset_id is not None and session.get(Asset, asset_id) is None:
-        raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+    if asset_id is not None:
+        if session.get(Asset, asset_id) is None:
+            raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+        require_asset_access(session, asset_id)
     #Validate the rule
-    if rule_id is not None and session.get(MonitoringRule, rule_id) is None:
-        raise HTTPException(status_code=404, detail=f"Rule {rule_id} was not found")
+    if rule_id is not None:
+        rule = session.get(MonitoringRule, rule_id)
+        if rule is None:
+            raise HTTPException(status_code=404, detail=f"Rule {rule_id} was not found")
+        require_rule_access(session, rule)
+    # Without an explicit asset or rule, only an unrestricted caller evaluates every rule.
+    if asset_id is None and rule_id is None and not access_scope(session).unrestricted:
+        raise HTTPException(status_code=403, detail="Specify an asset or rule to evaluate")
     #Call the monitoring engine
     counts = evaluate_rules(
         session,
@@ -102,6 +122,7 @@ def monitoring_status(
 ) -> dict[str, object]:
     query = select(MonitoringRule).where(
         MonitoringRule.is_enabled.is_(True),
+        rule_clause(access_scope(session)),
     )
     if rule_id is not None:
         query = query.where(MonitoringRule.id == rule_id)
@@ -129,8 +150,8 @@ def asset_monitoring_status(
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
-    # Verify the asset exists
-    if session.get(Asset, asset_id) is None:
+    # Verify the asset exists and is within the caller's scope
+    if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     # fine rules associated with that asset
     rules = session.scalars(
@@ -155,6 +176,7 @@ def rule_status(rule_id: int, session: Session = Depends(get_db)) -> RuleStateRe
     rule = session.get(MonitoringRule, rule_id)
     if rule is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id} was not found")
+    require_rule_access(session, rule)
     return state_for_rule(session, rule)
 
 
@@ -174,7 +196,8 @@ def alert_query(
         raise HTTPException(status_code=422, detail="start_time must not be later than end_time")
     query = select(Alert)
     count_query = select(func.count()).select_from(Alert)
-    filters = []
+    # Only alerts on assets the caller may reach (administrators: all alerts).
+    filters = [access_scope(session).clause(Alert.target_asset_id)]
     if asset_id is not None:
         filters.append(Alert.target_asset_id == asset_id)
     if rule_id is not None:
@@ -269,10 +292,7 @@ def list_alerts(
 # Retrieving a specific alert by its ID
 @router.get("/alerts/{alert_id}", response_model=AlertRead)
 def get_alert(alert_id: int, session: Session = Depends(get_db)) -> Alert:
-    alert = session.get(Alert, alert_id)
-    if alert is None:
-        raise HTTPException(status_code=404, detail=f"Alert {alert_id} was not found")
-    return alert
+    return _alert_in_scope(session, session.get(Alert, alert_id), alert_id)
 
 # Acknowledging an active alert
 @router.post("/alerts/{alert_id}/acknowledge", response_model=AlertRead)
@@ -284,8 +304,7 @@ def acknowledge_alert(
     ),
 ) -> Alert:
     alert = session.scalar(select(Alert).where(Alert.id == alert_id).with_for_update())
-    if alert is None:
-        raise HTTPException(status_code=404, detail=f"Alert {alert_id} was not found")
+    _alert_in_scope(session, alert, alert_id)
     if alert.status != "active":
         raise HTTPException(status_code=409, detail="Only active alerts can be acknowledged.")
     if alert.acknowledged_at is None:
@@ -324,8 +343,7 @@ def complete_alert(
     user: User = Depends(require_roles("Administrator", "Supervisor", "Operator")),
 ) -> Alert:
     alert = session.scalar(select(Alert).where(Alert.id == alert_id).with_for_update())
-    if alert is None:
-        raise HTTPException(status_code=404, detail=f"Alert {alert_id} was not found")
+    _alert_in_scope(session, alert, alert_id)
     if alert.status != "active":
         raise HTTPException(status_code=409, detail="Only active alerts can be completed.")
     if alert.acknowledged_at is None:
@@ -477,6 +495,10 @@ def list_events(
         .outerjoin(MonitoringRule, MonitoringRule.id == MonitoringEvent.rule_id)
     )
     count_query = select(func.count()).select_from(MonitoringEvent)
+    # Only events on assets the caller may reach (administrators: all events,
+    # including system events that have no asset).
+    scope_condition = access_scope(session).clause(MonitoringEvent.asset_id)
+    query, count_query = query.where(scope_condition), count_query.where(scope_condition)
     for value, column in (
         (asset_id, MonitoringEvent.asset_id),
         (rule_id, MonitoringEvent.rule_id),
@@ -513,7 +535,7 @@ def list_events(
 @router.get("/events/{event_id}", response_model=EventRead)
 def get_event(event_id: int, session: Session = Depends(get_db)) -> MonitoringEvent:
     event = session.get(MonitoringEvent, event_id)
-    if event is None:
+    if event is None or not access_scope(session).allows(event.asset_id):
         raise HTTPException(status_code=404, detail=f"Event {event_id} was not found")
     return event
 

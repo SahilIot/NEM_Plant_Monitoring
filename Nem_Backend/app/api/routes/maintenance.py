@@ -27,6 +27,7 @@ from app.schemas.maintenance import (
     MaintenanceScheduleUpdate,
     MaintenanceUpdate,
 )
+from app.services.access_scope import access_scope
 from app.services.maintenance_schedule import due_status, next_due_date
 from app.services.monitoring_engine import emit_event, utc_now
 
@@ -64,9 +65,28 @@ def _execute_deletion(
 #Find a maintenance schedule by its db ID
 def _schedule_or_404(session: Session, schedule_id: int) -> MaintenanceSchedule:
     schedule = session.get(MaintenanceSchedule, schedule_id)
-    if schedule is None:
+    return _schedule_in_scope(session, schedule, schedule_id)
+
+
+# A schedule or record on an asset outside the caller's scope is reported as not found.
+def _schedule_in_scope(
+    session: Session,
+    schedule: MaintenanceSchedule | None,
+    schedule_id: int,
+) -> MaintenanceSchedule:
+    if schedule is None or not access_scope(session).allows(schedule.asset_id):
         raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
     return schedule
+
+
+def _record_in_scope(
+    session: Session,
+    record: MaintenanceRecord | None,
+    record_id: int,
+) -> MaintenanceRecord:
+    if record is None or not access_scope(session).allows(record.asset_id):
+        raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
+    return record
 
 
 def _authorize_operator_due_occurrence(
@@ -249,9 +269,7 @@ def _normalized(value: datetime | None) -> datetime | None:
 #Similar to schedule_or_404, but it looks up a single maintenance record instead of schedule
 def _record_or_404(session: Session, record_id: int) -> MaintenanceRecord:
     record = session.get(MaintenanceRecord, record_id)
-    if record is None:
-        raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
-    return record
+    return _record_in_scope(session, record, record_id)
 
 #validates an alert associated with a maintenance record
 def _validate_alert(
@@ -263,7 +281,7 @@ def _validate_alert(
     if alert_id is None:
         return None
     alert = session.get(Alert, alert_id)
-    if alert is None:
+    if alert is None or not access_scope(session).allows(alert.target_asset_id):
         raise HTTPException(status_code=404, detail=f"Alert {alert_id} was not found")
     if alert.target_asset_id != asset_id:
         raise HTTPException(status_code=422,detail="Alert does not belong to the selected asset",)
@@ -312,7 +330,7 @@ def create_maintenance_record(
     payload: MaintenanceCreate,
     session: Session = Depends(get_db),
 ) -> MaintenanceRecord:
-    if session.get(Asset, payload.asset_id) is None:
+    if session.get(Asset, payload.asset_id) is None or not access_scope(session).allows(payload.asset_id):
         raise HTTPException(status_code=404,detail=f"Asset {payload.asset_id} was not found",)
     alert = _validate_alert(
         session,
@@ -400,7 +418,7 @@ def _create_maintenance_schedule(
     session: Session,
     payload: MaintenanceScheduleCreate,
 ) -> MaintenanceSchedule:
-    if session.get(Asset, payload.asset_id) is None:
+    if session.get(Asset, payload.asset_id) is None or not access_scope(session).allows(payload.asset_id):
         raise HTTPException(status_code=404,detail=f"Asset {payload.asset_id} was not found",)
     schedule = MaintenanceSchedule(
         asset_id=payload.asset_id,
@@ -442,7 +460,9 @@ def list_maintenance_schedules(
     ),
     session: Session = Depends(get_db),
 ) -> list[MaintenanceScheduleRead]:
-    query = select(MaintenanceSchedule).order_by(
+    query = select(MaintenanceSchedule).where(
+        access_scope(session).clause(MaintenanceSchedule.asset_id)
+    ).order_by(
         MaintenanceSchedule.current_due_date.asc().nulls_last(),
         MaintenanceSchedule.id.asc(),
     )
@@ -475,7 +495,7 @@ def permanently_delete_maintenance_schedule(
         .where(MaintenanceSchedule.id == schedule_id)
         .with_for_update()
     )
-    if schedule is None:
+    if schedule is None or not access_scope(session).allows(schedule.asset_id):
         raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
 
     records = session.scalars(
@@ -544,7 +564,7 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
         .where(MaintenanceSchedule.id == schedule_id)
         .with_for_update()
     )
-    if schedule is None:
+    if schedule is None or not access_scope(session).allows(schedule.asset_id):
         raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
 
     current_occurrence = None
@@ -768,7 +788,7 @@ def confirm_next_occurrence(
         .with_for_update()
     )
 
-    if schedule is None:
+    if schedule is None or not access_scope(session).allows(schedule.asset_id):
         raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
 
     # Make repeated requests safe after an occurrence has been created.
@@ -846,7 +866,7 @@ def decline_next_occurrence(schedule_id: int,
         .where(MaintenanceSchedule.id == schedule_id)
         .with_for_update()
     )
-    if schedule is None:
+    if schedule is None or not access_scope(session).allows(schedule.asset_id):
         raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
     # A repeated decline is safe if the proposal has already been cleared.
     if (schedule.approval_status == "declined" and schedule.proposed_due_date is None):
@@ -885,7 +905,8 @@ def list_maintenance_records(
     if start is not None and end is not None and start > end:
         raise HTTPException(status_code=422,detail="start_time must not be later than end_time",)
 
-    conditions = []
+    # Only records on assets the caller may reach (administrators: all records).
+    conditions = [access_scope(session).clause(MaintenanceRecord.asset_id)]
     if asset_id is not None:
         conditions.append(MaintenanceRecord.asset_id == asset_id)
     if alert_id is not None:
@@ -937,7 +958,7 @@ def permanently_delete_maintenance_record(
         .where(MaintenanceRecord.id == record_id)
         .with_for_update()
     )
-    if record is None:
+    if record is None or not access_scope(session).allows(record.asset_id):
         raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
     if record.schedule_id is not None and record.status != "completed":
         permanently_delete_maintenance_schedule(record.schedule_id, session, user)
@@ -996,7 +1017,7 @@ def update_maintenance_record(
         .where(MaintenanceRecord.id == record_id)
         .with_for_update()
     )
-    if record is None:
+    if record is None or not access_scope(session).allows(record.asset_id):
         raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
     if record.status == "in_progress":
         raise HTTPException(status_code=409,detail="In-progress maintenance cannot be edited.",)
@@ -1073,7 +1094,7 @@ def complete_maintenance_record(
     user: User = Depends(get_current_user),
 ) -> MaintenanceRecord:
     record = session.get(MaintenanceRecord, record_id)
-    if record is None:
+    if record is None or not access_scope(session).allows(record.asset_id):
         raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
     schedule = None
     if record.schedule_id is not None:
@@ -1089,7 +1110,7 @@ def complete_maintenance_record(
         .where(MaintenanceRecord.id == record_id)
         .with_for_update()
     )
-    if record is None:
+    if record is None or not access_scope(session).allows(record.asset_id):
         raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
     _authorize_operator_due_occurrence(session, record, user, action="complete")
     if record.status in {"completed", "cancelled"}:

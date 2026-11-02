@@ -63,6 +63,7 @@ from app.api.routes.rules import (
 )
 from app.api.routes.monitoring import state_for_rule
 from app.api.routes.auth import get_current_user, require_roles
+from app.services.access_scope import access_scope, hidden_document_ids, require_rule_access, rule_clause
 from app.services.labels import apply_label_filter, assign_labels
 
 router = APIRouter(tags=["frontend compatibility"])
@@ -285,7 +286,7 @@ def _descendant_ids(session: Session, asset_id: int) -> set[int]:
         ).all()
         frontier = [item for item in children if item not in result]
         result.update(frontier)
-    return result
+    return access_scope(session).restrict(result)
 
 #Encrypting saved email passwords
 def _fernet(request: Request) -> Fernet:
@@ -309,6 +310,7 @@ def frontend_summary(session: Session = Depends(get_db)) -> dict[str, Any]:
             .select_from(MonitoringRule)
             .where(
                 MonitoringRule.lifecycle_status == status,
+                rule_clause(access_scope(session)),
             )
         )
         or 0
@@ -346,6 +348,7 @@ def frontend_rules_by_lifecycle(
         .where(
             MonitoringRule.lifecycle_status == lifecycle_status,
             MonitoringRule.target_asset_id.is_not(None),
+            access_scope(session).clause(MonitoringRule.target_asset_id),
         )
         .order_by(MonitoringRule.target_asset_id, MonitoringRule.id)
     ).all()
@@ -361,6 +364,7 @@ def frontend_rules_by_status(kind: str, session: Session = Depends(get_db)) -> l
         select(MonitoringRule)
         .where(
             MonitoringRule.target_asset_id.is_not(None),
+            access_scope(session).clause(MonitoringRule.target_asset_id),
         )
         .order_by(MonitoringRule.id)
     ).all()
@@ -373,7 +377,7 @@ def frontend_rules_by_status(kind: str, session: Session = Depends(get_db)) -> l
 # rule for a specific asset
 @router.get("/assets/{asset_id}/rules")
 def frontend_asset_rules(asset_id: int,include_children: bool = False,session: Session = Depends(get_db),) -> list[dict[str, Any]]:
-    if session.get(Asset, asset_id) is None:
+    if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     asset_ids = _descendant_ids(session, asset_id) if include_children else {asset_id}
     rules = session.scalars(
@@ -717,7 +721,7 @@ def submit_rule_template_request(
 
     if isinstance(payload, MaintenanceSuggestionPayload):
         maintenance = payload.maintenance
-        if session.get(Asset, maintenance.asset_id) is None:
+        if session.get(Asset, maintenance.asset_id) is None or not access_scope(session).allows(maintenance.asset_id):
             raise HTTPException(status_code=404,detail=f"Asset {maintenance.asset_id} was not found",)
         from app.api.routes.maintenance import _validate_instruction_documents
 
@@ -1017,7 +1021,7 @@ def assign_template_to_assets(
         already_assigned = []
         for asset_id in sorted(payload.asset_ids):
             asset = session.scalar(select(Asset).where(Asset.id == asset_id).with_for_update())
-            if asset is None:
+            if asset is None or not access_scope(session).allows(asset_id):
                 raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
             definition = _template_rule_definition(
                 session,
@@ -1067,7 +1071,7 @@ def frontend_predefined_rules(
     request: Request,
     session: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    if session.get(Asset, asset_id) is None:
+    if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     templates = session.scalars(
         select(MonitoringRuleTemplate).order_by(
@@ -1164,7 +1168,7 @@ def frontend_assign_predefined_rules(
 ) -> dict[str, Any]:
     if session.scalar(
         select(Asset).where(Asset.id == asset_id).with_for_update()
-    ) is None:
+    ) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     templates = session.scalars(
         select(MonitoringRuleTemplate)
@@ -1225,11 +1229,11 @@ def frontend_copy_asset_rules(
     request: Request,
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    if session.get(Asset, asset_id) is None:
+    if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     if payload.source_asset_id == asset_id:
         raise HTTPException(status_code=422, detail="Source and target assets must be different")
-    if session.get(Asset, payload.source_asset_id) is None:
+    if session.get(Asset, payload.source_asset_id) is None or not access_scope(session).allows(payload.source_asset_id):
         raise HTTPException(status_code=404,detail=f"Source asset {payload.source_asset_id} was not found",)
     source_rules = session.scalars(
         select(MonitoringRule)
@@ -1349,11 +1353,11 @@ def frontend_create_usage_rule(
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     asset = session.get(Asset, asset_id)
-    if asset is None:
+    if asset is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
 
     variable = session.get(Variable, payload.variable_id)
-    if variable is None:
+    if variable is None or not access_scope(session).allows(variable.asset_id):
         raise HTTPException(status_code=404, detail=f"Variable {payload.variable_id} was not found")
     if not variable.is_active:
         raise HTTPException(status_code=422, detail="Usage thresholds require an active numeric variable")
@@ -1403,7 +1407,7 @@ def frontend_create_time_rule(
     asset_id: int,
     session: Session = Depends(get_db),
 ) -> None:
-    if session.get(Asset, asset_id) is None:
+    if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     raise HTTPException(status_code=410,detail=("Time-based maintenance is not a monitoring rule. Create a planned maintenance record through POST /maintenance instead."),)
 
@@ -1419,7 +1423,7 @@ def frontend_bulk_rule_state(
     include_children: bool = False,
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    if session.get(Asset, asset_id) is None:
+    if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     state = payload.get("state")
     if state not in {"activated", "not_activated"}:
@@ -1486,6 +1490,7 @@ def _transition_rule_lifecycle(
     )
     if rule is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id} was not found")
+    require_rule_access(session, rule)
 
     now = datetime.now(timezone.utc)
     current = rule.lifecycle_status
@@ -1642,7 +1647,7 @@ def frontend_asset_logbook(
     asset_id: int,
     session: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    if session.get(Asset, asset_id) is None:
+    if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     rows = session.execute(
         select(MaintenanceRecord, MonitoringRule.name)
@@ -1728,7 +1733,7 @@ def frontend_bulk_delete_asset_logbook(
     session: Session = Depends(get_db),
     user: User = Depends(require_roles("Administrator")),
 ) -> dict[str, int]:
-    if session.get(Asset, asset_id) is None:
+    if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
 
     records = _lock_rows_by_ids(session, MaintenanceRecord, payload.ids)
@@ -1788,7 +1793,7 @@ def frontend_add_logbook_entry(
     payload: LogbookEntry,
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    if session.get(Asset, asset_id) is None:
+    if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     text_value = payload.text
     record = MaintenanceRecord(
@@ -1813,7 +1818,7 @@ def frontend_asset_events(
     asset_id: int,
     session: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    if session.get(Asset, asset_id) is None:
+    if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     events = session.execute(
         select(MonitoringEvent, Asset.name, MonitoringRule.name)
@@ -1850,7 +1855,7 @@ def frontend_bulk_delete_asset_events(
     session: Session = Depends(get_db),
     user: User = Depends(require_roles("Administrator")),
 ) -> dict[str, int]:
-    if session.get(Asset, asset_id) is None:
+    if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     events = _lock_rows_by_ids(session, MonitoringEvent, payload.ids)
     if any(
@@ -2008,9 +2013,11 @@ def list_documents(
         query = apply_label_filter(select(InstructionDocument), InstructionDocument, label_ids)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    rows = session.scalars(
-        query.order_by(InstructionDocument.id)
-    ).all()
+    hidden_documents = hidden_document_ids(session)
+    rows = [
+        row for row in session.scalars(query.order_by(InstructionDocument.id)).all()
+        if row.id not in hidden_documents
+    ]
     result: list[dict[str, Any]] = []
     for row in rows:
         attachments = session.scalars(
@@ -2198,7 +2205,7 @@ def view_document_file(
             InstructionDocumentFile.document_id == document_id,
         )
     )
-    if attachment is None:
+    if attachment is None or document_id in hidden_document_ids(session):
         raise HTTPException(status_code=404, detail="Document attachment was not found")
     path = _stored_instruction_file_path(attachment)
 
@@ -2266,7 +2273,7 @@ def download_document_file(
         InstructionDocumentFile.id == file_id,
         InstructionDocumentFile.document_id == document_id,
     ))
-    if attachment is None:
+    if attachment is None or document_id in hidden_document_ids(session):
         raise HTTPException(status_code=404, detail="Document attachment was not found")
     path = _stored_instruction_file_path(attachment)
     media_type, _ = mimetypes.guess_type(attachment.original_name)

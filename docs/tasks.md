@@ -37,22 +37,22 @@ deployment configuration or field validation.
 
 ## Known issues and discrepancies
 
-1. **Assigned-asset authorization is unverified.** The backend README promises
-   assigned-machine restrictions and machine-scoped WebSocket updates, while
-   inspected route and WebSocket wiring does not show those filters. Confirm
-   intended access policy and test direct API/WebSocket access for each role.
+1. **Assigned-asset authorization needs runtime testing.** Server-side scoping
+   is implemented for REST and WebSocket (`services/access_scope.py`), but only
+   reviewed and compiled; test direct API/WebSocket access for each role.
 2. **Root README has stale security/notification statements.** It says auth,
    roles, and outbound delivery are absent; current code includes authentication
    and an email notification implementation. Reconcile documentation to
    current source and deployment settings.
-3. **OPC UA production security is incomplete.** Current client code documents
-   an unencrypted development connection without certificate validation.
-   Production PLC-approved transport security must be confirmed/implemented
-   before any production or untrusted network use.
+3. **OPC UA secure mode is unverified against a PLC.** `Sign`/`SignAndEncrypt`
+   with trusted-server-certificate validation is implemented, but the default
+   remains unsecured and the secure path has not been run against a live
+   server. The installed `asyncua` in the project venv is 1.1.8 while
+   `requirements.txt` asks for `>=2.1`; confirm the APIs used still apply.
 4. **Some rule terminology/type contracts need review.** Current rule-choice
    UI uses “Cycle Clock” while README text uses “Motor Rotation”; the model
    accepts `boolean_condition`, while `RuleCreate` does not list that literal.
-   `generic` has no evaluator. Confirm intended compatibility for old records.
+   `generic` and `boolean_condition` have no evaluator and report unknown.
 5. **Testing coverage is not present in the inspected tree.** No backend
    `tests/` directory or Python test source files were found. The frontend test
    script exists, but the prior `npm test` run reported zero tests. Runtime and

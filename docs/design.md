@@ -39,7 +39,7 @@ loads `src/styles/global.css`.
 - **PLC / OPC UA** (`features/plc/pages/Plc.jsx`): recent saved PLC readings,
   connection status, mapping and publishing details, monitoring state,
   connection test, discovery, and one-shot read-and-save controls. The page
-  explicitly warns that its development OPC UA connection is unencrypted.
+  shows whether the OPC UA connection is secured, and warns only when it is unencrypted.
 - **Configuration** (`features/configuration/pages/`): rule library and
   collections, instruction/document creation and viewing, import/export, and
   related configuration workflows.

@@ -81,12 +81,17 @@ Primary operational tables and their roles:
   unique label key prevents duplicate names differing only by case or
   whitespace.
 - `scheduler_leases` elects a single owner for scheduled work and the OPC UA
-  collector.
+  collector. A lease is claimed with one conditional `UPDATE` (same owner or
+  expired), so an expired lease is recovered by the next instance; the
+  evaluator and maintenance workers release theirs on shutdown.
 
 Asset, variable, reading, rule, alert, maintenance, and history deletion is
 guarded where dependants would otherwise be orphaned. Startup calls
-`Base.metadata.create_all()` and applies in-code schema updates in
-`app/db/init_db.py`; production database changes should be backed up first.
+`Base.metadata.create_all()` and applies in-code, idempotent schema updates in
+`app/db/init_db.py` under a PostgreSQL advisory lock (so concurrent starts
+cannot interleave DDL); production database changes should be backed up first.
+No migration framework is used. `DATABASE_URL` must be `postgresql+psycopg`;
+SQLite is not initialized by the application.
 The versioned `app/db/migrations/shared_labels.py` migration imports legacy
 document JSON labels into the shared catalog and associations. New document
 assignments are stored in the normalized associations; the legacy column
@@ -156,10 +161,20 @@ subscription and maps data-change notifications to asset variables.
   `POST /api/v1/plc/read` performs a one-shot read and stores it as a normal
   reading. Discovery and test endpoints are read-only.
 
-The configured OPC UA client does not enable transport encryption or
-certificate validation in the current development implementation. It must not
-be treated as suitable for an untrusted or production network without approved
-security configuration. There are no PLC write calls.
+Transport security is configured with `OPCUA_SECURITY_MODE` (`None`, `Sign`,
+`SignAndEncrypt`) and `OPCUA_SECURITY_POLICY`; see the README section "OPC UA
+transport security". The default `None` is unsecured and is reported as such in
+status, logs and the PLC page. In the secure modes `services/opcua_client.py`
+validates the client certificate/key, requires the server certificate to be in
+`OPCUA_TRUSTED_SERVER_CERTIFICATES`, pins it for the session, and fails with a
+clear error rather than falling back to `None`. There are no PLC write calls.
+
+Every route that returns asset-related data applies the caller's asset scope
+(`services/access_scope.py`): Administrators are unrestricted; Supervisors and
+Operators get the assets assigned in `nem_asset_supervisors` plus descendants,
+and nothing when none are assigned. Background and system sessions are
+unrestricted; a request session without an active user has no access.
+WebSocket events are filtered by the same scope and re-evaluated per message.
 
 ## API groups
 

@@ -158,6 +158,27 @@ export function createLiveUpdateScheduler(callback, delay = 200) {
   return request;
 }
 
+// Drop the connection and all per-session state. Called whenever the signed-in identity
+// or token changes, so a socket opened for one user can never keep delivering for the next.
+export function resetLiveUpdates() {
+  if (reconnectTimer) {
+    window.clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  if (staleTimer) {
+    window.clearTimeout(staleTimer);
+    staleTimer = null;
+  }
+  if (socket) {
+    const connection = socket;
+    socket = null;
+    connection.close();
+  }
+  seenEventIds.clear();
+  hasConnected = false;
+  reconnectDelay = 500;
+}
+
 export function subscribeLiveUpdates(subscriber) {
   subscribers.add(subscriber);
   connect();

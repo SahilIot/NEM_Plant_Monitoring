@@ -107,7 +107,63 @@ def _migrate_auth_roles(engine: Engine) -> None:
         else:
             raise RuntimeError("User role migration is not implemented for "f"{engine.dialect.name}")
 
+# Arbitrary constant shared by every process that upgrades this schema.
+_SCHEMA_UPGRADE_LOCK_KEY = 0x4E454D01
+
+
 def initialize_database(engine: Engine) -> None:
+    """Create/upgrade the schema. Safe to call repeatedly and from several processes.
+
+    On PostgreSQL a session-level advisory lock serializes concurrent callers (API
+    workers, create_admin.py, seed.py) so their DDL cannot interleave. The upgrade
+    steps themselves are additive and idempotent.
+    """
+    if engine.dialect.name != "postgresql":
+        _initialize_schema(engine)
+        return
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as lock_connection:
+        lock_connection.execute(text("SELECT pg_advisory_lock(:key)"), {"key": _SCHEMA_UPGRADE_LOCK_KEY})
+        try:
+            _initialize_schema(engine)
+        finally:
+            lock_connection.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _SCHEMA_UPGRADE_LOCK_KEY})
+
+
+_RULE_TYPES = (
+    "parameter_threshold", "runtime_duration", "duration",
+    "generic", "boolean_condition", "boolean_count_threshold",
+)
+
+
+def _reconcile_rule_type_constraint(engine: Engine) -> None:
+    """Widen ck_nem_monitoring_rules_type on databases created before every type existed.
+
+    create_all() never alters an existing table, so an older database can keep a narrower
+    constraint than the model declares. Rows already stored satisfy the wider list, and the
+    constraint is added NOT VALID so no existing row is scanned, rejected or changed.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as connection:
+        definition = connection.execute(text(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+            "WHERE conname = 'ck_nem_monitoring_rules_type' "
+            "AND conrelid = 'nem_monitoring_rules'::regclass"
+        )).scalar()
+        if definition is not None and all(f"'{name}'" in definition for name in _RULE_TYPES):
+            return
+        if definition is not None:
+            connection.execute(text(
+                "ALTER TABLE nem_monitoring_rules DROP CONSTRAINT ck_nem_monitoring_rules_type"
+            ))
+        allowed = ", ".join(f"'{name}'" for name in _RULE_TYPES)
+        connection.execute(text(
+            "ALTER TABLE nem_monitoring_rules ADD CONSTRAINT ck_nem_monitoring_rules_type "
+            f"CHECK (rule_type IN ({allowed})) NOT VALID"
+        ))
+
+
+def _initialize_schema(engine: Engine) -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_auth_roles(engine)
     inspector = inspect(engine)
@@ -282,6 +338,8 @@ def initialize_database(engine: Engine) -> None:
                 )
             )
         _drop_column_if_present(engine, "nem_monitoring_rules", "is_archived")
+    if "nem_monitoring_rules" in table_names:
+        _reconcile_rule_type_constraint(engine)
     _migrate_legacy_rule_templates(engine)
     _migrate_boolean_duration_templates(engine)
     _migrate_existing_rule_counters(engine)

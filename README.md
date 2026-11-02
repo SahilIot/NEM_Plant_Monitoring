@@ -6,11 +6,13 @@ signals, evaluates monitoring rules, records alerts and events, and manages
 maintenance work and recurring calendar schedules.
 
 > **Safety and deployment:** The application is monitoring software, not a
-> safety interlock. It has no PLC write or machine-control path. The current
-> OPC UA client is configured without transport encryption or certificate
-> validation and is for trusted development/test networks only. Do not connect
-> it to a production or untrusted network without PLC-approved security
-> configuration and a deployment security review.
+> safety interlock. It has no PLC write or machine-control path. The OPC UA
+> client supports signed and encrypted connections with server-certificate
+> validation (see [OPC UA transport security](#opc-ua-transport-security)),
+> but defaults to `OPCUA_SECURITY_MODE=None` (unsecured) so existing
+> deployments keep working. Use the secure modes, and set
+> `OPCUA_REQUIRE_SECURE_TRANSPORT=true`, on any production or untrusted
+> network, and complete a deployment security review first.
 
 ## What is implemented
 
@@ -168,6 +170,14 @@ variables and `Nem_Backend/.env`. Common options:
 | `MAINTENANCE_DUE_ALERTS_ENABLED` | Enables the scheduled maintenance due-alert evaluator; `true` by default. |
 | `OPCUA_ENDPOINT` | OPC UA endpoint in `opc.tcp://host:port/...` form. |
 | `OPCUA_USERNAME`, `OPCUA_PASSWORD` | Optional OPC UA credentials; configure both or neither. |
+| `OPCUA_SECURITY_MODE` | `None` (default, unsecured), `Sign` or `SignAndEncrypt`. See [OPC UA transport security](#opc-ua-transport-security). |
+| `OPCUA_SECURITY_POLICY` | `Basic256Sha256` (default), `Aes128Sha256RsaOaep` or `Aes256Sha256RsaPss`; used when the mode is not `None`. |
+| `OPCUA_REQUIRE_SECURE_TRANSPORT` | When `true`, `OPCUA_SECURITY_MODE=None` is rejected as a configuration error; `false` by default. |
+| `OPCUA_CLIENT_CERTIFICATE_PATH`, `OPCUA_CLIENT_PRIVATE_KEY_PATH` | Client certificate and private key (PEM or DER) for secure modes. |
+| `OPCUA_CLIENT_PRIVATE_KEY_PASSWORD` | Optional password for an encrypted private key. |
+| `OPCUA_TRUSTED_SERVER_CERTIFICATES` | File, or directory of `.pem`/`.crt`/`.cer`/`.der` files, holding the PLC server certificate(s) you trust. |
+| `OPCUA_APPLICATION_URI` | Client application URI; must match the URI in the client certificate's subject alternative name. Default `urn:nem:plant-monitoring:opcua-client`. |
+| `OPCUA_CHECK_SERVER_HOSTNAME` | When `true`, the server certificate must also match the host in `OPCUA_ENDPOINT`; `false` by default. |
 | `OPCUA_TIMEOUT_SECONDS` | OPC UA timeout; 10 seconds by default. |
 | `OPCUA_RECONNECT_DELAY_SECONDS` | Collector reconnect delay; 5 seconds by default. |
 | `OPCUA_SUBSCRIPTION_PUBLISHING_INTERVAL_MS` | Requested OPC UA publishing interval; 1000 ms by default. Server negotiation may change it. |
@@ -185,6 +195,43 @@ variables and `Nem_Backend/.env`. Common options:
 SMTP host, port, username, password, sender, and notification enablement are
 also managed through the dashboard settings. Keep the encryption key protected
 and available to the backend when reading saved SMTP credentials.
+
+### OPC UA transport security
+
+The client stays read-only in every mode. `OPCUA_SECURITY_MODE` selects the
+channel:
+
+- `None` (default): no signing or encryption and no server authentication.
+  A warning is logged once, and `/plc/status`, `/plc/test` and the PLC page show
+  the mode. Username/password may be exposed in this mode.
+- `Sign` / `SignAndEncrypt`: a secure channel using `OPCUA_SECURITY_POLICY`.
+
+For the secure modes the backend, before every (re)connection:
+
+1. Loads the client certificate and private key, rejecting an expired or
+   not-yet-valid certificate, a wrong key password, or a key that does not match
+   the certificate. On Linux/macOS the key file must not be readable by group or
+   others (for example `chmod 600`).
+2. Asks the server which certificate it uses for the configured policy/mode
+   (public endpoint data only) and requires it to be present in
+   `OPCUA_TRUSTED_SERVER_CERTIFICATES` (exact SHA-256 match). An untrusted,
+   expired or not-yet-valid server certificate is rejected, and the rejected
+   certificate's fingerprint is logged so it can be verified out of band.
+3. Pins that certificate for the session, so a server presenting a different
+   one is refused.
+
+There is no fallback: if any step fails the connection is not made, the
+collector reports a clear `last_error`, and `/plc/test` returns an error. It
+never retries with `None`. Private keys, passwords and certificate paths are
+not logged or returned by the API; `/plc/status` exposes only the mode, policy
+and booleans.
+
+PLC/server side: enable an endpoint with the chosen policy and mode; add the
+client certificate to the server's trusted list (the certificate should carry a
+URI SAN equal to `OPCUA_APPLICATION_URI`); and keep the user-identity settings
+the server requires. When the PLC certificate is renewed, update the trust
+location. Not every PLC supports every policy: `Basic256Sha256` is the most
+widely supported. These paths have not been exercised against a live PLC.
 
 ### OPC UA mapping format
 
@@ -228,10 +275,11 @@ trustworthy; time across disconnects is not inferred. Missing, invalid,
 future-dated, or stale data is reported as unknown rather than normal.
 
 Rules can be suspended, resumed, activated, deactivated, completed, or
-permanently deleted subject to lifecycle and role restrictions. `generic`
-rules have no evaluator and remain unknown. The database permits
-`boolean_condition`, but the main `RuleCreate` schema does not accept it; treat
-that type as legacy/compatibility behavior requiring verification.
+permanently deleted subject to lifecycle and role restrictions. `generic` and
+`boolean_condition` have no evaluator: the engine reports them as unknown (never
+normal), and they cannot raise, change or clear alerts. The database accepts
+both (so existing rows load), `RuleCreate` accepts `generic` but not
+`boolean_condition`, and the UI offers neither.
 
 ## Alerts, events, and maintenance
 
@@ -267,11 +315,17 @@ configuration, destructive actions, monitoring-rule management, maintenance,
 and alert actions. Exact permissions vary by endpoint and are enforced in the
 backend as well as reflected in the UI.
 
-**Important verification:** Supervisor-to-asset assignments are implemented
-for workflows such as email recipient selection, but the inspected API query
-and WebSocket wiring does not establish that all data is filtered by assigned
-asset IDs. Do not rely on assignments as a data-isolation boundary until this
-behavior is verified and corrected if needed. The frontend stores its session
+**Asset assignment scope:** Administrators see everything. A Supervisor or
+Operator sees and can act on only the assets assigned to them (Asset detail ->
+assigned users, using the `nem_asset_supervisors` table) and those assets'
+descendants. A non-admin with no assignments sees nothing. The scope is applied
+on the server for asset, variable, reading, rule, alert, event, dashboard,
+maintenance, document and PLC-status queries and for WebSocket events; an
+out-of-scope item returns 404, and a parent outside the scope is hidden.
+Assigning an Operator grants access only; email recipients remain the assigned
+Supervisors. This has been checked by reading and compiling the code, not by an
+automated or live multi-role test, so verify it against a real database before
+relying on it as a data-isolation boundary. The frontend stores its session
 token in local storage; use trusted HTTPS in deployment.
 
 ## API overview
@@ -306,10 +360,18 @@ monitoring rules/states, counters, alerts, events, maintenance, supervisor
 assignments, and email notifications. Dashboard configuration and account
 tables are also stored in PostgreSQL.
 
-At startup, `Base.metadata.create_all()` creates missing model tables and
-`app/db/init_db.py` applies selected additive compatibility updates. This is
-not a substitute for reviewing schema changes. Back up the database before
-deploying updates. Dashboard backups are separate snapshots managed through
+At startup (and in `create_admin.py` / `seed.py`),
+`initialize_database()` runs `Base.metadata.create_all()` and the additive,
+idempotent updates in `app/db/init_db.py`, serialized across processes by a
+PostgreSQL advisory lock. SQLite is never initialized by the application:
+`DATABASE_URL` must be a `postgresql+psycopg` URL. On an older database it also
+widens `ck_nem_monitoring_rules_type` to the current rule types (added `NOT
+VALID`, so no existing row is changed); rollback is
+`ALTER TABLE nem_monitoring_rules DROP CONSTRAINT ck_nem_monitoring_rules_type`
+followed by re-adding the previous definition. Startup still drops the legacy
+`nem_monitoring_rules.is_archived` and `nem_maintenance_records.archived_at`
+columns if present. This is not a substitute for reviewing schema changes. Back
+up the database before deploying updates. Dashboard backups are separate snapshots managed through
 the Settings workflow; restoring one replaces current monitoring data.
 Protect database backups and the backend `backups/` directory.
 

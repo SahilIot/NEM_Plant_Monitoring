@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models import Alert, Asset, MonitoringRule, Reading, RuleState, Variable
+from app.services.access_scope import access_scope
 from app.schemas.variable import VariableCreate, VariableRead, VariableUpdate
 
 router = APIRouter(tags=["variables"])
@@ -31,14 +32,15 @@ def variable_integrity_conflict(error: IntegrityError) -> HTTPException | None:
 #Find a variable by its database ID
 def variable_or_404(session: Session, variable_id: int) -> Variable:
     variable = session.get(Variable, variable_id)
-    if variable is None:
+    # A variable on an asset outside the caller's scope is reported as not found.
+    if variable is None or not access_scope(session).allows(variable.asset_id):
         raise HTTPException(status_code=404,detail=f"Variable {variable_id} was not found",)
     return variable
 
 # Create a variable, optionally linked to an OPC UA node.
 @router.post("/assets/{asset_id}/variables",response_model=VariableRead,status_code=status.HTTP_201_CREATED,)
 def create_variable(asset_id: int,payload: VariableCreate,session: Session = Depends(get_db),) -> Variable:
-    if session.get(Asset, asset_id) is None:
+    if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404,detail=f"Asset {asset_id} was not found",)
   #Build the variable
     variable = Variable(asset_id=asset_id, **payload.model_dump(),)
@@ -60,7 +62,7 @@ def list_variables(asset_id: int,is_active: bool | None = None,opcua_linked: boo
 limit: int = Query(default=50, ge=1, le=200),offset: int = Query(default=0, ge=0),session: 
 Session = Depends(get_db),
 ) -> dict[str, object]:
-    if session.get(Asset, asset_id) is None:
+    if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404,detail=f"Asset {asset_id} was not found",)
 
     query = select(Variable).where(Variable.asset_id == asset_id)

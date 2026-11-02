@@ -1,5 +1,6 @@
 from functools import lru_cache # Caches the settings object so it doesn`t need to be recreated every time
 from pathlib import Path
+from typing import Literal
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
@@ -35,6 +36,17 @@ class Settings(BaseSettings):
     opcua_endpoint: str = ""
     opcua_username: str = ""
     opcua_password: SecretStr = SecretStr("")
+    # Transport security. "None" keeps existing deployments working; Sign/SignAndEncrypt
+    # require the certificate settings below and never fall back to an insecure channel.
+    opcua_security_mode: Literal["None", "Sign", "SignAndEncrypt"] = "None"
+    opcua_security_policy: Literal["Basic256Sha256", "Aes128Sha256RsaOaep", "Aes256Sha256RsaPss"] = "Basic256Sha256"
+    opcua_require_secure_transport: bool = False
+    opcua_client_certificate_path: str = ""
+    opcua_client_private_key_path: str = ""
+    opcua_client_private_key_password: SecretStr = SecretStr("")
+    opcua_trusted_server_certificates: str = ""
+    opcua_application_uri: str = "urn:nem:plant-monitoring:opcua-client"
+    opcua_check_server_hostname: bool = False
     opc_ua_mapping_bypass_enabled: bool = False
     opcua_timeout_seconds: int = Field(default=10, ge=1, le=120)
     opcua_machine_mappings: str = ""
@@ -47,6 +59,17 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @field_validator("opcua_security_mode", "opcua_security_policy", mode="before")
+    @classmethod
+    def normalize_opcua_security_choice(cls, value: object) -> object:
+        # Accept any capitalisation from .env (none, SIGN, signandencrypt, ...).
+        if isinstance(value, str):
+            names = {"none": "None", "sign": "Sign", "signandencrypt": "SignAndEncrypt",
+                     "basic256sha256": "Basic256Sha256", "aes128sha256rsaoaep": "Aes128Sha256RsaOaep",
+                     "aes256sha256rsapss": "Aes256Sha256RsaPss"}
+            return names.get(value.strip().lower(), value.strip())
+        return value
 
 # Validating db URLs automatically
     @field_validator("database_url", "test_database_url")

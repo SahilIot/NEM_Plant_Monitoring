@@ -12,6 +12,7 @@ from app.api.routes.auth import get_current_user
 from app.db.session import get_db
 from app.models import Asset, Alert, MonitoringRule, RuleState, Variable, User
 from app.schemas.rule import RuleCreate, RuleRead, RuleUpdate
+from app.services.access_scope import access_scope, rule_asset_id
 from app.services.labels import apply_label_filter, assign_labels
 from app.services.monitoring_engine import emit_event, set_rule_enabled_state
 from app.services.monitoring_engine import utc_now
@@ -78,7 +79,8 @@ def configured_runtime_signal_mapping(
 #Find the rule safely
 def rule_or_404(session: Session, rule_id: int) -> MonitoringRule:
     rule = session.get(MonitoringRule, rule_id)
-    if rule is None:
+    # A rule on an asset outside the caller's scope is reported as not found.
+    if rule is None or not access_scope(session).allows(rule_asset_id(session, rule)):
         raise HTTPException(status_code=404, detail=f"Rule {rule_id} was not found")
     return rule
 
@@ -96,12 +98,13 @@ def validate_targets(
     mapping_bypass_enabled: bool = False,
 ) -> None:
     #Check that asset exits
+    scope = access_scope(session)
     asset = session.get(Asset, target_asset_id) if target_asset_id is not None else None
-    if target_asset_id is not None and asset is None:
+    if target_asset_id is not None and (asset is None or not scope.allows(asset.id)):
         raise HTTPException(status_code=404, detail=f"Asset {target_asset_id} was not found")
     #Varibale exists
     variable = session.get(Variable, variable_id) if variable_id is not None else None
-    if variable_id is not None and variable is None:
+    if variable_id is not None and (variable is None or not scope.allows(variable.asset_id)):
         raise HTTPException(status_code=404, detail=f"Variable {variable_id} was not found")
     if variable is not None and target_asset_id is not None:
         if variable.asset_id != target_asset_id:
@@ -318,14 +321,17 @@ def list_rules(
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
     #Build the database queries
+    scope = access_scope(session)
     query = select(MonitoringRule).where(
         MonitoringRule.target_asset_id.is_not(None),
+        scope.clause(MonitoringRule.target_asset_id),
     )
     count_query = (
         select(func.count())
         .select_from(MonitoringRule)
         .where(
             MonitoringRule.target_asset_id.is_not(None),
+            scope.clause(MonitoringRule.target_asset_id),
         )
     )
     for condition, column in (

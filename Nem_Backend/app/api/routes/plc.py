@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session # Represents the SQLAlchemy database session
 
 # connect this router to your application`s own modules
 from app.db.session import get_db
+from app.services.access_scope import access_scope
 from app.schemas.opcua import OpcUaReadRequest, OpcUaReadResponse # Request and Response 
 from app.schemas.reading import ReadingCreate, ReadingRead # reading before ingestion and how reading is represented in API response
 import asyncio
@@ -47,15 +48,23 @@ def plc_monitoring_status(request: Request,session: Session = Depends(get_db),) 
     )
     connection["stale_after_seconds"] = (request.app.state.settings.monitoring_default_stale_after_seconds)
     connection["requested_publishing_interval_ms"] = (request.app.state.settings.opcua_subscription_publishing_interval_ms)
+    # Supervisors may read PLC status, but only for the assets assigned to them.
+    scope = access_scope(session)
     return {
         "connection": connection,
         "mapping_bypass_enabled": request.app.state.settings.opc_ua_mapping_bypass_enabled,
-        "mappings": collector.configured_mapping_rows(session),
-        "machines": machine_status_rows(
-            session,
-            collector,
-            stale_after_seconds=request.app.state.settings.monitoring_default_stale_after_seconds,
-        ),
+        "mappings": [
+            row for row in collector.configured_mapping_rows(session)
+            if scope.allows(row.get("asset_id"))
+        ],
+        "machines": [
+            row for row in machine_status_rows(
+                session,
+                collector,
+                stale_after_seconds=request.app.state.settings.monitoring_default_stale_after_seconds,
+            )
+            if scope.allows(row.get("asset_id"))
+        ],
     }
 
 #Translate internal errors into HTTP errors

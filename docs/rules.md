@@ -73,8 +73,10 @@ ill-typed, or untrusted values do not refresh trustworthy running state.
 
 The database constraint allows `parameter_threshold`, `runtime_duration`,
 `duration`, `generic`, `boolean_condition`, and `boolean_count_threshold`.
-`RuleCreate` accepts the same list except `boolean_condition`; compatibility
-endpoints and legacy records may have different behavior. Rules created for an
+`RuleCreate` accepts the same list except `boolean_condition`. `generic` and
+`boolean_condition` have no evaluator; the engine reports them as unknown and
+they never raise or clear alerts. On startup the PostgreSQL constraint is
+widened if an older database lacks any of these types. Rules created for an
 asset must use variables owned by that asset. Runtime/cycle rules must bind to
 the matching configured Boolean signal or eligible declared signal in
 mapping-bypass mode.
@@ -203,7 +205,8 @@ settings. Supervisors may manage monitoring and maintenance with field/action
 restrictions. Operators are limited to permitted alert actions and due
 scheduled maintenance actions.
 
-The backend README claims access is restricted to assigned machines, but
-asset-level query filters and WebSocket assignment filters were not verified
-in the inspected code. Confirm this before relying on assignments as a
-confidentiality boundary.
+Supervisors and Operators can see and act on only their assigned assets and
+those assets' descendants; the filter is applied in the REST routes and in
+WebSocket events, and a non-admin with no assignments sees nothing. Only
+assigned Supervisors receive alert emails. Assignment scope was verified by code
+review and compilation, not by a live multi-role test.

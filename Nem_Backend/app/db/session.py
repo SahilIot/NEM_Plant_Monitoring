@@ -54,6 +54,11 @@ def create_session_factory(
 # this function provides a db session to FastAPI endpoints
 def get_db(request: Request) -> Generator[Session, None, None]:
     with request.app.state.session_factory() as session:
+        # Marks this as an API-request session so asset-assignment scoping
+        # (app.services.access_scope) applies; background sessions lack the flag.
+        # The literal key matches access_scope.REQUEST_SESSION_KEY (importing it
+        # here would be circular).
+        session.info["access_scope_required"] = True
         user_id = getattr(request.state, "auth_user_id", None)
         if user_id is not None:
             session.info["auth_user_id"] = user_id
