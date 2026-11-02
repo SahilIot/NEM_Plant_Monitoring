@@ -638,7 +638,34 @@ export default function AssetDetail() {
   const [viewRule, setViewRule] = useState(null);
   const [completionDetails, setCompletionDetails] = useState(null);
   const [completionDetailsError, setCompletionDetailsError] = useState("");
-  const [actionNotice, setActionNotice] = useState("");
+  const [actionNotification, setActionNotification] = useState(null);
+  const actionNotice =
+    actionNotification?.assetId === assetId ? actionNotification : null;
+  const activeAssetId = useRef(assetId);
+  activeAssetId.current = assetId;
+  const setActionNotice = (message) => {
+    if (!message) {
+      setActionNotification(null);
+      return;
+    }
+    setActionNotification({
+      text: message,
+      type: "success",
+      assetId: activeAssetId.current,
+    });
+  };
+  const notifyAction = (
+    message,
+    type = "success",
+    notificationAssetId = activeAssetId.current
+  ) => {
+    if (notificationAssetId !== activeAssetId.current) return;
+    setActionNotification({
+      text: message,
+      type,
+      assetId: notificationAssetId,
+    });
+  };
   const [sortMenu, setSortMenu] = useState(false);
   const [modal, setModal] = useState(null);
   const [monitoringRuleSelection, setMonitoringRuleSelection] = useState(null);
@@ -702,6 +729,10 @@ export default function AssetDetail() {
     return () => {
       assetRouteGeneration.current += 1;
     };
+  }, [assetId]);
+
+  useEffect(() => {
+    setActionNotification(null);
   }, [assetId]);
 
   useEffect(() => {
@@ -2173,8 +2204,11 @@ const filteredEvents = [...events]
         </div>
       )}
       {actionNotice && (
-        <div className="banner success" role="status">
-          <p>{actionNotice}</p>
+        <div
+          className={`banner ${actionNotice.type}`}
+          role={actionNotice.type === "error" ? "alert" : "status"}
+        >
+          <p>{actionNotice.text}</p>
           <button
             type="button"
             className="btn-outline"
@@ -2842,9 +2876,11 @@ const filteredEvents = [...events]
             </div>
           )}
           <CurrentMaintenanceCards
+            key={assetId}
             assetId={assetId}
             refreshKey={maintenanceRefreshKey}
             onChanged={refreshMaintenanceData}
+            onActionNotification={notifyAction}
             onCompletedRecordsCount={setCompletedMaintenanceCount}
             showCompleted={list === "not_activated"}
             navigationState={assetNavigationState}
@@ -2855,8 +2891,10 @@ const filteredEvents = [...events]
 {tab === "logbook" && (
   <>
     <MaintenancePanel
+      key={assetId}
       assetId={assetId}
       onChanged={refreshMaintenanceData}
+      onActionNotification={notifyAction}
       navigationState={assetNavigationState}
     />
 

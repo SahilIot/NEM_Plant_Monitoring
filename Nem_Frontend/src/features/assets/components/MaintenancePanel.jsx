@@ -152,6 +152,7 @@ function validateForm(values, requirePlannedDates) {
 export default function MaintenancePanel({
   assetId,
   onChanged,
+  onActionNotification,
   navigationState,
 }) {
   const confirm = useConfirmation();
@@ -175,6 +176,7 @@ export default function MaintenancePanel({
   const [materialError, setMaterialError] = useState("");
   const [actionMenuRecordId, setActionMenuRecordId] = useState(null);
   const actionMenuTriggerRef = useRef(null);
+  const startRequestRef = useRef(false);
   const [legacyRuleOptionsOpen, setLegacyRuleOptionsOpen] = useState(false);
   const [values, setValues] = useState(() => formValues(null));
   const [scheduleValues, setScheduleValues] = useState({
@@ -667,6 +669,9 @@ const openEdit = (record) => {
     if (!canManageMaintenance || busy) return;
     const isStarting = record.status === "planned";
     if (!isStarting && record.status !== "in_progress") return;
+    if (isStarting && startRequestRef.current) return;
+    if (isStarting) startRequestRef.current = true;
+    let startSucceeded = false;
     setBusy(true);
     setError("");
     setNotice("");
@@ -674,6 +679,10 @@ const openEdit = (record) => {
       const updatedRecord = await api.post(
         `/maintenance/${record.id}/${isStarting ? "start" : "complete"}`
       );
+      if (isStarting) {
+        startSucceeded = true;
+        onActionNotification?.("Maintenance started.", "success", assetId);
+      }
       if (!isStarting && updatedRecord.schedule_id) {
         const updatedSchedules = await api.getAll(
           `/maintenance/schedules?asset_id=${assetId}`
@@ -694,13 +703,25 @@ const openEdit = (record) => {
       setRecords((previous) =>
         previous.map((item) => item.id === updatedRecord.id ? updatedRecord : item)
       );
-      setNotice(isStarting ? "Maintenance started." : "Maintenance finished.");
+      if (!isStarting) setNotice("Maintenance finished.");
       await loadRecords();
       await onChanged?.();
       if (!isStarting) await loadSchedules();
     } catch (requestError) {
-      setError(requestError.message || `Could not ${isStarting ? "start" : "finish"} maintenance.`);
+      if (isStarting && !startSucceeded) {
+        onActionNotification?.(
+          requestError.message || "Could not start maintenance.",
+          "error",
+          assetId
+        );
+      } else {
+        setError(
+          requestError.message ||
+            `Could not ${isStarting ? "refresh" : "finish"} maintenance.`
+        );
+      }
     } finally {
+      if (isStarting) startRequestRef.current = false;
       setBusy(false);
     }
   };

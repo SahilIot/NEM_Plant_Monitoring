@@ -32,6 +32,7 @@ export default function CurrentMaintenanceCards({
   assetId,
   refreshKey = 0,
   onChanged,
+  onActionNotification,
   onCompletedRecordsCount,
   showCompleted = false,
   navigationState,
@@ -56,6 +57,7 @@ export default function CurrentMaintenanceCards({
   const [editingRecordId, setEditingRecordId] = useState(null);
   const [actionMenuRecordId, setActionMenuRecordId] = useState(null);
   const actionMenuTriggerRef = useRef(null);
+  const startRequestRef = useRef(false);
   const lastLoadedDate = useRef("");
   const loadingRef = useRef(false);
   const busy =
@@ -298,20 +300,33 @@ const openEdit = (record) => {
       !(canOperateDueMaintenance && record.schedule_id != null &&
         record.planned_due_date <= todayDateInput())
     ) return;
-    if (startingRecordId !== null) return;
+    if (startingRecordId !== null || startRequestRef.current) return;
+    startRequestRef.current = true;
     setStartingRecordId(record.id);
     setError("");
     setNotice("");
     try {
       await api.post(`/maintenance/${record.id}/start`);
-      await Promise.all([
-        loadCurrentMaintenance(),
-        Promise.resolve(onChanged?.()),
-      ]);
-      setNotice("Maintenance started.");
+      onActionNotification?.("Maintenance started.", "success", assetId);
+      try {
+        await Promise.all([
+          loadCurrentMaintenance(),
+          Promise.resolve(onChanged?.()),
+        ]);
+      } catch (refreshError) {
+        setError(
+          refreshError.message ||
+            "Maintenance started, but the current maintenance could not be refreshed."
+        );
+      }
     } catch (startError) {
-      setError(startError.message || "Could not start maintenance.");
+      onActionNotification?.(
+        startError.message || "Could not start maintenance.",
+        "error",
+        assetId
+      );
     } finally {
+      startRequestRef.current = false;
       setStartingRecordId(null);
     }
   };
