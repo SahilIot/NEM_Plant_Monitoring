@@ -583,6 +583,7 @@ export default function AssetDetail() {
   const isSupervisor = user?.role === "Supervisor";
   const isOperator = user?.role === "Operator";
   const canManageRules = isAdministrator || isSupervisor;
+  const canChangeRuleLifecycle = isAdministrator;
   const canManageLogbook = canManageRules;
   const { id } = useParams();
   const location = useLocation();
@@ -1541,7 +1542,7 @@ const filteredEvents = [...events]
   };
 
   const confirmLifecycleChange = async () => {
-    if (!canManageRules || !lifecycleAction || deletingRuleId !== null) return;
+    if (!canChangeRuleLifecycle || !lifecycleAction || deletingRuleId !== null) return;
     const { rule, action } = lifecycleAction;
     setDeletingRuleId(rule.id);
     setLoadError("");
@@ -1853,7 +1854,7 @@ const filteredEvents = [...events]
   );
 
   const bulk = async (state) => {
-    if (!canManageRules || bulkRequest.current || bulkSaving) return;
+    if (!canChangeRuleLifecycle || bulkRequest.current || bulkSaving) return;
     const affected = rules.filter((rule) =>
       state === "activated" ? !isAct(rule) : isAct(rule)
     ).length;
@@ -2458,8 +2459,8 @@ const filteredEvents = [...events]
                       <button
                       type="button"
                       className="rule-bulk-menu-item"
-                      disabled={bulkSaving || !canManageRules}
-                      title={!canManageRules ? "You do not have permission to manage monitoring rules." : undefined}
+                      disabled={bulkSaving || !canChangeRuleLifecycle}
+                      title={!canChangeRuleLifecycle ? "Only Administrators can change monitoring rule states." : undefined}
                       role="menuitem"
                       onClick={() => bulk("activated")}
                       >
@@ -2469,8 +2470,8 @@ const filteredEvents = [...events]
                         <button
                         type="button"
                         className="rule-bulk-menu-item"
-                        disabled={bulkSaving || !canManageRules}
-                        title={!canManageRules ? "You do not have permission to manage monitoring rules." : undefined}
+                        disabled={bulkSaving || !canChangeRuleLifecycle}
+                        title={!canChangeRuleLifecycle ? "Only Administrators can change monitoring rule states." : undefined}
                       role="menuitem"
                         onClick={() => bulk("not_activated")}
                         >
@@ -2772,10 +2773,10 @@ const filteredEvents = [...events]
           setRuleActionMenuId(null);
           setLifecycleAction({ rule, action: "suspend" });
         }}
-        disabled={isSupervisor ||deletingRuleId !== null ||!canManageRules}
+        disabled={!canChangeRuleLifecycle || deletingRuleId !== null}
         title={
-          !canManageRules
-            ? "You do not have permission to manage monitoring rules."
+          !canChangeRuleLifecycle
+            ? "Only Administrators can change monitoring rule states."
             : undefined
         }
       >
@@ -2816,10 +2817,10 @@ const filteredEvents = [...events]
           setRuleActionMenuId(null);
           setLifecycleAction({ rule, action: "activate" });
         }}
-        disabled={deletingRuleId !== null || !canManageRules}
+        disabled={deletingRuleId !== null || !canChangeRuleLifecycle}
         title={
-          !canManageRules
-            ? "You do not have permission to manage monitoring rules."
+          !canChangeRuleLifecycle
+            ? "Only Administrators can change monitoring rule states."
             : undefined
         }
       >
@@ -2838,10 +2839,10 @@ const filteredEvents = [...events]
           setRuleActionMenuId(null);
           setLifecycleAction({ rule, action: "deactivate" });
         }}
-        disabled={isSupervisor ||deletingRuleId !== null ||!canManageRules}
+        disabled={!canChangeRuleLifecycle || deletingRuleId !== null}
         title={
-          !canManageRules
-            ? "You do not have permission to manage monitoring rules."
+          !canChangeRuleLifecycle
+            ? "Only Administrators can change monitoring rule states."
             : undefined
         }
       >

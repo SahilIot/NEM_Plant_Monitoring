@@ -1408,7 +1408,10 @@ def frontend_create_time_rule(
     raise HTTPException(status_code=410,detail=("Time-based maintenance is not a monitoring rule. Create a planned maintenance record through POST /maintenance instead."),)
 
 # endpoint allows the frontend to change the state of multiple monitoring rules belonging to one asset
-@router.post("/assets/{asset_id}/rules/bulk")
+@router.post(
+    "/assets/{asset_id}/rules/bulk",
+    dependencies=[Depends(require_roles("Administrator"))],
+)
 def frontend_bulk_rule_state(
     asset_id: int,
     payload: dict[str, str],
@@ -1538,7 +1541,10 @@ def _transition_rule_lifecycle(
     return _rule_row(session, rule)
 
 
-@router.post("/rules/{rule_id}/suspend")
+@router.post(
+    "/rules/{rule_id}/suspend",
+    dependencies=[Depends(require_roles("Administrator"))],
+)
 def suspend_rule(
     rule_id: int,
     request: Request,
@@ -1547,7 +1553,10 @@ def suspend_rule(
     return _transition_rule_lifecycle(rule_id, "suspend", request, session)
 
 
-@router.post("/rules/{rule_id}/resume")
+@router.post(
+    "/rules/{rule_id}/resume",
+    dependencies=[Depends(require_roles("Administrator"))],
+)
 def resume_rule(
     rule_id: int,
     request: Request,
@@ -1556,7 +1565,10 @@ def resume_rule(
     return _transition_rule_lifecycle(rule_id, "resume", request, session)
 
 
-@router.post("/rules/{rule_id}/activate")
+@router.post(
+    "/rules/{rule_id}/activate",
+    dependencies=[Depends(require_roles("Administrator"))],
+)
 def activate_rule(
     rule_id: int,
     request: Request,
@@ -1565,7 +1577,10 @@ def activate_rule(
     return _transition_rule_lifecycle(rule_id, "activate", request, session)
 
 
-@router.post("/rules/{rule_id}/deactivate")
+@router.post(
+    "/rules/{rule_id}/deactivate",
+    dependencies=[Depends(require_roles("Administrator"))],
+)
 def deactivate_rule(
     rule_id: int,
     request: Request,
