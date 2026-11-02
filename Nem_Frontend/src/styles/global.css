@@ -1484,3 +1484,261 @@ html[data-theme="dark"] .topbar > .icon-btn:hover {
     max-height: 92dvh;
   }
 }
+
+
+/* =========================================
+   COLLECTION DETAILS MODAL
+   Light + Dark Theme Support
+========================================= */
+
+.collection-details {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 6px 2px 2px;
+  color: var(--text-primary, var(--text, #1f2937));
+}
+
+.collection-details h3 {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.4;
+  color: var(--text-primary, var(--text, #1f2937));
+}
+
+.collection-details > p {
+  margin: -12px 0 0;
+  font-size: 0.92rem;
+  line-height: 1.65;
+  color: var(--text-secondary, #64748b);
+  overflow-wrap: anywhere;
+}
+
+.collection-details-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 15px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 10px;
+  background: var(--surface-secondary, #f8fafc);
+  color: var(--text-secondary, #64748b);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.collection-details-meta strong {
+  color: var(--text-primary, #1f2937);
+  font-weight: 650;
+}
+
+.collection-rules-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+
+.collection-rules-heading h4 {
+  margin: 0;
+  color: var(--text-primary, #1f2937);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.collection-rules-heading span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 26px;
+  padding: 3px 10px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 20px;
+  background: var(--surface-secondary, #f8fafc);
+  color: var(--text-secondary, #64748b);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.collection-rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 2px 3px 2px 0;
+}
+
+.collection-rule-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 15px 16px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 11px;
+  background: var(--surface, #ffffff);
+  color: var(--text-primary, #1f2937);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.collection-rule-item:hover {
+  border-color: var(--primary, #64748b);
+  background: var(--surface-secondary, #f8fafc);
+  box-shadow: 0 3px 12px rgba(15, 23, 42, 0.07);
+  transform: translateY(-1px);
+}
+
+.collection-rule-item:focus-visible {
+  outline: 2px solid var(--primary, #64748b);
+  outline-offset: 3px;
+}
+
+.collection-rule-item > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.collection-rule-item strong {
+  color: var(--text-primary, #1f2937);
+  font-size: 0.93rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.collection-rule-item small {
+  color: var(--text-secondary, #64748b);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.collection-rule-item > svg {
+  flex-shrink: 0;
+  color: var(--text-secondary, #64748b);
+  transition: color 160ms ease;
+}
+
+.collection-rule-item:hover > svg {
+  color: var(--primary, #475569);
+}
+
+.collection-details-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color, #e2e8f0);
+}
+
+/* Dark theme */
+.dark .collection-details,
+[data-theme="dark"] .collection-details {
+  color: var(--text-primary, #e5e7eb);
+}
+
+.dark .collection-details h3,
+[data-theme="dark"] .collection-details h3,
+.dark .collection-details-meta strong,
+[data-theme="dark"] .collection-details-meta strong,
+.dark .collection-rules-heading h4,
+[data-theme="dark"] .collection-rules-heading h4,
+.dark .collection-rule-item strong,
+[data-theme="dark"] .collection-rule-item strong {
+  color: var(--text-primary, #f1f5f9);
+}
+
+.dark .collection-details > p,
+[data-theme="dark"] .collection-details > p,
+.dark .collection-details-meta,
+[data-theme="dark"] .collection-details-meta,
+.dark .collection-rules-heading span,
+[data-theme="dark"] .collection-rules-heading span,
+.dark .collection-rule-item small,
+[data-theme="dark"] .collection-rule-item small {
+  color: var(--text-secondary, #a1a1aa);
+}
+
+.dark .collection-details-meta,
+[data-theme="dark"] .collection-details-meta,
+.dark .collection-rules-heading span,
+[data-theme="dark"] .collection-rules-heading span {
+  background: var(--surface-secondary, #252a35);
+  border-color: var(--border-color, #374151);
+}
+
+.dark .collection-rules-heading,
+[data-theme="dark"] .collection-rules-heading,
+.dark .collection-details-actions,
+[data-theme="dark"] .collection-details-actions {
+  border-color: var(--border-color, #374151);
+}
+
+.dark .collection-rule-item,
+[data-theme="dark"] .collection-rule-item {
+  background: var(--surface, #1f2937);
+  border-color: var(--border-color, #374151);
+  color: var(--text-primary, #f1f5f9);
+}
+
+.dark .collection-rule-item:hover,
+[data-theme="dark"] .collection-rule-item:hover {
+  background: var(--surface-secondary, #293548);
+  border-color: var(--primary, #94a3b8);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.2);
+}
+
+.dark .collection-rule-item > svg,
+[data-theme="dark"] .collection-rule-item > svg {
+  color: var(--text-secondary, #a1a1aa);
+}
+
+/* Responsive layout */
+@media (max-width: 600px) {
+  .collection-details {
+    gap: 17px;
+  }
+
+  .collection-details h3 {
+    font-size: 1.15rem;
+  }
+
+  .collection-rule-item {
+    padding: 13px;
+    gap: 10px;
+  }
+
+  .collection-details-actions {
+    flex-direction: column;
+  }
+
+  .collection-details-actions button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .collection-rule-item,
+  .collection-rule-item > svg {
+    transition: none;
+  }
+
+  .collection-rule-item:hover {
+    transform: none;
+  }
+}

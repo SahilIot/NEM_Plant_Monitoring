@@ -277,7 +277,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         admin_only_read_paths = (
             "/api/v1/auth/users",
             "/api/v1/plc",
-            "/api/v1/collections",
             "/api/v1/import",
             "/api/v1/settings",
             "/api/v1/backups",

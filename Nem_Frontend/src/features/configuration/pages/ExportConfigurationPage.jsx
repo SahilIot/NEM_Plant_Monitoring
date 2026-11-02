@@ -61,7 +61,7 @@ export default function ExportConfigurationPage() {
         className="link-btn"
         onClick={() => window.history.back()}
       >
-        ← Back
+        ‹ Back
       </button>
 
       <h1 className="page-title">

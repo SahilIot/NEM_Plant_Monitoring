@@ -2088,12 +2088,17 @@ async def create_document_with_files(
     description: str = Form(""),
     labels: str = Form("[]"),
     duration_minutes: int | None = Form(default=None, ge=1),
-    files: list[UploadFile] = File(default=[]),
+    files: list[UploadFile] = File(...),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     title, kind = title.strip(), kind.strip()
     if not title or not kind:
         raise HTTPException(status_code=422, detail="Title and type are required")
+    if not files or all(not (upload.filename or "").strip() for upload in files):
+        raise HTTPException(
+            status_code=422,
+            detail="At least one attachment is required.",
+        )
     if len(files) > MAX_FILES_PER_DOCUMENT:
         raise HTTPException(status_code=413, detail=f"Choose no more than {MAX_FILES_PER_DOCUMENT} files")
     try:

@@ -20,6 +20,7 @@ import {
 import { conditionText } from "../../../utils/format.js";
 import {
   CreateModal,
+  Modal,
   EmptyState,
   LoadingIndicator,
   useConfirmation,
@@ -191,9 +192,10 @@ function fieldsFor(sub, variables) {
     { key: "labels", label: "Labels", type: "labels" },
     {
       key: "files",
-      label: "Attach files (optional)",
+      label: "Attach files (required)",
       type: "files",
-      hint: "PDF, DOC, DOCX or TXT. Up to 10 files; 10 MB each.",
+      required: true,
+      hint: "At least one file is required. PDF, DOC, DOCX or TXT. Up to 10 files; 10 MB each.",
     },
   ];
 }
@@ -370,6 +372,10 @@ export default function ConfigSub() {
     error: false,
   });
   const [activeCollection, setActiveCollection] = useState(null);
+  const [viewingCollection, setViewingCollection] = useState(null);
+  const [collectionTemplates, setCollectionTemplates] = useState([]);
+  const [loadingCollectionTemplates, setLoadingCollectionTemplates] = useState(false);
+  const [editingCollectionTemplate, setEditingCollectionTemplate] = useState(null);
   const [editingCollection, setEditingCollection] = useState(null);
   const [editingDocument, setEditingDocument] = useState(null);
   const [busyRuleId, setBusyRuleId] = useState(null);
@@ -1120,7 +1126,14 @@ const edit = async (values) => {
           </div>
         )}
         {["rules", "collections", "documents"].includes(sub) && (
-          <div className="config-label-filter" style={{ marginBottom: 16 }}>
+          <div
+          className="config-label-filter"
+          style={{
+            marginBottom: 16,
+            display: "flex",
+            justifyContent: "flex-end",
+            }}
+            >
             <LabelsField
               mode="filter"
               value={labelIds}
@@ -1249,16 +1262,7 @@ const edit = async (values) => {
                               title="Edit rule"
                               aria-label="Edit rule"
                               disabled={!canManageConfiguration || busyRuleId === row.id}
-                              onClick={() =>
-                                nav(
-                                  `/assets/${row.target_asset_id}/monitoring-rules/${row.rule_type}/edit`,
-                                  {
-                                    state: {
-                                      editingRule: row,
-                                    },
-                                  }
-                                )
-                              }
+                              onClick={() => nav("/configuration/rules/edit")}
                             >
                               <Pencil size={17} />
                             </button>
@@ -1323,37 +1327,37 @@ const edit = async (values) => {
   <PlusCircle size={16} />
   Add Rule
 </button>
-
-    {/* Edit Rule */}
-    <button
-      type="button"
-      className="btn-outline"
-      title="Edit collection rules"
-      disabled={!canManageConfiguration}
-      onClick={() => {
-        nav("/configuration/rules", {
-          state: {
-            collectionId: row.id,
-            collectionName: row.name,
-            action: "edit",
-          },
-        });
-      }}
-    >
-      <Pencil size={16} />
-      Edit Rule
-    </button>
-
     <button
       type="button"
       className="config-icon-btn edit"
-      title="Edit collection"
-      aria-label="Edit collection"
+      title="View collection details"
+      aria-label="View collection details"
       disabled={!canManageConfiguration}
-      onClick={() => {
-        setEditingCollection(row);
-        setOpen(true);
-      }}
+      onClick={async () => {
+        setViewingCollection(row);
+        setCollectionTemplates([]);
+  setLoadingCollectionTemplates(true);
+
+  try {
+    const result = await api.get("/rule-templates");
+
+    const templates = Array.isArray(result) ? result : [];
+
+    setCollectionTemplates(
+      templates.filter(
+        (template) =>
+          String(template.collection_id) === String(row.id)
+      )
+    );
+  } catch (error) {
+    setMsg({
+      text: error.message || "Could not load collection rules.",
+      error: true,
+    });
+  } finally {
+    setLoadingCollectionTemplates(false);
+  }
+}}
     >
       <Pencil size={17} />
     </button>
@@ -1514,6 +1518,120 @@ const edit = async (values) => {
           }}
         />
       )}
+
+      
+      {viewingCollection && (
+        <Modal
+          title="Collection Details"
+          onClose={() => {
+            setViewingCollection(null);
+            setEditingCollectionTemplate(null);
+          }}
+          wide
+        >
+          <div className="collection-details">
+            <h3>{viewingCollection.name}</h3>
+
+            <p>
+              {viewingCollection.description ||
+                "No description available."}
+            </p>
+
+            <div className="collection-details-meta">
+              <strong>Labels:</strong>{" "}
+              {Array.isArray(viewingCollection.labels)
+                ? viewingCollection.labels
+                    .map((label) =>
+                      typeof label === "string"
+                        ? label
+                        : label.name
+                    )
+                    .filter(Boolean)
+                    .join(", ") || "No labels"
+                : viewingCollection.labels || "No labels"}
+            </div>
+
+            <div className="collection-rules-heading">
+              <h4>Reusable Rules</h4>
+              <span>
+                {collectionTemplates.length} rules
+              </span>
+            </div>
+
+            {loadingCollectionTemplates ? (
+              <p>Loading reusable rules...</p>
+            ) : collectionTemplates.length === 0 ? (
+              <p>No reusable rules found in this collection.</p>
+            ) : (
+              <div className="collection-rules-list">
+                {collectionTemplates.map((template) => (
+                  <button
+                    key={template.id}
+                    type="button"
+                    className="collection-rule-item"
+                    onClick={() =>
+                      setEditingCollectionTemplate(template)
+                    }
+                  >
+                    <span>
+                      <strong>{template.name}</strong>
+                      <small>
+                        {template.description ||
+                          "No description"}
+                      </small>
+                    </span>
+                    <Pencil size={16} />
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="collection-details-actions">
+              <button
+                type="button"
+                className="btn-outline"
+                onClick={() => {
+                  setEditingCollection(viewingCollection);
+                  setViewingCollection(null);
+                  setOpen(true);
+                }}
+              >
+                Edit collection details
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {editingCollectionTemplate && viewingCollection && (
+        <ReusableRuleModal
+          collection={viewingCollection}
+          template={editingCollectionTemplate}
+          onClose={() => setEditingCollectionTemplate(null)}
+          onUpdated={async () => {
+            setMsg({
+              text: "Reusable rule updated successfully.",
+              error: false,
+            });
+
+            setEditingCollectionTemplate(null);
+
+            const result = await api.get("/rule-templates");
+            const templates = Array.isArray(result) ? result : [];
+
+            setCollectionTemplates(
+              templates.filter(
+                (item) =>
+                  String(item.collection_id) ===
+                  String(viewingCollection.id)
+              )
+            );
+
+            await load();
+          }}
+        />
+      )}
+
       {open && sub !== "documents" && sub !== "collections" && (
         <CreateModal
           disabled={!canManageConfiguration}
