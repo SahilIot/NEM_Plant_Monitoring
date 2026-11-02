@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import ReusableRuleModal from "./ReusableRuleModal.jsx";
 import RuleCollectionCreateModal from "./RuleCollectionCreateModal.jsx";
+import "./ConfigSub.css";
 
 const DOC_TYPES = [
   ["Instruction", "Instruction"],
@@ -1521,87 +1522,110 @@ const edit = async (values) => {
 
       
       {viewingCollection && (
-        <Modal
-          title="Collection Details"
-          onClose={() => {
-            setViewingCollection(null);
-            setEditingCollectionTemplate(null);
-          }}
-          wide
-        >
-          <div className="collection-details">
-            <h3>{viewingCollection.name}</h3>
+  <Modal
+    title="Collection Details"
+    onClose={() => {
+      setViewingCollection(null);
+      setEditingCollectionTemplate(null);
+    }}
+    wide
+  >
+    <div className="collection-details">
+      <div className="collection-details-cards">
+  {/* Machine Card */}
+  <div className="collection-details-card">
+    <h4>Machine</h4>
 
-            <p>
-              {viewingCollection.description ||
-                "No description available."}
-            </p>
+    <p>
+      {viewingCollection.name || "No machine available"}
+    </p>
 
-            <div className="collection-details-meta">
-              <strong>Labels:</strong>{" "}
-              {Array.isArray(viewingCollection.labels)
-                ? viewingCollection.labels
-                    .map((label) =>
-                      typeof label === "string"
-                        ? label
-                        : label.name
-                    )
-                    .filter(Boolean)
-                    .join(", ") || "No labels"
-                : viewingCollection.labels || "No labels"}
-            </div>
+    <small>
+      {viewingCollection.description || "No description available."}
+    </small>
+  </div>
 
-            <div className="collection-rules-heading">
-              <h4>Reusable Rules</h4>
+  {/* Labels Card */}
+  <div className="collection-details-card">
+    <h4>Labels</h4>
+
+    <p>
+      {Array.isArray(viewingCollection.labels)
+        ? viewingCollection.labels
+            .map((label) =>
+              typeof label === "string" ? label : label?.name
+            )
+            .filter(Boolean)
+            .join(", ") || "No labels"
+        : viewingCollection.labels || "No labels"}
+    </p>
+  </div>
+</div>
+
+      {/* Reusable Rules */}
+      <div className="collection-rules-heading">
+        <h4>Reusable Rules</h4>
+        <span>{collectionTemplates.length} rules</span>
+      </div>
+
+      {loadingCollectionTemplates ? (
+        <p>Loading reusable rules...</p>
+      ) : collectionTemplates.length === 0 ? (
+        <p>No reusable rules found in this collection.</p>
+      ) : (
+        <div className="collection-rules-list">
+          {collectionTemplates.map((template) => (
+            <button
+              key={template.id}
+              type="button"
+              className="collection-rule-item"
+              onClick={() =>
+                setEditingCollectionTemplate(template)
+              }
+            >
               <span>
-                {collectionTemplates.length} rules
+                <strong>{template.name}</strong>
+                <small>
+                  {template.description || "No description"}
+                </small>
               </span>
-            </div>
-
-            {loadingCollectionTemplates ? (
-              <p>Loading reusable rules...</p>
-            ) : collectionTemplates.length === 0 ? (
-              <p>No reusable rules found in this collection.</p>
-            ) : (
-              <div className="collection-rules-list">
-                {collectionTemplates.map((template) => (
-                  <button
-                    key={template.id}
-                    type="button"
-                    className="collection-rule-item"
-                    onClick={() =>
-                      setEditingCollectionTemplate(template)
-                    }
-                  >
-                    <span>
-                      <strong>{template.name}</strong>
-                      <small>
-                        {template.description ||
-                          "No description"}
-                      </small>
-                    </span>
-                    <Pencil size={16} />
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div className="collection-details-actions">
-              <button
-                type="button"
-                className="btn-outline"
-                onClick={() => {
-                  setEditingCollection(viewingCollection);
-                  setViewingCollection(null);
-                  setOpen(true);
-                }}
-              >
-                Edit collection details
-              </button>
-            </div>
-          </div>
-        </Modal>
+              <Pencil size={16} className="collection-rule-pencil" color="#374151"/>
+            </button>
+          ))}
+        </div>
       )}
+
+      {/* Action Buttons */}
+      <div className="collection-details-actions">
+        <button
+          type="button"
+          className="btn-outline"
+          onClick={() => {
+            setActiveCollection({
+              id: viewingCollection.id,
+              name: viewingCollection.name,
+              ruleCount: collectionTemplates.length,
+            });
+          }}
+        >
+          Add Rule
+        </button>
+
+        <button
+          type="button"
+          className="btn-outline"
+          onClick={() => {
+            setEditingCollection(viewingCollection);
+            setViewingCollection(null);
+            setOpen(true);
+          }}
+        >
+          Edit collection details
+        </button>
+      </div>
+    </div>
+  </Modal>
+)}
 
       {editingCollectionTemplate && viewingCollection && (
         <ReusableRuleModal

@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App.jsx";
 import { AuthProvider } from "../features/auth/AuthContext.jsx";
+import { ConfirmationProvider } from "../components/common/UI.jsx";
 import "../styles/global.css";
 
 
@@ -17,11 +18,13 @@ class ErrorBoundary extends React.Component {
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(
-  <ErrorBoundary>
+    <ErrorBoundary>
     <BrowserRouter basename="/ui">
-      <AuthProvider>
-        <App />
-      </AuthProvider>
+      <ConfirmationProvider>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </ConfirmationProvider>
     </BrowserRouter>
   </ErrorBoundary>
 );

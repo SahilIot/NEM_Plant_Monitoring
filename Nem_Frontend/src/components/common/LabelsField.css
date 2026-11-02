@@ -53,17 +53,14 @@
 .labels-suggestions,
 .labels-filter-menu {
   position: absolute;
-  z-index: 20;
   top: calc(100% + 5px);
-  left: 0;
-  width: min(100%, 360px);
-  max-height: 230px;
+  right: 0;
+  left: auto;
+  bottom: auto;
+  width: min(300px, calc(100vw - 32px));
+  max-height: min(320px, 60vh);
   overflow: auto;
-  padding: 5px;
-  border: 1px solid var(--line, #d8dee5);
-  border-radius: 9px;
-  background: var(--surface, #111827);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+  z-index: 1100;
 }
 
 .labels-suggestions button {
@@ -137,6 +134,7 @@
 }
 
 .labels-filter {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -185,12 +183,13 @@
   }
 
   .labels-filter-menu {
-    position: fixed;
-    top: auto;
-    left: 16px;
-    right: 16px;
-    bottom: 16px;
-    width: auto;
+    position: absolute;
+    top: calc(100% + 5px);
+    left: auto;
+    right: 0;
+    bottom: auto;
+    width: min(300px, calc(100vw - 32px));
+    max-height: min(320px, 60vh);
     z-index: 1100;
   }
 }

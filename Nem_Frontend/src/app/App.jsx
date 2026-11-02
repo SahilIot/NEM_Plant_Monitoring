@@ -153,6 +153,12 @@ export default function App() {
   element={<CreateMonitoringRulePage />}
 />
 
+{/* Monitoring Rules */}
+<Route
+  path="/assets/:id/monitoring-rules/new/:choiceId"
+  element={<CreateMonitoringRulePage />}
+/>
+
 {/* Edit existing monitoring rule */}
 <Route
   path="/assets/:id/monitoring-rules/:rule_type/edit"
