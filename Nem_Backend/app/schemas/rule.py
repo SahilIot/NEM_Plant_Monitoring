@@ -452,6 +452,10 @@ class RuleRead(ORMModel):
     stale_after_seconds: int | None
     created_at: datetime
     updated_at: datetime
+    created_by_id: int | None = None
+    created_by: str | None = None
+    updated_by_id: int | None = None
+    updated_by: str | None = None
 
 #Simplified rule creation , smaller schema for frontend-oriented rule creation workflows
 class FrontendRuleCreate(ORMModel):

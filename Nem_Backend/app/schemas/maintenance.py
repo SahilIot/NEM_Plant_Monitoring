@@ -107,6 +107,11 @@ class MaintenanceRead(ORMModel):
     schedule_id: int | None = None
     planned_due_date: date | None = None
     created_at: datetime
+    updated_at: datetime | None = None
+    created_by_id: int | None = None
+    created_by: str | None = None
+    updated_by_id: int | None = None
+    updated_by: str | None = None
 
 #Defines which maintenance record fields can be updated,editing a job
 class MaintenanceUpdate(ORMModel):
@@ -249,6 +254,10 @@ class MaintenanceScheduleRead(ORMModel):
     total_days: int
     created_at: datetime
     updated_at: datetime
+    created_by_id: int | None = None
+    created_by: str | None = None
+    updated_by_id: int | None = None
+    updated_by: str | None = None
 
 #Accepts a due date when confirming the next schedule - user approval
 class MaintenanceScheduleConfirm(ORMModel):

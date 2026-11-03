@@ -21,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.db.session import UTCDateTime
+from app.models.audit_mixin import AuditNamesMixin
 from app.models.labels import Label, rule_labels, rule_template_labels
 
 
@@ -141,7 +142,7 @@ class MonitoringRuleTemplateRequest(Base):
         nullable=False,
     )
 
-class MonitoringRule(Base):
+class MonitoringRule(AuditNamesMixin, Base):
     """Asset-specific monitoring rule."""
 
     __tablename__ = "nem_monitoring_rules"
@@ -211,6 +212,18 @@ class MonitoringRule(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
+    )
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="SET NULL"), index=True
+    )
+    updated_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="SET NULL"), index=True
+    )
+    created_by_user: Mapped["User | None"] = relationship(
+        "User", foreign_keys=[created_by_id], lazy="selectin"
+    )
+    updated_by_user: Mapped["User | None"] = relationship(
+        "User", foreign_keys=[updated_by_id], lazy="selectin"
     )
     label_records: Mapped[list[Label]] = relationship(secondary=rule_labels, lazy="selectin",)
 

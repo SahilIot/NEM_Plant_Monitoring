@@ -152,10 +152,48 @@ def _reconcile_rule_type_constraint(engine: Engine) -> None:
         connection.execute(text("ALTER TABLE nem_monitoring_rules ADD CONSTRAINT ck_nem_monitoring_rules_type "
             f"CHECK (rule_type IN ({allowed})) NOT VALID"))
 
+# Audit trail columns (who created / last modified a record). Additive and
+# idempotent; existing rows keep NULL because their history is unknown.
+_AUDIT_TABLES = (
+    "nem_monitoring_rules",
+    "nem_maintenance_schedules",
+    "nem_maintenance_records",
+)
+
+
+def _upgrade_audit_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    if "auth_users" not in table_names:
+        return
+    postgres = engine.dialect.name == "postgresql"
+    timestamp_type = "TIMESTAMP WITH TIME ZONE" if postgres else "DATETIME"
+    if_not_exists = "IF NOT EXISTS " if postgres else ""
+    for table in _AUDIT_TABLES:
+        if table not in table_names:
+            continue
+        existing = {column["name"] for column in inspector.get_columns(table)}
+        statements = []
+        for column in ("created_by_id", "updated_by_id"):
+            if column not in existing:
+                statements.append(
+                    f"ALTER TABLE {table} ADD COLUMN {if_not_exists}{column} INTEGER "
+                    "REFERENCES auth_users(id) ON DELETE SET NULL"
+                )
+        if table == "nem_maintenance_records" and "updated_at" not in existing:
+            statements.append(f"ALTER TABLE {table} ADD COLUMN {if_not_exists}updated_at {timestamp_type}")
+        for column in ("created_by_id", "updated_by_id"):
+            statements.append(f"CREATE INDEX IF NOT EXISTS ix_{table}_{column} ON {table} ({column})")
+        with engine.begin() as connection:
+            for statement in statements:
+                connection.execute(text(statement))
+
+
 # Largest and important function this creates missing tables and other supported objects described in the SQLAlchemy models.
 def _initialize_schema(engine: Engine) -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_auth_roles(engine)
+    _upgrade_audit_columns(engine)
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
     if "auth_users" in table_names:

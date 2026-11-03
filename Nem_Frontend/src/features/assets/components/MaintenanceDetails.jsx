@@ -1,5 +1,5 @@
 import React from "react";
-import { formatTime } from "../../../utils/format.js";
+import { auditUser, formatAuditTime, formatTime } from "../../../utils/format.js";
 
 function displayDate(value) {
   if (!value) return "—";
@@ -115,6 +115,32 @@ export default function MaintenanceDetails({ record, now = Date.now() }) {
                 <span>Actual completion</span>
                 <strong>{formatTime(record.actual_completed_at)}</strong>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="maintenance-detail-section">
+          <h4>RECORD HISTORY</h4>
+          <div className="maintenance-detail-grid">
+            <div className="maintenance-detail-field">
+              <span>Created by</span>
+              <strong>{auditUser(record.created_by)}</strong>
+            </div>
+            <div className="maintenance-detail-field">
+              <span>Created at</span>
+              <strong>{formatAuditTime(record.created_at)}</strong>
+            </div>
+            <div className="maintenance-detail-field">
+              <span>Last modified by</span>
+              <strong>{auditUser(record.updated_by)}</strong>
+            </div>
+            <div className="maintenance-detail-field">
+              <span>Last modified at</span>
+              <strong>
+                {record.updated_by || record.created_by
+                  ? formatAuditTime(record.updated_at)
+                  : "Unknown"}
+              </strong>
             </div>
           </div>
         </section>

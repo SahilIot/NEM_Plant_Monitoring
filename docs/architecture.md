@@ -102,6 +102,20 @@ columns. It drops only those columns, preserving all rule and maintenance
 records; previously filtered rows are included in normal listings and
 evaluation queries according to their existing lifecycle/status fields.
 
+### Audit trail (rules and maintenance)
+
+`nem_monitoring_rules`, `nem_maintenance_schedules` and `nem_maintenance_records` carry
+`created_by_id`, `created_at`, `updated_by_id` and `updated_at` (UTC). The two user columns are
+nullable foreign keys to `auth_users` with `ON DELETE SET NULL`; `nem_maintenance_records.updated_at`
+is nullable. A single SQLAlchemy `before_flush` listener (`app/models/audit.py`) stamps them from
+`session.info["auth_user_id"]`, which `get_db` sets from the verified bearer session, so no request
+body can supply it. Creator fields cannot be changed after insert. Sessions without an authenticated
+user (workers, schedulers) never claim a user and leave the last human modification stamp intact.
+Existing rows stay NULL and display as "Unknown". The columns are added idempotently by
+`_upgrade_audit_columns` in `app/db/init_db.py`. API responses add `created_by` / `updated_by`
+(usernames, null for legacy rows or deleted users). A separate activity-history table can later be
+fed from the same listener.
+
 ## Request and monitoring data flow
 
 1. The dashboard calls `/api/v1` using `Nem_Frontend/src/services/api.js`.

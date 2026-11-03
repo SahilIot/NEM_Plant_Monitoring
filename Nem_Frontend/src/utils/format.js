@@ -11,6 +11,24 @@ export function formatTime(value) {
   });
 }
 
+// Full local-timezone date/time for audit fields; "Unknown" when never recorded.
+export function formatAuditTime(value) {
+  if (!value) return "Unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  return date.toLocaleString([], {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function auditUser(value) {
+  return value || "Unknown";
+}
+
 export function timeAgo(value, now = Date.now()) {
   if (!value) return "never";
   const then = new Date(value).getTime();

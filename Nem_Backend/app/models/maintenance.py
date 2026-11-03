@@ -12,12 +12,13 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 from app.db.session import UTCDateTime
+from app.models.audit_mixin import AuditNamesMixin
 
 #represents the recurring maintenance plan
-class MaintenanceSchedule(Base):
+class MaintenanceSchedule(AuditNamesMixin, Base):
     __tablename__ = "nem_maintenance_schedules"
     __table_args__ = (
         CheckConstraint(
@@ -63,9 +64,13 @@ class MaintenanceSchedule(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True)
+    updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True)
+    created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
+    updated_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
 
 #stores the maintenance work performed on machines 
-class MaintenanceRecord(Base):
+class MaintenanceRecord(AuditNamesMixin, Base):
     __tablename__ = "nem_maintenance_records"
     __table_args__ = (
         Index("ix_nem_maintenance_records_asset_performed", "asset_id", "performed_at"),
@@ -98,6 +103,12 @@ class MaintenanceRecord(Base):
     schedule_id: Mapped[int | None] = mapped_column(ForeignKey("nem_maintenance_schedules.id", ondelete="RESTRICT"), index=True)
     planned_due_date: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=lambda: datetime.now(timezone.utc), nullable=False)
+    # Nullable and without onupdate: legacy rows stay NULL; the audit listener stamps it.
+    updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True)
+    updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True)
+    created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
+    updated_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
 
     @property
     def title(self) -> str:

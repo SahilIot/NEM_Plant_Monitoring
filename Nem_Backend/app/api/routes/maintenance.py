@@ -183,6 +183,8 @@ def _schedule_read(
             for column in MaintenanceSchedule.__table__.columns
         }
         | {
+            "created_by": schedule.created_by,
+            "updated_by": schedule.updated_by,
             "instruction_documents": instruction_documents,
             "due_status": due_status(
                 schedule.current_due_date,

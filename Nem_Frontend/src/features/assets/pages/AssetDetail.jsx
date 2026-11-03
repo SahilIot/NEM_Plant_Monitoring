@@ -31,6 +31,8 @@ import {
   monitoringRuleFormSelection,
 } from "../rules/monitoringRuleFlow.js";
 import {
+  auditUser,
+  formatAuditTime,
   formatDuration,
   formatTime,
   formatValue,
@@ -3767,6 +3769,22 @@ const filteredEvents = [...events]
       <div>
         <dt>Last evaluated</dt>
         <dd>{viewRule.last_evaluated_at ? formatTime(viewRule.last_evaluated_at) : "Not evaluated yet"}</dd>
+      </div>
+      <div>
+        <dt>Created by</dt>
+        <dd>{auditUser(viewRule.created_by)}</dd>
+      </div>
+      <div>
+        <dt>Created at</dt>
+        <dd>{viewRule.created_by ? formatAuditTime(viewRule.created_at) : `${formatAuditTime(viewRule.created_at)} (legacy record)`}</dd>
+      </div>
+      <div>
+        <dt>Last modified by</dt>
+        <dd>{auditUser(viewRule.updated_by)}</dd>
+      </div>
+      <div>
+        <dt>Last modified at</dt>
+        <dd>{viewRule.updated_by ? formatAuditTime(viewRule.updated_at) : "Unknown"}</dd>
       </div>
       {viewRule.evaluation_message && (
         <div>
