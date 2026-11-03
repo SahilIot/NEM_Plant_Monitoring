@@ -613,14 +613,20 @@ export default function RuleLibrary() {
   const [busyId, setBusyId] = useState(null);
   const [message, setMessage] = useState({ text: "", error: false });
   const load = useCallback(async () => {
-    const generation = ++templateLoadGeneration.current;
-    const result = await api.get(
-      `/rule-templates${labelFilterQuery ? `?${labelFilterQuery}` : ""}`
+  const generation = ++templateLoadGeneration.current;
+
+  const result = await api.get(
+    `/rule-templates${labelFilterQuery ? `?${labelFilterQuery}` : ""}`
+  );
+
+  if (generation === templateLoadGeneration.current) {
+    const libraryTemplates = (Array.isArray(result) ? result : []).filter(
+      (template) => template.collection_id == null
     );
-    if (generation === templateLoadGeneration.current) {
-      setTemplates(Array.isArray(result) ? result : []);
-    }
-  }, [labelFilterQuery]);
+
+    setTemplates(libraryTemplates);
+  }
+}, [labelFilterQuery]);
 
 
 const loadPendingRequests = async (filterStatus = requestStatus) => {

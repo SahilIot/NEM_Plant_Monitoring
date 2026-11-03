@@ -906,16 +906,42 @@ const edit = async (values) => {
     }
   };
 
-  const remove = async (row) => {
-    if (!canManageConfiguration) return;
-    const isRule = sub === "rules";
 
+const remove = async (row) => {
+  if (!canManageConfiguration) return;
+
+  const isRule = sub === "rules";
+  const isCollection = sub === "collections";
+
+  setBusyRuleId(row.id);
+  setMsg({ text: "", error: false });
+
+  try {
+    let collectionRules = [];
+
+    // Step 1: Collection ke reusable rules fetch karo
+    if (isCollection) {
+      const result = await api.get("/rule-templates");
+
+      const templates = Array.isArray(result) ? result : [];
+
+      collectionRules = templates.filter(
+        (template) =>
+          String(template.collection_id) === String(row.id)
+      );
+    }
+
+    // Step 2: Confirmation
     const confirmed = await confirm(
-      isRule
-        ? `Delete rule "${row.name}"? This action may be rejected if the rule has alert history.`
-        : `Delete this ${cfg.noun.toLowerCase()}?`,
+      isCollection
+        ? `Delete collection "${row.name}" and all ${collectionRules.length} reusable rule(s) inside it? This cannot be undone.`
+        : isRule
+          ? `Delete rule "${row.name}"? This action may be rejected if the rule has alert history.`
+          : `Delete this ${cfg.noun.toLowerCase()}?`,
       {
-        title: `Delete ${isRule ? "rule" : cfg.noun.toLowerCase()}`,
+        title: isCollection
+          ? "Delete collection and its rules"
+          : `Delete ${isRule ? "rule" : cfg.noun.toLowerCase()}`,
         confirmLabel: "Delete",
         destructive: true,
       }
@@ -923,37 +949,54 @@ const edit = async (values) => {
 
     if (!confirmed) return;
 
-    setBusyRuleId(row.id);
-    setMsg({ text: "", error: false });
-
-    try {
-      if (isRule && row.is_enabled) {
-        await api.patch(`/rules/${row.id}`, {
-          is_enabled: false,
-        });
+    // Step 3: Collection ke reusable rules delete karo
+    if (isCollection) {
+      for (const template of collectionRules) {
+        await api.del(`/rule-templates/${template.id}`);
       }
-
-      await api.del(`/${cfg.endpoint}/${row.id}`);
-
-      setMsg({
-        text: `${cfg.noun} deleted.`,
-        error: false,
-      });
-
-      await load();
-    } catch (error) {
-      setMsg({
-        text: error.message,
-        error: true,
-      });
-
-      if (isRule) {
-        await load().catch(() => {});
-      }
-    } finally {
-      setBusyRuleId(null);
     }
-  };
+
+    // Step 4: Existing monitoring rule behavior preserve karo
+    if (isRule && row.is_enabled) {
+      await api.patch(`/rules/${row.id}`, {
+        is_enabled: false,
+      });
+    }
+
+    // Step 5: Finally collection/document/rule delete karo
+    await api.del(`/${cfg.endpoint}/${row.id}`);
+
+    if (isCollection) {
+      setViewingCollection(null);
+      setCollectionTemplates([]);
+      setEditingCollectionTemplate(null);
+      setActiveCollection(null);
+    }
+
+    setMsg({
+      text: isCollection
+        ? `Collection "${row.name}" and its ${collectionRules.length} reusable rule(s) deleted successfully.`
+        : `${cfg.noun} deleted.`,
+      error: false,
+    });
+
+    await load();
+
+  } catch (error) {
+    setMsg({
+      text: error.message || "Could not delete the item.",
+      error: true,
+    });
+
+    if (isRule || isCollection) {
+      await load().catch(() => {});
+    }
+
+  } finally {
+    setBusyRuleId(null);
+  }
+};
+
 
   const auditText = (value) => {
     if (!value) return "-";
@@ -1198,7 +1241,7 @@ const edit = async (values) => {
                       </>
                     )}
 
-                    <th>Actions</th>
+                    <th className="config-actions-header">Actions</th>
                   </tr>
                 </thead>
 
@@ -1240,7 +1283,7 @@ const edit = async (values) => {
                         </>
                       )}
 
-                      <td className="right">
+                      <td className="config-actions-cell">
                         {sub === "rules" ? (
                           <div className="config-action-icons">
                             <button
@@ -1606,6 +1649,7 @@ const edit = async (values) => {
               name: viewingCollection.name,
               ruleCount: collectionTemplates.length,
             });
+            setViewingCollection(null);
           }}
         >
           Add Rule

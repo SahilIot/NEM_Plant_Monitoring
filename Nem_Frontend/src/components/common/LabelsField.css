@@ -193,3 +193,84 @@
     z-index: 1100;
   }
 }
+
+/* Labels dropdown - Light mode */
+.labels-suggestions,
+.labels-filter-menu {
+  padding: 7px;
+  border: 1px solid #d1d5db;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #1f2937;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+
+/* Dropdown items */
+.labels-suggestions button,
+.labels-filter-option {
+  min-height: 36px;
+  padding: 9px 11px;
+  border-radius: 6px;
+  color: #334155;
+  font-size: 13px;
+  transition: background 0.18s ease;
+}
+
+.labels-suggestions button:hover,
+.labels-filter-option:hover {
+  background: #e9eef5;
+  color: #111827;
+}
+
+/* Search input */
+.labels-filter-menu > input[type="search"] {
+  box-sizing: border-box;
+  padding: 9px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #1f2937;
+}
+
+/* Dark mode dropdown */
+.dark .labels-suggestions,
+.dark .labels-filter-menu,
+[data-theme="dark"] .labels-suggestions,
+[data-theme="dark"] .labels-filter-menu {
+  background: #151c25;
+  border-color: #3b4655;
+  color: #f1f5f9;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* Dark mode items */
+.dark .labels-suggestions button,
+.dark .labels-filter-option,
+[data-theme="dark"] .labels-suggestions button,
+[data-theme="dark"] .labels-filter-option {
+  color: #e2e8f0;
+}
+
+.dark .labels-suggestions button:hover,
+.dark .labels-filter-option:hover,
+[data-theme="dark"] .labels-suggestions button:hover,
+[data-theme="dark"] .labels-filter-option:hover {
+  background: #293545;
+  color: #ffffff;
+}
+
+/* Dark mode search */
+.dark .labels-filter-menu > input[type="search"],
+[data-theme="dark"] .labels-filter-menu > input[type="search"] {
+  background: #202a37;
+  border-color: #475569;
+  color: #f1f5f9;
+}
+
+/* Dropdown helper text */
+.dark .labels-filter-menu > small,
+.dark .labels-empty,
+[data-theme="dark"] .labels-filter-menu > small,
+[data-theme="dark"] .labels-empty {
+  color: #cbd5e1;
+}
