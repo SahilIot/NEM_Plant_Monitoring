@@ -127,17 +127,17 @@ export default function MaintenanceDetails({ record, now = Date.now() }) {
               <strong>{auditUser(record.created_by)}</strong>
             </div>
             <div className="maintenance-detail-field">
-              <span>Created at</span>
+              <span>Created on</span>
               <strong>{formatAuditTime(record.created_at)}</strong>
             </div>
             <div className="maintenance-detail-field">
-              <span>Last modified by</span>
+              <span>Last updated by</span>
               <strong>{auditUser(record.updated_by)}</strong>
             </div>
             <div className="maintenance-detail-field">
-              <span>Last modified at</span>
+              <span>Last updated on</span>
               <strong>
-                {record.updated_by || record.created_by
+                {record.updated_by
                   ? formatAuditTime(record.updated_at)
                   : "Unknown"}
               </strong>

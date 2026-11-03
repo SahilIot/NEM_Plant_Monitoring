@@ -385,3 +385,29 @@
   display: grid;
   gap: 5px;
 }
+
+.rule-view-grid {
+  overflow-y: auto;
+  margin: 0;
+  padding: 6px 20px 10px;
+}
+
+.rule-view-grid > div {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.4fr) 1fr;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rule-view-grid dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rule-view-grid dd {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}

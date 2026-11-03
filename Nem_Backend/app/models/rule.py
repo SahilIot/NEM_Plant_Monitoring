@@ -72,11 +72,11 @@ class MonitoringRuleTemplate(AuditNamesMixin, Base):
         server_default="admin_only",
         nullable=False,
     )
-    visibility_supervisors: Mapped[list["User"]] = relationship( "User", secondary="nem_rule_template_supervisors", lazy="selectin")
+    visibility_supervisors: Mapped[list["User"]] = relationship( "User", secondary="nem_rule_template_supervisors", lazy="selectin") # type: ignore
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True)
     updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True)
-    created_by_user: Mapped["User | None"] = relationship( "User", foreign_keys=[created_by_id], lazy="selectin")
-    updated_by_user: Mapped["User | None"] = relationship( "User", foreign_keys=[updated_by_id], lazy="selectin")
+    created_by_user: Mapped["User | None"] = relationship( "User", foreign_keys=[created_by_id], lazy="selectin") # type: ignore
+    updated_by_user: Mapped["User | None"] = relationship( "User", foreign_keys=[updated_by_id], lazy="selectin") # type: ignore
     label_records: Mapped[list[Label]] = relationship(secondary=rule_template_labels,lazy="selectin",)
 
     @property
@@ -89,7 +89,7 @@ class MonitoringRuleTemplate(AuditNamesMixin, Base):
 
 
 class MonitoringRuleTemplateRequest(Base):
-    """Supervisor-submitted reusable rule awaiting Admin review."""
+    # Supervisor-submitted reusable rule awaiting Admin review.
 
     __tablename__ = "nem_monitoring_rule_template_requests"
 
@@ -231,8 +231,8 @@ class MonitoringRule(AuditNamesMixin, Base):
     )
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True)
     updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True)
-    created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
-    updated_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
+    created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_id], lazy="selectin") # type: ignore
+    updated_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[updated_by_id], lazy="selectin") # type: ignore
     label_records: Mapped[list[Label]] = relationship(secondary=rule_labels, lazy="selectin",)
 
     @property

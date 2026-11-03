@@ -25,6 +25,18 @@ export function formatAuditTime(value) {
   });
 }
 
+// Date only (e.g. "Oct 23, 2026") for compact list lines.
+export function formatAuditDate(value) {
+  if (!value) return "Unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 export function auditUser(value) {
   return value || "Unknown";
 }

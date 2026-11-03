@@ -13,7 +13,7 @@ import {
 } from "../../../components/common/UI.jsx";
 import { DotsIcon } from "../../../components/common/Icons.jsx";
 import { getAuthToken } from "../../../services/api.js";
-import { formatTime } from "../../../utils/format.js";
+import { auditUser, formatAuditTime, formatTime } from "../../../utils/format.js";
 import MaintenanceDetails from "./MaintenanceDetails.jsx";
 import {
   LEGACY_RULE_CHOICES,
@@ -195,36 +195,27 @@ export default function MaintenancePanel({
   const [approvalDate, setApprovalDate] = useState("");
   const [clockNow, setClockNow] = useState(Date.now());
 
+  // One delete at a time, including while the confirmation dialog is open.
+  const deleteGuard = useRef(false);
   const permanentlyDeleteRecord = async (record) => {
+    if (deleteGuard.current) return;
+    deleteGuard.current = true;
+    try {
+      await runPermanentDeleteRecord(record);
+    } finally {
+      deleteGuard.current = false;
+    }
+  };
+
+  const runPermanentDeleteRecord = async (record) => {
     if (!isAdministrator || busy) return;
-    const scheduled =
-      Boolean(record.schedule_id) && record.status !== "completed";
-    const plannedDate = record.planned_start_at
-      ? formatTime(record.planned_start_at)
-      : null;
-    const confirmation = scheduled
-      ? `Delete the entire schedule "${record.title}"${plannedDate ? `, scheduled for ${plannedDate}` : ""}, including its linked maintenance entries?`
-      : `Permanently delete maintenance "${record.title}"${plannedDate ? `, scheduled for ${plannedDate}` : ""}?`;
     if (
-      !(await confirm(confirmation, {
-        title: scheduled ? "Delete maintenance schedule" : "Delete maintenance",
+      !(await confirm("Are you sure you want to delete this maintenance? This action cannot be undone.", {
+        title: "Delete Maintenance?",
         confirmLabel: "Delete",
         destructive: true,
       }))
     ) return;
-    if (
-      (scheduled || (record.planned_start_at && new Date(record.planned_start_at) > new Date())) &&
-      !(await confirm(
-        `Confirm again: permanently delete "${record.title}"${plannedDate ? ` scheduled for ${plannedDate}` : ""}? This cannot be undone.`,
-        {
-          title: "Confirm permanent deletion",
-          confirmLabel: "Delete permanently",
-          destructive: true,
-        }
-      ))
-    ) {
-      return;
-    }
     setBusy(true);
     setError("");
     setNotice("");
@@ -243,26 +234,22 @@ export default function MaintenancePanel({
   };
 
   const permanentlyDeleteSchedule = async (schedule) => {
-    if (!isAdministrator || busy) return;
-    const dueDate = schedule.current_due_date
-      ? displayDate(schedule.current_due_date)
-      : null;
-    if (!(await confirm(
-      `Delete maintenance schedule "${schedule.title}"${dueDate ? `, due ${dueDate}` : ""}, including its linked maintenance entries?`,
-      {
-        title: "Delete maintenance schedule",
-        confirmLabel: "Delete",
-        destructive: true,
-      }
-    ))) return;
-    if (!(await confirm(
-      `Confirm again: permanently delete schedule "${schedule.title}"${dueDate ? ` due ${dueDate}` : ""}? This cannot be undone.`,
-      {
-        title: "Confirm permanent deletion",
-        confirmLabel: "Delete permanently",
-        destructive: true,
-      }
-    ))) return;
+    if (!isAdministrator || busy || deleteGuard.current) return;
+    deleteGuard.current = true;
+    let confirmed = false;
+    try {
+      confirmed = await confirm(
+        "Are you sure you want to delete this maintenance schedule? This permanently deletes the schedule and its planned maintenance. Completed maintenance history is kept. This action cannot be undone.",
+        {
+          title: "Delete Maintenance Schedule?",
+          confirmLabel: "Delete",
+          destructive: true,
+        }
+      );
+    } finally {
+      if (!confirmed) deleteGuard.current = false;
+    }
+    if (!confirmed) return;
     setBusy(true);
     setDeletingScheduleId(schedule.id);
     setError("");
@@ -279,6 +266,7 @@ export default function MaintenancePanel({
     } finally {
       setDeletingScheduleId(null);
       setBusy(false);
+      deleteGuard.current = false;
     }
   };
 
@@ -921,9 +909,7 @@ const openEdit = (record) => {
               disabled={busy || record.status === "in_progress"}
               title={record.status === "in_progress"
                 ? "In-progress maintenance cannot be deleted."
-                : record.schedule_id && record.status !== "completed"
-                  ? "Permanently delete schedule"
-                  : "Permanently delete maintenance"}
+                : "Permanently delete this maintenance"}
             >
               <Trash2 size={16} aria-hidden="true" />
               <span>Delete maintenance</span>
@@ -1101,6 +1087,10 @@ const openEdit = (record) => {
             <dt>Last completed</dt><dd>{dialog.record.last_completed_at ? formatTime(dialog.record.last_completed_at) : "—"}</dd>
             <dt>Assigned technician</dt><dd>{dialog.record.assigned_technician || "—"}</dd>
             <dt>Description</dt><dd>{dialog.record.description || "—"}</dd>
+            <dt>Created by</dt><dd>{auditUser(dialog.record.created_by)}</dd>
+            <dt>Created on</dt><dd>{formatAuditTime(dialog.record.created_at)}</dd>
+            <dt>Last updated by</dt><dd>{auditUser(dialog.record.updated_by)}</dd>
+            <dt>Last updated on</dt><dd>{dialog.record.updated_by ? formatAuditTime(dialog.record.updated_at) : "Unknown"}</dd>
           </dl>
           <div className="modal-actions">
             <button type="button" className="btn-outline" onClick={() => setDialog(null)}>Close</button>

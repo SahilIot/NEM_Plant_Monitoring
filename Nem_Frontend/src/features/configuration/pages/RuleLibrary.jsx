@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { api } from "../../../services/api.js";
+import { auditUser, formatAuditDate, formatAuditTime } from "../../../utils/format.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import {
   captureNavigationOrigin,
@@ -28,6 +29,7 @@ import {
 import LabelsField from "../../../components/common/LabelsField.jsx";
 import {
   RequestVisibilityModal,
+  VISIBILITY_LABELS,
   VisibilityBadge,
   VisibilityModal,
   VisibilityRequestsPanel,
@@ -425,6 +427,67 @@ export function templatePayload(values) {
   };
 }
 
+// Read-only details of a shared rule. Audit values are the shared rule's own
+// (not those of any asset-specific rule created from it).
+function RuleViewModal({ template, onClose, onManageVisibility }) {
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  const rows = [
+    ["Rule name", template.name],
+    ["Description", template.description || "No description provided."],
+    ["Rule type", displayType(template)],
+    ["Conditions and thresholds", templateSummary(template)],
+    ["Severity", template.severity],
+    ["Availability", template.is_enabled ? "Available" : "Disabled"],
+    ["Visibility", VISIBILITY_LABELS[template.visibility_type] || VISIBILITY_LABELS.admin_only],
+    template.required_variable_types?.length
+      ? ["Required variable", `${template.required_variable_types.join(" / ")}${template.variable_key ? ` · prefers ${template.variable_key}` : ""}`]
+      : null,
+    template.evaluation_interval_seconds
+      ? ["Evaluation interval", formatInterval(template.evaluation_interval_seconds)]
+      : null,
+    template.stale_after_seconds
+      ? ["Stale after", formatInterval(template.stale_after_seconds)]
+      : null,
+    template.labels?.length ? ["Labels", template.labels.join(", ")] : null,
+    ["Created by", auditUser(template.created_by)],
+    ["Created on", formatAuditTime(template.created_at)],
+    ["Last updated by", auditUser(template.updated_by)],
+    ["Last updated on", template.updated_by ? formatAuditTime(template.updated_at) : "Unknown"],
+  ].filter(Boolean);
+
+  return (
+    <div className="rule-library-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="rule-library-modal" role="dialog" aria-modal="true" aria-labelledby="rule-view-title">
+        <header>
+          <div><h2 id="rule-view-title">{template.name}</h2><p>Shared rule details (read-only)</p></div>
+          <button className="icon-btn" aria-label="Close" onClick={onClose}><X size={19} /></button>
+        </header>
+        <dl className="rule-view-grid">
+          {rows.map(([label, value]) => (
+            <div key={label}>
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+        <footer>
+          {onManageVisibility && (
+            <button className="btn-outline" onClick={onManageVisibility}><Eye size={15} /> Change visibility</button>
+          )}
+          <button className="btn-primary" onClick={onClose}>Close</button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 function AssignmentModal({ template, onClose, onComplete }) {
   const { user } = useAuth();
   const isAdministrator = user?.role === "Administrator";
@@ -618,6 +681,7 @@ export default function RuleLibrary() {
   const [suggesting, setSuggesting] = useState(false);
   const [assigning, setAssigning] = useState(null);
   const [visibilityTarget, setVisibilityTarget] = useState(null);
+  const [viewing, setViewing] = useState(null);
   const [requestingVisibility, setRequestingVisibility] = useState(false);
   const [visibilityRefresh, setVisibilityRefresh] = useState(0);
   const [busyId, setBusyId] = useState(null);
@@ -1234,7 +1298,7 @@ const reviewRequest = async (request, action) => {
                 <div className="rule-library-card-main">
                   <div className="rule-library-card-title"><h2>{template.name}</h2><span className={`rule-library-status ${template.is_enabled ? "available" : "disabled"}`}>{template.is_enabled ? "Available" : "Disabled"}</span><VisibilityBadge type={template.visibility_type} /></div>
                   <p>{template.description || "No description provided."}</p>
-                  <small>{displayType(template)} · {templateSummary(template)}</small>
+                  <small>{displayType(template)} · {templateSummary(template)} · Created by {auditUser(template.created_by)} · {formatAuditDate(template.created_at)}</small>
                   {template.labels?.length > 0 && (
                     <span className="labels-chips rule-library-labels">
                       {template.labels.map((label) => (
@@ -1244,7 +1308,7 @@ const reviewRequest = async (request, action) => {
                   )}
                 </div>
                 <div className="rule-library-actions">
-                  {isAdministrator && <button className="btn-outline" onClick={() => setVisibilityTarget(template)} title="Rule visibility" aria-label="Rule visibility"><Eye size={15} /></button>}
+                  <button className="btn-outline" onClick={() => setViewing(template)} title="View rule" aria-label="View rule"><Eye size={15} /></button>
                   <button className="btn-outline" onClick={() => setAssigning(template)} disabled={!canAssignRules || !template.is_enabled || needsRuntimeThresholdConfiguration(template)} title={!canAssignRules ? "You do not have permission to assign rules." : needsRuntimeThresholdConfiguration(template) ? "Edit this rule and configure running-time thresholds before assigning it." : undefined}><Copy size={15} /> Assign rule</button>
                   <button className="btn-outline" onClick={() => {setSuggesting(false);setEditing(template);setModalOpen(true);}} disabled={!canEditRules} title="Edit rule" aria-label="Edit rule"><Pencil size={15} /></button>
                   <button className="btn-outline danger" onClick={() => remove(template)} disabled={busyId === template.id || !isAdministrator} title={!isAdministrator ? "Administrator access required to delete reusable rules." : undefined}>{busyId === template.id ? "Deleting…" : <><Trash2 size={15} /></>}</button>
@@ -1381,6 +1445,21 @@ fields={
       setEditing(null);
       setSuggesting(false);
     }}
+  />
+)}
+
+{viewing && (
+  <RuleViewModal
+    template={viewing}
+    onClose={() => setViewing(null)}
+    onManageVisibility={
+      isAdministrator
+        ? () => {
+            setVisibilityTarget(viewing);
+            setViewing(null);
+          }
+        : undefined
+    }
   />
 )}
 

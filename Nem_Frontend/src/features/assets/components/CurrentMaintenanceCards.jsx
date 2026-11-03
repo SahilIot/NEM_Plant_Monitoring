@@ -11,7 +11,6 @@ import {
   Modal,
   useConfirmation,
 } from "../../../components/common/UI.jsx";
-import { formatTime } from "../../../utils/format.js";
 import MaintenanceDetails from "./MaintenanceDetails.jsx";
 import { DotsIcon } from "../../../components/common/Icons.jsx";
 import "./MaintenancePanel.css";
@@ -106,39 +105,27 @@ const openEdit = (record) => {
   );
 };
 
+  // One delete at a time, including while the confirmation dialog is open.
+  const deleteGuard = useRef(false);
   const permanentlyDeleteRecord = async (record) => {
+    if (deleteGuard.current) return;
+    deleteGuard.current = true;
+    try {
+      await runPermanentDeleteRecord(record);
+    } finally {
+      deleteGuard.current = false;
+    }
+  };
+
+  const runPermanentDeleteRecord = async (record) => {
     if (!isAdministrator || busy || record.status === "in_progress") return;
-    const scheduled =
-      Boolean(record.schedule_id) && record.status !== "completed";
-    const plannedDate = record.planned_start_at
-      ? formatTime(record.planned_start_at)
-      : null;
-    const confirmation = scheduled
-      ? `Delete the entire schedule "${record.title}"${plannedDate ? `, scheduled for ${plannedDate}` : ""}, including its linked maintenance entries?`
-      : `Permanently delete maintenance "${record.title}"${plannedDate ? `, scheduled for ${plannedDate}` : ""}?`;
     if (
-      !(await confirm(confirmation, {
-        title: scheduled ? "Delete maintenance schedule" : "Delete maintenance",
+      !(await confirm("Are you sure you want to delete this maintenance? This action cannot be undone.", {
+        title: "Delete Maintenance?",
         confirmLabel: "Delete",
         destructive: true,
       }))
     ) return;
-    if (
-      (scheduled ||
-        (record.planned_start_at &&
-          new Date(record.planned_start_at) > new Date())) &&
-      !(await confirm(
-        `Confirm again: permanently delete "${record.title}"${plannedDate ? ` scheduled for ${plannedDate}` : ""}? This cannot be undone.`,
-        {
-          title: "Confirm permanent deletion",
-          confirmLabel: "Delete permanently",
-          destructive: true,
-        }
-      ))
-    ) {
-      return;
-    }
-
     setDeletingRecordId(record.id);
     setError("");
     setNotice("");
