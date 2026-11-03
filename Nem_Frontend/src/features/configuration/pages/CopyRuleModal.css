@@ -1,0 +1,150 @@
+.copy-rule-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.copy-rule-modal {
+  width: 100%;
+  max-width: 520px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.22);
+  overflow: hidden;
+}
+
+.copy-rule-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.copy-rule-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font-size: 18px;
+  color: var(--ink);
+}
+
+.copy-rule-header p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.copy-rule-header .icon-btn {
+  flex-shrink: 0;
+}
+
+.copy-rule-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.copy-rule-original {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  background: var(--surface-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.copy-rule-original span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.copy-rule-original strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.copy-rule-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.copy-rule-field label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.copy-rule-field label span {
+  color: #e16b6b;
+}
+
+.copy-rule-field input {
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.copy-rule-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(80, 130, 200, 0.13);
+}
+
+.copy-rule-field small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.copy-rule-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 7px;
+  color: var(--danger, #dc5555);
+  background: var(--danger-bg, rgba(220, 85, 85, 0.09));
+  font-size: 13px;
+}
+
+.copy-rule-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 15px 20px;
+  border-top: 1px solid var(--border);
+}
+
+.copy-rule-footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+@media (max-width: 540px) {
+  .copy-rule-backdrop {
+    padding: 12px;
+  }
+
+  .copy-rule-footer {
+    flex-wrap: wrap;
+  }
+}

@@ -269,3 +269,14 @@
   justify-content: center;
   gap: 7px;
 }
+
+.predefined-rules-label-filter {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.predefined-rules-label-filter > * {
+  max-width: 100%;
+}
