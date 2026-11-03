@@ -106,11 +106,6 @@ export default function CreateInstructionPage() {
       return;
     }
 
-    if (files.length === 0) {
-      setError("Please attach at least one supporting document.");
-      return;
-    }
-
     if (files.length > MAX_FILES) {
       setError("You can attach up to 10 documents.");
       return;
@@ -124,28 +119,35 @@ export default function CreateInstructionPage() {
     setBusy(true);
 
     try {
-      const form = new FormData();
+      if (files.length > 0) {
+        const form = new FormData();
+        form.append("title", cleanName);
+        form.append("kind", "Instruction");
+        form.append("description", cleanText);
+        form.append("labels", JSON.stringify(labels));
+        form.append("duration_minutes", String(minutes));
+        files.forEach((file) => {
+          form.append("files", file);
+        });
+        
+        await api.postForm("/documents/with-files", form);
+      } else {
+        await api.post("/documents", {
+          title: cleanName,
+          kind: "Instruction",
+          description: cleanText,
+          labels,
+        });
+      }
 
-      form.append("title", cleanName);
-      form.append("kind", "Instruction");
-      form.append("description", cleanText);
-      form.append("labels", JSON.stringify(labels));
-      form.append("duration_minutes", String(minutes));
-
-      files.forEach((file) => {
-        form.append("files", file);
-      });
-
-      await api.postForm("/documents/with-files", form);
-
-      nav("/configuration/documents", {
-        state: { documentCreated: true },
-      });
-    } catch (err) {
-      setError(err.message || "Unable to create instruction.");
-    } finally {
-      setBusy(false);
-    }
+  nav("/configuration/documents", {
+    state: { documentCreated: true },
+  });
+} catch (err) {
+  setError(err.message || "Unable to create instruction.");
+} finally {
+  setBusy(false);
+}
   }
 
   return (
@@ -295,7 +297,6 @@ export default function CreateInstructionPage() {
           <div className="instruction-field">
             <label htmlFor="instruction-documents">
               Attach Supporting Documents{" "}
-              <span className="required">*</span>
             </label>
 
             <label
