@@ -456,3 +456,11 @@ html[data-theme="dark"] .document-create-page .document-selected-file {
 html[data-theme="dark"] .document-create-page .document-form-footer {
   border-color: var(--line);
 }
+
+/* Required stars - Create Document page */
+.document-create-page .req {
+  color: #f28b82 !important;
+  font-weight: 400 !important;
+  opacity: 1;
+  transition: color 0.2s ease;
+}

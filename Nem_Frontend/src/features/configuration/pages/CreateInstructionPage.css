@@ -435,3 +435,8 @@
   border-color: #64748b;
   color: #ffffff;
 }
+
+.instruction-form label .required,
+.instruction-page-heading .required {
+  color: #f28b82;
+}

@@ -156,7 +156,7 @@ export default function DocumentCreatePage() {
             <div className="document-fields-grid">
               <div className="field">
                 <label htmlFor="document-title">
-                  Title <span className="req">*</span>
+                  Title <span className="req"> * </span>
                 </label>
                 <input
                   id="document-title"
@@ -209,7 +209,7 @@ export default function DocumentCreatePage() {
 
               <div className="field document-attachments-field">
                 <label htmlFor="document-files">
-                  Attach files <span className="muted">(required)</span>
+                  Attach files Required <span className="req"> *</span>
                 </label>
 
                 <div className="document-upload-zone">
