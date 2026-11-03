@@ -292,6 +292,25 @@ export default function PredefinedRulesModal({
                     {rule.description || (rule.rule_type || "Monitoring rule").replaceAll("_", " ")}
                     {rule.mapped_variable_name ? ` · ${rule.mapped_variable_name}` : ""}
                   </small>
+                  
+{Array.isArray(rule.labels) && rule.labels.length > 0 && (
+  <div className="prm-rule-labels">
+    {rule.labels.map((label, index) => {
+      const labelName =
+        typeof label === "string" ? label : label?.name;
+
+      return labelName ? (
+        <span
+          className="prm-rule-label-chip"
+          key={label.id ?? `${labelName}-${index}`}
+        >
+          {labelName}
+        </span>
+      ) : null;
+    })}
+  </div>
+)}
+
                   <small className="prm-condition-summary">
                     {ruleConditionSummary(rule)}
                   </small>
