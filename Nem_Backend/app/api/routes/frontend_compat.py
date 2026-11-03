@@ -63,7 +63,8 @@ from app.api.routes.rules import (
 )
 from app.api.routes.monitoring import state_for_rule
 from app.api.routes.auth import get_current_user, require_roles
-from app.services.access_scope import access_scope, hidden_document_ids, require_rule_access, rule_clause
+from app.services.access_scope import access_scope, hidden_document_ids, internal_propagation_scope, require_rule_access, rule_clause
+from app.services.rule_visibility import get_visible_template, request_user, visible_templates_clause
 from app.services.labels import apply_label_filter, assign_labels
 
 router = APIRouter(tags=["frontend compatibility"])
@@ -565,6 +566,7 @@ def _template_rule_definition(
         requested_variable_id: int | None,
         *,
         allow_disabled: bool = False,
+        activate: bool = False,
 ) -> dict[str, Any]:
         if not template.is_enabled and not allow_disabled:
             raise HTTPException(status_code=422, detail=f"Rule template '{template.name}' is disabled")
@@ -586,8 +588,10 @@ def _template_rule_definition(
             "threshold": template.threshold,
             "parameters": template.parameters,
             "severity": template.severity,
-            "is_enabled": False,
-            "lifecycle_status": "deactivated",
+            # Activation is decided by the server: a newly assigned rule starts Active
+            # (activate=True); every other use of this definition keeps it inactive.
+            "is_enabled": activate,
+            "lifecycle_status": "in_progress" if activate else "deactivated",
             "evaluation_interval_seconds": template.evaluation_interval_seconds,
             "stale_after_seconds": template.stale_after_seconds,
             "source_template_id": template.id,
@@ -611,6 +615,15 @@ def _template_rule_definition(
         return definition
 
 #Listing templates - builds a db query and optionally filters by name,type,status
+def _template_read(session: Session, template: MonitoringRuleTemplate) -> RuleTemplateRead:
+    # Shared rule payload; the Supervisor visibility list is shown to Administrators only.
+    data = RuleTemplateRead.model_validate(template)
+    user = request_user(session)
+    if user is None or user.role != "Administrator":
+        data = data.model_copy(update={"visibility_supervisor_ids": []})
+    return data
+
+
 @router.get("/rule-templates", response_model=list[RuleTemplateRead])
 def list_rule_templates(
         search: str | None = None,
@@ -618,8 +631,11 @@ def list_rule_templates(
         is_enabled: bool | None = None,
         label_ids: list[int] | None = Query(default=None),
         session: Session = Depends(get_db),
-) -> list[MonitoringRuleTemplate]:
-        query = select(MonitoringRuleTemplate)
+) -> list[RuleTemplateRead]:
+        # Visibility is enforced here, not in the browser: hidden shared rules are never returned.
+        query = select(MonitoringRuleTemplate).where(
+            visible_templates_clause(session, request_user(session))
+        )
         if search and search.strip():
             pattern = f"%{search.strip()}%"
             query = query.where(
@@ -636,7 +652,8 @@ def list_rule_templates(
             query = apply_label_filter(query, MonitoringRuleTemplate, label_ids)
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
-        return session.scalars(query.order_by(MonitoringRuleTemplate.name, MonitoringRuleTemplate.id)).all()
+        templates = session.scalars(query.order_by(MonitoringRuleTemplate.name, MonitoringRuleTemplate.id)).all()
+        return [_template_read(session, template) for template in templates]
 
 # Checks whether a rule template can be assigned to a particular rule collection.
 def _validate_template_collection(
@@ -909,25 +926,24 @@ def decline_rule_template_request(
 @router.post("/rule-templates", response_model=RuleTemplateRead, status_code=201)
 def create_rule_template(
         payload: RuleTemplateCreate, session: Session = Depends(get_db)
-) -> MonitoringRuleTemplate:
+) -> RuleTemplateRead:
         _validate_template_collection(session, payload.collection_id)
         values = payload.model_dump(exclude={"labels"})
-        template = MonitoringRuleTemplate(**values)
+        # New shared rules always start Admin Only; visibility is never taken from the payload.
+        template = MonitoringRuleTemplate(**values, visibility_type="admin_only")
         session.add(template)
         session.flush()
         assign_labels(session, template, payload.labels)
         session.commit()
         session.refresh(template)
-        return template
+        return _template_read(session, template)
 
 
 @router.get("/rule-templates/{template_id}", response_model=RuleTemplateRead)
 def get_rule_template(template_id: int, session: Session = Depends(get_db)
-) -> MonitoringRuleTemplate:
-        template = session.get(MonitoringRuleTemplate, template_id)
-        if template is None:
-            raise HTTPException(status_code=404, detail="Rule template was not found")
-        return template
+) -> RuleTemplateRead:
+        template = get_visible_template(session, template_id)
+        return _template_read(session, template)
 
 #Retrieves the template and replaces its fields with the values in the request
 @router.put("/rule-templates/{template_id}", response_model=RuleTemplateRead)
@@ -936,10 +952,8 @@ def update_rule_template(
         payload: RuleTemplateCreate,
         request: Request,
         session: Session = Depends(get_db),
-) -> MonitoringRuleTemplate:
-        template = session.get(MonitoringRuleTemplate, template_id)
-        if template is None:
-            raise HTTPException(status_code=404, detail="Rule template was not found")
+) -> RuleTemplateRead:
+        template = get_visible_template(session, template_id)
         values = payload.model_dump(exclude={"labels"})
         if values["collection_id"] != template.collection_id:
             _validate_template_collection(session, values["collection_id"], excluded_template_id=template.id)
@@ -968,30 +982,41 @@ def update_rule_template(
                     MonitoringRule.source_template_id == template.id,
                 )
             ).all()
-            for rule in assigned_rules:
-                definition = _template_rule_definition(
-                    session,
-                    template,
-                    rule.target_asset_id,
-                    request,
-                    rule.variable_id,
-                    allow_disabled=True,
-                )
-                for field in (
-                    "name",
-                    "description",
-                    "rule_type",
-                    "operator",
-                    "threshold",
-                    "parameters",
-                    "severity",
-                    "evaluation_interval_seconds",
-                    "stale_after_seconds",
-                ):
-                    setattr(rule, field, definition[field])
+            editor = request_user(session)
+            is_admin = editor is not None and editor.role == "Administrator"
+            # Propagation targets are exactly this shared rule's own assignments
+            # (source_template_id), so the editor's personal asset filter must not apply.
+            with internal_propagation_scope(session):
+                for rule in assigned_rules:
+                    try:
+                        definition = _template_rule_definition(
+                            session,
+                            template,
+                            rule.target_asset_id,
+                            request,
+                            rule.variable_id,
+                            allow_disabled=True,
+                        )
+                    except HTTPException:
+                        if is_admin:
+                            raise
+                        # Never describe assets the editor cannot reach.
+                        raise HTTPException(status_code=409,detail="The change could not be applied to every asset using this shared rule. Contact an Administrator.",) from None
+                    for field in (
+                        "name",
+                        "description",
+                        "rule_type",
+                        "operator",
+                        "threshold",
+                        "parameters",
+                        "severity",
+                        "evaluation_interval_seconds",
+                        "stale_after_seconds",
+                    ):
+                        setattr(rule, field, definition[field])
         session.commit()
         session.refresh(template)
-        return template
+        return _template_read(session, template)
 
 #if template has assigned rules,it cannot be deleted 
 @router.delete("/rule-templates/{template_id}", status_code=204)
@@ -1018,9 +1043,7 @@ def assign_template_to_assets(
         request: Request,
         session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-        template = session.get(MonitoringRuleTemplate, template_id)
-        if template is None:
-            raise HTTPException(status_code=404, detail="Rule template was not found")
+        template = get_visible_template(session, template_id)
         prepared = []
         already_assigned = []
         for asset_id in sorted(payload.asset_ids):
@@ -1033,6 +1056,7 @@ def assign_template_to_assets(
                 asset_id,
                 request,
                 payload.variable_mappings.get(asset_id),
+                activate=True,
             )
             existing = session.scalars(
                 select(MonitoringRule)
@@ -1064,7 +1088,14 @@ def assign_template_to_assets(
                 asset_id=asset_id,
                 rule_id=rule.id,
             )
-            created.append({"asset_id": asset_id, "id": rule.id, "name": rule.name})
+            created.append({
+                "asset_id": asset_id,
+                "id": rule.id,
+                "name": rule.name,
+                "is_enabled": rule.is_enabled,
+                "lifecycle_status": rule.lifecycle_status,
+                "state": "activated" if rule.is_enabled else rule.lifecycle_status,
+            })
         session.commit()
         return {"created": created, "already_assigned": already_assigned}
 
@@ -1196,6 +1227,7 @@ def frontend_assign_predefined_rules(
             asset_id,
             request,
             payload.variable_mappings.get(template.id),
+            activate=True,
         )
         if any(
             rule.source_template_id == template.id
@@ -1221,7 +1253,14 @@ def frontend_assign_predefined_rules(
             asset_id=asset_id,
             rule_id=rule.id,
         )
-        created.append({"template_rule_id": template.id, "id": rule.id, "name": rule.name})
+        created.append({
+            "template_rule_id": template.id,
+            "id": rule.id,
+            "name": rule.name,
+            "is_enabled": rule.is_enabled,
+            "lifecycle_status": rule.lifecycle_status,
+            "state": "activated" if rule.is_enabled else rule.lifecycle_status,
+        })
     session.commit()
     return {"created": created, "already_assigned": already_assigned}
 
@@ -1907,6 +1946,7 @@ def list_collections(
     templates = session.scalars(
         select(MonitoringRuleTemplate)
         .where(MonitoringRuleTemplate.collection_id.is_not(None))
+        .where(visible_templates_clause(session, request_user(session)))
         .order_by(MonitoringRuleTemplate.name, MonitoringRuleTemplate.id)
     ).all()
     templates_by_collection: dict[int, list[dict[str, Any]]] = {}

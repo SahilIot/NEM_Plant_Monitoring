@@ -25,8 +25,14 @@ from app.models.audit_mixin import AuditNamesMixin
 from app.models.labels import Label, rule_labels, rule_template_labels
 
 
-class MonitoringRuleTemplate(Base):
+class MonitoringRuleTemplate(AuditNamesMixin, Base):
     __tablename__ = "nem_monitoring_rule_templates"
+    __table_args__ = (
+        CheckConstraint(
+            "visibility_type IN ('admin_only', 'specific_supervisors', 'all_supervisors')",
+            name="ck_nem_monitoring_rule_templates_visibility",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -59,7 +65,23 @@ class MonitoringRuleTemplate(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+    # Who may see and manage this shared rule in the global Monitoring Rules section.
+    visibility_type: Mapped[str] = mapped_column(
+        String(30),
+        default="admin_only",
+        server_default="admin_only",
+        nullable=False,
+    )
+    visibility_supervisors: Mapped[list["User"]] = relationship( "User", secondary="nem_rule_template_supervisors", lazy="selectin")
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True)
+    updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True)
+    created_by_user: Mapped["User | None"] = relationship( "User", foreign_keys=[created_by_id], lazy="selectin")
+    updated_by_user: Mapped["User | None"] = relationship( "User", foreign_keys=[updated_by_id], lazy="selectin")
     label_records: Mapped[list[Label]] = relationship(secondary=rule_template_labels,lazy="selectin",)
+
+    @property
+    def visibility_supervisor_ids(self) -> list[int]:
+        return sorted(user.id for user in self.visibility_supervisors)
 
     @property
     def labels(self) -> list[str]:
@@ -176,14 +198,8 @@ class MonitoringRule(AuditNamesMixin, Base):
     rule_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
 
     target_asset_id: Mapped[int | None] = mapped_column(ForeignKey("assets.id", ondelete="RESTRICT"),index=True,)
-    source_template_id: Mapped[int | None] = mapped_column(
-        ForeignKey( "nem_monitoring_rule_templates.id",ondelete="RESTRICT",),
-        index=True,
-    )
-    variable_id: Mapped[int | None] = mapped_column(
-        ForeignKey("variables.id", ondelete="RESTRICT"),
-        index=True,
-    )
+    source_template_id: Mapped[int | None] = mapped_column(ForeignKey( "nem_monitoring_rule_templates.id",ondelete="RESTRICT",),index=True,)
+    variable_id: Mapped[int | None] = mapped_column(ForeignKey("variables.id", ondelete="RESTRICT"),index=True,)
 
     operator: Mapped[str | None] = mapped_column(String(10))
     threshold: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
@@ -213,18 +229,10 @@ class MonitoringRule(AuditNamesMixin, Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
-    created_by_id: Mapped[int | None] = mapped_column(
-        ForeignKey("auth_users.id", ondelete="SET NULL"), index=True
-    )
-    updated_by_id: Mapped[int | None] = mapped_column(
-        ForeignKey("auth_users.id", ondelete="SET NULL"), index=True
-    )
-    created_by_user: Mapped["User | None"] = relationship(
-        "User", foreign_keys=[created_by_id], lazy="selectin"
-    )
-    updated_by_user: Mapped["User | None"] = relationship(
-        "User", foreign_keys=[updated_by_id], lazy="selectin"
-    )
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True)
+    updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True)
+    created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
+    updated_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
     label_records: Mapped[list[Label]] = relationship(secondary=rule_labels, lazy="selectin",)
 
     @property

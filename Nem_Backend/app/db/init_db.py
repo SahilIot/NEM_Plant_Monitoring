@@ -189,11 +189,45 @@ def _upgrade_audit_columns(engine: Engine) -> None:
                 connection.execute(text(statement))
 
 
+def _upgrade_rule_visibility(engine: Engine) -> None:
+    """Add shared-rule visibility and template audit columns (idempotent, additive).
+    Existing shared rules default to ``admin_only``; no historical permission is invented.
+    """
+    inspector = inspect(engine)
+    table = "nem_monitoring_rule_templates"
+    if table not in set(inspector.get_table_names()):
+        return
+    existing = {column["name"] for column in inspector.get_columns(table)}
+    postgres = engine.dialect.name == "postgresql"
+    if_not_exists = "IF NOT EXISTS " if postgres else ""
+    statements = []
+    if "visibility_type" not in existing:
+        statements.append(f"ALTER TABLE {table} ADD COLUMN {if_not_exists}visibility_type VARCHAR(30) "
+            "NOT NULL DEFAULT 'admin_only'")
+    for column in ("created_by_id", "updated_by_id"):
+        if column not in existing:
+            statements.append(f"ALTER TABLE {table} ADD COLUMN {if_not_exists}{column} INTEGER "
+                "REFERENCES auth_users(id) ON DELETE SET NULL")
+        statements.append(f"CREATE INDEX IF NOT EXISTS ix_{table}_{column} ON {table} ({column})")
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+        if postgres:
+            connection.execute(text(
+                "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = "
+                "'ck_nem_monitoring_rule_templates_visibility') THEN ALTER TABLE "
+                f"{table} ADD CONSTRAINT ck_nem_monitoring_rule_templates_visibility "
+                "CHECK (visibility_type IN ('admin_only', 'specific_supervisors', "
+                "'all_supervisors')); END IF; END $$"
+            ))
+
+
 # Largest and important function this creates missing tables and other supported objects described in the SQLAlchemy models.
 def _initialize_schema(engine: Engine) -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_auth_roles(engine)
     _upgrade_audit_columns(engine)
+    _upgrade_rule_visibility(engine)
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
     if "auth_users" in table_names:

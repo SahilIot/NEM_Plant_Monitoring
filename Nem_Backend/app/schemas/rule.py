@@ -336,6 +336,37 @@ class RuleTemplateRead(RuleTemplateCreate):
     legacy_rule_id: int | None = None
     created_at: datetime
     updated_at: datetime
+    created_by_id: int | None = None
+    created_by: str | None = None
+    updated_by_id: int | None = None
+    updated_by: str | None = None
+    visibility_type: Literal["admin_only", "specific_supervisors", "all_supervisors"] = "admin_only"
+    # Filled for Administrators only; Supervisors never see who else is on the list.
+    visibility_supervisor_ids: list[int] = Field(default_factory=list)
+
+
+class RuleVisibilityUpdate(ORMModel):
+    visibility_type: Literal["admin_only", "specific_supervisors", "all_supervisors"]
+    supervisor_ids: list[int] = Field(default_factory=list, max_length=200)
+
+
+class RuleVisibilityRequestCreate(ORMModel):
+    template_id: int = Field(ge=1)
+    # "self" = access for the requesting Supervisor; "all_supervisors" = visible to everyone.
+    request_type: Literal["self", "all_supervisors"]
+    reason: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("reason")
+    @classmethod
+    def strip_reason(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("A reason is required")
+        return value
+
+
+class RuleVisibilityReject(ORMModel):
+    reason: str | None = Field(default=None, max_length=2000)
 
 #Applying templates to assets
 class RuleTemplateAssetAssignment(ORMModel):

@@ -4116,12 +4116,12 @@ const filteredEvents = [...events]
           onClose={() => setShowPredefinedRules(false)}
           onAssigned={async (result) => {
             setShowPredefinedRules(false);
-            setList("not_activated");
+            setList("activated");
             await refreshAll();
             const assigned = result.created?.length || 0;
             const existing = result.already_assigned?.length || 0;
             setActionNotice(
-              `${assigned} predefined rule(s) assigned and created inactive.` +
+              `${assigned} predefined rule(s) assigned and activated.` +
                 (existing ? ` ${existing} rule(s) were already assigned.` : "")
             );
           }}

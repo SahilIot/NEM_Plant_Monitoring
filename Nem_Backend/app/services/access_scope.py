@@ -19,6 +19,7 @@ response is identical to a missing asset and does not reveal that it exists.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -118,6 +119,26 @@ def access_scope(session: Session) -> AccessScope:
         scope = scope_for_user(session, user)
     session.info[_CACHE_KEY] = scope
     return scope
+
+
+@contextmanager
+def internal_propagation_scope(session: Session):
+    """Run internal propagation of a shared-rule edit without the caller's asset filter.
+    Editing a shared rule updates every asset rule created from it, including assets
+    the editing Supervisor cannot reach. The affected rows are selected by the rule's
+    own assignments (``source_template_id``), never by the caller's scope, and
+    nothing about those assets is returned to the caller. Use only around that
+    internal loop; request-level asset checks stay in force everywhere else.
+    """
+    previous = session.info.get(_CACHE_KEY)
+    session.info[_CACHE_KEY] = UNRESTRICTED
+    try:
+        yield
+    finally:
+        if previous is None:
+            session.info.pop(_CACHE_KEY, None)
+        else:
+            session.info[_CACHE_KEY] = previous
 
 
 def require_asset_access(

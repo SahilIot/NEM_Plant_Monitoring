@@ -22,6 +22,7 @@ from app.models.rule import (
     SchedulerLease,
 )
 from app.models.variable import Variable
+from app.models.rule_visibility import RuleVisibilityChange, RuleVisibilityRequest
 from app.models import audit as _audit  # noqa: F401  (registers audit stamping)
 
 __all__ = [

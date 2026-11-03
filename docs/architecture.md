@@ -116,6 +116,28 @@ Existing rows stay NULL and display as "Unknown". The columns are added idempote
 (usernames, null for legacy rows or deleted users). A separate activity-history table can later be
 fed from the same listener.
 
+### Shared-rule visibility
+
+Shared (reusable) rules, i.e. `nem_monitoring_rule_templates`, carry `visibility_type`
+(`admin_only` default, `specific_supervisors`, `all_supervisors`). Selected Supervisors live in
+`nem_rule_template_supervisors`. `app/services/rule_visibility.py` is the single authorization point:
+Administrators see everything, Supervisors see `all_supervisors` rules and `specific_supervisors` rules
+that list them, Operators and everyone else see none. It is enforced in `GET /rule-templates`,
+`GET/PUT /rule-templates/{id}`, `POST /rule-templates/{id}/assign` and the rule names embedded in
+`GET /collections`; a hidden rule answers 404. Visibility never grants asset access and the asset-level
+workflows (`/assets/{id}/rules/...`) are unchanged.
+
+Only Administrators change visibility (`PUT /rule-templates/{id}/visibility`). Supervisors file requests
+(`/rule-visibility-requests`: access for themselves, or All Supervisors); only an Administrator approves or
+rejects them. Pending duplicates for the same rule and configuration are blocked by a partial unique
+index. Every change is recorded with previous/new values in `nem_rule_visibility_changes`, and templates
+now carry the same `created_by` / `updated_by` audit columns as rules.
+
+Editing a shared rule propagates to every asset rule created from it (`source_template_id`). That loop runs
+inside `internal_propagation_scope` so the editing Supervisor's asset filter does not block assets they
+cannot reach; the affected rows come only from the rule's own assignments and error messages for
+non-administrators never name assets.
+
 ## Request and monitoring data flow
 
 1. The dashboard calls `/api/v1` using `Nem_Frontend/src/services/api.js`.

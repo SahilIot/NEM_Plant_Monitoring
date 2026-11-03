@@ -13,9 +13,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.maintenance import MaintenanceRecord, MaintenanceSchedule
-from app.models.rule import MonitoringRule
+from app.models.rule import MonitoringRule, MonitoringRuleTemplate
 
-AUDITED_MODELS = (MonitoringRule, MaintenanceSchedule, MaintenanceRecord)
+AUDITED_MODELS = (MonitoringRule, MonitoringRuleTemplate, MaintenanceSchedule, MaintenanceRecord)
 _IMMUTABLE_COLUMNS = ("created_by_id", "created_at")
 
 

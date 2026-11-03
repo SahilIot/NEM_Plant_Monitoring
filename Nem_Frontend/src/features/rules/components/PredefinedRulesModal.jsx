@@ -309,14 +309,14 @@ export default function PredefinedRulesModal({
 
         {reviewing && (
           <div className="prm-confirmation" role="status">
-            Assign {selected.size} selected rule(s) to this asset? They will be created inactive and the original predefined rules will remain unchanged.
+            Assign {selected.size} selected rule(s) to this asset? They will be activated automatically and the original predefined rules will remain unchanged.
           </div>
         )}
 
         <footer className="prm-footer">
           <span className="prm-note">
             {availableCount
-              ? "Assigned rules are created inactive; activate them from the asset rules list."
+              ? "Assigned rules are activated automatically and start being evaluated."
               : "Rules requiring missing variables or unsupported evaluators cannot be assigned."}
           </span>
           {reviewing && (

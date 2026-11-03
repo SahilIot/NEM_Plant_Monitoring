@@ -28,6 +28,7 @@ from app.api.routes import (
     notifications,
     plc,
     readings,
+    rule_visibility,
     rules,
     variables,
 )
@@ -287,6 +288,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             and method == "POST"
             and policy_path in {
                 "/api/v1/rule-template-requests",
+                "/api/v1/rule-visibility-requests",
                 "/api/v1/documents",
                 "/api/v1/documents/with-files",
                 }
@@ -589,6 +591,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application.include_router(auth.router, prefix="/api/v1")
     application.include_router(frontend_compat.router, prefix="/api/v1")
+    application.include_router(rule_visibility.router, prefix="/api/v1")
     application.include_router(assets.router, prefix="/api/v1")
     application.include_router(variables.router, prefix="/api/v1")
     application.include_router(readings.router, prefix="/api/v1")

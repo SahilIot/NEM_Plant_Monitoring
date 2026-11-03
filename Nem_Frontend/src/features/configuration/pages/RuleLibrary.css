@@ -341,3 +341,47 @@
   gap: 10px;
   flex-wrap: wrap;
 }
+
+.rule-visibility-body {
+  overflow-y: auto;
+  padding: 14px 18px;
+  display: grid;
+  gap: 14px;
+}
+
+.rule-visibility-options {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.rule-visibility-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.rule-visibility-option input {
+  margin-top: 3px;
+  accent-color: var(--action-bg);
+}
+
+.rule-visibility-option small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rule-visibility-supervisors {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.rule-visibility-field {
+  display: grid;
+  gap: 5px;
+}

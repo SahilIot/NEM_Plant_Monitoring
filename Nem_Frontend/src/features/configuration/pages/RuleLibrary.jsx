@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
   Copy,
+  Eye,
   Pencil,
   Plus,
   Search,
@@ -25,6 +26,12 @@ import {
   useConfirmation,
 } from "../../../components/common/UI.jsx";
 import LabelsField from "../../../components/common/LabelsField.jsx";
+import {
+  RequestVisibilityModal,
+  VisibilityBadge,
+  VisibilityModal,
+  VisibilityRequestsPanel,
+} from "./RuleVisibility.jsx";
 import "./RuleLibrary.css";
 
 const RULE_TYPES = [
@@ -520,7 +527,7 @@ function AssignmentModal({ template, onClose, onComplete }) {
     <div className="rule-library-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !saving && onClose()}>
       <section className="rule-library-modal" role="dialog" aria-modal="true" aria-labelledby="template-assign-title">
         <header>
-          <div><h2 id="template-assign-title">Assign “{template.name}”</h2><p>Selected rules are added inactive. Existing assignments are left unchanged.</p></div>
+          <div><h2 id="template-assign-title">Assign “{template.name}”</h2><p>Selected rules are added active. Existing assignments are left unchanged.</p></div>
           <button className="icon-btn" aria-label="Close" onClick={onClose} disabled={saving}><X size={19} /></button>
         </header>
         {error && <p className="notice error" role="alert">{error}</p>}
@@ -550,7 +557,7 @@ function AssignmentModal({ template, onClose, onComplete }) {
             );
           })}
         </div>
-        {review && <p className="rule-library-review" role="status">Assign this rule to {selected.size} selected asset(s)? Each new asset rule will be created inactive.</p>}
+        {review && <p className="rule-library-review" role="status">Assign this rule to {selected.size} selected asset(s)? Each new asset rule will be activated automatically.</p>}
         <footer>
           <button className="btn-outline" onClick={onClose} disabled={saving}>Cancel</button>
           {review && <button className="btn-outline" onClick={() => setReview(false)} disabled={saving}>Back</button>}
@@ -610,6 +617,9 @@ export default function RuleLibrary() {
   const [editing, setEditing] = useState(null);
   const [suggesting, setSuggesting] = useState(false);
   const [assigning, setAssigning] = useState(null);
+  const [visibilityTarget, setVisibilityTarget] = useState(null);
+  const [requestingVisibility, setRequestingVisibility] = useState(false);
+  const [visibilityRefresh, setVisibilityRefresh] = useState(0);
   const [busyId, setBusyId] = useState(null);
   const [message, setMessage] = useState({ text: "", error: false });
   const load = useCallback(async () => {
@@ -980,7 +990,7 @@ const reviewRequest = async (request, action) => {
           <h1 className="page-title">Monitoring Rule Library</h1>
           <p className="muted">
             Create reusable monitoring rules, then assign them to assets.
-            Assigned rules start inactive.
+            Assigned rules are activated automatically.
             </p>
             </div>
 <div className="rule-library-heading-actions">
@@ -1014,6 +1024,17 @@ const reviewRequest = async (request, action) => {
     >
       <Plus size={17} />
       Suggest new rule
+    </button>
+  )}
+
+  {isSupervisor && (
+    <button
+      type="button"
+      className="btn-outline"
+      onClick={() => setRequestingVisibility(true)}
+    >
+      <Eye size={17} />
+      Request visibility
     </button>
   )}
 </div>
@@ -1176,6 +1197,18 @@ const reviewRequest = async (request, action) => {
   </section>
 )}
 
+{(isAdministrator || isSupervisor) && (
+  <VisibilityRequestsPanel
+    isAdministrator={isAdministrator}
+    refreshKey={visibilityRefresh}
+    onMessage={setMessage}
+    onChanged={async () => {
+      setVisibilityRefresh((value) => value + 1);
+      await load();
+    }}
+  />
+)}
+
       <section className="rule-library-panel">
         <div className="rule-library-tools">
           <label className="rule-library-search"><Search size={17} /><input aria-label="Search rules" placeholder="Search rules…" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
@@ -1199,7 +1232,7 @@ const reviewRequest = async (request, action) => {
               <article className="rule-library-card" key={template.id}>
                 <div className="rule-library-card-icon"><Activity size={19} /></div>
                 <div className="rule-library-card-main">
-                  <div className="rule-library-card-title"><h2>{template.name}</h2><span className={`rule-library-status ${template.is_enabled ? "available" : "disabled"}`}>{template.is_enabled ? "Available" : "Disabled"}</span></div>
+                  <div className="rule-library-card-title"><h2>{template.name}</h2><span className={`rule-library-status ${template.is_enabled ? "available" : "disabled"}`}>{template.is_enabled ? "Available" : "Disabled"}</span><VisibilityBadge type={template.visibility_type} /></div>
                   <p>{template.description || "No description provided."}</p>
                   <small>{displayType(template)} · {templateSummary(template)}</small>
                   {template.labels?.length > 0 && (
@@ -1211,6 +1244,7 @@ const reviewRequest = async (request, action) => {
                   )}
                 </div>
                 <div className="rule-library-actions">
+                  {isAdministrator && <button className="btn-outline" onClick={() => setVisibilityTarget(template)} title="Rule visibility" aria-label="Rule visibility"><Eye size={15} /></button>}
                   <button className="btn-outline" onClick={() => setAssigning(template)} disabled={!canAssignRules || !template.is_enabled || needsRuntimeThresholdConfiguration(template)} title={!canAssignRules ? "You do not have permission to assign rules." : needsRuntimeThresholdConfiguration(template) ? "Edit this rule and configure running-time thresholds before assigning it." : undefined}><Copy size={15} /> Assign rule</button>
                   <button className="btn-outline" onClick={() => {setSuggesting(false);setEditing(template);setModalOpen(true);}} disabled={!canEditRules} title="Edit rule" aria-label="Edit rule"><Pencil size={15} /></button>
                   <button className="btn-outline danger" onClick={() => remove(template)} disabled={busyId === template.id || !isAdministrator} title={!isAdministrator ? "Administrator access required to delete reusable rules." : undefined}>{busyId === template.id ? "Deleting…" : <><Trash2 size={15} /></>}</button>
@@ -1350,6 +1384,30 @@ fields={
   />
 )}
 
+{visibilityTarget && (
+  <VisibilityModal
+    template={visibilityTarget}
+    onClose={() => setVisibilityTarget(null)}
+    onSaved={async () => {
+      const name = visibilityTarget.name;
+      setVisibilityTarget(null);
+      setMessage({ text: `Visibility updated for "${name}".`, error: false });
+      await load();
+    }}
+  />
+)}
+
+{requestingVisibility && (
+  <RequestVisibilityModal
+    onClose={() => setRequestingVisibility(false)}
+    onSubmitted={async () => {
+      setRequestingVisibility(false);
+      setMessage({ text: "Visibility request sent to an Administrator.", error: false });
+      setVisibilityRefresh((value) => value + 1);
+    }}
+  />
+)}
+
 {assigning && (
   <AssignmentModal
     template={assigning}
@@ -1359,7 +1417,7 @@ fields={
       const duplicates = result.already_assigned?.length || 0;
 
       setMessage({
-        text: `Assigned to ${made} asset(s); ${duplicates} already had the same rule.`,
+        text: `Assigned and activated on ${made} asset(s); ${duplicates} already had the same rule.`,
         error: false,
       });
     }}
