@@ -31,7 +31,7 @@ roadmap.
   `001_shared_labels` migrates existing document JSON labels into the shared
   catalog, clears the legacy JSON values after import, and restores document
   labels to that column on downgrade. The migration is invoked during database
-  initialization; a SQLite in-memory check verified repeat initialization,
+  initialization; a temporary local check (run on SQLite, which the application no longer supports) verified repeat initialization,
   reuse/filtering, the 10-label limit, and rollback. A live PostgreSQL upgrade
   has not been exercised.
 - Startup drops the legacy rule and maintenance visibility-marker columns
@@ -40,6 +40,17 @@ roadmap.
   completed scheduled occurrence retains its schedule; deleting a
   noncompleted scheduled occurrence keeps the pre-existing explicit
   delete-the-schedule behavior.
+- Shared-rule visibility is Administrator-controlled only. The Supervisor
+  visibility-request feature was removed (routes, model, schemas, UI);
+  `/api/v1/rule-visibility-requests` answers 404. Visibility, editing
+  (Supervisor threshold-only) and asset access are separate checks, each
+  enforced in the backend. Unknown stored visibility values are treated as
+  `admin_only`.
+- Startup upgrades for audit columns, rule visibility and request removal are
+  PostgreSQL-only, verify real definitions (foreign keys, indexes, constraint
+  scope) and never delete request records or visibility history. See
+  `docs/architecture.md`, "Startup schema upgrades". SQLite support was
+  removed from the migration code, `shared_labels.py` and the role guard.
 - Demo data created by `Nem_Backend/seed.py` is explicitly marked as simulated
   and must not be interpreted as live equipment telemetry.
 
@@ -51,13 +62,10 @@ roadmap.
    (`authorized_asset_ids`, per-message re-check). Users with no assignments see
    nothing. Verified by code review and compilation only; exercise every role
    against a real database before relying on it.
-2. **Root README is stale in places.** Its Safety and Limitations sections say
-   the API has no authentication and that authentication/roles and
-   email/SMS delivery are not implemented. Current source implements local
-   bearer sessions and roles (`api/routes/auth.py`, `services/auth_security.py`)
-   and an email outbox/delivery loop (`services/email_notifications.py`,
-   `main.py`). The root README was reconciled with the implemented email
-   behavior; production SMTP delivery still requires environment verification.
+2. **Root README was reconciled with the code.** It now describes local
+   bearer sessions and roles, the email outbox, Administrator-controlled
+   shared-rule visibility, and the current project layout. Production SMTP
+   delivery still requires environment verification.
 3. **Email behavior is conditional.** The outbox path is implemented, but
    delivery depends on the email feature setting, saved SMTP configuration,
    valid supervisor assignment/email addresses, and SMTP reachability. Pending
@@ -79,9 +87,23 @@ roadmap.
    session verified compilation, not runtime behavior or acceptance coverage.
 7. **Shared labels have local verification only.** Case/whitespace
    normalization, duplicate reuse, AND filtering, document-label migration
-   and rollback, and the 10-label maximum passed temporary SQLite checks.
+   and rollback, and the 10-label maximum passed temporary local checks (run on SQLite, since removed from the codebase).
    The production PostgreSQL migration and role-specific API/UI flows still
    require verification against an isolated deployment-like environment.
+
+## Latest verification status
+
+Verified: Python compilation and internal import resolution for the backend;
+Babel parsing and local import/export resolution for every frontend source
+file; the visibility, authorization, history and threshold-only editing logic
+against an in-memory database; and the three startup upgrades against a real
+PostgreSQL 16.15 server (a scratch instance, not the deployed one).
+
+Not verified: `npm run build` and a backend startup after the latest changes, real
+HTTP/middleware behavior (including the 404 for removed request routes),
+the rendered UI, a live login, PLC or SMTP, and the upgrades against the
+deployed database. Run `npm run build` and restart the backend before relying
+on them.
 
 ## Recently corrected UI root cause
 

@@ -42,7 +42,12 @@ loads `src/styles/global.css`.
   shows whether the OPC UA connection is secured, and warns only when it is unencrypted.
 - **Configuration** (`features/configuration/pages/`): rule library and
   collections, instruction/document creation and viewing, import/export, and
-  related configuration workflows.
+  related configuration workflows. The rule library lists only the shared rules
+  the signed-in role may see. Its **View** dialog shows the rule, the assets
+  using it (within the caller's asset scope) and its change history.
+  Administrators also get the visibility dialog (Admin Only, Specific
+  Supervisors, All Supervisors) and a "Supervisors with access" row; a
+  Supervisor sees no access-request control.
 - **Settings** (`features/settings/pages/`): profile, email server, usage,
   backup/restore, and other settings subsections. **User access** is routed to
   `features/auth/AdminUsersPage.jsx`.

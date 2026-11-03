@@ -32,8 +32,9 @@ maintenance work and recurring calendar schedules.
   counters and per-rule/per-asset counters persist in the database. The
   frontend does not increment cycle counts.
 - **Monitoring rules:** Create supported asset rules, use reusable templates,
-  assign or copy rules, and manage rule lifecycle. Rule types and limitations
-  are described under [Monitoring rules](#monitoring-rules).
+  assign or copy rules, and manage rule lifecycle. Shared (reusable) rules have
+  Administrator-controlled visibility. Rule types and limitations are described
+  under [Monitoring rules](#monitoring-rules).
 - **Alerts and events:** Maintain active/resolved alerts and event history;
   acknowledge and complete eligible alerts. Alert acknowledgement does not by
   itself clear a rule condition.
@@ -63,26 +64,75 @@ current code.
 ## Project layout
 
 ```text
-Nem_Backend/
-  app/
-    api/routes/       FastAPI routers, including dashboard compatibility routes
-    core/              Environment-backed application settings
-    db/                SQLAlchemy base, sessions, UTC type, startup initialization
-    models/             SQLAlchemy persistence models
-    schemas/            Pydantic request/response validation
-    services/           Rule engine, ingestion, OPC UA, live updates, email, backups
-  scripts/              Administrator setup script
-  seed.py               Idempotent simulated demo data
-  requirements.txt
-Nem_Frontend/
-  src/app/              React routes and application entry point
-  src/components/       Shared layout, menus, icons, dialogs, UI controls
-  src/features/         Assets, monitoring, dashboard, PLC, configuration, auth,
-                       settings and maintenance screens
-  src/services/         REST API and WebSocket clients
-  src/styles/           Global light/dark theme and layout styles
-  package.json
-docs/                    Architecture, design, product, rules, memory and task docs
+NEM_Plant_Monitoring/
+  README.md                         Setup and functionality guide
+  docs/                             Architecture, design, product, rules, memory and task docs
+  .postman/                         Postman workspace registration
+  Nem_Backend/
+    app/
+      main.py                       App factory: HTTP middleware and role gate, background tasks,
+                                    WebSocket, router registration, /ui static mount
+      api/routes/
+        auth.py                     Login, sessions, user administration, role dependencies
+        assets.py                   Asset hierarchy CRUD and move
+        variables.py                Asset-owned variables
+        readings.py                 Single/batch ingestion, latest and history queries
+        rules.py                    Asset-specific rule creation, listing and update
+        rule_visibility.py          Admin-controlled shared-rule visibility, history, assignments
+        monitoring.py               Evaluation, status, alerts, events
+        maintenance.py              Work records, recurring schedules, occurrences
+        plc.py                      OPC UA status, test, discovery, one-shot read
+        notifications.py            Supervisor assignments and email delivery summary
+        dashboard.py                Dashboard summary
+        frontend_compat.py          Dashboard workflows: rule templates and suggestions, collections,
+                                    documents, settings, import/export, lifecycle actions, backups
+      core/                         config.py (environment settings), labels.py (label normalization)
+      db/
+        base.py, session.py         Declarative base, session factory, UTCDateTime
+        init_db.py                  Startup schema creation and idempotent upgrades
+        migrations/shared_labels.py Versioned shared-labels migration
+      models/                       asset, variable, reading, rule, rule_visibility, maintenance,
+                                    machine_monitoring, notification, auth, labels, frontend_data,
+                                    audit (+ audit_mixin)
+      schemas/                      Pydantic request/response models per area
+      services/
+        reading_ingestion.py        Validated single/batch reading ingestion
+        monitoring_engine.py        Rule evaluation, alerts, events, lifecycle helpers
+        opcua_client.py             Read-only OPC UA client, transport security
+        opcua_collector.py          Reconnecting subscription collector
+        access_scope.py             Asset-assignment scoping for REST and WebSocket
+        rule_visibility.py          Shared-rule visibility, edit permission, change history
+        maintenance_schedule.py     Calendar recurrence and due-date logic
+        email_notifications.py      Email outbox and SMTP delivery
+        live_updates.py             Committed-change WebSocket hub
+        auth_security.py            Password hashing, sessions
+        labels.py                   Shared label catalog service
+        frontend_backup.py          Dashboard backup/restore snapshots
+    scripts/create_admin.py         Interactive first-Administrator setup
+    seed.py                         Idempotent simulated demo data
+    requirements.txt
+    (local only, git-ignored: .env, certificates/, backups/, uploads/, .venv/)
+  Nem_Frontend/
+    index.html, vite.config.js, package.json
+    public/logo.png
+    scripts/add-react-imports.js    Adds `import React` to JSX files (npm run add-react-imports)
+    src/
+      app/                          App.jsx (routes), main.jsx (router at /ui, providers)
+      components/common/            Layout, Brand, GroupedMenu, LabelsField, Icons, UI controls
+      features/
+        dashboard/pages/            Home (Overview)
+        assets/                     components/ (tree, supervisors, maintenance panel, copy rules),
+                                    pages/ (asset index/detail, rule and maintenance creation),
+                                    rules/monitoringRuleFlow.js
+        plc/                        pages/Plc.jsx, styles/Plc.css
+        rules/                      components/PredefinedRulesModal, pages/AlertRules, RuleCreatePage
+        configuration/pages/        Rule library, visibility dialog, collections, documents,
+                                    instructions, import/export
+        settings/pages/             Profile, email, usage, backup/restore
+        auth/                       AuthContext, LoginPage, AdminUsersPage
+      services/                     api.js (REST client), liveUpdates.js (WebSocket client)
+      styles/global.css             Light/dark theme tokens and layout
+      utils/                        config.js, format.js, navigation.js
 ```
 
 The root `README.md` is the project setup and functionality guide. Detailed
@@ -265,8 +315,11 @@ asset. Supported behavior includes:
   interval-elapsed rules are also supported.
 - **Cycle/count thresholds:** count false-to-true transitions on the configured
   Boolean cycle signal and use a separate counter for each rule/asset.
-- **Reusable rule templates:** create, organize, request/review, assign, and
-  copy compatible rules through the configuration and asset workflows.
+- **Reusable rule templates:** create, organize, assign, and copy compatible
+  rules through the configuration and asset workflows. Administrators decide
+  which Supervisors can see each shared rule (see
+  [Shared rule visibility](#shared-rule-visibility)); Supervisors can suggest a
+  new reusable rule or maintenance schedule for Administrator review.
 
 The first cycle sample establishes a baseline; only a subsequent false-to-true
 edge increments the count. Running time is calculated from timestamps, not
@@ -280,6 +333,22 @@ permanently deleted subject to lifecycle and role restrictions. `generic` and
 normal), and they cannot raise, change or clear alerts. The database accepts
 both (so existing rows load), `RuleCreate` accepts `generic` but not
 `boolean_condition`, and the UI offers neither.
+
+### Shared rule visibility
+
+Each shared rule has a visibility: **Admin Only** (default), **Specific
+Supervisors** or **All Supervisors**. Only an Administrator changes it or the
+list of Supervisors with access. There is no request or approval workflow in
+the application; a Supervisor who needs a rule asks the Administrator, and
+`/api/v1/rule-visibility-requests` answers 404 for every role.
+
+Visibility, editing and assignment are separate checks, all enforced by the
+backend. A Supervisor who can see a shared rule may change only its numeric
+thresholds and evaluation interval; creating or deleting shared rules is
+Administrator-only; assigning a rule to an asset also needs access to that
+asset. A rule a caller may not see answers 404, the same as a missing rule.
+Every edit is recorded field by field, and every visibility change with its
+previous and new value, in a history shown in the Rule Library **View** dialog.
 
 ## Alerts, events, and maintenance
 
@@ -340,6 +409,7 @@ API routers are mounted under `/api/v1`:
 | Variables | `/assets/{asset_id}/variables`, `/variables/{variable_id}` |
 | Readings | `POST /readings`, `POST /readings/batch`, latest and history queries |
 | Rules | `/rules`, rule status, template assignment/copy, lifecycle operations |
+| Shared rules | `/rule-templates`, `/rule-templates/{id}/visibility` (Administrator), `/rule-templates/{id}/history`, `/rule-templates/{id}/assignments`, `/rule-visibility/supervisors`, `/rule-template-requests` (suggestions) |
 | Monitoring | `/monitoring/status`, `/monitoring/evaluate`, alerts and events |
 | Maintenance | `/maintenance`, `/maintenance/schedules`, start/complete/cancel and next-date actions |
 | PLC / OPC UA | `/plc/status`, `/plc/test`, `/plc/discover`, `/plc/read` |
@@ -370,7 +440,12 @@ VALID`, so no existing row is changed); rollback is
 `ALTER TABLE nem_monitoring_rules DROP CONSTRAINT ck_nem_monitoring_rules_type`
 followed by re-adding the previous definition. Startup still drops the legacy
 `nem_monitoring_rules.is_archived` and `nem_maintenance_records.archived_at`
-columns if present. This is not a substitute for reviewing schema changes. Back
+columns if present. Startup also verifies the audit columns (foreign keys and indexes), the
+shared-rule `visibility_type` column and its allowed-values constraint, and
+removes the discontinued visibility-request table and `request_id` column only
+when that loses nothing; otherwise it keeps them and logs a warning. See
+[Startup schema upgrades](docs/architecture.md#startup-schema-upgrades). This
+is not a substitute for reviewing schema changes. Back
 up the database before deploying updates. Dashboard backups are separate snapshots managed through
 the Settings workflow; restoring one replaces current monitoring data.
 Protect database backups and the backend `backups/` directory.

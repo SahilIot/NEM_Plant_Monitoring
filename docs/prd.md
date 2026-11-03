@@ -29,11 +29,14 @@ as planned below is not represented as a committed future feature.
 The source defines `Administrator`, `Supervisor`, and `Operator`.
 
 - **Administrator:** account administration, asset/variable and PLC
-  configuration, system settings, and privileged actions such as permanent
+  configuration, system settings, shared-rule management including which
+  Supervisors can see each rule, and privileged actions such as permanent
   deletion and backup/restore.
 - **Supervisor:** monitoring-rule and maintenance management, with limits on
-  rule field edits and privileged configuration. Supervisors can submit
-  reusable template/content requests for Administrator review.
+  rule field edits and privileged configuration. Supervisors see only the
+  shared rules an Administrator made visible to them, may change only their
+  numeric thresholds, and can suggest new reusable monitoring rules or
+  maintenance schedules for Administrator review.
 - **Operator:** view operational information, acknowledge/complete active
   alerts subject to their state, and start/complete the active scheduled
   maintenance occurrence due today or overdue.
@@ -60,6 +63,8 @@ assignments they see no assets. Administrators are unrestricted.
 | FR-11 | Use OPC UA to write PLC values or control/stop machinery. | Explicitly not implemented |
 | FR-12 | Schedule maintenance from machine running-hour or cycle thresholds. | Not implemented |
 | FR-13 | Assign reusable shared labels to rules, rule collections, and instruction documents; filter listings by one or more labels. | Implemented; PostgreSQL migration and deployment verification required |
+| FR-14 | Administrator-controlled visibility of shared rules (Admin Only, Specific Supervisors, All Supervisors) with grant and revoke; Supervisors see only authorized rules, enforced by the backend. | Implemented; no request workflow exists |
+| FR-15 | Record who created and last changed rules and maintenance, and keep field-level history of shared-rule edits and visibility changes. | Implemented |
 
 ## Principal workflows
 

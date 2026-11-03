@@ -142,6 +142,41 @@ suspend/resume/activate/deactivate and verify legacy rule records.
   Collection and document metadata updates are Administrator-only; rule and
   template updates continue to use their existing role restrictions.
 
+## Shared rule visibility and editing
+
+Shared (reusable) rules are stored in `nem_monitoring_rule_templates`. Three
+checks apply, and none implies another:
+
+- **Visibility:** `admin_only` (default), `specific_supervisors` (the
+  Supervisors listed for that rule) or `all_supervisors`. Administrators see
+  every shared rule; Operators see none. Only an Administrator changes
+  visibility or the Supervisor list (`PUT /rule-templates/{id}/visibility`).
+  There is no request or approval workflow, and
+  `/api/v1/rule-visibility-requests` answers 404 for every role. An unknown
+  stored value is treated as `admin_only`.
+- **Editing:** a Supervisor who can see a rule may change only its numeric
+  thresholds (`threshold`, the threshold keys inside `parameters`, and
+  `evaluation_interval_seconds`); any other change answers 403. Creating and
+  deleting shared rules is Administrator-only.
+- **Assignment:** assigning a shared rule to an asset needs an assigning role,
+  visibility of the rule and access to the target asset.
+
+A rule the caller may not see answers 404, identical to a missing rule, in
+listings, pickers, search, predefined-rule lists, assignment and history.
+`source_template_id` on asset rule rows is returned only to roles that may see
+that shared rule. Editing a shared rule propagates to the asset rules created
+from it, including assets the editor cannot reach; error messages for
+non-Administrators never name assets.
+
+Each edit is recorded field by field (previous value, new value, editor, UTC
+time) in `nem_rule_template_changes`; saves that change nothing are not
+recorded. Visibility changes are recorded with previous and new values in
+`nem_rule_visibility_changes` and are shown to Administrators only.
+`GET /rule-templates/{id}/history` returns the timeline and
+`GET /rule-templates/{id}/assignments` lists the assets using the rule, limited
+to the caller's asset scope. Rows written before the request feature was
+removed may still carry the source `request`.
+
 ## Alerts and events
 
 - The rule evaluator maintains at most one active alert per rule and target
@@ -207,6 +242,6 @@ scheduled maintenance actions.
 
 Supervisors and Operators can see and act on only their assigned assets and
 those assets' descendants; the filter is applied in the REST routes and in
-WebSocket events, and a non-admin with no assignments sees nothing. Only
+WebSocket events, and a non-admin with no assignments sees nothing. Asset scope and shared-rule visibility are independent: seeing a rule never grants access to an asset, and the reverse. Only
 assigned Supervisors receive alert emails. Assignment scope was verified by code
 review and compilation, not by a live multi-role test.

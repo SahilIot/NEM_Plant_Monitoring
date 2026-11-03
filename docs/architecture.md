@@ -18,6 +18,80 @@ External reading client ──┴─> FastAPI /api/v1 ──> SQLAlchemy ──>
 React + Vite dashboard <── REST refreshes / WebSocket notifications
 ```
 
+## Project structure
+
+```text
+NEM_Plant_Monitoring/
+  README.md                         Setup and functionality guide
+  docs/                             Architecture, design, product, rules, memory and task docs
+  .postman/                         Postman workspace registration
+  Nem_Backend/
+    app/
+      main.py                       App factory: HTTP middleware and role gate, background tasks,
+                                    WebSocket, router registration, /ui static mount
+      api/routes/
+        auth.py                     Login, sessions, user administration, role dependencies
+        assets.py                   Asset hierarchy CRUD and move
+        variables.py                Asset-owned variables
+        readings.py                 Single/batch ingestion, latest and history queries
+        rules.py                    Asset-specific rule creation, listing and update
+        rule_visibility.py          Admin-controlled shared-rule visibility, history, assignments
+        monitoring.py               Evaluation, status, alerts, events
+        maintenance.py              Work records, recurring schedules, occurrences
+        plc.py                      OPC UA status, test, discovery, one-shot read
+        notifications.py            Supervisor assignments and email delivery summary
+        dashboard.py                Dashboard summary
+        frontend_compat.py          Dashboard workflows: rule templates and suggestions, collections,
+                                    documents, settings, import/export, lifecycle actions, backups
+      core/                         config.py (environment settings), labels.py (label normalization)
+      db/
+        base.py, session.py         Declarative base, session factory, UTCDateTime
+        init_db.py                  Startup schema creation and idempotent upgrades
+        migrations/shared_labels.py Versioned shared-labels migration
+      models/                       asset, variable, reading, rule, rule_visibility, maintenance,
+                                    machine_monitoring, notification, auth, labels, frontend_data,
+                                    audit (+ audit_mixin)
+      schemas/                      Pydantic request/response models per area
+      services/
+        reading_ingestion.py        Validated single/batch reading ingestion
+        monitoring_engine.py        Rule evaluation, alerts, events, lifecycle helpers
+        opcua_client.py             Read-only OPC UA client, transport security
+        opcua_collector.py          Reconnecting subscription collector
+        access_scope.py             Asset-assignment scoping for REST and WebSocket
+        rule_visibility.py          Shared-rule visibility, edit permission, change history
+        maintenance_schedule.py     Calendar recurrence and due-date logic
+        email_notifications.py      Email outbox and SMTP delivery
+        live_updates.py             Committed-change WebSocket hub
+        auth_security.py            Password hashing, sessions
+        labels.py                   Shared label catalog service
+        frontend_backup.py          Dashboard backup/restore snapshots
+    scripts/create_admin.py         Interactive first-Administrator setup
+    seed.py                         Idempotent simulated demo data
+    requirements.txt
+    (local only, git-ignored: .env, certificates/, backups/, uploads/, .venv/)
+  Nem_Frontend/
+    index.html, vite.config.js, package.json
+    public/logo.png
+    scripts/add-react-imports.js    Adds `import React` to JSX files (npm run add-react-imports)
+    src/
+      app/                          App.jsx (routes), main.jsx (router at /ui, providers)
+      components/common/            Layout, Brand, GroupedMenu, LabelsField, Icons, UI controls
+      features/
+        dashboard/pages/            Home (Overview)
+        assets/                     components/ (tree, supervisors, maintenance panel, copy rules),
+                                    pages/ (asset index/detail, rule and maintenance creation),
+                                    rules/monitoringRuleFlow.js
+        plc/                        pages/Plc.jsx, styles/Plc.css
+        rules/                      components/PredefinedRulesModal, pages/AlertRules, RuleCreatePage
+        configuration/pages/        Rule library, visibility dialog, collections, documents,
+                                    instructions, import/export
+        settings/pages/             Profile, email, usage, backup/restore
+        auth/                       AuthContext, LoginPage, AdminUsersPage
+      services/                     api.js (REST client), liveUpdates.js (WebSocket client)
+      styles/global.css             Light/dark theme tokens and layout
+      utils/                        config.js, format.js, navigation.js
+```
+
 ## Runtime and source layout
 
 - `Nem_Backend/app/main.py` creates the FastAPI application, engine, session
@@ -102,6 +176,54 @@ columns. It drops only those columns, preserving all rule and maintenance
 records; previously filtered rows are included in normal listings and
 evaluation queries according to their existing lifecycle/status fields.
 
+### Startup schema upgrades
+
+`initialize_database()` in `app/db/init_db.py` runs at API startup and from
+`scripts/create_admin.py` and `seed.py`. On PostgreSQL it holds a session-level
+advisory lock for the whole upgrade, so concurrent processes cannot interleave
+DDL. It runs `Base.metadata.create_all()` and then idempotent in-code steps.
+There is no migration framework. The application database is PostgreSQL only:
+the audit, visibility and request-removal helpers log a warning and skip any
+other dialect. Their table, column and index names are fixed constants that are
+validated before use, and no step switches off foreign-key enforcement.
+
+- `_upgrade_audit_columns` makes sure rules, maintenance schedules and
+  maintenance records have `created_by_id` / `updated_by_id` as nullable
+  INTEGER foreign keys to `auth_users(id)` with `ON DELETE SET NULL` and a
+  plain single-column index, and that `nem_maintenance_records.updated_at` is a
+  `TIMESTAMP WITHOUT TIME ZONE` (the type of `UTCDateTime`). Existing columns
+  are verified rather than rewritten: a missing foreign key is added only when
+  no value in the column is orphaned; an index is matched by its definition, so
+  a same-named index on other columns is left alone and the correct one is
+  created as `ix_<table>_<column>_audit`; a different `ON DELETE` action or a
+  `timestamptz` column is reported as a warning and left unchanged. Existing
+  audit data is never modified.
+- `_upgrade_rule_visibility` adds `visibility_type` (`VARCHAR(30) NOT NULL
+  DEFAULT 'admin_only'`) and the template audit columns. Valid existing values
+  are preserved. A NULL or unknown value is reset to `admin_only` (such rules
+  were already hidden from Supervisors) and logged with the affected rule ids,
+  so the allowed-values constraint can always be created. The constraint
+  `ck_nem_monitoring_rule_templates_visibility` is added when missing and
+  replaced when its definition is stale; the existence check is scoped to this
+  table in the current schema, so a same-named constraint elsewhere is ignored.
+- `_remove_visibility_requests` removes the discontinued
+  `nem_rule_visibility_requests` table and `nem_rule_visibility_changes.request_id`
+  together, in one transaction that locks both tables (5 second lock timeout),
+  so no row can arrive between the emptiness check and the drop. Everything is
+  kept, with a warning, when the request table still holds records, a change
+  row still points at a request, or anything unexpected references the table.
+  The table is dropped without `CASCADE`, so PostgreSQL itself refuses if a
+  view depends on it. A lock timeout or database error is logged and retried at
+  the next start. The table and the column are handled independently, so a
+  half-migrated database finishes on the next start. Visibility history rows
+  are never altered.
+
+These three steps were run against a real PostgreSQL 16.15 server (fresh
+schema, missing audit and visibility columns, invalid visibility values, a
+same-named constraint on another table and schema, empty and non-empty request
+tables, partially migrated states, lock contention, repeat startup). They have
+not been run against the deployed database, so back it up before deploying.
+
 ### Audit trail (rules and maintenance)
 
 `nem_monitoring_rules`, `nem_maintenance_schedules` and `nem_maintenance_records` carry
@@ -112,7 +234,8 @@ is nullable. A single SQLAlchemy `before_flush` listener (`app/models/audit.py`)
 body can supply it. Creator fields cannot be changed after insert. Sessions without an authenticated
 user (workers, schedulers) never claim a user and leave the last human modification stamp intact.
 Existing rows stay NULL and display as "Unknown". The columns are added idempotently by
-`_upgrade_audit_columns` in `app/db/init_db.py`. API responses add `created_by` / `updated_by`
+`_upgrade_audit_columns` in `app/db/init_db.py`, which also verifies their foreign keys and
+indexes (see Startup schema upgrades). API responses add `created_by` / `updated_by`
 (usernames, null for legacy rows or deleted users). A separate activity-history table can later be
 fed from the same listener.
 
@@ -132,8 +255,9 @@ may see a rule; there is no in-app request or approval workflow (a Supervisor wh
 Administrator, or suggests a new rule through the existing rule suggestions). `/api/v1/rule-visibility-requests`
 answers 404 for every role. Every change is recorded with previous/new values in
 `nem_rule_visibility_changes`, and templates now carry the same `created_by` / `updated_by` audit columns as
-rules. Startup drops the obsolete `nem_rule_visibility_requests` table only when it is empty; a table that
-still holds old request records is left in place with a warning.
+rules. The obsolete `nem_rule_visibility_requests` table and `request_id` column are removed at startup only when
+that loses nothing; otherwise they are kept and a warning is logged (see Startup schema upgrades). An unknown
+stored `visibility_type` is treated as `admin_only`.
 
 Visibility is also enforced in the asset-level predefined-rule list and assignment
 (`/assets/{id}/rules/predefined`, `/assets/{id}/rules/assign`), so hidden rule names never reach a Supervisor
@@ -240,12 +364,13 @@ All routers are mounted under `/api/v1` in `app/main.py`:
 | `variables.py` | Asset-owned variable CRUD |
 | `readings.py` | Individual/batch ingestion, latest and paginated readings |
 | `rules.py` | Asset-specific rule creation, listing and update |
+| `rule_visibility.py` | Shared-rule visibility (Administrator), change history, and assignments |
 | `monitoring.py` | Evaluation/status, alerts, acknowledgement/completion, events |
 | `maintenance.py` | Work records, recurring schedules and occurrences |
 | `plc.py` | OPC UA status, test, discovery and one-shot read |
 | `notifications.py` | Supervisor assignments and email delivery summary |
 | `dashboard.py` | Dashboard summary |
-| `frontend_compat.py` | Existing dashboard rule, collection, document, settings, import, and backup workflows |
+| `frontend_compat.py` | Dashboard rule templates and suggestions, collection, document, settings, import, backup, and rule lifecycle workflows |
 
 The shared label endpoints and filters are part of the existing API surface:
 `GET /api/v1/labels` lists reusable labels; rules, rule templates, collections,

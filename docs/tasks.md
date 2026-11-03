@@ -24,6 +24,14 @@ deployment configuration or field validation.
   Startup drops those marker columns without deleting rows; previously hidden
   records use their normal lifecycle/status fields and maintenance deletion
   preserves the established schedule behavior.
+- Administrator-controlled shared-rule visibility (Admin Only, Specific
+  Supervisors, All Supervisors) with backend-enforced checks, Supervisor
+  threshold-only editing, field-level rule history and visibility history. The
+  visibility-request workflow was removed.
+- Hardened, idempotent startup upgrades for audit columns, rule visibility and
+  request removal (PostgreSQL only; see `docs/architecture.md`).
+- Codebase cleanup: unused imports, functions, components, icons, styles and
+  debug logging removed; no API contract or behavior changed.
 - Read-only OPC UA test/read/discovery and continuous collector, mappings,
   reconnect behavior, machine cycle/runtime state, freshness handling, and
   status endpoint.
@@ -40,10 +48,9 @@ deployment configuration or field validation.
 1. **Assigned-asset authorization needs runtime testing.** Server-side scoping
    is implemented for REST and WebSocket (`services/access_scope.py`), but only
    reviewed and compiled; test direct API/WebSocket access for each role.
-2. **Root README has stale security/notification statements.** It says auth,
-   roles, and outbound delivery are absent; current code includes authentication
-   and an email notification implementation. Reconcile documentation to
-   current source and deployment settings.
+2. **Root README and docs were reconciled** with the current code
+   (authentication, roles, email, shared-rule visibility, project layout).
+   Re-check them whenever behavior changes.
 3. **OPC UA secure mode is unverified against a PLC.** `Sign`/`SignAndEncrypt`
    with trusted-server-certificate validation is implemented, but the default
    remains unsecured and the secure path has not been run against a live
@@ -67,12 +74,12 @@ deployment configuration or field validation.
   upgrade behavior with representative legacy data and a verified backup.
 - Exercise the shared-label migration and rollback against an isolated
   PostgreSQL database, including existing document labels and repeat startup.
-  SQLite checks covered migration idempotency, shared-name reuse,
+  Temporary local checks (SQLite, since removed from the codebase) covered migration idempotency, shared-name reuse,
   association-only removal, AND filtering, and the 10-label maximum; live
   PostgreSQL behavior remains unverified.
 - Exercise the legacy marker-column removal against an isolated PostgreSQL
-  database and verify row retention; SQLite verification should cover schedule
-  reference cleanup when deleting a completed occurrence.
+  database and verify row retention; also verify schedule reference cleanup
+  when deleting a completed occurrence.
 - Against a PLC simulator/approved test server, verify NodeId mappings,
   variable ownership/types, signal roles, source/server timestamps, data
   quality, negotiated publishing intervals, reconnection, and freshness.
@@ -85,12 +92,34 @@ deployment configuration or field validation.
 - In a safe SMTP environment, verify recipient selection from supervisor
   assignments, encrypted credential handling, feature flag, delivery, retries,
   and skipped/failed outbox states.
-- Reconcile the root README with the code: authentication/safety posture,
-  email behavior, tests actually present, route permissions, and current rule
-  names.
+- Run `npm run build` and start the backend after the latest cleanup and
+  migration changes; exercise the removed request routes (404), shared-rule
+  visibility for each role over real HTTP, and the startup upgrades on a copy of
+  the production database.
 - Validate the current UI against product requirements for responsive layouts,
   keyboard and screen-reader interaction, and error/empty states; no formal
   accessibility/browser test results were found.
+
+## Cleanup candidates (deliberately left unchanged)
+
+Found during the cleanup but not removed because they could not be confirmed
+unnecessary:
+
+- `Nem_Frontend/src/features/assets/pages/ExportConfigurationPage.jsx` is not
+  imported anywhere; the router uses the near-identical copy in
+  `features/configuration/pages/`.
+- Backend routes with no frontend caller (possible external integrations, see
+  `.postman`): asset `children`, `hierarchy`, `move` and `rules/time|usage`;
+  document file `download`/`view`; maintenance `cancel` and `permanent`;
+  `monitoring-status`; `notifications/email/summary`; `plc/discover/{job_id}`;
+  reading `latest` per asset and per variable.
+- About 100 CSS classes not referenced as literals in JavaScript (many may be
+  built dynamically), and a few write-only React state variables.
+- Dependencies: frontend `xlsx` (only `@e965/xlsx` is imported); backend
+  `python-dotenv`, `httpx` and `pytest` are not imported by application code.
+- `LOG_LEVEL` in `.env` is not read by `config.py`; the `npm test` script has
+  no tests; local SQLite files (`*.db`) in `Nem_Backend` are leftovers.
+- Generic non-PostgreSQL `else` branches remain in `_initialize_schema`.
 
 ## Planned functionality
 
