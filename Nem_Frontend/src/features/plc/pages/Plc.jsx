@@ -9,16 +9,6 @@ import {
 import { formatDuration, timeAgo } from "../../../utils/format.js";
 import "../styles/Plc.css";
 
-const Svg = ({ children, size = 22 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-       strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
-);
-const IconChip = (p) => <Svg {...p}><rect x="6" y="6" width="12" height="12" rx="2" /><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" /></Svg>;
-const IconPulse = (p) => <Svg {...p}><path d="M3 12h4l2.5-7 5 14 2.5-7h4" /></Svg>;
-const IconShield = (p) => <Svg {...p}><path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z" /><path d="M9 12l2.2 2.2L15.5 10" /></Svg>;
-const IconDownload = (p) => <Svg {...p}><path d="M12 3v12M7 10l5 5 5-5M4 20h16" /></Svg>;
-const IconEmpty = (p) => <Svg size={34} {...p}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18M8 15h3" /></Svg>;
-const Spinner = () => <span className="spin" aria-hidden="true" />;
 
 function useAppTheme() {
   const [light, setLight] = useState(
@@ -44,8 +34,6 @@ function useAppTheme() {
   return light;
 }
 
-const percent = (value, limit) => (limit ? Math.min(100, Math.round((value / limit) * 100)) : null);
-const barTone = (pct) => (pct >= 100 ? " bad" : pct >= 80 ? " warn" : "");
 
 export default function Plc() {
   const light = useAppTheme();

@@ -9,7 +9,6 @@ import React, {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { Link } from "react-router-dom";
 import { AlertTriangle, Trash2 } from "lucide-react";
 import { EmptyArt } from "./Icons.jsx";
 import LabelsField from "./LabelsField.jsx";
@@ -47,18 +46,6 @@ export function LoadingIndicator({
     </div>
   );
 }
-
-export const CardLink = ({ to, icon: Icon, title, desc }) => (
-  <Link to={to} className="cardlink">
-    <div className="cardlink-ico">
-      <Icon size={34} strokeWidth={1.5} />
-    </div>
-    <div className="cardlink-txt">
-      <div className="cardlink-title">{title}</div>
-      <div className="cardlink-desc">{desc}</div>
-    </div>
-  </Link>
-);
 
 const STATUS_LABEL = {
   ok: "Normal",
@@ -346,9 +333,18 @@ export function CreateModal({
                 : String(initialValues[field.key] ?? "")
               : initialValue(field);
 
+          // A record's own stored choice (edit forms) is kept even when the option list
+          // does not currently contain it; only choices made in the form are re-validated.
+          const keepsStoredChoice =
+            field.preserveInitial &&
+            hasInitial &&
+            initialValues[field.key] !== null &&
+            String(initialValues[field.key]) === String(value);
+
           if (
             field.type === "select" &&
             value !== "" &&
+            !keepsStoredChoice &&
             !optionsFor(field, current).some(
               ([option]) => String(option) === String(value)
             )

@@ -392,21 +392,6 @@ export default function MaintenancePanel({
     });
   };
 
-const openScheduleEdit = (schedule) => {
-  if (!canManageMaintenance) return;
-  navigate(
-    `/assets/${assetId}/maintenance/schedules/${schedule.id}/edit`,
-    {
-      state: {
-        from: captureNavigationOrigin(location, {
-          ...(navigationState || location.state),
-          activeTab: "logbook",
-        }),
-      },
-    }
-  );
-};
-
 const openEdit = (record) => {
   if (!canManageMaintenance) return;
 
@@ -564,9 +549,6 @@ const openEdit = (record) => {
           ? { alert_id: Number(values.alert_id) }
           : {}),
       };
-
-    console.log("Maintenance alert_id:", values.alert_id);
-    console.log("Maintenance payload:", payload);
 
     setBusy(true);
     try {

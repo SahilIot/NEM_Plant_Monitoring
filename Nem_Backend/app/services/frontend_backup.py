@@ -14,7 +14,6 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.db.session import UTCDateTime
 from app.models import (
     Alert,
     Asset,

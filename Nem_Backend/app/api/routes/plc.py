@@ -29,7 +29,6 @@ from app.services.reading_ingestion import ingest_reading
 from app.services.opcua_collector import machine_status_rows
 
 import logging
-import traceback
 
 logger = logging.getLogger(__name__)
 

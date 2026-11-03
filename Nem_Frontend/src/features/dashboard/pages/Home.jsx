@@ -12,7 +12,6 @@ import {
   subscribeLiveUpdates,
 } from "../../../services/liveUpdates.js";
 import {
-  formatDuration,
   formatTime,
   formatValue,
   timeAgo,

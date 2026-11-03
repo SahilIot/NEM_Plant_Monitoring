@@ -5,7 +5,6 @@ import { useAuth } from "../../auth/AuthContext.jsx";
 import { CreateModal } from "../../../components/common/UI.jsx";
 import { captureNavigationOrigin } from "../../../utils/navigation.js";
 import {
-  AssetIcon,
   ChevronDown,
   ChevronRight,
   FxIcon,

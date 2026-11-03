@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Generator # describes a function that yields values.
 
 from fastapi import Request
-from sqlalchemy import DateTime, Engine, create_engine, event
+from sqlalchemy import DateTime, Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.types import TypeDecorator
 

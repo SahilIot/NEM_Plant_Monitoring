@@ -24,11 +24,9 @@ import MaintenanceDetails from "../components/MaintenanceDetails.jsx";
 import MaintenancePanel from "../components/MaintenancePanel.jsx";
 import "./AssetDetail.css";
 import {
-  MONITORING_RULE_CHOICES,
   LEGACY_RULE_CHOICES,
   legacyRulePath,
   buildAssetMonitoringRule,
-  monitoringRuleFormSelection,
 } from "../rules/monitoringRuleFlow.js";
 import {
   auditUser,
@@ -60,9 +58,6 @@ import {
   PlusCircle,
   DotsIcon,
   ChevronDown,
-  BookmarkIcon,
-  FxIcon,
-  EditIcon,
 } from "../../../components/common/Icons.jsx";
 
 const ORDER = { alert: 0, warning: 1, ok: 2 };
@@ -670,7 +665,6 @@ export default function AssetDetail() {
   const [modal, setModal] = useState(null);
   const [monitoringRuleSelection, setMonitoringRuleSelection] = useState(null);
   const [showPredefinedRules, setShowPredefinedRules] = useState(false);
-  const [addRuleMenu, setAddRuleMenu] = useState(false);
   const [logs, setLogs] = useState([]);
   const [selectedMaintenanceLogIds, setSelectedMaintenanceLogIds] = useState([]);
   const [bulkDeletingMaintenanceLogs, setBulkDeletingMaintenanceLogs] = useState(false);
@@ -699,8 +693,6 @@ export default function AssetDetail() {
   const [deletingAsset, setDeletingAsset] = useState(false);
   const [deletingVariableId, setDeletingVariableId] = useState(null);
   const [variableDeleteError, setVariableDeleteError] = useState("");
-  const [variableDataSource, setVariableDataSource] = useState("none");
-  const [variableConnector, setVariableConnector] = useState("");
   const [selectedEntry, setSelectedEntry] = useState(null);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [showEventDetails, setShowEventDetails] = useState(false);
@@ -1709,10 +1701,17 @@ const filteredEvents = [...events]
       }
       await api.patch(`/rules/${editId}`, payload);
     } else {
+      // An unchanged stored signal stays valid when editing; the backend still checks the
+      // PLC mapping. Creating a rule, or choosing a different signal, is validated as before.
+      const initial = monitoringRuleSelection?.initialValues || {};
+      const keepStored = (list, key) =>
+        editId && initial[key] != null && String(values[key]) === String(initial[key])
+          ? [...new Set([...list, Number(initial[key])])]
+          : list;
       const rule = buildAssetMonitoringRule(values, assetId, {
         variables: availableVariables,
-        cycleVariableIds,
-        runtimeVariableIds,
+        cycleVariableIds: keepStored(cycleVariableIds, "cycle_variable_id"),
+        runtimeVariableIds: keepStored(runtimeVariableIds, "runtime_variable_id"),
       });
       rule.labels = values.labels || [];
 
@@ -1826,6 +1825,29 @@ const filteredEvents = [...events]
           }
         }
 
+        // Editing keeps the rule's stored signal/variable selected even when the live
+        // PLC-mapping list does not (yet) offer it, instead of blanking the field.
+        let preserveInitial = false;
+        if (
+          isEditing &&
+          ["variable_id", "cycle_variable_id", "runtime_variable_id"].includes(field.key) &&
+          field.showWhen?.equals === editingRuleType
+        ) {
+          const storedId = monitoringRuleSelection?.initialValues?.[field.key];
+          if (storedId !== undefined && storedId !== null) {
+            preserveInitial = true;
+            if (!(options || []).some(([id]) => String(id) === String(storedId))) {
+              const stored = availableVariables.find(
+                (variable) => String(variable.id) === String(storedId)
+              );
+              options = [
+                [storedId, stored ? `${stored.name} (#${storedId})` : `Current signal (#${storedId})`],
+                ...(options || []),
+              ];
+            }
+          }
+        }
+
         if (isSupervisor && isEditing) {
           const allowedFields = [
             "threshold",
@@ -1846,10 +1868,11 @@ const filteredEvents = [...events]
           ...field,
           disabled,
           options,
+          preserveInitial,
         };
       });
     },
-    [ruleFormFields, monitoringRuleSelection, isSupervisor]
+    [ruleFormFields, monitoringRuleSelection, isSupervisor, availableVariables]
   );
 
   const bulk = async (state) => {

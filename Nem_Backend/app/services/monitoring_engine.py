@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 from app.models import (
     Alert,
     Asset,
-    MachineMonitoringState,
     MonitoringEvent,
     MonitoringRule,
     Reading,

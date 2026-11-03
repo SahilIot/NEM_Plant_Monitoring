@@ -26,10 +26,6 @@ class EvaluationResult(ORMModel):
     warning: int
     alert: int
 
-#Acknowledging an alert
-class AcknowledgeRequest(ORMModel):
-    acknowledged_by: str | None = Field(default=None, max_length=200)
-
 #Returning an alert to the frontend
 class AlertRead(ORMModel):
     id: int

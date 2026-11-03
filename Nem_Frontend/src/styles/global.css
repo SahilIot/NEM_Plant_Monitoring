@@ -396,11 +396,6 @@ button:disabled { opacity: 0.55; cursor: default; }
 
 
 .cards-col { display: flex; flex-direction: column; gap: 12px; max-width: 720px; }
-.cardlink { display: flex; align-items: center; gap: 18px; padding: 18px 20px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); color: inherit; text-decoration: none; }
-.cardlink:hover { border-color: var(--action); background: var(--surface-2); }
-.cardlink-ico { width: 56px; height: 56px; flex-shrink: 0; border-radius: 8px; background: var(--action-soft); color: var(--action); display: flex; align-items: center; justify-content: center; }
-.cardlink-title { color: var(--ink); font-weight: 600; font-size: 17px; margin-bottom: 2px; }
-.cardlink-desc { color: var(--muted); }
 
 
 .asset-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; max-width: 1440px; margin-bottom: 14px; }

@@ -1,5 +1,5 @@
 #Readings API router.Focusing on receiving PLC readings,saving them to postgreSQL,retrieving the lastest or historical readings for the frontend
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select

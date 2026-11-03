@@ -28,11 +28,9 @@ import {
 } from "../../../components/common/UI.jsx";
 import LabelsField from "../../../components/common/LabelsField.jsx";
 import {
-  RequestVisibilityModal,
   VISIBILITY_LABELS,
   VisibilityBadge,
   VisibilityModal,
-  VisibilityRequestsPanel,
 } from "./RuleVisibility.jsx";
 import "./RuleLibrary.css";
 
@@ -429,7 +427,33 @@ export function templatePayload(values) {
 
 // Read-only details of a shared rule. Audit values are the shared rule's own
 // (not those of any asset-specific rule created from it).
+function formatHistoryValue(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value).replaceAll("_", " ");
+}
+
 function RuleViewModal({ template, onClose, onManageVisibility }) {
+  const [history, setHistory] = useState(null);
+  const [assignments, setAssignments] = useState(null);
+  const [visibleTo, setVisibleTo] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    if (onManageVisibility && template.visibility_type === "specific_supervisors") {
+      api.get(`/rule-templates/${template.id}/visibility`)
+        .then((detail) => alive && setVisibleTo((detail.supervisors || []).map((item) => item.username)))
+        .catch(() => alive && setVisibleTo([]));
+    }
+    api.get(`/rule-templates/${template.id}/history`)
+      .then((result) => alive && setHistory(Array.isArray(result) ? result : []))
+      .catch(() => alive && setHistory([]));
+    api.get(`/rule-templates/${template.id}/assignments`)
+      .then((result) => alive && setAssignments(result))
+      .catch(() => alive && setAssignments({ assets: [], total: null }));
+    return () => {
+      alive = false;
+    };
+  }, [template.id]);
   useEffect(() => {
     const onKeyDown = (event) => {
       if (event.key === "Escape") onClose();
@@ -446,6 +470,7 @@ function RuleViewModal({ template, onClose, onManageVisibility }) {
     ["Severity", template.severity],
     ["Availability", template.is_enabled ? "Available" : "Disabled"],
     ["Visibility", VISIBILITY_LABELS[template.visibility_type] || VISIBILITY_LABELS.admin_only],
+    visibleTo ? ["Supervisors with access", visibleTo.length ? visibleTo.join(", ") : "None"] : null,
     template.required_variable_types?.length
       ? ["Required variable", `${template.required_variable_types.join(" / ")}${template.variable_key ? ` · prefers ${template.variable_key}` : ""}`]
       : null,
@@ -477,6 +502,39 @@ function RuleViewModal({ template, onClose, onManageVisibility }) {
             </div>
           ))}
         </dl>
+        <section className="rule-view-section">
+          <h3>Assigned assets{assignments?.total != null ? ` (${assignments.total})` : ""}</h3>
+          {assignments === null ? (
+            <small className="muted">Loading…</small>
+          ) : assignments.assets.length === 0 ? (
+            <small className="muted">Not assigned to any asset you can access.</small>
+          ) : (
+            <ul>
+              {assignments.assets.map((item) => (
+                <li key={item.rule_id}>{item.asset_name} <small className="muted">· {String(item.state).replaceAll("_", " ")}</small></li>
+              ))}
+            </ul>
+          )}
+        </section>
+        <section className="rule-view-section">
+          <h3>Change history</h3>
+          {history === null ? (
+            <small className="muted">Loading…</small>
+          ) : history.length === 0 ? (
+            <small className="muted">No changes recorded yet.</small>
+          ) : (
+            <ul>
+              {history.map((entry, index) => (
+                <li key={`${entry.type}-${entry.at}-${index}`}>
+                  {entry.type === "visibility" && <small className="muted">[Visibility] </small>}
+                  <strong>{String(entry.field).replaceAll("_", " ")}</strong>
+                  {": "}{formatHistoryValue(entry.previous)} → {formatHistoryValue(entry.new)}
+                  <small className="muted"> · {auditUser(entry.by)} · {formatAuditTime(entry.at)}{entry.comment ? ` · ${entry.comment}` : ""}</small>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
         <footer>
           {onManageVisibility && (
             <button className="btn-outline" onClick={onManageVisibility}><Eye size={15} /> Change visibility</button>
@@ -682,8 +740,6 @@ export default function RuleLibrary() {
   const [assigning, setAssigning] = useState(null);
   const [visibilityTarget, setVisibilityTarget] = useState(null);
   const [viewing, setViewing] = useState(null);
-  const [requestingVisibility, setRequestingVisibility] = useState(false);
-  const [visibilityRefresh, setVisibilityRefresh] = useState(0);
   const [busyId, setBusyId] = useState(null);
   const [message, setMessage] = useState({ text: "", error: false });
   const load = useCallback(async () => {
@@ -1090,17 +1146,6 @@ const reviewRequest = async (request, action) => {
       Suggest new rule
     </button>
   )}
-
-  {isSupervisor && (
-    <button
-      type="button"
-      className="btn-outline"
-      onClick={() => setRequestingVisibility(true)}
-    >
-      <Eye size={17} />
-      Request visibility
-    </button>
-  )}
 </div>
                   </div>
 
@@ -1259,18 +1304,6 @@ const reviewRequest = async (request, action) => {
       </div>
     )}
   </section>
-)}
-
-{(isAdministrator || isSupervisor) && (
-  <VisibilityRequestsPanel
-    isAdministrator={isAdministrator}
-    refreshKey={visibilityRefresh}
-    onMessage={setMessage}
-    onChanged={async () => {
-      setVisibilityRefresh((value) => value + 1);
-      await load();
-    }}
-  />
 )}
 
       <section className="rule-library-panel">
@@ -1472,17 +1505,6 @@ fields={
       setVisibilityTarget(null);
       setMessage({ text: `Visibility updated for "${name}".`, error: false });
       await load();
-    }}
-  />
-)}
-
-{requestingVisibility && (
-  <RequestVisibilityModal
-    onClose={() => setRequestingVisibility(false)}
-    onSubmitted={async () => {
-      setRequestingVisibility(false);
-      setMessage({ text: "Visibility request sent to an Administrator.", error: false });
-      setVisibilityRefresh((value) => value + 1);
     }}
   />
 )}

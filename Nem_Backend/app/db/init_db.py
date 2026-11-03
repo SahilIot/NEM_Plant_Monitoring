@@ -1,3 +1,5 @@
+import logging
+
 from sqlalchemy import inspect, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -222,12 +224,48 @@ def _upgrade_rule_visibility(engine: Engine) -> None:
             ))
 
 
+logger = logging.getLogger(__name__)
+
+
+def _remove_visibility_requests(engine: Engine) -> None:
+    """Drop the tables of the removed Supervisor visibility-request feature, only when safe.
+
+    The only thing that references ``nem_rule_visibility_requests`` is the optional
+    ``request_id`` column of ``nem_rule_visibility_changes``. The table is dropped only
+    when it holds no rows; a table that still holds request history is left untouched
+    (and logged) so nothing is ever deleted silently. Visibility settings, supervisor
+    lists and the visibility change history itself are never touched.
+    """
+    table = "nem_rule_visibility_requests"
+    if table not in set(inspect(engine).get_table_names()):
+        return
+    with engine.connect() as connection:
+        remaining = connection.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar_one()
+    if remaining:
+        logger.warning(
+            "%s holds %s request record(s) from the removed visibility-request feature; "
+            "it is no longer used and was left in place. Drop it manually once the history "
+            "is no longer needed.",
+            table,
+            remaining,
+        )
+        return
+    with engine.begin() as connection:
+        if engine.dialect.name == "postgresql":
+            # Removes the foreign key to the requests table; no other data is affected.
+            connection.execute(text(
+                "ALTER TABLE IF EXISTS nem_rule_visibility_changes DROP COLUMN IF EXISTS request_id"
+            ))
+        connection.execute(text(f"DROP TABLE IF EXISTS {table}"))
+
+
 # Largest and important function this creates missing tables and other supported objects described in the SQLAlchemy models.
 def _initialize_schema(engine: Engine) -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_auth_roles(engine)
     _upgrade_audit_columns(engine)
     _upgrade_rule_visibility(engine)
+    _remove_visibility_requests(engine)
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
     if "auth_users" in table_names:

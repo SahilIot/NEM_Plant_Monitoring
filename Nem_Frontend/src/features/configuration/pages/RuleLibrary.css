@@ -381,11 +381,6 @@
   overflow-y: auto;
 }
 
-.rule-visibility-field {
-  display: grid;
-  gap: 5px;
-}
-
 .rule-view-grid {
   overflow-y: auto;
   margin: 0;
@@ -410,4 +405,23 @@
   color: var(--ink-2);
   font-size: 13px;
   overflow-wrap: anywhere;
+}
+
+.rule-view-section {
+  padding: 8px 20px;
+  border-top: 1px solid var(--line);
+}
+
+.rule-view-section h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.rule-view-section ul {
+  max-height: 150px;
+  overflow-y: auto;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--ink-2);
 }

@@ -350,24 +350,6 @@ class RuleVisibilityUpdate(ORMModel):
     supervisor_ids: list[int] = Field(default_factory=list, max_length=200)
 
 
-class RuleVisibilityRequestCreate(ORMModel):
-    template_id: int = Field(ge=1)
-    # "self" = access for the requesting Supervisor; "all_supervisors" = visible to everyone.
-    request_type: Literal["self", "all_supervisors"]
-    reason: str = Field(min_length=1, max_length=2000)
-
-    @field_validator("reason")
-    @classmethod
-    def strip_reason(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("A reason is required")
-        return value
-
-
-class RuleVisibilityReject(ORMModel):
-    reason: str | None = Field(default=None, max_length=2000)
-
 #Applying templates to assets
 class RuleTemplateAssetAssignment(ORMModel):
     asset_ids: list[int] = Field(min_length=1, max_length=100)

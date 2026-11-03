@@ -35,7 +35,6 @@ import {
   Trash2,
   Copy,
   Power,
-  Download,
 } from "lucide-react";
 import ReusableRuleModal from "./ReusableRuleModal.jsx";
 import RuleCollectionCreateModal from "./RuleCollectionCreateModal.jsx";

@@ -154,19 +154,6 @@ def require_asset_access(
         )
 
 
-def require_assets_access(
-    session: Session,
-    asset_ids: Iterable[int],
-    detail_template: str = "Asset {asset_id} was not found",
-) -> None:
-    scope = access_scope(session)
-    for asset_id in asset_ids:
-        if not scope.allows(asset_id):
-            raise HTTPException(
-                status_code=404, detail=detail_template.format(asset_id=asset_id)
-            )
-
-
 def rule_asset_id(session: Session, rule) -> int | None:
     """Asset that owns a monitoring rule (target asset, else variable asset)."""
     if rule.target_asset_id is not None:
@@ -197,11 +184,6 @@ def require_rule_access(session: Session, rule, detail: str | None = None) -> No
         raise HTTPException(
             status_code=404, detail=detail or f"Rule {rule.id} was not found"
         )
-
-
-def visible_parent_id(scope: AccessScope, parent_asset_id: int | None) -> int | None:
-    """Parent id to expose: hidden parents are reported as no parent."""
-    return parent_asset_id if scope.allows(parent_asset_id) else None
 
 
 def hidden_document_ids(session: Session) -> set[int]:

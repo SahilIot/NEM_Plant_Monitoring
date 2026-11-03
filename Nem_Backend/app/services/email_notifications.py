@@ -17,7 +17,7 @@ from cryptography.fernet import Fernet, InvalidToken #Decrypts saved SMTP passwo
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.config import Settings, get_settings
+from app.core.config import Settings
 from app.models import (
     Alert,
     Asset,
@@ -158,14 +158,6 @@ def _log_recipient_resolution(
             for user in recipients
         ],
     )
-
-# Helper function that returns only supervisors with valid email addresses
-def supervisors_for_asset(session: Session, asset: Asset) -> list[User]:
-    return [
-        user
-        for user in _assigned_supervisors_for_asset(session, asset)
-        if valid_email(user.email_address)
-    ]
 
 # Builds the full asset heirarchy as a readable string 
 def _location(session: Session, asset: Asset) -> str:

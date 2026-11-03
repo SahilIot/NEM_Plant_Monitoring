@@ -20,6 +20,7 @@ from fastapi import HTTPException
 from app.models import MonitoringRuleTemplate, User
 from app.models.rule_visibility import (
     VISIBILITY_TYPES,
+    RuleTemplateChange,
     RuleVisibilityChange,
     rule_template_visibility_supervisors,
 )
@@ -109,7 +110,6 @@ def apply_visibility(
     *,
     actor: User,
     source: str,
-    request_id: int | None = None,
 ) -> RuleVisibilityChange | None:
     """Set a shared rule's visibility and record previous/new values.
 
@@ -134,7 +134,6 @@ def apply_visibility(
     change = RuleVisibilityChange(
         template_id=template.id,
         changed_by_id=actor.id,
-        request_id=request_id,
         source=source,
         previous_visibility=previous_type,
         new_visibility=visibility_type,
@@ -143,3 +142,128 @@ def apply_visibility(
     )
     session.add(change)
     return change
+
+
+def values_differ(old, new) -> bool:
+    """True when two stored/submitted values really differ (Decimal-safe, None-aware)."""
+    from decimal import Decimal
+
+    if old is None or new is None:
+        return (old is None) != (new is None)
+    if isinstance(old, Decimal) or isinstance(new, Decimal):
+        return Decimal(str(old)) != Decimal(str(new))
+    return old != new
+
+
+def require_session_roles(session: Session, *roles: str) -> User | None:
+    """Route-level role gate (defence in depth behind the middleware).
+
+    Background/system sessions pass. Returns the authenticated user otherwise.
+    """
+    if _is_system_session(session):
+        return None
+    user = request_user(session)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if user.role not in roles:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    return user
+
+
+# Edit permission is separate from visibility. A Supervisor who can see a shared rule may
+# change only its numeric thresholds (the same fields the Rule Library editor offers them).
+SUPERVISOR_EDITABLE_FIELDS = frozenset({"threshold", "evaluation_interval_seconds", "parameters"})
+SUPERVISOR_EDITABLE_PARAMETERS = frozenset({
+    "warning_thresholds", "alert_threshold",
+    "warning_thresholds_seconds", "alert_threshold_seconds",
+})
+
+
+def enforce_template_edit_permission(
+    session: Session,
+    template: MonitoringRuleTemplate,
+    new_values: dict,
+    new_labels: list[str] | None,
+) -> None:
+    """Raise 403 unless the caller may apply ``new_values`` to ``template``.
+
+    Call after the visibility check. Administrators may change anything.
+    """
+    if _is_system_session(session):
+        return
+    user = request_user(session)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if user.role == "Administrator":
+        return
+    if user.role != "Supervisor":
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    denied = HTTPException(
+        status_code=403,
+        detail="Supervisors may only change the numeric thresholds of a shared rule",
+    )
+    for field, new in new_values.items():
+        if field in SUPERVISOR_EDITABLE_FIELDS - {"parameters"}:
+            continue
+        old = getattr(template, field, None)
+        if field == "parameters":
+            old_params = {k: v for k, v in (old or {}).items() if k not in SUPERVISOR_EDITABLE_PARAMETERS}
+            new_params = {k: v for k, v in (new or {}).items() if k not in SUPERVISOR_EDITABLE_PARAMETERS}
+            if old_params != new_params:
+                raise denied
+        elif values_differ(old, new):
+            raise denied
+    if new_labels is not None and sorted(template.labels) != sorted(new_labels):
+        raise denied
+
+
+_TRACKED_FIELDS = (
+    "name", "description", "rule_type", "required_variable_types", "variable_key",
+    "operator", "threshold", "parameters", "severity", "is_enabled",
+    "evaluation_interval_seconds", "stale_after_seconds", "collection_id",
+)
+
+
+def _json_safe(value):
+    from decimal import Decimal
+
+    if isinstance(value, Decimal):
+        return format(value.normalize(), "f")
+    return value
+
+
+def record_template_changes(
+    session: Session,
+    template: MonitoringRuleTemplate,
+    new_values: dict,
+    new_labels: list[str] | None = None,
+) -> list[RuleTemplateChange]:
+    """Log each changed field of a shared rule (call before applying the new values).
+
+    The editor comes from the authenticated session, never from the request body.
+    """
+    editor = request_user(session)
+    rows: list[RuleTemplateChange] = []
+
+    for field in _TRACKED_FIELDS:
+        if field not in new_values:
+            continue
+        old, new = getattr(template, field), new_values[field]
+        if values_differ(old, new):
+            rows.append(RuleTemplateChange(
+                template_id=template.id,
+                changed_by_id=editor.id if editor else None,
+                field=field,
+                previous_value=_json_safe(old),
+                new_value=_json_safe(new),
+            ))
+    if new_labels is not None and sorted(template.labels) != sorted(new_labels):
+        rows.append(RuleTemplateChange(
+            template_id=template.id,
+            changed_by_id=editor.id if editor else None,
+            field="labels",
+            previous_value=sorted(template.labels),
+            new_value=sorted(new_labels),
+        ))
+    session.add_all(rows)
+    return rows

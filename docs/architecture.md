@@ -73,7 +73,7 @@ Primary operational tables and their roles:
   supervisors and assets. `nem_email_notifications` is a persistent
   alert-email outbox linked to alert and user.
 - Dashboard data includes frontend settings, rule collections, instruction
-  documents and files, and backup metadata. Rule templates and review requests
+  documents and files, and backup metadata. Rule templates and rule/maintenance suggestions
   are stored separately from asset-specific rules.
 - The shared `labels` catalog is linked by many-to-many association tables to
   asset-specific rules, reusable rule templates, collections, and instruction
@@ -127,11 +127,28 @@ that list them, Operators and everyone else see none. It is enforced in `GET /ru
 `GET /collections`; a hidden rule answers 404. Visibility never grants asset access and the asset-level
 workflows (`/assets/{id}/rules/...`) are unchanged.
 
-Only Administrators change visibility (`PUT /rule-templates/{id}/visibility`). Supervisors file requests
-(`/rule-visibility-requests`: access for themselves, or All Supervisors); only an Administrator approves or
-rejects them. Pending duplicates for the same rule and configuration are blocked by a partial unique
-index. Every change is recorded with previous/new values in `nem_rule_visibility_changes`, and templates
-now carry the same `created_by` / `updated_by` audit columns as rules.
+Only Administrators change visibility (`PUT /rule-templates/{id}/visibility`) and choose which Supervisors
+may see a rule; there is no in-app request or approval workflow (a Supervisor who needs access asks the
+Administrator, or suggests a new rule through the existing rule suggestions). `/api/v1/rule-visibility-requests`
+answers 404 for every role. Every change is recorded with previous/new values in
+`nem_rule_visibility_changes`, and templates now carry the same `created_by` / `updated_by` audit columns as
+rules. Startup drops the obsolete `nem_rule_visibility_requests` table only when it is empty; a table that
+still holds old request records is left in place with a warning.
+
+Visibility is also enforced in the asset-level predefined-rule list and assignment
+(`/assets/{id}/rules/predefined`, `/assets/{id}/rules/assign`), so hidden rule names never reach a Supervisor
+there. Every edit of a shared rule is logged field by field (previous value, new value, editor, time) in
+`nem_rule_template_changes`; `GET /rule-templates/{id}/history` returns the timeline (Administrators also see
+visibility changes) and `GET /rule-templates/{id}/assignments` lists the assets
+using the rule, limited to the caller's asset scope.
+
+Visibility, editing and assignment are separate checks. Seeing a shared rule does not allow editing it:
+a Supervisor may change only its numeric thresholds (`threshold`, the threshold keys inside `parameters`,
+`evaluation_interval_seconds`); any other change answers 403, enforced in the route by
+`enforce_template_edit_permission`. Creating and deleting shared rules and all visibility decisions are
+Administrator-only in the route itself, and assignment needs an assigning role, visibility of the rule and
+access to the target asset. A rule a Supervisor may not see answers 404, identical to a missing rule.
+`source_template_id` on asset rule rows is returned only to roles that may see that shared rule.
 
 Editing a shared rule propagates to every asset rule created from it (`source_template_id`). That loop runs
 inside `internal_propagation_scope` so the editing Supervisor's asset filter does not block assets they

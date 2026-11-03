@@ -7,13 +7,13 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from starlette.middleware.cors import CORSMiddleware
 from starlette.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -32,7 +32,7 @@ from app.api.routes import (
     rules,
     variables,
 )
-from app.models import AuthSession, User
+from app.models import AuthSession
 from app.services.access_scope import scope_for_user
 from app.services.auth_security import hash_session_token
 from app.core.config import Settings, get_settings
@@ -274,6 +274,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request.state.auth_token_hash = token_hash
 
         method = request.method.upper()
+        # The Supervisor visibility-request workflow was removed; answer 404 for every role.
+        if policy_path.rstrip("/").startswith("/api/v1/rule-visibility-requests"):
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
         safe_method = method in {"GET", "HEAD", "OPTIONS"}
         admin_only_read_paths = (
             "/api/v1/auth/users",
@@ -288,7 +291,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             and method == "POST"
             and policy_path in {
                 "/api/v1/rule-template-requests",
-                "/api/v1/rule-visibility-requests",
                 "/api/v1/documents",
                 "/api/v1/documents/with-files",
                 }
