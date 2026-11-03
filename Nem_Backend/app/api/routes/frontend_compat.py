@@ -1208,7 +1208,7 @@ def frontend_predefined_rules(
                 "id": label.id,
                 "name": label.name,
             }
-            for label in (template.labels or [])
+            for label in (template.label_records or [])
         ],
 
         "assigned": duplicate,
