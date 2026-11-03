@@ -33,6 +33,8 @@ import {
   VisibilityModal,
 } from "./RuleVisibility.jsx";
 import "./RuleLibrary.css";
+import CopyRuleModal from "./CopyRuleModal.jsx";
+import "./CopyRuleModal.css";
 
 const RULE_TYPES = [
   ["interval_based", "Interval based"],
@@ -707,6 +709,7 @@ export default function RuleLibrary() {
   const confirm = useConfirmation();
   const navigate = useNavigate();
   const location = useLocation();
+  const [copying, setCopying] = useState(null);
 
   const [templates, setTemplates] = useState(null);
   const [ruleRequests, setRuleRequests] = useState([]);
@@ -1341,8 +1344,20 @@ const reviewRequest = async (request, action) => {
                   )}
                 </div>
                 <div className="rule-library-actions">
-                  <button className="btn-outline" onClick={() => setViewing(template)} title="View rule" aria-label="View rule"><Eye size={15} /></button>
-                  <button className="btn-outline" onClick={() => setAssigning(template)} disabled={!canAssignRules || !template.is_enabled || needsRuntimeThresholdConfiguration(template)} title={!canAssignRules ? "You do not have permission to assign rules." : needsRuntimeThresholdConfiguration(template) ? "Edit this rule and configure running-time thresholds before assigning it." : undefined}><Copy size={15} /> Assign rule</button>
+                  <button
+  type="button"
+  className="btn-outline"
+  onClick={() => setCopying(template)}
+  disabled={!canCreateRules}
+  title={
+    !canCreateRules
+      ? "Administrator access required to copy reusable rules."
+      : "Copy this reusable rule"
+  }
+>
+  <Copy size={15} />
+  Copy rule
+</button>
                   <button className="btn-outline" onClick={() => {setSuggesting(false);setEditing(template);setModalOpen(true);}} disabled={!canEditRules} title="Edit rule" aria-label="Edit rule"><Pencil size={15} /></button>
                   <button className="btn-outline danger" onClick={() => remove(template)} disabled={busyId === template.id || !isAdministrator} title={!isAdministrator ? "Administrator access required to delete reusable rules." : undefined}>{busyId === template.id ? "Deleting…" : <><Trash2 size={15} /></>}</button>
                 </div>
@@ -1509,18 +1524,20 @@ fields={
   />
 )}
 
-{assigning && (
-  <AssignmentModal
-    template={assigning}
-    onClose={() => setAssigning(null)}
-    onComplete={async (result) => {
-      const made = result.created?.length || 0;
-      const duplicates = result.already_assigned?.length || 0;
+      {copying && (
+  <CopyRuleModal
+    template={copying}
+    existingTemplates={templates || []}
+    onClose={() => setCopying(null)}
+    onComplete={async () => {
+      setCopying(null);
 
       setMessage({
-        text: `Assigned and activated on ${made} asset(s); ${duplicates} already had the same rule.`,
+        text: "Rule copied successfully and added to the Monitoring Rule Library.",
         error: false,
       });
+
+      await load();
     }}
   />
 )}

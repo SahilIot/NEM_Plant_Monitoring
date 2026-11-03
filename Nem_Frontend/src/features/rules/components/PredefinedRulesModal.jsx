@@ -4,6 +4,7 @@ import { api } from "../../../services/api.js";
 import { LoadingIndicator } from "../../../components/common/UI.jsx";
 import { captureNavigationOrigin } from "../../../utils/navigation.js";
 import "./PredefinedRulesModal.css";
+import LabelsField from "../../../components/common/LabelsField.jsx";
 import {
   ShieldCheck,
   Search,
@@ -90,6 +91,7 @@ export default function PredefinedRulesModal({
   const [saving, setSaving] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [error, setError] = useState("");
+  const [labelIds, setLabelIds] = useState([]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -111,16 +113,33 @@ export default function PredefinedRulesModal({
   }, [assetId]);
 
   const visibleRules = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return rules.filter((rule) => {
-      const matchesText = !query ||
-        `${rule.name || ""} ${rule.description || ""} ${rule.rule_type || ""}`
-          .toLowerCase().includes(query);
-      const matchesSeverity = severity === "all" ||
-        (rule.severity || "warning").toLowerCase() === severity;
-      return matchesText && matchesSeverity;
-    });
-  }, [rules, search, severity]);
+  const query = search.trim().toLowerCase();
+
+  return rules.filter((rule) => {
+    // Search filter
+    const matchesText =
+      !query ||
+      `${rule.name || ""} ${rule.description || ""} ${rule.rule_type || ""}`
+        .toLowerCase()
+        .includes(query);
+
+    // Severity filter
+    const matchesSeverity =
+      severity === "all" ||
+      (rule.severity || "warning").toLowerCase() === severity;
+
+    // Labels filter: all selected labels must exist on the rule
+    const ruleLabelIds = (rule.labels || []).map((label) =>
+      Number(typeof label === "object" ? label.id : label)
+    );
+
+    const matchesLabels =
+      labelIds.length === 0 ||
+      labelIds.every((id) => ruleLabelIds.includes(Number(id)));
+
+    return matchesText && matchesSeverity && matchesLabels;
+  });
+}, [rules, search, severity, labelIds]);
 
   const toggle = (id) => {
     setReviewing(false);
@@ -206,6 +225,13 @@ export default function PredefinedRulesModal({
             <option value="warning">Warning</option>
             <option value="alert">Alert</option>
           </select>
+          <div className="predefined-rules-label-filter">
+  <LabelsField
+    mode="filter"
+    value={labelIds}
+    onChange={setLabelIds}
+  />
+</div>
           <span>{selected.size} selected</span>
         </div>
 

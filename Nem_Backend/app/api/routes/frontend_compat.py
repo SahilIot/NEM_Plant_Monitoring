@@ -261,10 +261,6 @@ def _rule_row(session: Session, rule: MonitoringRule) -> dict[str, Any]:
         "completed_at": rule.completed_at,
         "created_at": rule.created_at,
         "updated_at": rule.updated_at,
-        "created_by_id": rule.created_by_id,
-        "created_by": rule.created_by,
-        "updated_by_id": rule.updated_by_id,
-        "updated_by": rule.updated_by,
         "status": (
             "evaluated"
             if rule.lifecycle_status == "completed"
@@ -1204,22 +1200,32 @@ def frontend_predefined_rules(
             )
         )
         result.append(
-            {**_template_read(session, template).model_dump(mode="json"),
-                "assigned": duplicate,
-                "unavailable_reason": reason,
-                "variable_mapping_required": mapping_required,
-                "mapped_variable_name": mapped.name if mapped else None,
-                "compatible_variables": [
-                    {
-                        "id": variable.id,
-                        "name": variable.name,
-                        "key": variable.key,
-                        "data_type": variable.data_type,
-                    }
-                    for variable in candidates
-                ],
+    {
+        **RuleTemplateRead.model_validate(template).model_dump(mode="json"),
+
+        "labels": [
+            {
+                "id": label.id,
+                "name": label.name,
             }
-        )
+            for label in (template.labels or [])
+        ],
+
+        "assigned": duplicate,
+        "unavailable_reason": reason,
+        "variable_mapping_required": mapping_required,
+        "mapped_variable_name": mapped.name if mapped else None,
+        "compatible_variables": [
+            {
+                "id": variable.id,
+                "name": variable.name,
+                "key": variable.key,
+                "data_type": variable.data_type,
+            }
+            for variable in candidates
+        ],
+    }
+)
     return result
 
 # Create Asset Rule - this endpoint creates a new rule for a specific asset, validating the input and ensuring that the rule is compatible with the asset's variables and configuration. 
@@ -1747,10 +1753,6 @@ def frontend_asset_logbook(
             "alert_id": record.alert_id,
             "assigned_rule": rule_name,
             "assigned_technician": record.assigned_technician or record.performed_by,
-            "created_at": record.created_at.isoformat() if record.created_at else None,
-            "created_by": record.created_by,
-            "updated_at": record.updated_at.isoformat() if record.updated_at else None,
-            "updated_by": record.updated_by,
             "priority": record.priority,
             "completion_notes": record.completion_notes,
             "parts_used": record.parts_used,

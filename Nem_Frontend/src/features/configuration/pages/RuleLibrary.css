@@ -425,3 +425,86 @@
   font-size: 12px;
   color: var(--ink-2);
 }
+
+
+.copy-rule-modal {
+  width: min(100% - 32px, 560px);
+}
+
+.copy-rule-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px;
+}
+
+.copy-rule-original {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-secondary);
+  margin-bottom: 8px;
+}
+
+.copy-rule-original span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.copy-rule-original strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.copy-rule-body label {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.copy-rule-body label span {
+  color: #e06b6b;
+}
+
+.copy-rule-body input {
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.copy-rule-body input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.copy-rule-body input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.copy-rule-body > small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.copy-rule-body .notice {
+  margin: 5px 0 0;
+}
+
+.copy-rule-modal footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+}
