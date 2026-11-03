@@ -98,7 +98,7 @@ def opcua_security_summary(settings: Settings) -> dict[str, object]:
         "policy": settings.opcua_security_policy if secure else "None",
         "signed": secure,
         "encrypted": settings.opcua_security_mode == "SignAndEncrypt",
-        "server_certificate_validated": secure,
+        "server_certificate_validated": False,
         "secure_transport_required": settings.opcua_require_secure_transport,
     }
 
@@ -321,12 +321,16 @@ async def create_configured_opcua_client(settings: Settings) -> Client:
 async def test_opcua_connection(settings: Settings) -> dict[str, object]:
     result = await read_opcua_node(settings, "i=2258")
     server_time = result.value
+    security = opcua_security_summary(settings)
+    security["server_certificate_validated"] = (
+        settings.opcua_security_mode != "None"
+    )
     return {
         "connected": True,
         "endpoint": settings.opcua_endpoint.strip(),
         "test": "read_only",
         "server_time": server_time.isoformat() if isinstance(server_time, datetime) else str(server_time),
-        "security": opcua_security_summary(settings),
+        "security": security,
         "message": (
             "Read-only OPC UA connection test succeeded without transport encryption."
             if settings.opcua_security_mode == "None"

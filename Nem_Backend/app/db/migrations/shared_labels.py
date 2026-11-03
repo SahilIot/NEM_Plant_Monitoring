@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime, MetaData, String, Table, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
 
 from app.core.labels import normalize_label_names
@@ -57,11 +56,7 @@ def upgrade(engine: Engine) -> None:
                 InstructionDocument.__table__.c.labels,
             )
         ).all()
-        insert_function = (
-            pg_insert
-            if engine.dialect.name == "postgresql"
-            else sqlite_insert
-        )
+        insert_function = pg_insert
         for document_id, legacy_names in labels:
             names = normalize_label_names(legacy_names or [])
             links: list[dict[str, int]] = []

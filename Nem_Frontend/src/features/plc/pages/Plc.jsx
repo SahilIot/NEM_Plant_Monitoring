@@ -377,6 +377,9 @@ export default function Plc() {
   const securityLabel = security && !insecureTransport
     ? `${security.policy}, ${security.mode === "SignAndEncrypt" ? "signed and encrypted" : "signed"}`
     : "";
+  const certificateValidationLabel = security?.server_certificate_validated
+    ? "the server certificate has been verified for the current connection"
+    : "server certificate verification is required before a secure connection can be established";
 
   const connText = !conn
     ? ""
@@ -430,7 +433,7 @@ export default function Plc() {
       <p className="muted lede">
         {insecureTransport
           ? "Monitor PLC values. This connection does not encrypt OPC UA traffic; use it only on a trusted test network."
-          : `Monitor PLC values. OPC UA traffic is secured (${securityLabel}) and the server certificate is verified.`}
+          : `Monitor PLC values. OPC UA traffic uses secured (${securityLabel}) connections; ${certificateValidationLabel}.`}
       </p>
 
       <section className="panel plc-panel wide">
@@ -758,7 +761,7 @@ export default function Plc() {
         <p className="muted">
           {insecureTransport
             ? "Uses the configured OPC UA endpoint without transport encryption or certificates. This client is read-only; only use it on a trusted test network."
-            : `Uses the configured OPC UA endpoint over a secured channel (${securityLabel}) with server certificate verification. This client is read-only.`}
+            : `Uses the configured OPC UA endpoint over secured channels (${securityLabel}); ${certificateValidationLabel}. This client is read-only.`}
         </p>
 
         <button

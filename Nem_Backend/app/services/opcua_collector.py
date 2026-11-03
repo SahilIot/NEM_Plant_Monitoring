@@ -411,6 +411,7 @@ class OpcUaCollector:
         finally:
             await asyncio.to_thread(self._release_lease)
             self.status["connected"] = False
+            self.status["security"]["server_certificate_validated"] = False
             if self.mappings or self.settings.opc_ua_mapping_bypass_enabled:
                 self.status["state"] = "disconnected"
             self._notify_status_changed()
@@ -456,6 +457,7 @@ class OpcUaCollector:
                 await self._wait_before_retry()
 
     async def _run_connection(self) -> bool:
+        self.status["security"]["server_certificate_validated"] = False
         await asyncio.to_thread(self._validate_mappings)
         if not self._node_mappings:
             self.status.update(
@@ -519,6 +521,9 @@ class OpcUaCollector:
                 last_connected_at=now,
                 last_error=None,
             )
+            self.status["security"]["server_certificate_validated"] = (
+                self.settings.opcua_security_mode != "None"
+            )
             self._notify_status_changed()
             try:
                 last_runtime_checkpoint = time.monotonic()
@@ -564,6 +569,7 @@ class OpcUaCollector:
                 await asyncio.to_thread(self._disconnect_runtime, utc_now())
                 self._queue = None
                 self.status["connected"] = False
+                self.status["security"]["server_certificate_validated"] = False
         return False
 
     async def _wait_for_notification_or_configuration_change(self,

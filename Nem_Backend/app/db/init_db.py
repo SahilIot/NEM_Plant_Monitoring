@@ -1,10 +1,12 @@
 import logging
+import re
 
-from sqlalchemy import inspect, select, text
+from sqlalchemy import bindparam, inspect, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import sqltypes
 import app.models
 from app.db.base import Base
 from app.models import (
@@ -25,7 +27,7 @@ def _drop_column_if_present(engine: Engine, table_name: str, column_name: str) -
     }
     if column_name not in columns:
         return
-    if engine.dialect.name not in {"postgresql", "sqlite"}:
+    if engine.dialect.name != "postgresql":
         raise RuntimeError(f"Column removal is not implemented for {engine.dialect.name}")
     with engine.begin() as connection:
         connection.execute(text(f"ALTER TABLE {table_name} DROP COLUMN {column_name}"))
@@ -75,33 +77,6 @@ def _migrate_auth_roles(engine: Engine) -> None:
                         "('Administrator', 'Supervisor', 'Operator'))"
                     )
                 )
-        elif engine.dialect.name == "sqlite":
-            connection.execute(
-                text(
-                    """
-                    CREATE TRIGGER IF NOT EXISTS auth_users_role_insert_guard
-                    BEFORE INSERT ON auth_users
-                    FOR EACH ROW
-                    WHEN NEW.role NOT IN ('Administrator', 'Supervisor', 'Operator')
-                    BEGIN
-                        SELECT RAISE(ABORT, 'invalid user role');
-                    END
-                    """
-                )
-            )
-            connection.execute(
-                text(
-                    """
-                    CREATE TRIGGER IF NOT EXISTS auth_users_role_update_guard
-                    BEFORE UPDATE OF role ON auth_users
-                    FOR EACH ROW
-                    WHEN NEW.role NOT IN ('Administrator', 'Supervisor', 'Operator')
-                    BEGIN
-                        SELECT RAISE(ABORT, 'invalid user role');
-                    END
-                    """
-                )
-            )
         else:
             raise RuntimeError("User role migration is not implemented for "f"{engine.dialect.name}")
 
@@ -162,101 +137,326 @@ _AUDIT_TABLES = (
     "nem_maintenance_records",
 )
 
+logger = logging.getLogger(__name__)
 
-def _upgrade_audit_columns(engine: Engine) -> None:
-    inspector = inspect(engine)
-    table_names = set(inspector.get_table_names())
-    if "auth_users" not in table_names:
+_SAFE_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
+_POSTGRES_MAX_IDENTIFIER = 63
+# How long a migration waits for a table lock before giving up until the next start.
+_MIGRATION_LOCK_TIMEOUT = "5s"
+
+_TEMPLATES_TABLE = "nem_monitoring_rule_templates"
+_VISIBILITY_VALUES = ("admin_only", "specific_supervisors", "all_supervisors")
+_VISIBILITY_DEFAULT = "admin_only"
+_VISIBILITY_CHECK = "ck_nem_monitoring_rule_templates_visibility"
+_REQUESTS_TABLE = "nem_rule_visibility_requests"
+_CHANGES_TABLE = "nem_rule_visibility_changes"
+_REQUEST_COLUMN = "request_id"
+
+
+def _ident(engine: Engine, name: str) -> str:
+    """Quote a fixed, code-defined table/column/index name; refuse anything else."""
+    if not _SAFE_IDENTIFIER.match(name) or len(name) > _POSTGRES_MAX_IDENTIFIER:
+        raise ValueError(f"Unsafe database identifier: {name!r}")
+    return engine.dialect.identifier_preparer.quote(name)
+
+
+def _is_postgresql(engine: Engine, step: str) -> bool:
+    if engine.dialect.name == "postgresql":
+        return True
+    logger.warning("Skipping %s: the application database must be PostgreSQL (got %s).", step, engine.dialect.name)
+    return False
+
+
+def _index_name_taken(connection, name: str) -> bool:
+    """True when any index with this name exists in the current schema (any table)."""
+    return connection.execute(
+        text("SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = :name"),
+        {"name": name},
+    ).first() is not None
+
+
+def _is_plain_index_on(index: dict, column: str) -> bool:
+    """A usable audit index: single column, non-unique, not partial, not an expression."""
+    options = index.get("dialect_options") or {}
+    return (
+        index.get("column_names") == [column]
+        and not index.get("unique")
+        and not index.get("expressions")
+        and not any(key.endswith("_where") for key in options)
+    )
+
+
+def _ensure_single_column_index(connection, table: str, column: str) -> None:
+    """Make sure a plain index on ``table(column)`` exists, judged by its definition, not its name."""
+    if any(_is_plain_index_on(index, column) for index in inspect(connection).get_indexes(table)):
         return
-    postgres = engine.dialect.name == "postgresql"
-    timestamp_type = "TIMESTAMP WITH TIME ZONE" if postgres else "DATETIME"
-    if_not_exists = "IF NOT EXISTS " if postgres else ""
+    base = f"ix_{table}_{column}"
+    for name in (base, f"{base}_audit"):
+        if not _index_name_taken(connection, name):
+            connection.execute(text(
+                f"CREATE INDEX {_ident(connection.engine, name)} "
+                f"ON {_ident(connection.engine, table)} ({_ident(connection.engine, column)})"
+            ))
+            return
+    logger.warning("Could not index %s.%s: both %s and %s_audit are taken by other definitions.",
+        table, column, base, base)
+
+
+def _ensure_user_foreign_key(connection, table: str, column: str) -> None:
+    """Check ``table.column`` references auth_users(id); repair it only where that is lossless."""
+    foreign_keys = [
+        fk for fk in inspect(connection).get_foreign_keys(table)
+        if fk["constrained_columns"] == [column]
+    ]
+    matching = [
+        fk for fk in foreign_keys
+        if fk["referred_table"] == "auth_users" and fk["referred_columns"] == ["id"]
+    ]
+    if matching:
+        ondelete = ((matching[0].get("options") or {}).get("ondelete") or "").upper()
+        if ondelete != "SET NULL":
+            logger.warning("%s.%s references auth_users but is ON DELETE %s instead of SET NULL; "
+                "left unchanged.", table, column, ondelete or "NO ACTION")
+        return
+    if foreign_keys:
+        logger.warning("%s.%s already references %s; left unchanged.", table, column,
+            foreign_keys[0]["referred_table"])
+        return
+    engine = connection.engine
+    quoted_table, quoted_column = _ident(engine, table), _ident(engine, column)
+    orphans = connection.execute(text(
+        f"SELECT COUNT(*) FROM {quoted_table} WHERE {quoted_column} IS NOT NULL "
+        f"AND {quoted_column} NOT IN (SELECT id FROM auth_users)"
+    )).scalar_one()
+    if orphans:
+        logger.warning("%s.%s has %s value(s) that match no auth_users row; the foreign key was not "
+            "added and the data was left unchanged.", table, column, orphans)
+        return
+    constraint = f"fk_{table}_{column}_auth_users"
+    connection.execute(text(
+        f"ALTER TABLE {quoted_table} ADD CONSTRAINT {_ident(engine, constraint)} "
+        f"FOREIGN KEY ({quoted_column}) REFERENCES auth_users (id) ON DELETE SET NULL"
+    ))
+
+
+def _ensure_user_reference_column(engine: Engine, table: str, column: str) -> None:
+    """Ensure ``table.column`` is a nullable INTEGER FK to auth_users(id) ON DELETE SET NULL with an index.
+
+    Missing pieces are added; existing columns and their data are never altered or deleted.
+    One transaction per column, so a failure leaves nothing half-applied.
+    """
+    quoted_table, quoted_column = _ident(engine, table), _ident(engine, column)
+    with engine.begin() as connection:
+        columns = {col["name"]: col for col in inspect(connection).get_columns(table)}
+        if column not in columns:
+            connection.execute(text(
+                f"ALTER TABLE {quoted_table} ADD COLUMN IF NOT EXISTS {quoted_column} INTEGER "
+                "REFERENCES auth_users(id) ON DELETE SET NULL"
+            ))
+        elif not isinstance(columns[column]["type"], sqltypes.Integer):
+            logger.warning("%s.%s is %s, not INTEGER; its foreign key and index were not touched.",
+                table, column, columns[column]["type"])
+            return
+        else:
+            _ensure_user_foreign_key(connection, table, column)
+        _ensure_single_column_index(connection, table, column)
+
+
+def _ensure_timestamp_column(engine: Engine, table: str, column: str) -> None:
+    """Add a nullable naive-UTC timestamp column (matches the models' UTCDateTime) when missing."""
+    with engine.begin() as connection:
+        columns = {col["name"]: col for col in inspect(connection).get_columns(table)}
+        if column not in columns:
+            connection.execute(text(
+                f"ALTER TABLE {_ident(engine, table)} ADD COLUMN IF NOT EXISTS "
+                f"{_ident(engine, column)} TIMESTAMP WITHOUT TIME ZONE"
+            ))
+        elif getattr(columns[column]["type"], "timezone", False):
+            logger.warning("%s.%s is TIMESTAMP WITH TIME ZONE but the models store naive UTC "
+                "(TIMESTAMP WITHOUT TIME ZONE). Existing values were left unchanged; convert them "
+                "deliberately once the server time zone they were written under is known.", table, column)
+
+
+# add missing audit columns to tables that should have them, and create indexes on those columns
+def _upgrade_audit_columns(engine: Engine) -> None:
+    """Add/verify created_by_id, updated_by_id (FK to auth_users, indexed) and records.updated_at.
+
+    Additive and idempotent: existing rows keep their values (NULL where history is unknown).
+    """
+    if not _is_postgresql(engine, "audit column upgrade"):
+        return
+    table_names = set(inspect(engine).get_table_names())
+    if "auth_users" not in table_names:
+        logger.info("Audit column upgrade skipped: auth_users does not exist yet.")
+        return
     for table in _AUDIT_TABLES:
         if table not in table_names:
             continue
-        existing = {column["name"] for column in inspector.get_columns(table)}
-        statements = []
         for column in ("created_by_id", "updated_by_id"):
-            if column not in existing:
-                statements.append(
-                    f"ALTER TABLE {table} ADD COLUMN {if_not_exists}{column} INTEGER "
-                    "REFERENCES auth_users(id) ON DELETE SET NULL"
-                )
-        if table == "nem_maintenance_records" and "updated_at" not in existing:
-            statements.append(f"ALTER TABLE {table} ADD COLUMN {if_not_exists}updated_at {timestamp_type}")
-        for column in ("created_by_id", "updated_by_id"):
-            statements.append(f"CREATE INDEX IF NOT EXISTS ix_{table}_{column} ON {table} ({column})")
-        with engine.begin() as connection:
-            for statement in statements:
-                connection.execute(text(statement))
+            _ensure_user_reference_column(engine, table, column)
+        if table == "nem_maintenance_records":
+            _ensure_timestamp_column(engine, table, "updated_at")
 
 
+def _constraint_literals(sqltext: str | None) -> set[str]:
+    return set(re.findall(r"'([^']*)'", sqltext or ""))
+
+
+def _normalise_invalid_visibility(connection) -> None:
+    """Fail closed: unknown/NULL visibility values become admin_only (already invisible to Supervisors)."""
+    table = _ident(connection.engine, _TEMPLATES_TABLE)
+    invalid = connection.execute(
+        text(f"SELECT id, visibility_type FROM {table} "
+             "WHERE visibility_type IS NULL OR visibility_type NOT IN :valid")
+        .bindparams(bindparam("valid", expanding=True)),
+        {"valid": list(_VISIBILITY_VALUES)},
+    ).all()
+    if not invalid:
+        return
+    logger.warning(
+        "%s shared rule(s) had an invalid visibility_type and were reset to %s (they were already "
+        "hidden from Supervisors). Affected (id, old value): %s",
+        len(invalid), _VISIBILITY_DEFAULT, [(row[0], row[1]) for row in invalid[:50]],
+    )
+    connection.execute(
+        text(f"UPDATE {table} SET visibility_type = :value WHERE id = :id"),
+        [{"value": _VISIBILITY_DEFAULT, "id": row[0]} for row in invalid],
+    )
+
+
+def _ensure_visibility_column(connection) -> None:
+    """Add visibility_type (NOT NULL DEFAULT admin_only), or restore a missing default / NOT NULL."""
+    table = _ident(connection.engine, _TEMPLATES_TABLE)
+    columns = {col["name"]: col for col in inspect(connection).get_columns(_TEMPLATES_TABLE)}
+    if "visibility_type" not in columns:
+        connection.execute(text(
+            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS visibility_type "
+            f"VARCHAR(30) NOT NULL DEFAULT '{_VISIBILITY_DEFAULT}'"
+        ))
+        return
+    column = columns["visibility_type"]
+    if _VISIBILITY_DEFAULT not in str(column.get("default") or ""):
+        connection.execute(text(
+            f"ALTER TABLE {table} ALTER COLUMN visibility_type SET DEFAULT '{_VISIBILITY_DEFAULT}'"))
+    if column.get("nullable"):
+        _normalise_invalid_visibility(connection)
+        connection.execute(text(f"ALTER TABLE {table} ALTER COLUMN visibility_type SET NOT NULL"))
+
+
+def _ensure_visibility_check(connection) -> None:
+    """Enforce the three allowed visibility values with a CHECK constraint (replacing a stale one)."""
+    engine = connection.engine
+    table = _ident(engine, _TEMPLATES_TABLE)
+    # The inspector is scoped to this table in the connection's default schema, so a same-named
+    # constraint on another table or schema is never mistaken for this one.
+    checks = {c["name"]: c for c in inspect(connection).get_check_constraints(_TEMPLATES_TABLE)}
+    existing = checks.get(_VISIBILITY_CHECK)
+    if existing is not None and _constraint_literals(existing.get("sqltext")) == set(_VISIBILITY_VALUES):
+        return
+    if existing is not None:
+        logger.warning("%s has a different definition than expected; replacing it.", _VISIBILITY_CHECK)
+        connection.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT {_ident(engine, _VISIBILITY_CHECK)}"))
+    values = ", ".join(f"'{value}'" for value in _VISIBILITY_VALUES)
+    connection.execute(text(
+        f"ALTER TABLE {table} ADD CONSTRAINT {_ident(engine, _VISIBILITY_CHECK)} "
+        f"CHECK (visibility_type IN ({values}))"
+    ))
+
+
+# Adds visibility_type default is admin only can change to specific supervisors or all supervisors.
 def _upgrade_rule_visibility(engine: Engine) -> None:
     """Add shared-rule visibility and template audit columns (idempotent, additive).
-    Existing shared rules default to ``admin_only``; no historical permission is invented.
+
+    Existing shared rules default to ``admin_only``; valid existing values are preserved and no
+    historical permission is invented. Invalid values are reset to ``admin_only`` (fail closed)
+    before the allowed-values constraint is enforced.
     """
-    inspector = inspect(engine)
-    table = "nem_monitoring_rule_templates"
-    if table not in set(inspector.get_table_names()):
+    if not _is_postgresql(engine, "rule visibility upgrade"):
         return
-    existing = {column["name"] for column in inspector.get_columns(table)}
-    postgres = engine.dialect.name == "postgresql"
-    if_not_exists = "IF NOT EXISTS " if postgres else ""
-    statements = []
-    if "visibility_type" not in existing:
-        statements.append(f"ALTER TABLE {table} ADD COLUMN {if_not_exists}visibility_type VARCHAR(30) "
-            "NOT NULL DEFAULT 'admin_only'")
+    table_names = set(inspect(engine).get_table_names())
+    if _TEMPLATES_TABLE not in table_names:
+        return
+    with engine.begin() as connection:
+        _ensure_visibility_column(connection)
+        _normalise_invalid_visibility(connection)
+        _ensure_visibility_check(connection)
+    if "auth_users" not in table_names:
+        logger.info("Template audit columns skipped: auth_users does not exist yet.")
+        return
     for column in ("created_by_id", "updated_by_id"):
-        if column not in existing:
-            statements.append(f"ALTER TABLE {table} ADD COLUMN {if_not_exists}{column} INTEGER "
-                "REFERENCES auth_users(id) ON DELETE SET NULL")
-        statements.append(f"CREATE INDEX IF NOT EXISTS ix_{table}_{column} ON {table} ({column})")
-    with engine.begin() as connection:
-        for statement in statements:
-            connection.execute(text(statement))
-        if postgres:
-            connection.execute(text(
-                "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = "
-                "'ck_nem_monitoring_rule_templates_visibility') THEN ALTER TABLE "
-                f"{table} ADD CONSTRAINT ck_nem_monitoring_rule_templates_visibility "
-                "CHECK (visibility_type IN ('admin_only', 'specific_supervisors', "
-                "'all_supervisors')); END IF; END $$"
-            ))
+        _ensure_user_reference_column(engine, _TEMPLATES_TABLE, column)
 
 
-logger = logging.getLogger(__name__)
+def _request_cleanup_blockers(connection) -> list[str]:
+    """Reasons the obsolete request structures must be kept (empty list = safe to remove)."""
+    inspector = inspect(connection)
+    names = set(inspector.get_table_names())
+    blockers: list[str] = []
+    for table in sorted(names):
+        for fk in inspector.get_foreign_keys(table):
+            if fk["referred_table"] == _REQUESTS_TABLE and not (
+                table == _CHANGES_TABLE and fk["constrained_columns"] == [_REQUEST_COLUMN]
+            ):
+                blockers.append(f"unexpected foreign key {table}({', '.join(fk['constrained_columns'])})")
+    engine = connection.engine
+    if _REQUESTS_TABLE in names:
+        count = connection.execute(text(f"SELECT COUNT(*) FROM {_ident(engine, _REQUESTS_TABLE)}")).scalar_one()
+        if count:
+            blockers.append(f"{count} old request record(s) in {_REQUESTS_TABLE}")
+    if _CHANGES_TABLE in names and _REQUEST_COLUMN in {c["name"] for c in inspector.get_columns(_CHANGES_TABLE)}:
+        linked = connection.execute(text(
+            f"SELECT COUNT(*) FROM {_ident(engine, _CHANGES_TABLE)} WHERE {_ident(engine, _REQUEST_COLUMN)} IS NOT NULL"
+        )).scalar_one()
+        if linked:
+            blockers.append(f"{linked} visibility change(s) still linked through {_CHANGES_TABLE}.{_REQUEST_COLUMN}")
+    return blockers
 
 
+# Remove the discontinued visibility-request structures, but only when that loses nothing.
 def _remove_visibility_requests(engine: Engine) -> None:
-    """Drop the tables of the removed Supervisor visibility-request feature, only when safe.
+    """Drop ``nem_rule_visibility_requests`` and ``nem_rule_visibility_changes.request_id``.
 
-    The only thing that references ``nem_rule_visibility_requests`` is the optional
-    ``request_id`` column of ``nem_rule_visibility_changes``. The table is dropped only
-    when it holds no rows; a table that still holds request history is left untouched
-    (and logged) so nothing is ever deleted silently. Visibility settings, supervisor
-    lists and the visibility change history itself are never touched.
+    Both are removed together, atomically, and only when the request table is empty, nothing
+    else references it, and no change row still points at a request. Otherwise everything is kept
+    and a warning explains why. Re-running is harmless, and each structure is handled
+    independently, so a database left half-migrated converges on the next start.
     """
-    table = "nem_rule_visibility_requests"
-    if table not in set(inspect(engine).get_table_names()):
+    if not _is_postgresql(engine, "visibility-request removal"):
         return
-    with engine.connect() as connection:
-        remaining = connection.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar_one()
-    if remaining:
-        logger.warning(
-            "%s holds %s request record(s) from the removed visibility-request feature; "
-            "it is no longer used and was left in place. Drop it manually once the history "
-            "is no longer needed.",
-            table,
-            remaining,
-        )
+    inspector = inspect(engine)
+    names = set(inspector.get_table_names())
+    has_column = _CHANGES_TABLE in names and _REQUEST_COLUMN in {
+        column["name"] for column in inspector.get_columns(_CHANGES_TABLE)
+    }
+    if _REQUESTS_TABLE not in names and not has_column:
         return
-    with engine.begin() as connection:
-        if engine.dialect.name == "postgresql":
-            # Removes the foreign key to the requests table; no other data is affected.
-            connection.execute(text(
-                "ALTER TABLE IF EXISTS nem_rule_visibility_changes DROP COLUMN IF EXISTS request_id"
-            ))
-        connection.execute(text(f"DROP TABLE IF EXISTS {table}"))
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(f"SET LOCAL lock_timeout = '{_MIGRATION_LOCK_TIMEOUT}'"))
+            names = set(inspect(connection).get_table_names())
+            locked = [_ident(engine, t) for t in (_CHANGES_TABLE, _REQUESTS_TABLE) if t in names]
+            if not locked:
+                return
+            # Block writers on both tables until commit, so a row cannot appear between the emptiness
+            # check below and the drop. A fixed lock order avoids deadlocks between migrations.
+            connection.execute(text(f"LOCK TABLE {', '.join(locked)} IN ACCESS EXCLUSIVE MODE"))
+            blockers = _request_cleanup_blockers(connection)
+            if blockers:
+                logger.warning("Obsolete visibility-request structures were kept: %s. They are no longer "
+                    "used; remove them manually once the history is no longer needed.", "; ".join(blockers))
+                return
+            if _CHANGES_TABLE in names:
+                connection.execute(text(
+                    f"ALTER TABLE {_ident(engine, _CHANGES_TABLE)} DROP COLUMN IF EXISTS {_ident(engine, _REQUEST_COLUMN)}"))
+            if _REQUESTS_TABLE in names:
+                # No CASCADE: PostgreSQL itself refuses if a view or foreign key still depends on it.
+                connection.execute(text(f"DROP TABLE {_ident(engine, _REQUESTS_TABLE)}"))
+            logger.info("Removed the obsolete visibility-request table and %s.%s.", _CHANGES_TABLE, _REQUEST_COLUMN)
+    except SQLAlchemyError as exc:
+        # The structures are unused, so a busy or blocked database must not stop the application
+        # from starting; nothing was changed (the transaction rolled back) and the next start retries.
+        logger.warning("Could not remove the obsolete visibility-request structures yet (they were "
+            "left unchanged and will be retried at the next start): %s", exc)
 
 
 # Largest and important function this creates missing tables and other supported objects described in the SQLAlchemy models.
@@ -676,7 +876,7 @@ def _migrate_boolean_duration_templates(engine: Engine) -> None:
 #intializes counter-tracking records for existing boolean count-threshold rules
 def _migrate_existing_rule_counters(engine: Engine) -> None:
     migration_key = "internal_rule_counter_state_v1"
-    insert_function = (pg_insert if engine.dialect.name == "postgresql" else sqlite_insert)
+    insert_function = pg_insert
     with Session(engine) as session:
         statement = (
             insert_function(FrontendConfig)
