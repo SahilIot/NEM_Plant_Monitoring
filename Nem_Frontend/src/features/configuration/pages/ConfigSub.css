@@ -83,3 +83,28 @@
   stroke: #a1a1aa !important;
   opacity: 1 !important;
 }
+
+/* Align action buttons below Actions heading */
+.config-actions-header {
+  text-align: left !important;
+  padding-left: 16px !important;
+}
+
+.config-actions-cell {
+  text-align: left !important;
+  vertical-align: middle;
+  padding-left: 16px !important;
+}
+
+.config-actions-cell .config-action-icons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+
+/* Keep buttons properly aligned */
+.config-actions-cell .config-icon-btn {
+  flex-shrink: 0;
+}
