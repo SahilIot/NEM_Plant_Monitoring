@@ -280,3 +280,36 @@
 .predefined-rules-label-filter > * {
   max-width: 100%;
 }
+
+
+/* Labels displayed under monitoring rule description */
+.prm-rule-labels {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.prm-rule-label-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 3px 9px;
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: 20px;
+  background: var(--surface-2, #eef2f7);
+  color: var(--text, #334155);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+/* Dark mode */
+.dark .prm-rule-label-chip,
+[data-theme="dark"] .prm-rule-label-chip {
+  background: #263449;
+  border-color: #40516a;
+  color: #dbeafe;
+}

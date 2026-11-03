@@ -274,3 +274,100 @@
 [data-theme="dark"] .labels-empty {
   color: #cbd5e1;
 }
+
+
+/* Improved Labels filter dropdown */
+.labels-filter-menu {
+  box-sizing: border-box;
+  width: 300px;
+  max-width: min(300px, calc(100vw - 24px));
+  padding: 10px;
+  border-radius: 10px;
+  z-index: 1200;
+}
+
+/* Search field */
+.labels-filter-menu > input[type="search"] {
+  display: block;
+  width: 100%;
+  min-height: 38px;
+  box-sizing: border-box;
+  margin: 0 0 9px;
+  padding: 9px 11px;
+  border-radius: 7px;
+  font-size: 13px;
+  outline: none;
+}
+
+.labels-filter-menu > input[type="search"]:focus {
+  border-color: var(--accent, #3b82f6);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+/* Checkbox and label alignment */
+.labels-filter-option {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 10px;
+  width: 100%;
+  min-height: 38px;
+  box-sizing: border-box;
+  padding: 8px 10px !important;
+  margin: 2px 0;
+  border-radius: 7px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.labels-filter-option input[type="checkbox"] {
+  display: inline-block;
+  flex: 0 0 15px;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent, #3b82f6);
+}
+
+.labels-filter-option span {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  line-height: 1.4;
+  font-size: 13px;
+}
+
+.labels-filter-option:hover {
+  background: rgba(148, 163, 184, 0.13);
+}
+
+.labels-filter-menu > small {
+  display: block;
+  margin-top: 7px;
+  padding: 9px 3px 2px;
+  border-top: 1px solid var(--line, #d8dee5);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* Dark mode */
+.dark .labels-filter-option:hover,
+[data-theme="dark"] .labels-filter-option:hover {
+  background: #293545;
+}
+
+.dark .labels-filter-menu > small,
+[data-theme="dark"] .labels-filter-menu > small {
+  border-color: #3b4655;
+  color: #cbd5e1;
+}
+
+/* Mobile */
+@media (max-width: 560px) {
+  .labels-filter-menu {
+    width: min(300px, calc(100vw - 24px));
+  }
+}
