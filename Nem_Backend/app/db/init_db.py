@@ -273,10 +273,6 @@ def _ensure_timestamp_column(engine: Engine, table: str, column: str) -> None:
                 f"ALTER TABLE {_ident(engine, table)} ADD COLUMN IF NOT EXISTS "
                 f"{_ident(engine, column)} TIMESTAMP WITHOUT TIME ZONE"
             ))
-        elif getattr(columns[column]["type"], "timezone", False):
-            logger.warning("%s.%s is TIMESTAMP WITH TIME ZONE but the models store naive UTC "
-                "(TIMESTAMP WITHOUT TIME ZONE). Existing values were left unchanged; convert them "
-                "deliberately once the server time zone they were written under is known.", table, column)
 
 
 # add missing audit columns to tables that should have them, and create indexes on those columns
@@ -297,6 +293,22 @@ def _upgrade_audit_columns(engine: Engine) -> None:
             _ensure_user_reference_column(engine, table, column)
         if table == "nem_maintenance_records":
             _ensure_timestamp_column(engine, table, "updated_at")
+    _warn_timezone_aware_audit_columns(engine, table_names)
+
+
+def _warn_timezone_aware_audit_columns(engine: Engine, table_names: set[str]) -> None:
+    # Read-only check. The models store naive UTC, so a TIMESTAMP WITH TIME ZONE audit column
+    # holds values that may be shifted by the server time zone in force when they were written.
+    inspector = inspect(engine)
+    for table in _AUDIT_TABLES:
+        if table not in table_names:
+            continue
+        for column in inspector.get_columns(table):
+            if column["name"] in ("created_at", "updated_at") and getattr(column["type"], "timezone", False):
+                logger.warning("%s.%s is TIMESTAMP WITH TIME ZONE but the models store naive UTC. "
+                    "Rows written before connections were pinned to UTC may be shifted by the server's "
+                    "UTC offset at write time; nothing was changed. Review them before correcting.",
+                    table, column["name"])
 
 
 def _constraint_literals(sqltext: str | None) -> set[str]:

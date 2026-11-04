@@ -488,6 +488,81 @@ def get_maintenance_schedule(
     return _schedule_read(session, _schedule_or_404(session, schedule_id))
 
 
+# Deletes a locked schedule together with ALL of its maintenance records (past, present and future)
+# and its alerts in one transaction. Events are audit history: they are kept, only unlinked from the alerts.
+def _delete_schedule_tree(session: Session, schedule: MaintenanceSchedule, user: User) -> None:
+    schedule_id = schedule.id
+    records = session.scalars(
+        select(MaintenanceRecord)
+        .where(MaintenanceRecord.schedule_id == schedule_id)
+        .with_for_update()
+    ).all()
+    if any(record.status == "in_progress" for record in records):
+        raise HTTPException(status_code=409,detail=("This maintenance is currently in progress and cannot be deleted. "
+                "Complete or cancel that work first."),)
+
+    alert_ids = sorted(session.scalars(select(Alert.id).where(Alert.maintenance_schedule_id == schedule_id)).all())
+    if alert_ids and session.scalar(
+        select(MaintenanceRecord.id)
+        .where(
+            MaintenanceRecord.alert_id.in_(alert_ids),
+            or_(MaintenanceRecord.schedule_id.is_(None), MaintenanceRecord.schedule_id != schedule_id),
+        )
+        .limit(1)
+    ):
+        raise HTTPException(status_code=409,detail=("A maintenance record outside this series references one of its alerts. "
+                "Remove that alert link before deleting it."),)
+
+    schedule_title = schedule.title
+    asset_id = schedule.asset_id
+    record_ids = sorted(record.id for record in records)
+    logger.warning(
+        "Deleting maintenance schedule id=%s asset_id=%s: deleting record(s) %s and alert(s) %s (requested by user %s)",
+        schedule_id, asset_id, record_ids, alert_ids, user.id,
+    )
+    detail = "Related data prevents deleting this maintenance."
+    try:
+        for record in records:
+            session.delete(record)
+        _flush_deletion(session, detail)
+        if alert_ids:
+            _execute_deletion(
+                session,
+                update(MonitoringEvent)
+                .where(MonitoringEvent.alert_id.in_(alert_ids))
+                .values(alert_id=None)
+                .execution_options(synchronize_session=False),
+                detail,
+            )
+            removed = session.execute(
+                delete(Alert).where(Alert.id.in_(alert_ids)).execution_options(synchronize_session=False)
+            )
+            if removed.rowcount != len(alert_ids):
+                raise HTTPException(status_code=409, detail=detail)
+        session.delete(schedule)
+        _flush_deletion(session, detail)
+        emit_event(
+            session,
+            event_type="maintenance_schedule_permanently_deleted",
+            message=f"Maintenance '{schedule_title}' and its schedule were permanently deleted.",
+            occurred_at=utc_now(),
+            asset_id=asset_id,
+            metadata={
+                "deleted_schedule_id": schedule_id,
+                "deleted_schedule_title": schedule_title,
+                "deleted_record_ids": record_ids,
+                "deleted_alert_ids": alert_ids,
+            },
+        )
+        _commit_deletion(session, detail)
+    except HTTPException:
+        session.rollback()
+        raise
+    except Exception:
+        session.rollback()
+        logger.exception("Deleting maintenance schedule id=%s failed; rolled back", schedule_id)
+        raise
+
 @router.delete("/schedules/{schedule_id}/permanent",status_code=status.HTTP_204_NO_CONTENT,)
 def permanently_delete_maintenance_schedule(
     schedule_id: int = Path(gt=0),
@@ -501,117 +576,7 @@ def permanently_delete_maintenance_schedule(
     )
     if schedule is None or not access_scope(session).allows(schedule.asset_id):
         raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
-
-    records = session.scalars(
-        select(MaintenanceRecord)
-        .where(MaintenanceRecord.schedule_id == schedule.id)
-        .with_for_update()
-    ).all()
-    if any(record.status == "in_progress" for record in records):
-        raise HTTPException(status_code=409,detail=("This schedule has maintenance currently in progress and cannot be deleted. "
-                "Complete or cancel that work first."),)
-
-    alert_ids = session.scalars(select(Alert.id).where(Alert.maintenance_schedule_id == schedule.id)
-    ).all()
-    if alert_ids and session.scalar(
-        select(MaintenanceRecord.id)
-        .where(
-            MaintenanceRecord.alert_id.in_(alert_ids),
-            or_(
-                MaintenanceRecord.schedule_id.is_(None),
-                MaintenanceRecord.schedule_id != schedule.id,
-            ),
-        )
-        .limit(1)
-    ):
-        raise HTTPException(status_code=409,detail=("A maintenance record outside this schedule references one of its alerts. "
-                "Remove that alert link before deleting this schedule."),)
-
-    schedule_title = schedule.title
-    asset_id = schedule.asset_id
-    # Planned occurrences go with the schedule. Completed (and cancelled) records are
-    # history: they are kept and only detached from the schedule (schedule_id is nullable).
-    deleted_occurrence_ids = sorted(record.id for record in records if record.status == "planned")
-    preserved_record_ids = sorted(record.id for record in records if record.status != "planned")
-    alert_id_list = sorted(alert_ids)
-    logger.warning(
-        "Deleting maintenance schedule id=%s asset_id=%s: deleting planned record(s) %s, "
-        "preserving record(s) %s, deleting %d alert(s) %s (requested by user %s)",
-        schedule_id, asset_id, deleted_occurrence_ids, preserved_record_ids,
-        len(alert_id_list), alert_id_list, user.id,
-    )
-    detail = "Related maintenance history prevents deleting this schedule."
-    try:
-        if preserved_record_ids:
-            # Core UPDATEs bypass the audit listener, so the preserved records keep their
-            # original created-by/on and updated-by/on values.
-            detached = session.execute(
-                update(MaintenanceRecord)
-                .where(
-                    MaintenanceRecord.id.in_(preserved_record_ids),
-                    MaintenanceRecord.schedule_id == schedule_id,
-                )
-                .values(schedule_id=None)
-                .execution_options(synchronize_session=False)
-            )
-            if detached.rowcount != len(preserved_record_ids):
-                raise HTTPException(status_code=409, detail=detail)
-            if alert_id_list:
-                # Alerts of this schedule are deleted below (they cannot exist without it).
-                session.execute(
-                    update(MaintenanceRecord)
-                    .where(
-                        MaintenanceRecord.id.in_(preserved_record_ids),
-                        MaintenanceRecord.alert_id.in_(alert_id_list),
-                    )
-                    .values(alert_id=None)
-                    .execution_options(synchronize_session=False)
-                )
-            for record in records:
-                if record.id in preserved_record_ids:
-                    session.expire(record)
-        for record in records:
-            if record.id in deleted_occurrence_ids:
-                session.delete(record)
-        _flush_deletion(session, detail)
-        if alert_id_list:
-            # Keep the historical events; only drop their link to the removed alerts.
-            _execute_deletion(
-                session,
-                update(MonitoringEvent)
-                .where(MonitoringEvent.alert_id.in_(alert_id_list))
-                .values(alert_id=None)
-                .execution_options(synchronize_session=False),
-                detail,
-            )
-            removed = session.execute(
-                delete(Alert).where(Alert.id.in_(alert_id_list)).execution_options(synchronize_session=False)
-            )
-            if removed.rowcount != len(alert_id_list):
-                raise HTTPException(status_code=409, detail=detail)
-        session.delete(schedule)
-        _flush_deletion(session, detail)
-        emit_event(
-            session,
-            event_type="maintenance_schedule_permanently_deleted",
-            message=f"Maintenance schedule '{schedule_title}' was permanently deleted.",
-            occurred_at=utc_now(),
-            asset_id=asset_id,
-            metadata={
-                "deleted_schedule_id": schedule_id,
-                "deleted_schedule_title": schedule_title,
-                "deleted_occurrence_ids": deleted_occurrence_ids,
-                "preserved_record_ids": preserved_record_ids,
-            },
-        )
-        _commit_deletion(session, detail)
-    except HTTPException:
-        session.rollback()
-        raise
-    except Exception:
-        session.rollback()
-        logger.exception("Deleting maintenance schedule id=%s failed; rolled back", schedule_id)
-        raise
+    _delete_schedule_tree(session, schedule, user)
 
 # User can change selected fields without sending the entire schedule again.
 @router.patch("/schedules/{schedule_id}", response_model=MaintenanceScheduleRead)
@@ -1013,6 +978,15 @@ def permanently_delete_maintenance_record(
         raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
     if record.status == "in_progress":
         raise HTTPException(status_code=409,detail="Maintenance currently in progress cannot be permanently deleted.",)
+
+    if record.status == "planned" and record.schedule_id is not None:
+        # Deleting a planned maintenance removes its whole series, records and alerts.
+        schedule = session.scalar(
+            select(MaintenanceSchedule).where(MaintenanceSchedule.id == record.schedule_id).with_for_update()
+        )
+        if schedule is not None:
+            _delete_schedule_tree(session, schedule, user)
+            return
 
     schedule_id = record.schedule_id
     if schedule_id is not None:

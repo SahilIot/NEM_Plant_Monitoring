@@ -36,7 +36,9 @@ class UTCDateTime(TypeDecorator[datetime]):
 def create_database_engine(database_url: str | None = None) -> Engine:
     url = get_settings().database_url if database_url is None else database_url
     validate_postgresql_database_url(url)
-    return create_engine(url, pool_pre_ping=True)
+    # Timestamps are stored as naive UTC. Pin every connection to UTC so that the value is also read and
+    # written as UTC when a column is TIMESTAMP WITH TIME ZONE, whatever the server's own time zone is.
+    return create_engine(url, pool_pre_ping=True, connect_args={"options": "-c timezone=UTC"})
 
 # manage db connectivity. A session is the object through which your application queries and modifies db records
 def create_session_factory(

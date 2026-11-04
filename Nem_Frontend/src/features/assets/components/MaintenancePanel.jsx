@@ -168,7 +168,6 @@ export default function MaintenancePanel({
   const [schedulesLoaded, setSchedulesLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [deletingScheduleId, setDeletingScheduleId] = useState(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [dialog, setDialog] = useState(null);
@@ -210,11 +209,16 @@ export default function MaintenancePanel({
   const runPermanentDeleteRecord = async (record) => {
     if (!isAdministrator || busy) return;
     if (
-      !(await confirm("Are you sure you want to delete this maintenance? This action cannot be undone.", {
-        title: "Delete Maintenance?",
-        confirmLabel: "Delete",
-        destructive: true,
-      }))
+      !(await confirm(
+        record.status === "planned" && record.schedule_id != null
+          ? "Permanently delete this maintenance? Its recurring schedule, all of its maintenance records and history, and its active notifications will be deleted. This action cannot be undone."
+          : "Are you sure you want to delete this maintenance? This action cannot be undone.",
+        {
+          title: "Delete Maintenance?",
+          confirmLabel: "Delete Maintenance",
+          destructive: true,
+        }
+      ))
     ) return;
     setBusy(true);
     setError("");
@@ -230,43 +234,6 @@ export default function MaintenancePanel({
       );
     } finally {
       setBusy(false);
-    }
-  };
-
-  const permanentlyDeleteSchedule = async (schedule) => {
-    if (!isAdministrator || busy || deleteGuard.current) return;
-    deleteGuard.current = true;
-    let confirmed = false;
-    try {
-      confirmed = await confirm(
-        "Are you sure you want to delete this maintenance schedule? This permanently deletes the schedule and its planned maintenance. Completed maintenance history is kept. This action cannot be undone.",
-        {
-          title: "Delete Maintenance Schedule?",
-          confirmLabel: "Delete",
-          destructive: true,
-        }
-      );
-    } finally {
-      if (!confirmed) deleteGuard.current = false;
-    }
-    if (!confirmed) return;
-    setBusy(true);
-    setDeletingScheduleId(schedule.id);
-    setError("");
-    setNotice("");
-    try {
-      await api.del(`/maintenance/schedules/${schedule.id}/permanent`);
-      setNotice("Maintenance schedule was permanently deleted.");
-      await Promise.all([loadRecords(), loadSchedules()]);
-      await onChanged?.();
-    } catch (requestError) {
-      setError(
-        requestError.message || "Could not permanently delete maintenance schedule."
-      );
-    } finally {
-      setDeletingScheduleId(null);
-      setBusy(false);
-      deleteGuard.current = false;
     }
   };
 
@@ -894,7 +861,7 @@ const openEdit = (record) => {
                 : "Permanently delete this maintenance"}
             >
               <Trash2 size={16} aria-hidden="true" />
-              <span>Delete maintenance</span>
+              <span>Delete Maintenance</span>
             </button>
             )}
           </FloatingMenu>

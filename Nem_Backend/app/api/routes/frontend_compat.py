@@ -277,6 +277,9 @@ def _rule_row(session: Session, rule: MonitoringRule) -> dict[str, Any]:
         "completed_at": rule.completed_at,
         "created_at": rule.created_at,
         "updated_at": rule.updated_at,
+        # Audit attribution comes from the user foreign keys; None means it was never stored.
+        "created_by": rule.created_by,
+        "updated_by": rule.updated_by,
         "status": (
             "evaluated"
             if rule.lifecycle_status == "completed"
@@ -1852,6 +1855,11 @@ def frontend_asset_logbook(
                 if record.planned_end_at
                 else None
             ),
+            # Audit attribution comes from the user foreign keys; None means it was never stored.
+            "created_at": record.created_at.isoformat(),
+            "updated_at": record.updated_at.isoformat() if record.updated_at else None,
+            "created_by": record.created_by,
+            "updated_by": record.updated_by,
         }
         for record, rule_name in rows
     ]

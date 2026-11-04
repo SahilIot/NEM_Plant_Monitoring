@@ -120,11 +120,16 @@ const openEdit = (record) => {
   const runPermanentDeleteRecord = async (record) => {
     if (!isAdministrator || busy || record.status === "in_progress") return;
     if (
-      !(await confirm("Are you sure you want to delete this maintenance? This action cannot be undone.", {
-        title: "Delete Maintenance?",
-        confirmLabel: "Delete",
-        destructive: true,
-      }))
+      !(await confirm(
+        record.status === "planned" && record.schedule_id != null
+          ? "Permanently delete this maintenance? Its recurring schedule, all of its maintenance records and history, and its active notifications will be deleted. This action cannot be undone."
+          : "Are you sure you want to delete this maintenance? This action cannot be undone.",
+        {
+          title: "Delete Maintenance?",
+          confirmLabel: "Delete Maintenance",
+          destructive: true,
+        }
+      ))
     ) return;
     setDeletingRecordId(record.id);
     setError("");
@@ -510,7 +515,7 @@ const openEdit = (record) => {
                             }
                           >
                             <Trash2 size={16} aria-hidden="true" />
-                            <span>Delete maintenance</span>
+                            <span>Delete Maintenance</span>
                           </button>
                         )}
                       </FloatingMenu>
