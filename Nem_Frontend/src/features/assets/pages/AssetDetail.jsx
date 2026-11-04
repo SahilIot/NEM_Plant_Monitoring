@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import CopyRulesModal from "../components/CopyRulesModal.jsx";
 import PredefinedRulesModal from "../../rules/components/PredefinedRulesModal.jsx";
+import { SHARED_RULE_WARNING } from "../../configuration/pages/RuleVisibility.jsx";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import {
@@ -1533,7 +1534,12 @@ const filteredEvents = [...events]
   };
 
   const confirmLifecycleChange = async () => {
-    if (!canChangeRuleLifecycle || !lifecycleAction || deletingRuleId !== null) return;
+    // Supervisors may only activate a Not Activated rule after reviewing it.
+    if (
+      !(canChangeRuleLifecycle || (isSupervisor && lifecycleAction?.action === "activate")) ||
+      !lifecycleAction ||
+      deletingRuleId !== null
+    ) return;
     const { rule, action } = lifecycleAction;
     setDeletingRuleId(rule.id);
     setLoadError("");
@@ -1686,6 +1692,24 @@ const filteredEvents = [...events]
     if (!canManageRules) return;
 
     const editId = monitoringRuleSelection?.ruleId;
+    if (editId) {
+      // A rule created from a shared rule is one record for every asset using it.
+      let sharedRule = false;
+      try {
+        sharedRule = Boolean((await api.get(`/rules/${editId}`))?.shared_rule);
+      } catch {
+        sharedRule = false;
+      }
+      if (
+        sharedRule &&
+        !(await confirm(SHARED_RULE_WARNING, {
+          title: "Shared rule",
+          confirmLabel: "Continue",
+        }))
+      ) {
+        return;
+      }
+    }
     if (editId && isSupervisor) {
       // Supervisors may only change thresholds and intervals; send just those.
       const payload = buildRuleThresholdChanges(
@@ -2775,11 +2799,16 @@ const filteredEvents = [...events]
         setRuleActionMenuId(null);
         openEditRuleForm(rule);
       }}
-      disabled={!canManageRules && !isSupervisor}
+      disabled={
+        (!canManageRules && !isSupervisor) ||
+        (isSupervisor && lifecycleStatus(rule) === "in_progress")
+      }
       title={
         !canManageRules
           ? "You do not have permission to manage monitoring rules."
-          : undefined
+          : isSupervisor && lifecycleStatus(rule) === "in_progress"
+            ? "A running rule cannot be edited by a Supervisor. Edit it while it is not activated."
+            : undefined
       }
     >
       <Pencil size={16} aria-hidden="true" />
@@ -2840,10 +2869,10 @@ const filteredEvents = [...events]
           setRuleActionMenuId(null);
           setLifecycleAction({ rule, action: "activate" });
         }}
-        disabled={deletingRuleId !== null || !canChangeRuleLifecycle}
+        disabled={deletingRuleId !== null || !(canChangeRuleLifecycle || isSupervisor)}
         title={
-          !canChangeRuleLifecycle
-            ? "Only Administrators can change monitoring rule states."
+          !(canChangeRuleLifecycle || isSupervisor)
+            ? "Only Administrators and Supervisors can activate monitoring rules."
             : undefined
         }
       >
@@ -4139,12 +4168,16 @@ const filteredEvents = [...events]
           onClose={() => setShowPredefinedRules(false)}
           onAssigned={async (result) => {
             setShowPredefinedRules(false);
-            setList("activated");
+            // A Supervisor's assignment starts Not Activated: show it there for review.
+            setList(isSupervisor ? "not_activated" : "activated");
             await refreshAll();
             const assigned = result.created?.length || 0;
             const existing = result.already_assigned?.length || 0;
             setActionNotice(
-              `${assigned} predefined rule(s) assigned and activated.` +
+              `${assigned} predefined rule(s) assigned` +
+                (isSupervisor
+                  ? ". They are Not Activated: review the thresholds, then activate them."
+                  : " and activated.") +
                 (existing ? ` ${existing} rule(s) were already assigned.` : "")
             );
           }}

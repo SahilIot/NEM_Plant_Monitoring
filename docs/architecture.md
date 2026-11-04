@@ -242,10 +242,15 @@ fed from the same listener.
 ### Shared-rule visibility
 
 Shared (reusable) rules, i.e. `nem_monitoring_rule_templates`, carry `visibility_type`
-(`admin_only` default, `specific_supervisors`, `all_supervisors`). Selected Supervisors live in
-`nem_rule_template_supervisors`. `app/services/rule_visibility.py` is the single authorization point:
-Administrators see everything, Supervisors see `all_supervisors` rules and `specific_supervisors` rules
-that list them, Operators and everyone else see none. It is enforced in `GET /rule-templates`,
+(`admin_only` or `specific_supervisors`; creation requires an explicit choice, there is no
+all-Supervisors value). Selected Supervisors live in `nem_rule_template_supervisors`.
+`app/services/rule_visibility.py` is the single authorization point: Administrators see everything,
+Supervisors see only `specific_supervisors` rules that list them, Operators and everyone else see none.
+Edits to a rule created from a shared rule (`PATCH /rules/{id}`) are applied to the shared rule and
+propagated to every asset using it (`apply_template_update` in `frontend_compat.py`), so there is one
+threshold per shared rule. `app/services/config_transfer.py` and `app/api/routes/config_transfer.py`
+implement the Administrator-only JSON export/preview/import (`/api/v1/config-transfer/*`, gated in the
+`main.py` middleware and re-checked in each handler); imports are logged in `nem_configuration_imports`. It is enforced in `GET /rule-templates`,
 `GET/PUT /rule-templates/{id}`, `POST /rule-templates/{id}/assign` and the rule names embedded in
 `GET /collections`; a hidden rule answers 404. Visibility never grants asset access and the asset-level
 workflows (`/assets/{id}/rules/...`) are unchanged.

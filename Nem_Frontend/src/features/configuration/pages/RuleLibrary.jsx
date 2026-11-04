@@ -28,9 +28,17 @@ import {
 } from "../../../components/common/UI.jsx";
 import LabelsField from "../../../components/common/LabelsField.jsx";
 import {
+  SHARED_RULE_WARNING,
+  VISIBILITY_CHANGE_WARNING,
   VISIBILITY_LABELS,
   VisibilityBadge,
   VisibilityModal,
+  saveVisibility,
+  useSupervisorChoices,
+  visibilityChanged,
+  visibilityFields,
+  visibilityInitial,
+  visibilityPayload,
 } from "./RuleVisibility.jsx";
 import "./RuleLibrary.css";
 import CopyRuleModal from "./CopyRuleModal.jsx";
@@ -707,6 +715,7 @@ export default function RuleLibrary() {
  const canAssignRules = isAdministrator || isSupervisor;
 
   const confirm = useConfirmation();
+  const supervisorChoices = useSupervisorChoices(isAdministrator);
   const navigate = useNavigate();
   const location = useLocation();
   const [copying, setCopying] = useState(null);
@@ -1000,14 +1009,31 @@ if (suggesting) {
     error: false,
   });
 } else if (editing) {
+  // The shared rule is one record used by every asset: confirm before changing it for all of them.
+  const changesVisibility = isAdministrator && visibilityChanged(editing, values);
+  if (changesVisibility && values.visibility_type === "specific_supervisors" && !(values.visibility_supervisor_ids || []).length) {
+    throw new Error("Select at least one Supervisor.");
+  }
+  const proceed = await confirm(
+    changesVisibility ? `${SHARED_RULE_WARNING}\n\n${VISIBILITY_CHANGE_WARNING}` : SHARED_RULE_WARNING,
+    { title: changesVisibility ? "Shared rule and access" : "Shared rule", confirmLabel: "Continue" }
+  );
+  if (!proceed) return;
   await api.put(`/rule-templates/${editing.id}`, payload);
+  if (changesVisibility) {
+    try {
+      await saveVisibility(editing, values);
+    } catch (err) {
+      throw new Error(`The rule was saved, but its visibility could not be changed: ${err.message}`);
+    }
+  }
 
   setMessage({
     text: "Rule updated successfully.",
     error: false,
   });
 } else {
-  await api.post("/rule-templates", payload);
+  await api.post("/rule-templates", { ...payload, ...visibilityPayload(values) });
 
   setMessage({
     text: "Rule created successfully.",
@@ -1420,10 +1446,13 @@ fields={
   suggesting && !editing
     ? FIELDS.filter((field) => field.key !== "labels")
     : editing && !supportsCurrentRuleEditor(editing)
-    ? LEGACY_EDIT_FIELDS.map((field) => ({
-        ...field,
-        disabled: isSupervisor,
-      }))
+    ? [
+        ...LEGACY_EDIT_FIELDS.map((field) => ({
+          ...field,
+          disabled: isSupervisor,
+        })),
+        ...(isAdministrator ? visibilityFields(supervisorChoices) : []),
+      ]
     : editing && isSupervisor
       ? FIELDS.map((field) => ({
           ...field,
@@ -1432,7 +1461,11 @@ fields={
             "threshold",
           ].includes(field.key),
         }))
-      : FIELDS
+      : editing
+        ? isAdministrator
+          ? [...FIELDS, ...visibilityFields(supervisorChoices)]
+          : FIELDS
+        : [...FIELDS, ...visibilityFields(supervisorChoices)]
 }
     initialValues={
   suggesting && !editing
@@ -1458,7 +1491,9 @@ fields={
         evaluation_interval_seconds: "",
         stale_after_seconds: "",
       }
-    : initialTemplate(editing)
+    : editing && isAdministrator
+      ? { ...initialTemplate(editing), ...visibilityInitial(editing) }
+      : initialTemplate(editing)
 }
     submitLabel={
       editing

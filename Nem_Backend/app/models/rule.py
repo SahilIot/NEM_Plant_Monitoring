@@ -29,7 +29,7 @@ class MonitoringRuleTemplate(AuditNamesMixin, Base):
     __tablename__ = "nem_monitoring_rule_templates"
     __table_args__ = (
         CheckConstraint(
-            "visibility_type IN ('admin_only', 'specific_supervisors', 'all_supervisors')",
+            "visibility_type IN ('admin_only', 'specific_supervisors')",
             name="ck_nem_monitoring_rule_templates_visibility",
         ),
     )
@@ -236,6 +236,11 @@ class MonitoringRule(AuditNamesMixin, Base):
     label_records: Mapped[list[Label]] = relationship(secondary=rule_labels, lazy="selectin",)
 
     @property
+    def shared_rule(self) -> bool:
+        # True when this rule is an asset use of a shared rule (edits change every asset using it).
+        return self.source_template_id is not None
+
+    @property
     def labels(self) -> list[str]:
         return [label.name for label in self.label_records]
 
@@ -271,13 +276,9 @@ class RuleState(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")
     latest_value: Mapped[Any | None] = mapped_column(JSON)
     message: Mapped[str] = mapped_column(Text, nullable=False)
-    last_evaluated_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(), nullable=False
-    )
+    last_evaluated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     condition_started_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
-    last_transition_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(), nullable=False
-    )
+    last_transition_at: Mapped[datetime] = mapped_column( UTCDateTime(), nullable=False)
     error_message: Mapped[str | None] = mapped_column(Text)
 
 

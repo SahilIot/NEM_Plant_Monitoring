@@ -25,9 +25,14 @@ deployment configuration or field validation.
   records use their normal lifecycle/status fields and maintenance deletion
   preserves the established schedule behavior.
 - Administrator-controlled shared-rule visibility (Admin Only, Specific
-  Supervisors, All Supervisors) with backend-enforced checks, Supervisor
+  Supervisors) with backend-enforced checks, Supervisor
   threshold-only editing, field-level rule history and visibility history. The
   visibility-request workflow was removed.
+- Shared rules are a single source of truth (one threshold, edits propagate to
+  every asset, confirmation in the UI); Admin Only / Specific Supervisors are
+  the only visibilities (`all_supervisors` retired by a startup migration).
+- Administrator-only versioned JSON export / preview / import of monitoring
+  rules, collections and maintenance definitions (`/api/v1/config-transfer/*`).
 - Hardened, idempotent startup upgrades for audit columns, rule visibility and
   request removal (PostgreSQL only; see `docs/architecture.md`).
 - Codebase cleanup: unused imports, functions, components, icons, styles and

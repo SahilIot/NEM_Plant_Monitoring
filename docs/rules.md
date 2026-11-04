@@ -147,8 +147,9 @@ suspend/resume/activate/deactivate and verify legacy rule records.
 Shared (reusable) rules are stored in `nem_monitoring_rule_templates`. Three
 checks apply, and none implies another:
 
-- **Visibility:** `admin_only` (default), `specific_supervisors` (the
-  Supervisors listed for that rule) or `all_supervisors`. Administrators see
+- **Visibility:** `admin_only` or `specific_supervisors` (the Supervisors
+  listed for that rule); there is no all-Supervisors value and creation needs
+  an explicit choice. Administrators see
   every shared rule; Operators see none. Only an Administrator changes
   visibility or the Supervisor list (`PUT /rule-templates/{id}/visibility`).
   There is no request or approval workflow, and

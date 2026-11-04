@@ -336,11 +336,33 @@ both (so existing rows load), `RuleCreate` accepts `generic` but not
 
 ### Shared rule visibility
 
-Each shared rule has a visibility: **Admin Only** (default), **Specific
-Supervisors** or **All Supervisors**. Only an Administrator changes it or the
-list of Supervisors with access. There is no request or approval workflow in
-the application; a Supervisor who needs a rule asks the Administrator, and
-`/api/v1/rule-visibility-requests` answers 404 for every role.
+Each shared rule has exactly one of two visibilities: **Admin Only** or
+**Specific Supervisors** (one or more). There is no "All Supervisors" option and
+no default: an Administrator must choose a visibility when creating a rule.
+Only an Administrator changes it afterwards. There is no request or approval
+workflow; `/api/v1/rule-visibility-requests` answers 404 for every role. A
+rule saved as `all_supervisors` by an older version is converted at startup to
+Specific Supervisors listing the active Supervisors it was visible to.
+
+A shared rule is a single record: a Supervisor allowed to edit its thresholds
+changes it for every asset and user using it, after a confirmation dialog, and
+the change is written to the rule history.
+
+### Configuration import / export (Administrators only)
+
+`GET /api/v1/config-transfer/export` returns a versioned JSON package
+(`application: nem-plant-monitoring`, `format_version: 1.0`) with Monitoring
+Rules, Monitoring Rule Collections and Maintenance Rules (recurring definitions
+only). It contains no database ids, runtime counters, alerts, events, completed
+maintenance, documents or credentials; Supervisors are referenced by username
+and assets by name/type/parent name. `POST /config-transfer/preview` validates a
+package and writes nothing; `POST /config-transfer/import` re-validates and
+creates the records in one transaction (all or nothing). Existing rules are
+never overwritten: duplicates are skipped or imported under a new name.
+Missing destination Supervisors fall back to Admin Only unless the Administrator
+maps them; maintenance rules need a matching or selected destination asset. The
+importing Administrator is recorded as creator and each import is logged in
+`nem_configuration_imports`.
 
 Visibility, editing and assignment are separate checks, all enforced by the
 backend. A Supervisor who can see a shared rule may change only its numeric

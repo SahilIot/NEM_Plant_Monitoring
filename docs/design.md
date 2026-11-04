@@ -46,7 +46,8 @@ loads `src/styles/global.css`.
   the signed-in role may see. Its **View** dialog shows the rule, the assets
   using it (within the caller's asset scope) and its change history.
   Administrators also get the visibility dialog (Admin Only, Specific
-  Supervisors, All Supervisors) and a "Supervisors with access" row; a
+  Supervisors) and a "Supervisors with access" row; creation forms require
+  an explicit visibility choice, and saving a shared rule asks for confirmation. A
   Supervisor sees no access-request control.
 - **Settings** (`features/settings/pages/`): profile, email server, usage,
   backup/restore, and other settings subsections. **User access** is routed to

@@ -361,11 +361,34 @@
   display: flex;
   align-items: flex-start;
   gap: 9px;
+  cursor: pointer;
 }
 
 .rule-visibility-option input {
-  margin-top: 3px;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  padding: 0;
   accent-color: var(--action-bg);
+  cursor: pointer;
+}
+
+/* Supervisor pick list: one compact, fully clickable row per Supervisor. */
+.rule-visibility-supervisors .rule-visibility-option {
+  align-items: center;
+  padding: 5px 4px;
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.rule-visibility-supervisors .rule-visibility-option input {
+  margin: 0;
+}
+
+.rule-visibility-supervisors .rule-visibility-option:hover {
+  background: var(--line);
 }
 
 .rule-visibility-option small {
@@ -376,7 +399,8 @@
 
 .rule-visibility-supervisors {
   display: grid;
-  gap: 8px;
+  gap: 2px;
+  align-content: start;
   max-height: 220px;
   overflow-y: auto;
 }

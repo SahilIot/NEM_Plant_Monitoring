@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.api.routes.auth import get_current_user
 from app.db.session import get_db
-from app.models import Asset, Alert, MonitoringRule, RuleState, Variable, User
-from app.schemas.rule import RuleCreate, RuleRead, RuleUpdate
+from app.models import Asset, Alert, MonitoringRule, MonitoringRuleTemplate, RuleState, Variable, User
+from app.schemas.rule import RuleCreate, RuleRead, RuleTemplateCreate, RuleUpdate
+from app.services.rule_visibility import can_view_template, request_user
 from app.services.access_scope import access_scope, rule_asset_id
 from app.services.labels import apply_label_filter, assign_labels
 from app.services.monitoring_engine import emit_event, set_rule_enabled_state
@@ -24,6 +25,17 @@ SUPERVISOR_PARAMETER_KEYS: dict[str, frozenset[str]] = {
     "runtime_duration": frozenset({"warning_thresholds_seconds", "alert_threshold_seconds"}),
     "boolean_count_threshold": frozenset({"warning_thresholds", "alert_threshold"}),
 }
+
+# Fields that live on the shared rule (template) for rules created from one.
+SHARED_RULE_FIELDS = frozenset({
+    "name", "description", "rule_type", "operator", "threshold", "parameters", "severity",
+    "evaluation_interval_seconds", "stale_after_seconds",
+})
+TEMPLATE_VALUE_FIELDS = (
+    "name", "description", "collection_id", "rule_type", "required_variable_types", "variable_key",
+    "operator", "threshold", "parameters", "severity", "is_enabled",
+    "evaluation_interval_seconds", "stale_after_seconds",
+)
 
 # This checks whether a new value is genuinely different from the existing value.
 def _field_differs(current, new) -> bool:
@@ -361,6 +373,8 @@ def update_rule(
         raise HTTPException(status_code=403, detail="You are not allowed to edit monitoring rules")
 
     rule = rule_or_404(session, rule_id)
+    if user.role == "Supervisor" and rule.is_enabled and rule.lifecycle_status == "in_progress":
+        raise HTTPException(status_code=403,detail="A running rule cannot be edited by a Supervisor. Ask an Administrator, or edit it while it is not activated.",)
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status_code=422, detail="Provide at least one field to update")
@@ -429,9 +443,34 @@ def update_rule(
     if target_fields.intersection(changes) and session.scalar(select(Alert.id).where(Alert.rule_id == rule.id, Alert.status == "active").limit(1)):
         raise HTTPException(status_code=409,detail="Resolve active alerts before changing a rule target",)
 
+    # A rule created from a shared rule is a view of it: threshold-type edits go to the shared
+    # rule (single source of truth) and propagate to every asset using it, with audit history.
+    propagated = set()
+    shared_changes = {field: value for field, value in changes.items() if field in SHARED_RULE_FIELDS}
+    template = (
+        session.get(MonitoringRuleTemplate, rule.source_template_id)
+        if rule.source_template_id is not None and shared_changes
+        else None
+    )
+    if template is not None:
+        if not can_view_template(session, request_user(session), template):
+            raise HTTPException(status_code=403,detail="This rule is shared and its configuration is managed by an Administrator",)
+        from app.api.routes.frontend_compat import apply_template_update
+
+        values = {field: getattr(template, field) for field in TEMPLATE_VALUE_FIELDS}
+        for field, value in shared_changes.items():
+            values[field] = {**(template.parameters or {}), **(payload.parameters or {})} if field == "parameters" else value
+        try:
+            validated_template = RuleTemplateCreate.model_validate({**values, "labels": list(template.labels)})
+        except ValidationError as error:
+            raise HTTPException(status_code=422, detail=_validation_message(error)) from error
+        values = validated_template.model_dump(exclude={"labels"})
+        apply_template_update(session, request, template, values, None)
+        propagated = set(shared_changes) - {"name", "description"}
+
     #Apply the changes
     for field, value in changes.items():
-        if field not in {"is_enabled", "labels"}:
+        if field not in {"is_enabled", "labels"} | propagated:
             setattr(rule, field, value)
     if "labels" in changes:
         assign_labels(session, rule, changes["labels"])

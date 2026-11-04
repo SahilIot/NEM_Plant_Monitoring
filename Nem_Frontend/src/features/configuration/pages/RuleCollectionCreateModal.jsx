@@ -7,6 +7,7 @@ import {
   templatePayload,
 } from "./RuleLibrary.jsx";
 import LabelsField from "../../../components/common/LabelsField.jsx";
+import { VISIBILITY_LABELS, useSupervisorChoices } from "./RuleVisibility.jsx";
 
 const MAX_RULES = 5;
 
@@ -23,6 +24,9 @@ export default function RuleCollectionCreateModal({
   const [ruleModalOpen, setRuleModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [visibilityType, setVisibilityType] = useState("");
+  const [supervisorIds, setSupervisorIds] = useState([]);
+  const supervisorChoices = useSupervisorChoices(!collection);
 
   const addRule = (values) => {
     setRules((current) => [...current, templatePayload(values)]);
@@ -40,6 +44,14 @@ export default function RuleCollectionCreateModal({
       setError("Add at least one monitoring rule to the collection.");
       return;
     }
+    if (!collection && !visibilityType) {
+      setError("Choose who can see the rules in this collection.");
+      return;
+    }
+    if (!collection && visibilityType === "specific_supervisors" && supervisorIds.length === 0) {
+      setError("Select at least one Supervisor.");
+      return;
+    }
 
     setSaving(true);
     setError("");
@@ -52,7 +64,12 @@ export default function RuleCollectionCreateModal({
       if (collection) {
         await onSave(payload);
       } else {
-        await onCreate({ ...payload, rules });
+        await onCreate({
+          ...payload,
+          rules,
+          visibility_type: visibilityType,
+          visibility_supervisor_ids: visibilityType === "specific_supervisors" ? supervisorIds : [],
+        });
       }
     } catch (requestError) {
       setError(requestError.message || "Could not create the rule collection.");
@@ -105,6 +122,52 @@ export default function RuleCollectionCreateModal({
               disabled={saving}
             />
           </div>
+
+          {!collection && (
+            <div className="field">
+              <label htmlFor="collection-visibility">
+                Rule visibility <span className="req">*</span>
+              </label>
+              <select
+                id="collection-visibility"
+                value={visibilityType}
+                onChange={(event) => setVisibilityType(event.target.value)}
+                disabled={saving}
+                required
+              >
+                <option value="" disabled>Select who can see these rules</option>
+                {Object.entries(VISIBILITY_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+              <span className="hint">Applies to every rule created with this collection.</span>
+              {visibilityType === "specific_supervisors" && (
+                <div className="rule-visibility-supervisors">
+                  {(supervisorChoices || []).length === 0 ? (
+                    <span className="hint">There are no active Supervisors.</span>
+                  ) : (
+                    supervisorChoices.map((person) => (
+                      <label key={person.id} className="rule-visibility-option">
+                        <input
+                          type="checkbox"
+                          checked={supervisorIds.includes(person.id)}
+                          disabled={saving}
+                          onChange={() =>
+                            setSupervisorIds((current) =>
+                              current.includes(person.id)
+                                ? current.filter((id) => id !== person.id)
+                                : [...current, person.id]
+                            )
+                          }
+                        />
+                        <span>{person.username}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {!collection && <section aria-label="Collection rules">
             <div className="panel-head">

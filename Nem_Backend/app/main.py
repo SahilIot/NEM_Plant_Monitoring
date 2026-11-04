@@ -21,6 +21,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.routes import (
     assets,
     auth,
+    config_transfer,
     dashboard,
     frontend_compat,
     maintenance,
@@ -282,6 +283,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "/api/v1/auth/users",
             "/api/v1/plc",
             "/api/v1/import",
+            "/api/v1/config-transfer",
             "/api/v1/settings",
             "/api/v1/backups",
             "/api/v1/usage",
@@ -344,6 +346,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             or policy_path.startswith("/api/v1/collections")
             or policy_path.startswith("/api/v1/documents")
             or policy_path.startswith("/api/v1/import")
+            or policy_path.startswith("/api/v1/config-transfer")
             or policy_path.startswith("/api/v1/settings")
             or policy_path.startswith("/api/v1/backups")
             or policy_path.startswith("/api/v1/usage")
@@ -594,6 +597,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(auth.router, prefix="/api/v1")
     application.include_router(frontend_compat.router, prefix="/api/v1")
     application.include_router(rule_visibility.router, prefix="/api/v1")
+    application.include_router(config_transfer.router, prefix="/api/v1")
     application.include_router(assets.router, prefix="/api/v1")
     application.include_router(variables.router, prefix="/api/v1")
     application.include_router(readings.router, prefix="/api/v1")

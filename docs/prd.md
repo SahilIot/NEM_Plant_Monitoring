@@ -63,8 +63,9 @@ assignments they see no assets. Administrators are unrestricted.
 | FR-11 | Use OPC UA to write PLC values or control/stop machinery. | Explicitly not implemented |
 | FR-12 | Schedule maintenance from machine running-hour or cycle thresholds. | Not implemented |
 | FR-13 | Assign reusable shared labels to rules, rule collections, and instruction documents; filter listings by one or more labels. | Implemented; PostgreSQL migration and deployment verification required |
-| FR-14 | Administrator-controlled visibility of shared rules (Admin Only, Specific Supervisors, All Supervisors) with grant and revoke; Supervisors see only authorized rules, enforced by the backend. | Implemented; no request workflow exists |
+| FR-14 | Administrator-controlled visibility of shared rules (Admin Only or Specific Supervisors, chosen explicitly at creation; no all-Supervisors option) with grant and revoke; Supervisors see only authorized rules, enforced by the backend. | Implemented; no request workflow exists |
 | FR-15 | Record who created and last changed rules and maintenance, and keep field-level history of shared-rule edits and visibility changes. | Implemented |
+| FR-16 | Administrators export and import monitoring rules, rule collections and maintenance rule definitions as a versioned, ID-free JSON package with preview, duplicate handling, Supervisor/asset mapping and all-or-nothing import. | Implemented; Administrator only |
 
 ## Principal workflows
 

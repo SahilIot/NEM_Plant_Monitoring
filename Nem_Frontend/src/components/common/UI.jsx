@@ -217,7 +217,7 @@ export function ConfirmationProvider({ children }) {
             >
               <AlertTriangle size={20} />
             </span>
-            <p>{request.message}</p>
+            <p style={{ whiteSpace: "pre-line" }}>{request.message}</p>
           </div>
           <div className="modal-actions">
             <button
@@ -244,7 +244,7 @@ export function ConfirmationProvider({ children }) {
 
 const initialValue = (field) => {
   if (field.type === "files") return [];
-  if (field.type === "labels") return [];
+  if (field.type === "labels" || field.type === "supervisors") return [];
   if (field.default !== undefined && field.default !== null) {
     return String(field.default);
   }
@@ -267,7 +267,7 @@ export function CreateModal({
         field.key,
         initialValues[field.key] !== undefined &&
         initialValues[field.key] !== null
-          ? field.type === "labels" && Array.isArray(initialValues[field.key])
+          ? (field.type === "labels" || field.type === "supervisors") && Array.isArray(initialValues[field.key])
             ? initialValues[field.key]
             : String(initialValues[field.key])
           : initialValue(field),
@@ -328,7 +328,7 @@ export function CreateModal({
           let value = hasCurrent
             ? current[field.key]
             : hasInitial
-              ? field.type === "labels" && Array.isArray(initialValues[field.key])
+              ? (field.type === "labels" || field.type === "supervisors") && Array.isArray(initialValues[field.key])
                 ? initialValues[field.key]
                 : String(initialValues[field.key] ?? "")
               : initialValue(field);
@@ -389,9 +389,9 @@ export function CreateModal({
     for (const field of fields) {
       const value =
         values[field.key] ??
-        (field.type === "files" || field.type === "labels" ? [] : "");
+        (field.type === "files" || field.type === "labels" || field.type === "supervisors" ? [] : "");
 
-      if (field.type === "files" || field.type === "labels") {
+      if (field.type === "files" || field.type === "labels" || field.type === "supervisors") {
         normalized[field.key] = value;
       } else if (
         field.type === "number" &&
@@ -442,6 +442,34 @@ export function CreateModal({
                 onChange={(next) => set(field.key, next)}
                 disabled={Boolean(field.disabled || busy || disabled)}
               />
+            ) : field.type === "supervisors" ? (
+              <div id={"f-" + field.key} className="rule-visibility-supervisors">
+                {(field.choices || []).length === 0 ? (
+                  <span className="hint">There are no active Supervisors.</span>
+                ) : (
+                  (field.choices || []).map((person) => {
+                    const chosen = Array.isArray(values[field.key]) ? values[field.key] : [];
+                    return (
+                      <label key={person.id} className="rule-visibility-option">
+                        <input
+                          type="checkbox"
+                          checked={chosen.includes(person.id)}
+                          disabled={Boolean(field.disabled || busy || disabled)}
+                          onChange={() =>
+                            set(
+                              field.key,
+                              chosen.includes(person.id)
+                                ? chosen.filter((id) => id !== person.id)
+                                : [...chosen, person.id]
+                            )
+                          }
+                        />
+                        <span>{person.username}</span>
+                      </label>
+                    );
+                  })
+                )}
+              </div>
             ) : field.type === "files" ? (
               <>
                 <input

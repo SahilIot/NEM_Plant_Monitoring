@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 
@@ -145,7 +146,8 @@ _POSTGRES_MAX_IDENTIFIER = 63
 _MIGRATION_LOCK_TIMEOUT = "5s"
 
 _TEMPLATES_TABLE = "nem_monitoring_rule_templates"
-_VISIBILITY_VALUES = ("admin_only", "specific_supervisors", "all_supervisors")
+_VISIBILITY_VALUES = ("admin_only", "specific_supervisors")
+_OBSOLETE_VISIBILITY = "all_supervisors"
 _VISIBILITY_DEFAULT = "admin_only"
 _VISIBILITY_CHECK = "ck_nem_monitoring_rule_templates_visibility"
 _REQUESTS_TABLE = "nem_rule_visibility_requests"
@@ -263,7 +265,7 @@ def _ensure_user_reference_column(engine: Engine, table: str, column: str) -> No
 
 
 def _ensure_timestamp_column(engine: Engine, table: str, column: str) -> None:
-    """Add a nullable naive-UTC timestamp column (matches the models' UTCDateTime) when missing."""
+    # Add a nullable naive-UTC timestamp column (matches the models' UTCDateTime) when missing
     with engine.begin() as connection:
         columns = {col["name"]: col for col in inspect(connection).get_columns(table)}
         if column not in columns:
@@ -280,7 +282,6 @@ def _ensure_timestamp_column(engine: Engine, table: str, column: str) -> None:
 # add missing audit columns to tables that should have them, and create indexes on those columns
 def _upgrade_audit_columns(engine: Engine) -> None:
     """Add/verify created_by_id, updated_by_id (FK to auth_users, indexed) and records.updated_at.
-
     Additive and idempotent: existing rows keep their values (NULL where history is unknown).
     """
     if not _is_postgresql(engine, "audit column upgrade"):
@@ -303,7 +304,7 @@ def _constraint_literals(sqltext: str | None) -> set[str]:
 
 
 def _normalise_invalid_visibility(connection) -> None:
-    """Fail closed: unknown/NULL visibility values become admin_only (already invisible to Supervisors)."""
+    # Fail closed: unknown/NULL visibility values become admin_only (already invisible to Supervisors).
     table = _ident(connection.engine, _TEMPLATES_TABLE)
     invalid = connection.execute(
         text(f"SELECT id, visibility_type FROM {table} "
@@ -324,27 +325,73 @@ def _normalise_invalid_visibility(connection) -> None:
     )
 
 
+def _convert_obsolete_all_supervisors(connection) -> None:
+    """Retire the removed "all_supervisors" visibility without changing who can see a rule.
+    Each affected shared rule becomes ``specific_supervisors`` listing the Supervisors that are
+    active right now (exactly the people who could see it before), or admin_only when there is
+    none. A history row records the conversion. Idempotent: once converted
+    no row carries the obsolete value.
+    """
+    names = set(inspect(connection).get_table_names())
+    needed = {_TEMPLATES_TABLE, "nem_rule_template_supervisors", "nem_rule_visibility_changes", "auth_users"}
+    templates = _ident(connection.engine, _TEMPLATES_TABLE)
+    affected = [row[0] for row in connection.execute(
+        text(f"SELECT id FROM {templates} WHERE visibility_type = :old ORDER BY id"),
+        {"old": _OBSOLETE_VISIBILITY},
+    )]
+    if not affected:
+        return
+    if not needed <= names:
+        raise RuntimeError(
+            "Cannot retire all_supervisors visibility safely; missing tables: "
+            + ", ".join(sorted(needed - names)))
+    supervisors = [row[0] for row in connection.execute(text(
+        "SELECT id FROM auth_users WHERE role = 'Supervisor' AND is_active = TRUE ORDER BY id"))]
+    new_type = "specific_supervisors" if supervisors else _VISIBILITY_DEFAULT
+    logger.warning(
+        "Converting %s shared rule(s) from the removed all_supervisors visibility to %s "
+        "(%s active Supervisor(s) keep access). Rule ids: %s",
+        len(affected), new_type, len(supervisors), affected[:50],
+    )
+    for template_id in affected:
+        if supervisors:
+            connection.execute(
+                text("INSERT INTO nem_rule_template_supervisors (template_id, user_id) "
+                     "VALUES (:t, :u) ON CONFLICT DO NOTHING"),
+                [{"t": template_id, "u": user_id} for user_id in supervisors],
+            )
+        connection.execute(
+            text(f"UPDATE {templates} SET visibility_type = :new WHERE id = :id"),
+            {"new": new_type, "id": template_id},
+        )
+        connection.execute(
+            text("INSERT INTO nem_rule_visibility_changes (template_id, changed_by_id, source, "
+                 "previous_visibility, new_visibility, previous_user_ids, new_user_ids, changed_at) "
+                 "VALUES (:t, NULL, 'migration', :old, :new, CAST(:prev AS JSON), CAST(:ids AS JSON), now())"),
+            {"t": template_id, "old": _OBSOLETE_VISIBILITY, "new": new_type,
+             "prev": "[]", "ids": json.dumps(supervisors)},
+        )
+
+# This function ensures the shared - template table has a correctly config. visibility_type coluumn.
 def _ensure_visibility_column(connection) -> None:
-    """Add visibility_type (NOT NULL DEFAULT admin_only), or restore a missing default / NOT NULL."""
+    # Add visibility_type (NOT NULL DEFAULT admin_only), or restore a missing default / NOT NULL.
     table = _ident(connection.engine, _TEMPLATES_TABLE)
     columns = {col["name"]: col for col in inspect(connection).get_columns(_TEMPLATES_TABLE)}
     if "visibility_type" not in columns:
-        connection.execute(text(
-            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS visibility_type "
+        connection.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS visibility_type "
             f"VARCHAR(30) NOT NULL DEFAULT '{_VISIBILITY_DEFAULT}'"
         ))
         return
     column = columns["visibility_type"]
     if _VISIBILITY_DEFAULT not in str(column.get("default") or ""):
-        connection.execute(text(
-            f"ALTER TABLE {table} ALTER COLUMN visibility_type SET DEFAULT '{_VISIBILITY_DEFAULT}'"))
+        connection.execute(text( f"ALTER TABLE {table} ALTER COLUMN visibility_type SET DEFAULT '{_VISIBILITY_DEFAULT}'"))
     if column.get("nullable"):
         _normalise_invalid_visibility(connection)
         connection.execute(text(f"ALTER TABLE {table} ALTER COLUMN visibility_type SET NOT NULL"))
 
 
 def _ensure_visibility_check(connection) -> None:
-    """Enforce the three allowed visibility values with a CHECK constraint (replacing a stale one)."""
+    # Enforce the two allowed visibility values with a CHECK constraint (replacing a stale one).
     engine = connection.engine
     table = _ident(engine, _TEMPLATES_TABLE)
     # The inspector is scoped to this table in the connection's default schema, so a same-named
@@ -366,7 +413,6 @@ def _ensure_visibility_check(connection) -> None:
 # Adds visibility_type default is admin only can change to specific supervisors or all supervisors.
 def _upgrade_rule_visibility(engine: Engine) -> None:
     """Add shared-rule visibility and template audit columns (idempotent, additive).
-
     Existing shared rules default to ``admin_only``; valid existing values are preserved and no
     historical permission is invented. Invalid values are reset to ``admin_only`` (fail closed)
     before the allowed-values constraint is enforced.
@@ -378,6 +424,7 @@ def _upgrade_rule_visibility(engine: Engine) -> None:
         return
     with engine.begin() as connection:
         _ensure_visibility_column(connection)
+        _convert_obsolete_all_supervisors(connection)
         _normalise_invalid_visibility(connection)
         _ensure_visibility_check(connection)
     if "auth_users" not in table_names:

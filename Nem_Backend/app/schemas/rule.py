@@ -340,14 +340,29 @@ class RuleTemplateRead(RuleTemplateCreate):
     created_by: str | None = None
     updated_by_id: int | None = None
     updated_by: str | None = None
-    visibility_type: Literal["admin_only", "specific_supervisors", "all_supervisors"] = "admin_only"
+    visibility_type: Literal["admin_only", "specific_supervisors"] = "admin_only"
     # Filled for Administrators only; Supervisors never see who else is on the list.
     visibility_supervisor_ids: list[int] = Field(default_factory=list)
 
 
 class RuleVisibilityUpdate(ORMModel):
-    visibility_type: Literal["admin_only", "specific_supervisors", "all_supervisors"]
+    visibility_type: Literal["admin_only", "specific_supervisors"]
     supervisor_ids: list[int] = Field(default_factory=list, max_length=200)
+
+
+class RuleTemplateCreateRequest(RuleTemplateCreate):
+    # Creating a shared rule requires an explicit visibility choice (no default).
+
+    visibility_type: Literal["admin_only", "specific_supervisors"]
+    visibility_supervisor_ids: list[int] = Field(default_factory=list, max_length=200)
+
+    @model_validator(mode="after")
+    def check_visibility_choice(self):
+        if self.visibility_type == "specific_supervisors" and not self.visibility_supervisor_ids:
+            raise ValueError("Select at least one Supervisor for specific-supervisor visibility")
+        if self.visibility_type == "admin_only" and self.visibility_supervisor_ids:
+            raise ValueError("Admin Only rules cannot list Supervisors")
+        return self
 
 
 #Applying templates to assets
@@ -452,7 +467,8 @@ class RuleRead(ORMModel):
     labels: list[str] = Field(default_factory=list)
     rule_type: str
     target_asset_id: int | None
-    source_template_id: int | None = None
+    # Never exposes the shared rule's id (it may be hidden from the caller).
+    shared_rule: bool = False
     variable_id: int | None
     operator: str | None
     threshold: Decimal | None

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Copy, X } from "lucide-react";
 import { api } from "../../../services/api.js";
 import "./CopyRuleModal.css";
+import { VisibilityPicker, useSupervisorChoices } from "./RuleVisibility.jsx";
 
 export default function CopyRuleModal({
   template,
@@ -12,6 +13,9 @@ export default function CopyRuleModal({
   const [name, setName] = useState(template.name || "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [visibilityType, setVisibilityType] = useState("");
+  const [supervisorIds, setSupervisorIds] = useState([]);
+  const supervisorChoices = useSupervisorChoices(true);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -40,6 +44,15 @@ export default function CopyRuleModal({
       return;
     }
 
+    if (!visibilityType) {
+      setError("Choose who can see the copied rule.");
+      return;
+    }
+    if (visibilityType === "specific_supervisors" && supervisorIds.length === 0) {
+      setError("Select at least one Supervisor.");
+      return;
+    }
+
     setSaving(true);
     setError("");
 
@@ -60,6 +73,8 @@ export default function CopyRuleModal({
           template.evaluation_interval_seconds ?? null,
         stale_after_seconds: template.stale_after_seconds ?? null,
         collection_id: null,
+        visibility_type: visibilityType,
+        visibility_supervisor_ids: visibilityType === "specific_supervisors" ? supervisorIds : [],
       };
 
       const result = await api.post("/rule-templates", payload);
@@ -140,6 +155,21 @@ export default function CopyRuleModal({
               <small>
                 Changing the name is required to create a copy.
               </small>
+            </div>
+
+            <div className="copy-rule-field">
+              <label htmlFor="copy-rule-visibility">
+                Visibility <span>*</span>
+              </label>
+              <VisibilityPicker
+                id="copy-rule-visibility"
+                type={visibilityType}
+                onType={setVisibilityType}
+                ids={supervisorIds}
+                onIds={setSupervisorIds}
+                choices={supervisorChoices}
+                disabled={saving}
+              />
             </div>
 
             {error && (

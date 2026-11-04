@@ -295,13 +295,13 @@ button:disabled { opacity: 0.55; cursor: default; }
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; color: var(--muted); font-size: 13px; }
 .field > label { color: var(--muted); font-size: 13px; }
 .field .req { color: var(--alert); }
-.form input, .form select, .field input, .field select, .field textarea, .mini-input, .profile-list input {
+.form input:not([type="checkbox"]):not([type="radio"]), .form select, .field input:not([type="checkbox"]):not([type="radio"]), .field select, .field textarea, .mini-input, .profile-list input {
   width: 100%; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: var(--r-ctl); color: var(--ink); background: var(--surface); font-size: 14px;
 }
-.form input, .form select, .field input, .field select, .mini-input, .profile-list input { height: var(--ctl); }
+.form input:not([type="checkbox"]):not([type="radio"]), .form select, .field input:not([type="checkbox"]):not([type="radio"]), .field select, .mini-input, .profile-list input { height: var(--ctl); }
 .mini-input { width: 200px; }
 .field textarea { padding: 9px 12px; resize: vertical; min-height: 84px; }
-.form input:focus, .form select:focus, .field input:focus, .field select:focus, .field textarea:focus, .mini-input:focus, .tree-tools input:focus { outline: 2px solid var(--action); outline-offset: 0; border-color: var(--action); }
+.form input:not([type="checkbox"]):not([type="radio"]):focus, .form select:focus, .field input:not([type="checkbox"]):not([type="radio"]):focus, .field select:focus, .field textarea:focus, .mini-input:focus, .tree-tools input:focus { outline: 2px solid var(--action); outline-offset: 0; border-color: var(--action); }
 
 .modal-bg { position: fixed; inset: 0; background: rgba(8, 12, 16, 0.55); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 16px; overflow-y: auto; }
 .modal { background: var(--surface); padding: 24px; width: 440px; max-width: 100%; max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow: auto; border-radius: 10px; border: 1px solid var(--line); box-shadow: var(--shadow); }

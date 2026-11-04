@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../../../services/api.js";
 import GroupedMenu from "../../../components/common/GroupedMenu.jsx";
+import { useAuth } from "../../auth/AuthContext.jsx";
 
 const ITEMS = [
   {
@@ -30,14 +31,14 @@ const ITEMS = [
     icon: "import",
     group: "Content",
     title: "Import configuration",
-    desc: "Import monitoring rules and monitoring rule collections.",
+    desc: "Import monitoring rules, rule collections and maintenance rules from a JSON export.",
   },
   {
     to: "/configuration/export",
     icon: "export",
     group: "Content",
     title: "Export configuration",
-    desc: "Export monitoring rules and monitoring rule collections as a JSON file.",
+    desc: "Export monitoring rules, rule collections and maintenance rules as a JSON file.",
   },
 ];
 
@@ -45,7 +46,12 @@ const plural = (n, one, many) =>
   `${n} ${n === 1 ? one : many}`;
 
 export default function Configuration() {
+  const { user } = useAuth();
   const [badges, setBadges] = useState({});
+  // Import / export are Administrator-only (the backend enforces this too).
+  const items = user?.role === "Administrator"
+    ? ITEMS
+    : ITEMS.filter((item) => !["/configuration/import", "/configuration/export"].includes(item.to));
 
   useEffect(() => {
     const count = (path, one, many) =>
@@ -74,7 +80,7 @@ export default function Configuration() {
   return (
     <GroupedMenu
       title="Configuration"
-      items={ITEMS}
+      items={items}
       badges={badges}
     />
   );

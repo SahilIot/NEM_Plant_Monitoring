@@ -1,3 +1,4 @@
+# Model registration/import file. purpose is to make sure the application`s db models are imported and registered with the ORM.
 from app.models.asset import Asset
 from app.models.auth import AuthSession, User
 from app.models.maintenance import MaintenanceRecord, MaintenanceSchedule
@@ -23,6 +24,7 @@ from app.models.rule import (
 )
 from app.models.variable import Variable
 from app.models.rule_visibility import RuleTemplateChange, RuleVisibilityChange
+from app.models.config_import import ConfigurationImport
 from app.models import audit as _audit  # noqa: F401  (registers audit stamping)
 
 __all__ = [

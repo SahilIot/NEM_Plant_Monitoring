@@ -4,16 +4,138 @@ import { api } from "../../../services/api.js";
 import { LoadingIndicator } from "../../../components/common/UI.jsx";
 
 export const VISIBILITY_LABELS = {
-  admin_only: "Admin only",
-  specific_supervisors: "Specific supervisors",
-  all_supervisors: "All supervisors",
+  admin_only: "Admin Only",
+  specific_supervisors: "Specific Supervisors",
 };
 
 const VISIBILITY_HELP = {
   admin_only: "Only Administrators can see and manage this shared rule.",
-  specific_supervisors: "Only the Supervisors you select can see and manage it.",
-  all_supervisors: "Every active Supervisor can see and manage it.",
+  specific_supervisors: "Only the Supervisors you select (and Administrators) can see and manage it.",
 };
+
+export const SHARED_RULE_WARNING =
+  "This is a shared rule. Changing this configuration will affect all assets and users using this rule. Do you want to continue?";
+
+/** Active Supervisors an Administrator may grant visibility to (null while loading). */
+export function useSupervisorChoices(enabled = true) {
+  const [choices, setChoices] = useState(null);
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let alive = true;
+    api
+      .get("/rule-visibility/supervisors")
+      .then((list) => alive && setChoices(Array.isArray(list) ? list : []))
+      .catch(() => alive && setChoices([]));
+    return () => {
+      alive = false;
+    };
+  }, [enabled]);
+  return choices;
+}
+
+/** Create-form fields: an explicit choice (no default) plus the Supervisor picker. */
+export function visibilityFields(supervisorChoices) {
+  const specific = { key: "visibility_type", equals: "specific_supervisors" };
+  return [
+    {
+      key: "visibility_type",
+      label: "Visibility",
+      type: "select",
+      required: true,
+      placeholder: "Select who can see this rule",
+      options: Object.entries(VISIBILITY_LABELS),
+      hint: "Admin Only: only Administrators. Specific Supervisors: Administrators and the Supervisors you select.",
+    },
+    {
+      key: "visibility_supervisor_ids",
+      label: "Supervisors",
+      type: "supervisors",
+      choices: supervisorChoices || [],
+      showWhen: specific,
+      requiredWhen: specific,
+    },
+  ];
+}
+
+/** Stand-alone explicit visibility chooser for forms that are not built from CreateModal fields. */
+export function VisibilityPicker({ id, type, onType, ids, onIds, choices, disabled }) {
+  return (
+    <div>
+      <select id={id} value={type} onChange={(event) => onType(event.target.value)} disabled={disabled} required>
+        <option value="" disabled>Select who can see this rule</option>
+        {Object.entries(VISIBILITY_LABELS).map(([value, label]) => (
+          <option key={value} value={value}>{label}</option>
+        ))}
+      </select>
+      {type === "specific_supervisors" && (
+        <div className="rule-visibility-supervisors">
+          {(choices || []).length === 0 ? (
+            <small>There are no active Supervisors.</small>
+          ) : (
+            choices.map((person) => (
+              <label key={person.id} className="rule-visibility-option">
+                <input
+                  type="checkbox"
+                  checked={ids.includes(person.id)}
+                  disabled={disabled}
+                  onChange={() =>
+                    onIds(ids.includes(person.id) ? ids.filter((item) => item !== person.id) : [...ids, person.id])
+                  }
+                />
+                <span>{person.username}</span>
+              </label>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export const VISIBILITY_CHANGE_WARNING =
+  "You are changing who can access this rule. The change applies to the shared rule itself, so it affects access for every asset that uses it, not only the one currently shown. Thresholds, activation state and assignments are not changed.";
+
+const sortedIds = (list) => [...(list || [])].map(Number).sort((a, b) => a - b);
+
+/** True when the form's visibility differs from the stored one (Administrator edit forms). */
+export function visibilityChanged(template, values) {
+  if (!values.visibility_type) return false;
+  if (values.visibility_type !== (template.visibility_type || "admin_only")) return true;
+  return (
+    values.visibility_type === "specific_supervisors" &&
+    JSON.stringify(sortedIds(values.visibility_supervisor_ids)) !==
+      JSON.stringify(sortedIds(template.visibility_supervisor_ids))
+  );
+}
+
+/** Edit-form initial values for the visibility fields. */
+export function visibilityInitial(template) {
+  return {
+    visibility_type: template?.visibility_type || "admin_only",
+    visibility_supervisor_ids: sortedIds(template?.visibility_supervisor_ids),
+  };
+}
+
+/** Persist a visibility change through the existing Administrator endpoint. */
+export async function saveVisibility(template, values) {
+  await api.put(`/rule-templates/${template.id}/visibility`, {
+    visibility_type: values.visibility_type,
+    supervisor_ids:
+      values.visibility_type === "specific_supervisors"
+        ? sortedIds(values.visibility_supervisor_ids)
+        : [],
+  });
+}
+
+export function visibilityPayload(values) {
+  return {
+    visibility_type: values.visibility_type,
+    visibility_supervisor_ids:
+      values.visibility_type === "specific_supervisors"
+        ? (values.visibility_supervisor_ids || []).map(Number)
+        : [],
+  };
+}
 
 function ModalShell({ id, title, subtitle, onClose, busy, children, footer }) {
   useEffect(() => {

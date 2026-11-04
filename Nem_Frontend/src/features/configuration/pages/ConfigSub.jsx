@@ -11,6 +11,7 @@ import {
   useNavigate,
   useParams,
 } from "react-router-dom";
+import ImportConfigurationPanel from "./ImportConfigurationPanel.jsx";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import {
@@ -276,79 +277,6 @@ function cell(key, row, variableNames) {
   }
 
   return value;
-}
-
-function ImportPage() {
-  const { user } = useAuth();
-  const canManageConfiguration = user?.role === "Administrator";
-  const [msg, setMsg] = useState({
-    text: "",
-    error: false,
-  });
-
-  const onFile = async (event) => {
-    if (!canManageConfiguration) return;
-    const file = event.target.files?.[0];
-
-    if (!file) return;
-
-    try {
-      const data = JSON.parse(await file.text());
-      const result = await api.post("/import", data);
-
-      setMsg({
-        text: `Imported ${result.rules} rule(s) and ${result.collections} new collection(s).`,
-        error: false,
-      });
-    } catch (error) {
-      const text =
-        error instanceof SyntaxError
-          ? "That file is not valid JSON."
-          : error.message;
-
-      setMsg({
-        text: `Import failed: ${text}`,
-        error: true,
-      });
-    } finally {
-      event.target.value = "";
-    }
-  };
-
-  return (
-    <div className="panel">
-      <p className="muted">
-        Choose a JSON file with a <code>collections</code> list
-        (name, description) and a <code>rules</code> list.
-        Each rule needs the same fields as a rule created in
-        the app, including its asset and variable IDs.
-      </p>
-
-      {!canManageConfiguration && (
-        <p className="notice" role="status">
-          Configuration import is restricted to Administrators.
-        </p>
-      )}
-      <input
-        type="file"
-        accept=".json,application/json"
-        disabled={!canManageConfiguration}
-        title={!canManageConfiguration ? "Only Administrators can import configuration." : undefined}
-        onChange={onFile}
-      />
-
-      {msg.text && (
-        <p
-          className={
-            "notice" + (msg.error ? " error" : "")
-          }
-          role="status"
-        >
-          {msg.text}
-        </p>
-      )}
-    </div>
-  );
 }
 
 export default function ConfigSub() {
@@ -1021,7 +949,7 @@ const remove = async (row) => {
           Import configuration
         </h1>
 
-        <ImportPage />
+        <ImportConfigurationPanel />
       </div>
     );
   }

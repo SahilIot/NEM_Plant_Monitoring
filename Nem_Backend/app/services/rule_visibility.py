@@ -1,10 +1,10 @@
 """Central authorization for shared (reusable) monitoring rule visibility.
 
-* Administrators see and manage every shared rule.
-* Supervisors see a shared rule when it is ``all_supervisors`` or when it is
-  ``specific_supervisors`` and they are on its list. ``admin_only`` hides it.
-* Operators have no access to the global shared-rule section.
-* Background/system sessions (no request) are not restricted.
+ Administrators see and manage every shared rule.
+ Supervisors see a shared rule only when it is specific_supervisors and they are
+  on its list. admin_onl` hides it. There is no "all supervisors" visibility.
+ Operators have no access to the global shared-rule section.
+ Background/system sessions (no request) are not restricted.
 
 Visibility only governs the shared rule definition and its global edit. It never
 grants access to assets: asset-level access stays with ``access_scope``. A rule the
@@ -12,7 +12,7 @@ user may not see answers 404, identical to a missing rule.
 """
 from __future__ import annotations
 
-from sqlalchemy import and_, false, or_, select, true
+from sqlalchemy import and_, false, select, true
 from sqlalchemy.orm import Session
 
 from fastapi import HTTPException
@@ -26,19 +26,19 @@ from app.models.rule_visibility import (
 )
 from app.services.access_scope import REQUEST_SESSION_KEY
 
-
+# Identifying the authenticated user 
 def request_user(session: Session) -> User | None:
     user_id = session.info.get("auth_user_id")
     user = session.get(User, user_id) if user_id is not None else None
     return user if user is not None and user.is_active else None
 
-
+# This checks whether the SQLAlchemy session belongs to a normal HTTP request.
 def _is_system_session(session: Session) -> bool:
     return not session.info.get(REQUEST_SESSION_KEY)
 
-
+# This function returns a SQL condition that can be applied directly to a query.- Filtering which rules users can see
 def visible_templates_clause(session: Session, user: User | None):
-    """SQL condition selecting the shared rules ``user`` may see and manage."""
+    # SQL condition selecting the shared rules ``user`` may see and manage.
     if _is_system_session(session):
         return true()
     if user is None or not user.is_active:
@@ -52,15 +52,12 @@ def visible_templates_clause(session: Session, user: User | None):
         .where(rule_template_visibility_supervisors.c.user_id == user.id)
         .scalar_subquery()
     )
-    return or_(
-        MonitoringRuleTemplate.visibility_type == "all_supervisors",
-        and_(
-            MonitoringRuleTemplate.visibility_type == "specific_supervisors",
-            MonitoringRuleTemplate.id.in_(listed),
-        ),
+    return and_(
+        MonitoringRuleTemplate.visibility_type == "specific_supervisors",
+        MonitoringRuleTemplate.id.in_(listed),
     )
 
-
+# Checking visibility for one rule.
 def can_view_template(session: Session, user: User | None, template: MonitoringRuleTemplate) -> bool:
     if _is_system_session(session):
         return True
@@ -70,23 +67,21 @@ def can_view_template(session: Session, user: User | None, template: MonitoringR
         return True
     if user.role != "Supervisor":
         return False
-    if template.visibility_type == "all_supervisors":
-        return True
     return template.visibility_type == "specific_supervisors" and any(
         listed.id == user.id for listed in template.visibility_supervisors
     )
 
-
+# It retrieves the template by ID
 def get_visible_template(session: Session, template_id: int) -> MonitoringRuleTemplate:
-    """Return the shared rule or raise 404 when missing or not visible to the caller."""
+    # Return the shared rule or raise 404 when missing or not visible to the caller.
     template = session.get(MonitoringRuleTemplate, template_id)
     if template is None or not can_view_template(session, request_user(session), template):
         raise HTTPException(status_code=404, detail="Rule template was not found")
     return template
 
-
+# This function validates the IDs selected when an Administrator changes rule visibility.
 def active_supervisors(session: Session, user_ids) -> list[User]:
-    """Validate that every id is an existing, active Supervisor."""
+    # Validate that every id is an existing, active Supervisor.
     ids = sorted({int(item) for item in user_ids})
     if not ids:
         return []
@@ -95,13 +90,10 @@ def active_supervisors(session: Session, user_ids) -> list[User]:
     missing = [item for item in ids if item not in found]
     invalid = [user for user in users if user.role != "Supervisor" or not user.is_active]
     if missing or invalid:
-        raise HTTPException(
-            status_code=422,
-            detail="Visibility can only be granted to active Supervisors",
-        )
+        raise HTTPException(status_code=422,detail="Visibility can only be granted to active Supervisors",)
     return users
 
-
+# This function actually changes a rule`s visibility
 def apply_visibility(
     session: Session,
     template: MonitoringRuleTemplate,
@@ -120,10 +112,7 @@ def apply_visibility(
         raise HTTPException(status_code=422, detail="Invalid visibility type")
     users = active_supervisors(session, supervisor_ids) if visibility_type == "specific_supervisors" else []
     if visibility_type == "specific_supervisors" and not users:
-        raise HTTPException(
-            status_code=422,
-            detail="Select at least one Supervisor for specific-supervisor visibility",
-        )
+        raise HTTPException( status_code=422,detail="Select at least one Supervisor for specific-supervisor visibility",)
     previous_type = template.visibility_type
     previous_ids = template.visibility_supervisor_ids
     new_ids = sorted(user.id for user in users)
@@ -143,9 +132,9 @@ def apply_visibility(
     session.add(change)
     return change
 
-
+# This function determines whether an old and new value are genuinely different
 def values_differ(old, new) -> bool:
-    """True when two stored/submitted values really differ (Decimal-safe, None-aware)."""
+    # True when two stored/submitted values really differ (Decimal-safe, None-aware).
     from decimal import Decimal
 
     if old is None or new is None:
@@ -154,10 +143,9 @@ def values_differ(old, new) -> bool:
         return Decimal(str(old)) != Decimal(str(new))
     return old != new
 
-
+# Route-level role auth 
 def require_session_roles(session: Session, *roles: str) -> User | None:
     """Route-level role gate (defence in depth behind the middleware).
-
     Background/system sessions pass. Returns the authenticated user otherwise.
     """
     if _is_system_session(session):
@@ -178,17 +166,16 @@ SUPERVISOR_EDITABLE_PARAMETERS = frozenset({
     "warning_thresholds_seconds", "alert_threshold_seconds",
 })
 
-
+# This function first allows system sessions , then it retrieves the authenticated user , admin are allowed to edit everything
 def enforce_template_edit_permission(
     session: Session,
     template: MonitoringRuleTemplate,
     new_values: dict,
     new_labels: list[str] | None,
 ) -> None:
-    """Raise 403 unless the caller may apply ``new_values`` to ``template``.
-
-    Call after the visibility check. Administrators may change anything.
-    """
+    # Raise 403 unless the caller may apply new_values to template.
+    # Call after the visibility check. Administrators may change anything.
+    
     if _is_system_session(session):
         return
     user = request_user(session)
@@ -198,10 +185,7 @@ def enforce_template_edit_permission(
         return
     if user.role != "Supervisor":
         raise HTTPException(status_code=403, detail="Insufficient permissions")
-    denied = HTTPException(
-        status_code=403,
-        detail="Supervisors may only change the numeric thresholds of a shared rule",
-    )
+    denied = HTTPException(status_code=403,detail="Supervisors may only change the numeric thresholds of a shared rule",)
     for field, new in new_values.items():
         if field in SUPERVISOR_EDITABLE_FIELDS - {"parameters"}:
             continue
@@ -223,25 +207,23 @@ _TRACKED_FIELDS = (
     "evaluation_interval_seconds", "stale_after_seconds", "collection_id",
 )
 
-
+# This converts Decimal values to string so that they can stored safely in JSON audit fields
 def _json_safe(value):
     from decimal import Decimal
-
     if isinstance(value, Decimal):
         return format(value.normalize(), "f")
     return value
 
-
+# This function records changes before applying the new values.
 def record_template_changes(
     session: Session,
     template: MonitoringRuleTemplate,
     new_values: dict,
     new_labels: list[str] | None = None,
 ) -> list[RuleTemplateChange]:
-    """Log each changed field of a shared rule (call before applying the new values).
-
-    The editor comes from the authenticated session, never from the request body.
-    """
+   # Log each changed field of a shared rule (call before applying the new values).
+   # The editor comes from the authenticated session, never from the request body.
+    
     editor = request_user(session)
     rows: list[RuleTemplateChange] = []
 
