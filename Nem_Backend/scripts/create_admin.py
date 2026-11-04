@@ -19,7 +19,7 @@ def main() -> int:
     if not username:
         print("Username cannot be empty.", file=sys.stderr)
         return 2
-    password = getpass.getpass("Administrator password (minimum 12 characters): ")
+    password = getpass.getpass("Administrator password (minimum 6 characters): ")
     if password != getpass.getpass("Confirm password: "):
         print("Passwords do not match.", file=sys.stderr)
         return 2
