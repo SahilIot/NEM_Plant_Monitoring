@@ -199,6 +199,25 @@ def enforce_template_edit_permission(
             raise denied
     if new_labels is not None and sorted(template.labels) != sorted(new_labels):
         raise denied
+    # A shared edit reaches every assignment, so none of them may be Running.
+    changes_values = any(
+        field in SUPERVISOR_EDITABLE_FIELDS and values_differ(getattr(template, field, None), new)
+        for field, new in new_values.items()
+    )
+    if changes_values:
+        from app.models import MonitoringRule
+        from app.services.access_scope import internal_propagation_scope
+
+        with internal_propagation_scope(session):
+            running = session.scalar(
+                select(MonitoringRule.id).where(
+                    MonitoringRule.source_template_id == template.id,
+                    MonitoringRule.is_enabled.is_(True),
+                    MonitoringRule.lifecycle_status == "in_progress",
+                ).limit(1)
+            )
+        if running is not None:
+            raise HTTPException(status_code=403,detail="This shared rule is Running on at least one asset. Only an Administrator can change it.",)
 
 
 _TRACKED_FIELDS = (

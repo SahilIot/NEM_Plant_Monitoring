@@ -52,6 +52,8 @@ from app.services.live_updates import LiveUpdateHub, serve_live_updates
 
 LOGGER = logging.getLogger("nem_backend")
 MAX_REQUEST_BODY_BYTES = 25 * 1024 * 1024  
+MAX_CONFIG_TRANSFER_BODY_BYTES = 5 * 1024 * 1024
+
 
 #function run repeatedly in the background to check whether maintenance schedules are due
 async def _release_lease_quietly(session_factory, owner_id: str, name: str) -> None:
@@ -513,7 +515,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         content_length = request.headers.get("content-length")
         if content_length is not None:
             try:
-                if int(content_length) > MAX_REQUEST_BODY_BYTES:
+                limit = (
+                    MAX_CONFIG_TRANSFER_BODY_BYTES
+                    if request.url.path.startswith("/api/v1/config-transfer")
+                    else MAX_REQUEST_BODY_BYTES
+                )
+                if int(content_length) > limit:
                     return JSONResponse(status_code=413,content={"error": {"message": "Request body is too large","code": 413,
                             }
                         },

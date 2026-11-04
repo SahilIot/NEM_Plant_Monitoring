@@ -36,5 +36,6 @@ __all__ = [
     "RuleCounterState",
     "AssetSupervisor", "EmailNotification",
     "Label",
+    "ConfigurationImport",
     "FrontendConfig", "RuleCollection", "InstructionDocument", "BackupRecord", "InstructionDocumentFile",
 ]

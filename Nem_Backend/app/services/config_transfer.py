@@ -39,6 +39,8 @@ FORMAT_NAME = "nem-configuration-export"
 FORMAT_VERSION = "1.0"
 SUPPORTED_MAJOR_VERSION = 1
 MAX_ITEMS_PER_CATEGORY = 1000
+MAX_NESTING_DEPTH = 12
+MAX_TOTAL_NODES = 200_000
 CATEGORIES = ("monitoring_rules", "collection_rules", "maintenance_rules")
 MAX_COLLECTION_RULES = 5
 # Runtime-timing keys that belong to one installation's operation, not to the definition.
@@ -165,6 +167,22 @@ def _error_text(error: ValidationError) -> list[str]:
         messages.append(f"{location}: {message}" if location else message)
     return messages
 
+def _within_limits(value: Any) -> bool:
+    # Iterative walk so hostile nesting cannot exhaust the stack.
+    stack = [(value, 1)]
+    nodes = 0
+    while stack:
+        current, depth = stack.pop()
+        nodes += 1
+        if depth > MAX_NESTING_DEPTH or nodes > MAX_TOTAL_NODES:
+            return False
+        if isinstance(current, dict):
+            stack.extend((v, depth + 1) for v in current.values())
+        elif isinstance(current, list):
+            stack.extend((v, depth + 1) for v in current)
+    return True
+
+
 # This validates the package envelope before processing its entries.
 def check_package(package: Any) -> dict[str, list]:
     # Validate the envelope (application, format, version, structure); raise 422 when unusable.
@@ -183,6 +201,11 @@ def check_package(package: Any) -> dict[str, list]:
     if not isinstance(contents, dict):
         problems.append("The export has no 'contents' section.")
         contents = {}
+    if not _within_limits(package):
+        raise HTTPException(
+            status_code=422,
+            detail=f"The file is too deeply nested (more than {MAX_NESTING_DEPTH} levels) or too large to import.",
+        )
     result: dict[str, list] = {}
     for category in CATEGORIES:
         items = contents.get(category, [])
@@ -405,6 +428,10 @@ def analyse(session: Session, package: Any, options: ImportOptions) -> dict[str,
         if not isinstance(recurrence, dict):
             errors.append("recurrence must be an object.")
             recurrence = {}
+        recurrence_enabled = recurrence.get("enabled", False)
+        if not isinstance(recurrence_enabled, bool):
+            errors.append("recurrence.enabled must be true or false.")
+            recurrence_enabled = False
         if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= 3650:
             errors.append("first_due_offset_days must be a whole number from 0 to 3650.")
             offset = 0
@@ -419,7 +446,7 @@ def analyse(session: Session, package: Any, options: ImportOptions) -> dict[str,
                 "description": raw.get("description"),
                 "schedule_start_date": start,
                 "first_due_date": start + timedelta(days=offset),
-                "recurrence_enabled": bool(recurrence.get("enabled", False)),
+                "recurrence_enabled": recurrence_enabled,
                 "recurrence_interval": recurrence.get("interval"),
                 "recurrence_unit": recurrence.get("unit"),
                 "instruction_document_ids": [],
@@ -442,26 +469,33 @@ def analyse(session: Session, package: Any, options: ImportOptions) -> dict[str,
                 if a.name.casefold() == asset_ref["name"].casefold()
                 and a.asset_type.casefold() == asset_ref["asset_type"].casefold()
             ]
-            if len(matches) > 1 and asset_ref.get("parent_name"):
+            candidates = matches
+            parent_wanted = asset_ref.get("parent_name")
+            if isinstance(parent_wanted, str) and parent_wanted:
+                # A stated parent must match; never fall back to a same-name asset elsewhere.
                 narrowed = [a for a in matches
                             if (parent_names.get(a.parent_asset_id) or "").casefold()
-                            == asset_ref["parent_name"].casefold()]
-                matches = narrowed or matches
+                            == parent_wanted.casefold()]
+                matches = narrowed
             if len(matches) == 1:
                 asset_id = matches[0].id
             else:
                 unresolved_assets[key] = {
                     "key": key, **{k: asset_ref.get(k) for k in ("name", "asset_type", "parent_name")},
-                    "candidates": [{"id": a.id, "name": a.name, "asset_type": a.asset_type} for a in matches],
+                    "candidates": [{"id": a.id, "name": a.name, "asset_type": a.asset_type} for a in candidates],
                 }
                 add("maintenance_rules", ref, candidate.title, "unresolved",
                     note="No single matching asset in this installation. Choose a destination asset to import it.")
                 continue
         signature = (asset_id, candidate.title.casefold(), candidate.maintenance_type)
         if signature in existing_schedules or signature in seen_schedules:
-            if options.on_duplicate == "rename" and signature not in seen_schedules:
-                suffix = " (imported)"
-                title_final = f"{candidate.title[: 200 - len(suffix)]}{suffix}"
+            if options.on_duplicate == "rename":
+                title_final = candidate.title
+                for number in range(1, 1000):
+                    suffix = " (imported)" if number == 1 else f" (imported {number})"
+                    title_final = f"{candidate.title[: 200 - len(suffix)]}{suffix}"
+                    if (asset_id, title_final.casefold(), candidate.maintenance_type) not in (existing_schedules | seen_schedules):
+                        break
                 candidate = candidate.model_copy(update={"title": title_final})
                 signature = (asset_id, title_final.casefold(), candidate.maintenance_type)
                 add("maintenance_rules", ref, raw.get("title"), "renamed", final_name=title_final,
