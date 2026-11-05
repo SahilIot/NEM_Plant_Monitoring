@@ -2,16 +2,10 @@ import { useEffect, useState } from "react";
 import { KeyRound } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../../../services/api.js";
-import { formatTime } from "../../../utils/format.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
-import {
-  CreateModal,
-  EmptyState,
-  LoadingIndicator,
-  Modal,
-  useConfirmation,
-} from "../../../components/common/UI.jsx";
+import { LoadingIndicator, Modal } from "../../../components/common/UI.jsx";
 import { BackIcon, EditIcon } from "../../../components/common/Icons.jsx";
+import BackupRestore from "./BackupRestore.jsx";
 
 const TITLES = {
   user: "User information",
@@ -424,67 +418,10 @@ function Usage() {
 
 function Backup() {
   const { user } = useAuth();
-  const canManageBackups = user?.role === "Administrator";
-  const confirm = useConfirmation();
-  const [list, setList] = useState([]);
-  const [msg, setMsg] = useState("");
-  const [open, setOpen] = useState(false);
-  const load = () => api.get("/backups").then(setList).catch((error) => setMsg(`Could not load backups: ${error.message}`));
-  useEffect(() => { if (canManageBackups) load(); }, [canManageBackups]);
-  const create = async (values) => {
-    if (!canManageBackups) return;
-    const b = await api.post("/backups", values);
-    setOpen(false);
-    setMsg(`Backup ${b.name} created.${b.warnings?.length ? ` Note: ${b.warnings.join(" ")}` : ""}`);
-    load();
-  };
-  const restore = async (b) => {
-    if (!canManageBackups) return;
-    if (
-      !(await confirm(
-        `Restore "${b.name}"? This replaces all current monitoring data, rules, collections, instructions and their attachments with the contents of this backup. User accounts are not changed. Create a fresh backup first if you may need the current data.`,
-        {
-          title: "Restore backup",
-          confirmLabel: "Restore backup",
-          destructive: true,
-        }
-      ))
-    ) return;
-    try {
-      const result = await api.post(`/backups/${b.id}/restore`);
-      setMsg(`Backup ${b.name} restored.${result?.warnings?.length ? ` Note: ${result.warnings.join(" ")}` : ""}`);
-    } catch (error) {
-      setMsg(`Could not restore backup: ${error.message}`);
-    }
-  };
-  return (
-    <>
-      <div className="panel-white">
-        {!canManageBackups && <p className="notice" role="status">Backup and restore are restricted to Administrators.</p>}
-        <button className="btn-primary" disabled={!canManageBackups} title={!canManageBackups ? "Only Administrators can create backups." : undefined} onClick={() => setOpen(true)}>Create backup</button>
-        {msg && <p className={"notice" + (/^Could not/.test(msg) ? " error" : "")} role="status">{msg}</p>}
-      </div>
-      {open && (
-        <CreateModal
-          title="Create backup" submitLabel="Create backup" onSubmit={create} onClose={() => setOpen(false)}
-          disabled={!canManageBackups}
-          fields={[
-            { key: "name", label: "Backup name", placeholder: "Leave empty for an automatic name" },
-            { key: "note", label: "Note", type: "textarea", placeholder: "Why are you taking this backup?" },
-          ]}
-        />
-      )}
-      <div className="panel-white">
-        {!canManageBackups ? (
-          <p className="muted">Backup records are available to Administrators only.</p>
-        ) : list.length === 0 ? <EmptyState title="No backups yet" /> :
-          <table className="table"><thead><tr><th>Name</th><th>Created</th><th /></tr></thead>
-            <tbody>{list.map((b) => (
-              <tr key={b.id}><td>{b.name}</td><td>{formatTime(b.created)}</td>
-                <td className="right"><button className="btn-outline" disabled={!canManageBackups} title={!canManageBackups ? "Only Administrators can restore backups." : undefined} onClick={() => restore(b)}>Restore</button></td></tr>))}</tbody></table>}
-      </div>
-    </>
-  );
+  if (user?.role !== "Administrator") {
+    return <div className="panel-white"><p className="notice" role="status">Backup and restore are restricted to Administrators.</p></div>;
+  }
+  return <BackupRestore />;
 }
 
 export default function SettingsSub() {

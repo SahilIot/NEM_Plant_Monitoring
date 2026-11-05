@@ -1,0 +1,67 @@
+/* Backup and restore. Uses the global theme variables, so light and dark themes both apply. */
+.br-overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 14px; max-width: 1100px; }
+.br-stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); padding: 10px 14px; min-width: 0; border-left: 3px solid var(--line-strong); }
+.br-stat.ok { border-left-color: var(--ok); }
+.br-stat.warn { border-left-color: var(--warn-lamp); }
+.br-stat-label { color: var(--muted); font-size: 12.5px; text-transform: uppercase; letter-spacing: .03em; }
+.br-stat-value { font-family: var(--font-num); font-size: 22px; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.br-stat-hint { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.br-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.br-toolbar input[type="text"], .br-toolbar input:not([type]) { min-width: 200px; }
+.br-toolbar input, .br-toolbar select { height: var(--ctl); }
+.br-spacer { flex: 1; }
+.br-scroll { overflow: auto; max-width: 100%; }
+.br-table td, .br-table th { white-space: nowrap; }
+.br-table td:first-child { white-space: normal; min-width: 180px; }
+.br-name { font-weight: 600; }
+.br-note { font-size: 12.5px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.br-flag { color: var(--warn); font-weight: 700; }
+.br-empty { padding: 14px 4px; }
+.br-compact th, .br-compact td { padding: 6px 10px; font-size: 13.5px; }
+.br-menu-danger { color: var(--alert); }
+.floating-menu button svg { vertical-align: -2px; margin-right: 6px; }
+
+.br-facts { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 10px 0; color: var(--ink-2); }
+.br-facts b { font-family: var(--font-num); font-size: 18px; color: var(--ink); }
+.br-meta { display: grid; grid-template-columns: 110px 1fr; gap: 6px 14px; margin: 0 0 12px; }
+.br-meta dt { color: var(--muted); }
+.br-meta dd { margin: 0; overflow-wrap: anywhere; }
+.br-hint { font-size: 13px; margin: 0 0 10px; }
+.br-details h4, .br-impact h4, .br-result h4 { margin: 16px 0 6px; font-size: 14.5px; }
+.br-list { margin: 4px 0 8px; padding-left: 18px; }
+.br-list li { margin: 2px 0; overflow-wrap: anywhere; }
+.warn-text { color: var(--warn); }
+.br-details .br-scroll, .br-impact .br-scroll, .br-result .br-scroll { max-height: 220px; border: 1px solid var(--line); border-radius: var(--r-ctl); }
+
+.br-callout { border: 1px solid var(--line-strong); border-left-width: 4px; border-radius: var(--r-ctl); padding: 10px 12px; margin: 10px 0; background: var(--surface-2); }
+.br-callout p { margin: 4px 0 0; }
+.br-callout.ok { border-left-color: var(--ok); }
+.br-callout.info { border-left-color: var(--action); }
+.br-callout.warn { border-left-color: var(--warn-lamp); background: var(--warn-soft); color: var(--warn); }
+.br-callout.danger { border-left-color: var(--alert); background: var(--alert-soft); color: var(--alert); }
+.br-callout.warn .br-list, .br-callout.danger .br-list { color: inherit; }
+.br-callout b svg { vertical-align: -3px; margin-right: 4px; }
+.br-callout code, .br-recovery code { font-size: 12.5px; }
+.br-recovery-item { margin-top: 8px; }
+.br-recovery-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+
+.br-steps { display: flex; flex-wrap: wrap; gap: 4px 14px; list-style: none; margin: 0 0 14px; padding: 0 0 10px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.br-steps li { display: inline-flex; align-items: center; gap: 6px; }
+.br-steps li span { width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line-strong); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; }
+.br-steps li.current { color: var(--action); font-weight: 600; }
+.br-steps li.current span { background: var(--action-bg); border-color: var(--action-bg); color: var(--on-action); }
+.br-steps li.done span { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+
+.br-checks { list-style: none; margin: 0; padding: 0; }
+.br-checks li { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.br-checks li:last-child { border-bottom: none; }
+.br-checks li span { width: 18px; flex-shrink: 0; font-weight: 700; text-align: center; }
+.br-checks li.ok span { color: var(--ok); }
+.br-checks li.warn span { color: var(--warn); }
+.br-checks li.bad span { color: var(--alert); }
+.br-check { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; }
+.br-check input { margin-top: 3px; }
+.br-check.danger-text { color: var(--alert); }
+.modal.wide:has(.br-steps) { width: 760px; }
+@media (max-width: 720px) { .br-meta { grid-template-columns: 1fr; } }

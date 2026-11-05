@@ -55,7 +55,17 @@ from app.schemas.rule import (
     UsageRuleCreate,
 )
 from app.schemas.maintenance import MaintenanceScheduleCreate
-from app.services.frontend_backup import create_backup_with_report, restore_backup
+from app.services.frontend_backup import (
+    analyze_restore,
+    backup_summary,
+    create_backup_with_report,
+    delete_backup_file,
+    import_backup_file,
+    resolve_backup_path,
+    restore_backup,
+    retry_recovery,
+    storage_report,
+)
 from app.services.monitoring_engine import (emit_event, set_rule_enabled_state,)
 from app.api.routes.rules import (
     configured_cycle_signal_mapping,
@@ -217,6 +227,10 @@ class DocumentUpdate(BaseModel):
 class BackupCreate(BaseModel):
     name: str | None = Field(default=None, max_length=200)
     note: str | None = None
+
+#Restore request: the confirmation token comes from the restore preview and is required only when the preview says so
+class BackupRestoreRequest(BaseModel):
+    confirmation_token: str | None = Field(default=None, max_length=4096)
 
 #Validates a maintenance log entry
 class LogbookEntry(BaseModel):
@@ -2704,14 +2718,54 @@ def frontend_usage(session: Session = Depends(get_db)) -> dict[str, int]:
         "maintenance_records": session.query(MaintenanceRecord).count(),
     }
 
-#List backups
+def _backup_record(session: Session, backup_id: int) -> BackupRecord:
+    record = session.get(BackupRecord, backup_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Backup was not found")
+    return record
+
+def _backup_item(record: BackupRecord, settings: Any, detailed: bool = False) -> dict[str, Any]:
+    return {
+        "id": record.id, "name": record.name, "note": record.note, "created": record.created_at.isoformat(),
+        **backup_summary(settings, record.file_name, detailed),
+    }
+
+#List backups, with facts read from each backup's manifest
 @router.get("/backups")
-def list_frontend_backups(session: Session = Depends(get_db)) -> list[dict[str, Any]]:
+def list_frontend_backups(request: Request, session: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    require_session_roles(session, "Administrator")
     records = session.scalars(select(BackupRecord).order_by(BackupRecord.created_at.desc())).all()
-    return [
-        {"id": item.id, "name": item.name, "note": item.note, "created": item.created_at.isoformat()}
-        for item in records
-    ]
+    return [_backup_item(item, request.app.state.settings) for item in records]
+
+#Backup folder use, files without a history record and unresolved attachment recoveries
+@router.get("/backups/storage")
+def backup_storage(request: Request, session: Session = Depends(get_db)) -> dict[str, Any]:
+    require_session_roles(session, "Administrator")
+    known = set(session.scalars(select(BackupRecord.file_name)).all())
+    return storage_report(request.app.state.settings, known)
+
+#Try again to place attachment files that a restore could not place
+@router.post("/backups/recovery/{folder}/retry")
+def retry_backup_recovery(folder: str, session: Session = Depends(get_db)) -> dict[str, Any]:
+    require_session_roles(session, "Administrator")
+    return retry_recovery(folder)
+
+#Upload a backup file (new ZIP or old JSON format) into the history
+@router.post("/backups/upload", status_code=201)
+def upload_frontend_backup(
+    request: Request,
+    file: UploadFile = File(...),
+    name: str = Form(""),
+    note: str = Form(""),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    require_session_roles(session, "Administrator")
+    if len(name) > 200:
+        raise HTTPException(status_code=422, detail="Backup name cannot exceed 200 characters")
+    record = import_backup_file(
+        request.app.state.engine, request.app.state.settings, file.file, file.filename or "", name, note.strip() or None
+    )
+    return _backup_item(record, request.app.state.settings)
 
 #Create a backup
 @router.post("/backups", status_code=201)
@@ -2726,19 +2780,54 @@ def create_frontend_backup(
     require_session_roles(session, "Administrator")
     record, report = create_backup_with_report(session, request.app.state.settings, name, payload.note)
     return {"id": record.id, "name": record.name, "note": record.note,
-            "created": record.created_at.isoformat(), "warnings": report["warnings"]}
+            "created": record.created_at.isoformat(), "warnings": report["warnings"],
+            "format_version": report["format_version"], "rows": report["rows"], "files": report["files"]}
 
-#Restore a backup
+#Backup details (manifest facts: tables, rows, attachments, problems)
+@router.get("/backups/{backup_id}")
+def backup_details(backup_id: int, request: Request, session: Session = Depends(get_db)) -> dict[str, Any]:
+    require_session_roles(session, "Administrator")
+    return _backup_item(_backup_record(session, backup_id), request.app.state.settings, detailed=True)
+
+#Download the backup file
+@router.get("/backups/{backup_id}/download")
+def download_frontend_backup(backup_id: int, request: Request, session: Session = Depends(get_db)) -> FileResponse:
+    require_session_roles(session, "Administrator")
+    record = _backup_record(session, backup_id)
+    path = resolve_backup_path(request.app.state.settings, record.file_name)
+    download_name = f"nem-backup-{record.created_at.strftime('%Y%m%d-%H%M%S')}-{record.id}{path.suffix}"
+    return FileResponse(path, media_type="application/octet-stream", filename=download_name)
+
+#Delete a backup file and its history record
+@router.delete("/backups/{backup_id}", status_code=204)
+def delete_frontend_backup(backup_id: int, request: Request, session: Session = Depends(get_db)) -> None:
+    require_session_roles(session, "Administrator")
+    record = _backup_record(session, backup_id)
+    delete_backup_file(request.app.state.engine, request.app.state.settings, record.file_name)
+    session.delete(record)
+    session.commit()
+
+#Validate a backup and describe exactly what restoring it would change (nothing is changed)
+@router.post("/backups/{backup_id}/restore/preview")
+def preview_frontend_restore(backup_id: int, request: Request, session: Session = Depends(get_db)) -> dict[str, Any]:
+    user = require_session_roles(session, "Administrator")
+    record = _backup_record(session, backup_id)
+    result = analyze_restore(request.app.state.settings, request.app.state.engine, record.file_name, user.id if user else None)
+    return {"id": record.id, "name": record.name, "created": record.created_at.isoformat(), **result}
+
+#Restore a backup. The confirmation token from the preview is required when the preview reports destructive effects.
 @router.post("/backups/{backup_id}/restore")
 def restore_frontend_backup(
     backup_id: int,
     request: Request,
+    payload: BackupRestoreRequest | None = None,
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    require_session_roles(session, "Administrator")
-    record = session.get(BackupRecord, backup_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Backup was not found")
+    user = require_session_roles(session, "Administrator")
+    record = _backup_record(session, backup_id)
     name, file_name = record.name, record.file_name
-    report = restore_backup(session, request.app.state.engine, request.app.state.settings, file_name)
-    return {"status": "restored", "name": name, "warnings": report["warnings"], "files": report["files"]}
+    report = restore_backup(
+        session, request.app.state.engine, request.app.state.settings, file_name,
+        confirmation_token=payload.confirmation_token if payload else None, user_id=user.id if user else None,
+    )
+    return {"status": "restored", "name": name, **report}

@@ -136,6 +136,37 @@ function upload(path, formData, { method = "POST", onProgress } = {}) {
   });
 }
 
+// Authenticated file download (the token cannot travel in a plain link). The file is saved through the browser.
+async function download(path, fallbackName = "download") {
+  const token = getAuthToken();
+  let res;
+  try {
+    res = await fetch(`${BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  } catch {
+    throw new ApiError("Cannot reach the backend. Check that the API server is running on port 8000.", 0);
+  }
+  if (!res.ok) {
+    let body = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    if (res.status === 401) window.dispatchEvent(new Event("nem-auth-expired"));
+    throw new ApiError(describeError(body, res.statusText || "Download failed"), res.status);
+  }
+  const blob = await res.blob();
+  const match = /filename="?([^";]+)"?/i.exec(res.headers.get("Content-Disposition") || "");
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = match ? match[1] : fallbackName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export const api = {
   get: async (p) => {
     const result = await req(p);
@@ -146,6 +177,7 @@ export const api = {
   postForm: (p, formData) =>
     req(p, { method: "POST", body: formData }),
   upload,
+  download,
   put: (p, body) => req(p, { method: "PUT", body: JSON.stringify(body) }),
   patch: (p, body) => req(p, { method: "PATCH", body: JSON.stringify(body) }),
   del: (p, body) =>

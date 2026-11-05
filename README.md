@@ -543,17 +543,31 @@ and files, asset supervisor assignments and dashboard configuration. Not include
 and sessions, the email outbox, rule suggestions, configuration-import log, scheduler leases and
 the backup history itself. Settings may hold SMTP credentials, so treat backup files as secrets.
 
-Restore validates the whole file first (format version, tables, columns, types, primary keys,
-references, checksums) and stages attachment files; nothing is deleted if that fails. The database
-part (exclusive table locks, delete, insert, sequence reset) is one transaction, so it is
-all-or-nothing. After the commit, attachments are moved into `uploads/` (existing files are never
-overwritten or deleted) and the start-up rule migrations are re-run; problems in those post-commit
-steps are reported as warnings and do not undo the restore. Records pointing at user accounts
-that no longer exist are kept with the reference cleared. If an upload with the same file name but different content already exists, the restored attachment is stored under a new name and the existing file is kept. Writers wait while a restore runs, and
-only one restore can run at a time. Old `.json` backups (format version 1) can still be restored,
-but they do not contain schedules, label links, attachment files and similar data, so a restore is
-refused when maintenance schedules or machine states exist now, and other data in those tables is
-reported as removed.
+Restore is a staged workflow in Settings → Backup and restore: select, validate, preview impact,
+confirm, execute, result. The whole file is validated first (format version, tables, columns, types
+including numeric precision/scale and integer ranges, primary keys, references, checksums) and
+attachment files are staged and verified; nothing is deleted if that fails. The preview
+(`POST /backups/{id}/restore/preview`) lists tables replaced, attachments restored/renamed/missing
+and records in tables outside the backup that would be deleted (`ON DELETE CASCADE`), cleared
+(`SET NULL`) or reset (`SET DEFAULT`); rows that block the restore (`RESTRICT`/`NO ACTION`) must be
+removed first. When the restore changes data outside the backup, or the backup is a legacy v1 file,
+the preview returns a signed confirmation token bound to that backup file, its checksum, the
+calculated impact and the administrator; it expires after 15 minutes and is rejected (HTTP 409) if
+anything differs when the restore runs. The database part (advisory lock, exclusive table locks,
+delete, insert, sequence reset) is one transaction, so it is all-or-nothing; the caller's own session
+is neither committed nor rolled back. After the commit, attachments are moved into `uploads/`
+(existing files are never overwritten or deleted; a clashing name is stored under a new name and the
+record updated) and start-up rule migrations are re-run. If a file cannot be moved it is kept in a
+`restore-recovery-*` folder next to the uploads with a `recovery.json` naming the document and
+original file name; the result is then reported as partial, and an administrator can retry from the
+page (`POST /backups/recovery/{folder}/retry`). Records pointing at missing user accounts are kept
+with the reference cleared. Only one restore can run at a time.
+
+Other endpoints (Administrators only): `GET /backups`, `GET /backups/storage`, `GET /backups/{id}`
+(details), `GET /backups/{id}/download`, `POST /backups/upload`, `DELETE /backups/{id}`. Old `.json`
+backups (format version 1) can still be restored, but they do not contain schedules, label links,
+attachment files and similar data; the limitations are shown in the preview and need an explicit
+confirmation before a legacy restore runs.
 
 Application datetimes are handled as UTC. The SQLAlchemy `UTCDateTime` type
 stores UTC-naive values in the database and returns aware UTC datetimes to the
