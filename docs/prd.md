@@ -59,7 +59,7 @@ assignments they see no assets. Administrators are unrestricted.
 | FR-07 | Raise and update alerts; acknowledge alerts; complete eligible alerts; preserve event history. | Implemented |
 | FR-08 | Record, schedule, start, complete, cancel, and review maintenance; manage calendar recurrence and proposed next dates. | Implemented |
 | FR-09 | Show operational status and affected-data refreshes in the React dashboard. | Implemented through a combination of WebSocket notifications and REST refresh/polling |
-| FR-10 | Manage local accounts, roles, profile/email settings, collections/documents, and database backups through existing workflows. | Implemented to varying degrees; deployment configuration and access scope require verification |
+| FR-10 | Manage local accounts, roles, profile/email settings, collections, instructions and documents (instructions may be created without an attachment), and database backups through existing workflows. | Implemented to varying degrees; deployment configuration and access scope require verification |
 | FR-11 | Use OPC UA to write PLC values or control/stop machinery. | Explicitly not implemented |
 | FR-12 | Schedule maintenance from machine running-hour or cycle thresholds. | Not implemented |
 | FR-13 | Assign reusable shared labels to rules, rule collections, and instruction documents; filter listings by one or more labels. | Implemented; PostgreSQL migration and deployment verification required |

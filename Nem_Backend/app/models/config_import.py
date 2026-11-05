@@ -8,7 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 from app.db.session import UTCDateTime
 
-
+# Defines a configuration import table history.
 class ConfigurationImport(Base):
     # One committed import. The importing Administrator is the creator of every record it made.
 

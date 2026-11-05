@@ -13,7 +13,7 @@ import AssetsIndex from "../features/assets/pages/AssetsIndex.jsx";
 import AssetDetail from "../features/assets/pages/AssetDetail.jsx";
 
 import Configuration from "../features/configuration/pages/Configuration.jsx";
-import ConfigSub from "../features/configuration/pages/ConfigSub.jsx";
+import ImportConfigurationPage from "../features/configuration/pages/ImportConfigurationPage.jsx";
 import DocumentCreatePage from "../features/configuration/pages/DocumentCreatePage.jsx";
 import CreateInstructionPage from "../features/configuration/pages/CreateInstructionPage.jsx";
 import DocumentViewerPage from "../features/configuration/pages/DocumentViewerPage.jsx";
@@ -119,10 +119,15 @@ export default function App() {
           element={<DocumentViewerPage />}
         />
 
-        {/* Other configuration sections */}
+        <Route
+          path="/configuration/import"
+          element={<ImportConfigurationPage />}
+        />
+
+        {/* Unknown configuration sections return to the configuration home */}
         <Route
           path="/configuration/:sub"
-          element={<ConfigSub />}
+          element={<Navigate to="/configuration" replace />}
         />
 
         {/* Settings */}

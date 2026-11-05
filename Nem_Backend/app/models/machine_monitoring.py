@@ -1,3 +1,4 @@
+# two models for machine monitoring and rule-counter functionality
 from datetime import datetime
 from decimal import Decimal
 from sqlalchemy import Boolean, ForeignKey, Integer, Numeric, UniqueConstraint
@@ -5,7 +6,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 from app.db.session import UTCDateTime
 
-#create the db table 
+# create the db table 
+# Stores machine-level monitoring information.
 class MachineMonitoringState(Base):
     __tablename__ = "machine_monitoring_states"
 
@@ -23,7 +25,7 @@ class MachineMonitoringState(Base):
     runtime_checkpoint_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
 
-
+# Stores rule-specific monitoring information for an asset.
 class RuleCounterState(Base):
     __tablename__ = "nem_rule_counter_states"
     __table_args__ = (UniqueConstraint("rule_id", "asset_id", name="uq_rule_counter_rule_asset"),)

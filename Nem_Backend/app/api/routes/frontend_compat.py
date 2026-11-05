@@ -55,7 +55,7 @@ from app.schemas.rule import (
     UsageRuleCreate,
 )
 from app.schemas.maintenance import MaintenanceScheduleCreate
-from app.services.frontend_backup import create_backup, restore_backup
+from app.services.frontend_backup import create_backup_with_report, restore_backup
 from app.services.monitoring_engine import (emit_event, set_rule_enabled_state,)
 from app.api.routes.rules import (
     configured_cycle_signal_mapping,
@@ -2723,9 +2723,10 @@ def create_frontend_backup(
     name = (payload.name or "").strip() or f"Backup {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
     if len(name) > 200:
         raise HTTPException(status_code=422, detail="Backup name cannot exceed 200 characters")
-    record = create_backup(session, request.app.state.settings, name, payload.note)
+    require_session_roles(session, "Administrator")
+    record, report = create_backup_with_report(session, request.app.state.settings, name, payload.note)
     return {"id": record.id, "name": record.name, "note": record.note,
-            "created": record.created_at.isoformat()}
+            "created": record.created_at.isoformat(), "warnings": report["warnings"]}
 
 #Restore a backup
 @router.post("/backups/{backup_id}/restore")
@@ -2733,9 +2734,11 @@ def restore_frontend_backup(
     backup_id: int,
     request: Request,
     session: Session = Depends(get_db),
-) -> dict[str, str]:
+) -> dict[str, Any]:
+    require_session_roles(session, "Administrator")
     record = session.get(BackupRecord, backup_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Backup was not found")
-    restore_backup(session, request.app.state.engine, request.app.state.settings, record.file_name)
-    return {"status": "restored", "name": record.name}
+    name, file_name = record.name, record.file_name
+    report = restore_backup(session, request.app.state.engine, request.app.state.settings, file_name)
+    return {"status": "restored", "name": name, "warnings": report["warnings"], "files": report["files"]}

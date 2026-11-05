@@ -56,8 +56,6 @@ class EventRead(ORMModel):
     alert_id: int | None
     message: str
     occurred_at: datetime
-    metadata: dict[str, Any] | None = Field(
-        default=None, validation_alias=AliasChoices("event_metadata", "metadata")
-    )
+    metadata: dict[str, Any] | None = Field(default=None, validation_alias=AliasChoices("event_metadata", "metadata"))
 
 #Rule evaluation -> Alerts -> Acknowledgement and history

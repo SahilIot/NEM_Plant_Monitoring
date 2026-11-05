@@ -135,9 +135,7 @@ def _log_recipient_resolution(
         .where(AssetSupervisor.asset_id.in_(ancestry_ids))
         .order_by(AssetSupervisor.asset_id, AssetSupervisor.user_id)
     ).all()
-    direct_ids = sorted(
-        user_id for asset_id, user_id in assignment_rows if asset_id == asset.id
-    )
+    direct_ids = sorted(user_id for asset_id, user_id in assignment_rows if asset_id == asset.id)
     ancestor_ids = [
         (asset_id, user_id)
         for asset_id, user_id in assignment_rows
@@ -490,7 +488,7 @@ def describe_smtp_error(error: Exception) -> str:
 
 #Background delivery and retry logic , a worker that delivers the persistent outbox jobs.
 def deliver_pending(session_factory, settings: Settings, *, batch_size: int = 20) -> int:
-    """Send due outbox rows. Returns the number successfully sent."""
+    # Send due outbox rows. Returns the number successfully sent.
     sent = 0
     with session_factory() as session:
         due = session.scalars(
@@ -523,28 +521,17 @@ def deliver_pending(session_factory, settings: Settings, *, batch_size: int = 20
                 if asset is None:
                     item.status = "skipped"
                     item.last_error = "Alert asset is no longer available"
-                    LOGGER.warning(
-                        "Notification %s skipped: %s",
-                        item.id,
-                        item.last_error,
-                    )
+                    LOGGER.warning("Notification %s skipped: %s",item.id,item.last_error,)
                     continue
                 if asset.id not in assigned_user_ids_by_asset:
                     current_recipients = _assigned_supervisors_for_asset(session, asset)
                     _log_recipient_resolution(session, asset, current_recipients, item.severity)
-                    assigned_user_ids_by_asset[asset.id] = {
-                        supervisor.id for supervisor in current_recipients
-                    }
+                    assigned_user_ids_by_asset[asset.id] = {supervisor.id for supervisor in current_recipients}
                 if item.user_id not in assigned_user_ids_by_asset[asset.id]:
                     item.status = "skipped"
                     item.last_error = ("Supervisor is no longer assigned to this asset")
-                    LOGGER.info(
-                        "Notification %s skipped because user %s is no longer "
-                        "assigned to asset %s",
-                        item.id,
-                        item.user_id,
-                        asset.id,
-                    )
+                    LOGGER.info("Notification %s skipped because user %s is no longer "
+                        "assigned to asset %s",item.id, item.user_id, asset.id,)
                     continue
                 user = session.get(User, item.user_id)
                 if user is None or not user.is_active or not valid_email(user.email_address):

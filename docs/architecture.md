@@ -64,7 +64,7 @@ NEM_Plant_Monitoring/
         live_updates.py             Committed-change WebSocket hub
         auth_security.py            Password hashing, sessions
         labels.py                   Shared label catalog service
-        frontend_backup.py          Dashboard backup/restore snapshots
+        frontend_backup.py          Dashboard backup/restore (ZIP v2 snapshot, validated transactional restore)
     scripts/create_admin.py         Interactive first-Administrator setup
     seed.py                         Idempotent simulated demo data
     requirements.txt
@@ -83,8 +83,10 @@ NEM_Plant_Monitoring/
                                     rules/monitoringRuleFlow.js
         plc/                        pages/Plc.jsx, styles/Plc.css
         rules/                      components/PredefinedRulesModal, pages/AlertRules, RuleCreatePage
-        configuration/pages/        Rule library, visibility dialog, collections, documents,
-                                    instructions, import/export
+        configuration/pages/        RuleLibrary, CollectionLibrary, visibility dialog,
+                                    DocumentsPage / DocumentCreatePage / DocumentViewerPage /
+                                    CreateInstructionPage (utils/documents.js helpers),
+                                    ImportConfigurationPage + panel, ExportConfigurationPage
         settings/pages/             Profile, email, usage, backup/restore
         auth/                       AuthContext, LoginPage, AdminUsersPage
       services/                     api.js (REST client), liveUpdates.js (WebSocket client)
@@ -147,7 +149,12 @@ Primary operational tables and their roles:
   supervisors and assets. `nem_email_notifications` is a persistent
   alert-email outbox linked to alert and user.
 - Dashboard data includes frontend settings, rule collections, instruction
-  documents and files, and backup metadata. Rule templates and rule/maintenance suggestions
+  documents and files, and backup metadata. Rule templates reference
+  a collection through `collection_id` (a collection owns its rules, at most
+  five). `instruction_documents` holds both instructions and uploaded documents,
+  distinguished by `entry_type` (`instruction` | `document`), with optional
+  `asset_id`, audit columns (`AuditNamesMixin`, registered in `AUDITED_MODELS`)
+  and files in `instruction_document_files`; an instruction needs no file. Rule templates and rule/maintenance suggestions
   are stored separately from asset-specific rules.
 - The shared `labels` catalog is linked by many-to-many association tables to
   asset-specific rules, reusable rule templates, collections, and instruction
@@ -249,7 +256,7 @@ Supervisors see only `specific_supervisors` rules that list them, Operators and 
 Edits to a rule created from a shared rule (`PATCH /rules/{id}`) are applied to the shared rule and
 propagated to every asset using it (`apply_template_update` in `frontend_compat.py`), so there is one
 threshold per shared rule. `app/services/config_transfer.py` and `app/api/routes/config_transfer.py`
-implement the Administrator-only JSON export/preview/import (`/api/v1/config-transfer/*`, gated in the
+implement the Administrator-only JSON export (optional `categories`/`asset_ids` filters, `export/summary`)/preview/import (`/api/v1/config-transfer/*`, gated in the
 `main.py` middleware and re-checked in each handler); imports are logged in `nem_configuration_imports`. It is enforced in `GET /rule-templates`,
 `GET/PUT /rule-templates/{id}`, `POST /rule-templates/{id}/assign` and the rule names embedded in
 `GET /collections`; a hidden rule answers 404. Visibility never grants asset access and the asset-level

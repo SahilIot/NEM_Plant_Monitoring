@@ -1,3 +1,4 @@
+# Asset variable creation, modification and retrieval schemas.
 from datetime import datetime
 from typing import Literal
 from pydantic import Field, field_validator, model_validator
@@ -6,6 +7,8 @@ from app.schemas.common import ORMModel
 VariableDataType = Literal["number", "integer", "string", "boolean"]
 VariableSignalRole = Literal["running", "cycle"]
 
+# Creating a new variable.
+# This schema validates the information required when creating a new variable for an asset.
 class VariableCreate(ORMModel):
     name: str = Field(min_length=1, max_length=150)
     key: str = Field(min_length=1, max_length=100)
@@ -41,6 +44,7 @@ class VariableCreate(ORMModel):
             return None
         return value
 
+# Updating an existing variable.
 class VariableUpdate(ORMModel):
     name: str | None = Field(default=None, min_length=1, max_length=150)
     key: str | None = Field(default=None, min_length=1, max_length=100)
@@ -81,6 +85,7 @@ class VariableUpdate(ORMModel):
             return None
         return value
 
+# Returning variable information. 
 class VariableRead(ORMModel):
     id: int
     asset_id: int

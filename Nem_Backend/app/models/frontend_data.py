@@ -1,4 +1,4 @@
-#four db models these model store frontendconfig,rule collection,instruction documents,backup records
+#Five db models these model store frontendconfig,rule collection,instruction documents,backup records and store attachments.
 from datetime import datetime, timezone
 from sqlalchemy import JSON, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -11,7 +11,7 @@ from app.models.labels import (
     rule_collection_labels,
 )
 
-#storing frontend settings
+#storing frontend settings as JSON
 class FrontendConfig(Base):
     __tablename__ = "frontend_config"
     key: Mapped[str] = mapped_column(String(50), primary_key=True)
@@ -27,7 +27,7 @@ class RuleCollection(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
     description: Mapped[str | None] = mapped_column(Text)
     label_records: Mapped[list[Label]] = relationship(secondary=rule_collection_labels,lazy="selectin",)
-
+# Instead of returning complete Label ORM objects, it returns just their names.
     @property
     def labels(self) -> list[str]:
         return [label.name for label in self.label_records]

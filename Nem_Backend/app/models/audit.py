@@ -6,6 +6,7 @@ it. Sessions without an authenticated user (workers, schedulers) never claim a
 user and leave the existing modification stamp untouched.
 """
 
+# This code actually records who created or modified a db record and when
 from datetime import datetime, timezone
 
 from sqlalchemy import event, inspect
@@ -16,10 +17,11 @@ from app.models.frontend_data import InstructionDocument
 from app.models.maintenance import MaintenanceRecord, MaintenanceSchedule
 from app.models.rule import MonitoringRule, MonitoringRuleTemplate
 
+# This defines which db models should receive automatic audit timestamps.
 AUDITED_MODELS = (MonitoringRule, MonitoringRuleTemplate, MaintenanceSchedule, MaintenanceRecord, InstructionDocument)
 _IMMUTABLE_COLUMNS = ("created_by_id", "created_at")
 
-
+# This is the function SQLAlchemy executes before writing changes to the db.
 def stamp_audit_fields(session, flush_context, instances) -> None:
     user_id = session.info.get("auth_user_id")
     now = datetime.now(timezone.utc)

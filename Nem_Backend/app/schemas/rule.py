@@ -225,9 +225,7 @@ class RuleTemplateCreate(ORMModel):
 
     @field_validator("required_variable_types")
     @classmethod
-    def unique_variable_types(
-        cls, value: list[str] | None
-    ) -> list[str] | None:
+    def unique_variable_types(cls, value: list[str] | None) -> list[str] | None:
         if value is not None and len(value) != len(set(value)):
             raise ValueError("Required variable types must be unique")
         return value
@@ -344,7 +342,7 @@ class RuleTemplateRead(RuleTemplateCreate):
     # Filled for Administrators only; Supervisors never see who else is on the list.
     visibility_supervisor_ids: list[int] = Field(default_factory=list)
 
-
+# Visibility of rule updating based on roles.
 class RuleVisibilityUpdate(ORMModel):
     visibility_type: Literal["admin_only", "specific_supervisors"]
     supervisor_ids: list[int] = Field(default_factory=list, max_length=200)
@@ -506,7 +504,7 @@ class FrontendRuleCreate(ORMModel):
     def clean_labels(cls, value: list[str]) -> list[str]:
         return normalize_label_names(value)
 
-
+# Creating a usage-based rule.
 class UsageRuleCreate(FrontendRuleCreate):
     variable_id: int = Field(gt=0)
     usage_limit: float = Field(gt=0)
@@ -518,6 +516,7 @@ class UsageRuleCreate(FrontendRuleCreate):
             raise ValueError("Usage limit must be finite")
         return value
 
+# Selecting monitoring rule templates.
 class RuleSelection(ORMModel):
     rule_ids: list[int] = Field(min_length=1, max_length=100)
     variable_mappings: dict[int, int] = Field(default_factory=dict)
@@ -544,7 +543,7 @@ class RuleSelection(ORMModel):
             raise ValueError("Variable mappings may only reference selected templates")
         return self
 
-
+# Copying rules between assets.
 class RuleCopyRequest(RuleSelection):
     source_asset_id: int = Field(gt=0)
     include_disabled: bool = True

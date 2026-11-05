@@ -1,6 +1,4 @@
-
 # Reusable monitoring rule templates, separate from asset-specific rules.
-
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -28,8 +26,7 @@ from app.models.labels import Label, rule_labels, rule_template_labels
 class MonitoringRuleTemplate(AuditNamesMixin, Base):
     __tablename__ = "nem_monitoring_rule_templates"
     __table_args__ = (
-        CheckConstraint(
-            "visibility_type IN ('admin_only', 'specific_supervisors')",
+        CheckConstraint("visibility_type IN ('admin_only', 'specific_supervisors')",
             name="ck_nem_monitoring_rule_templates_visibility",
         ),
     )
@@ -259,19 +256,9 @@ class RuleState(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     rule_id: Mapped[int] = mapped_column(
-        ForeignKey("nem_monitoring_rules.id", ondelete="RESTRICT"),
-        nullable=False,
-        unique=True,
-    )
-    target_asset_id: Mapped[int] = mapped_column(
-        ForeignKey("assets.id", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
-    )
-    target_variable_id: Mapped[int | None] = mapped_column(
-        ForeignKey("variables.id", ondelete="RESTRICT"),
-        index=True,
-    )
+        ForeignKey("nem_monitoring_rules.id", ondelete="RESTRICT"),nullable=False,unique=True,)
+    target_asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id", ondelete="RESTRICT"),nullable=False,index=True,)
+    target_variable_id: Mapped[int | None] = mapped_column(ForeignKey("variables.id", ondelete="RESTRICT"),index=True,)
 
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")
     latest_value: Mapped[Any | None] = mapped_column(JSON)
@@ -345,13 +332,9 @@ class Alert(Base):
 
     target_asset_id: Mapped[int] = mapped_column(
         ForeignKey("assets.id", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
-    )
-    target_variable_id: Mapped[int | None] = mapped_column(
-        ForeignKey("variables.id", ondelete="RESTRICT"),
-        index=True,
-    )
+        nullable=False,index=True,)
+    target_variable_id: Mapped[int | None] = mapped_column(ForeignKey("variables.id", ondelete="RESTRICT"),
+        index=True,)
 
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
     title: Mapped[str] = mapped_column(String(250), nullable=False)

@@ -1,15 +1,14 @@
 """Asset-assignment access scope shared by the REST routes and live updates.
 
 Rules
------
-* Administrators are unrestricted.
-* Assignment is parent-only: access is granted by assigning a top-level (root)
+  Administrators are unrestricted.
+  Assignment is parent-only: access is granted by assigning a top-level (root)
   asset, which gives the user that asset and every descendant beneath it. A row in
-  ``nem_asset_supervisors`` that points at a child asset (one that has a parent) is
+  nem_asset_supervisors that points at a child asset (one that has a parent) is
   not valid, grants nothing and is ignored: there is no independent child access and
   no fallback. Access never flows upward or sideways.
-* An active non-administrator with no assignments reaches nothing.
-* Sessions that were not opened for an authenticated API request (background
+  An active non-administrator with no assignments reaches nothing.
+  Sessions that were not opened for an authenticated API request (background
   workers, the OPC UA collector, the email worker) are system sessions and are
   not restricted. Request sessions are marked by ``get_db``; a request session
   without a resolvable active user is denied everything (fail closed).
@@ -33,25 +32,25 @@ SCOPED_ROLES = frozenset({"Supervisor", "Operator"})
 REQUEST_SESSION_KEY = "access_scope_required"
 _CACHE_KEY = "_access_scope"
 
-
+# The central permission object.
 @dataclass(frozen=True)
 class AccessScope:
     unrestricted: bool
     asset_ids: frozenset[int] = frozenset()
-
+# Checks whether the user can access a particular asset.
     def allows(self, asset_id: int | None) -> bool:
         if self.unrestricted:
             return True
         return asset_id is not None and asset_id in self.asset_ids
-
+# This generates SQL condition for filtering db queries.
     def clause(self, column):
-        """SQL condition limiting ``column`` (an asset id column) to the scope."""
+        # SQL condition limiting column (an asset id column) to the scope
         if self.unrestricted:
             return true()
         if not self.asset_ids:
             return false()
         return column.in_(sorted(self.asset_ids))
-
+# Takes a collection of asset ids and removes everything outside the user`s permission scope.
     def restrict(self, asset_ids: Iterable[int]) -> set[int]:
         if self.unrestricted:
             return set(asset_ids)
@@ -63,8 +62,7 @@ NO_ACCESS = AccessScope(unrestricted=False)
 
 
 def _descendants_of(session: Session, roots: set[int]) -> frozenset[int]:
-    """Return the existing ``roots`` plus all of their descendants.
-
+    """Return the existing roots plus all of their descendants.
     Starts from the explicitly assigned roots only and expands one level at a time
     (children of the current frontier), so the whole asset table is never scanned and
     an unassigned parent never leads to its children. Stale root ids are dropped.
@@ -72,13 +70,10 @@ def _descendants_of(session: Session, roots: set[int]) -> frozenset[int]:
     """
     if not roots:
         return frozenset()
-    visible: set[int] = set(
-        session.scalars(select(Asset.id).where(Asset.id.in_(sorted(roots)))).all()
-    )
+    visible: set[int] = set(session.scalars(select(Asset.id).where(Asset.id.in_(sorted(roots)))).all())
     frontier = set(visible)
     while frontier:
-        children = set(
-            session.scalars(
+        children = set(session.scalars(
                 select(Asset.id).where(Asset.parent_asset_id.in_(sorted(frontier)))
             ).all()
         )
@@ -86,9 +81,9 @@ def _descendants_of(session: Session, roots: set[int]) -> frozenset[int]:
         visible |= frontier
     return frozenset(visible)
 
-
+# Calculating the user permissions.-> access scope from the db.
 def scope_for_user(session: Session, user: User | None) -> AccessScope:
-    """Compute the scope of ``user`` from the database."""
+    # Compute the scope of user from the database.
     if user is None or not user.is_active:
         return NO_ACCESS
     if user.role == "Administrator":
@@ -105,9 +100,9 @@ def scope_for_user(session: Session, user: User | None) -> AccessScope:
     )
     return AccessScope(unrestricted=False, asset_ids=_descendants_of(session, assigned))
 
-
+# Request-level scope and caching.This func determines whether the current sqlalchemy session belongs to: An authenticated API request or a background system.
 def access_scope(session: Session) -> AccessScope:
-    """Scope of the user that owns ``session`` (cached for the request)."""
+    # Scope of the user that owns session (cached for the request).
     cached = session.info.get(_CACHE_KEY)
     if cached is not None:
         return cached
@@ -120,13 +115,13 @@ def access_scope(session: Session) -> AccessScope:
     session.info[_CACHE_KEY] = scope
     return scope
 
-
+# Controlled internal access -> purpose to allow a specific internal operation to bypass the caller`s asset restrictions.`
 @contextmanager
 def internal_propagation_scope(session: Session):
     """Run internal propagation of a shared-rule edit without the caller's asset filter.
     Editing a shared rule updates every asset rule created from it, including assets
     the editing Supervisor cannot reach. The affected rows are selected by the rule's
-    own assignments (``source_template_id``), never by the caller's scope, and
+    own assignments (source_template_id), never by the caller's scope, and
     nothing about those assets is returned to the caller. Use only around that
     internal loop; request-level asset checks stay in force everywhere else.
     """
@@ -140,22 +135,19 @@ def internal_propagation_scope(session: Session):
         else:
             session.info[_CACHE_KEY] = previous
 
-
+# Protecting individual assets -> check whether the current user can access an asset
 def require_asset_access(
     session: Session,
     asset_id: int | None,
     detail: str | None = None,
 ) -> None:
-    """Raise 404 unless the request user may reach ``asset_id``."""
+    # Raise 404 unless the request user may reach asset_id.
     if not access_scope(session).allows(asset_id):
-        raise HTTPException(
-            status_code=404,
-            detail=detail or f"Asset {asset_id} was not found",
-        )
+        raise HTTPException(status_code=404,detail=detail or f"Asset {asset_id} was not found",)
 
-
+# These functions extend asset access restrictions to monitoring rules.
 def rule_asset_id(session: Session, rule) -> int | None:
-    """Asset that owns a monitoring rule (target asset, else variable asset)."""
+    # Asset that owns a monitoring rule (target asset, else variable asset).
     if rule.target_asset_id is not None:
         return rule.target_asset_id
     if rule.variable_id is not None:
@@ -163,9 +155,9 @@ def rule_asset_id(session: Session, rule) -> int | None:
         return variable.asset_id if variable is not None else None
     return None
 
-
+# Builds a SQL filter to retrieve only rule associated with permitted assets.
 def rule_clause(scope: AccessScope):
-    """SQL condition matching rules owned by an asset inside ``scope``."""
+    # SQL condition matching rules owned by an asset inside scope.
     if scope.unrestricted:
         return true()
     return or_(
@@ -178,17 +170,14 @@ def rule_clause(scope: AccessScope):
         ),
     )
 
-
+# Check an individual rule`s asset ownership.
 def require_rule_access(session: Session, rule, detail: str | None = None) -> None:
     if not access_scope(session).allows(rule_asset_id(session, rule)):
-        raise HTTPException(
-            status_code=404, detail=detail or f"Rule {rule.id} was not found"
-        )
+        raise HTTPException(status_code=404, detail=detail or f"Rule {rule.id} was not found")
 
-
+# This function applies asset scope to INstruction & Document.
 def hidden_document_ids(session: Session) -> set[int]:
     """Instruction documents a restricted caller must not see.
-
     A document attached to maintenance schedules is visible when at least one of
     those schedules is on an asset inside the scope. Otherwise a document linked
     to an asset (``asset_id``) is visible only when that asset is in scope.
@@ -200,9 +189,7 @@ def hidden_document_ids(session: Session) -> set[int]:
         return set()
     attached: set[int] = set()
     visible: set[int] = set()
-    for asset_id, document_ids in session.execute(
-        select(MaintenanceSchedule.asset_id, MaintenanceSchedule.instruction_document_ids)
-    ):
+    for asset_id, document_ids in session.execute(select(MaintenanceSchedule.asset_id, MaintenanceSchedule.instruction_document_ids)):
         for document_id in document_ids or []:
             if isinstance(document_id, bool) or not isinstance(document_id, int):
                 continue

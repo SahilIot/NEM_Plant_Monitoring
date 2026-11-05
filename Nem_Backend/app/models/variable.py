@@ -21,10 +21,7 @@ class Variable(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
-    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
-    )
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id", ondelete="RESTRICT"), nullable=False,index=True,)
 
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     key: Mapped[str] = mapped_column(String(100), nullable=False)

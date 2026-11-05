@@ -434,13 +434,15 @@ function Backup() {
   const create = async (values) => {
     if (!canManageBackups) return;
     const b = await api.post("/backups", values);
-    setOpen(false); setMsg(`Backup ${b.name} created.`); load();
+    setOpen(false);
+    setMsg(`Backup ${b.name} created.${b.warnings?.length ? ` Note: ${b.warnings.join(" ")}` : ""}`);
+    load();
   };
   const restore = async (b) => {
     if (!canManageBackups) return;
     if (
       !(await confirm(
-        `Restore "${b.name}"? This replaces all current monitoring data.`,
+        `Restore "${b.name}"? This replaces all current monitoring data, rules, collections, instructions and their attachments with the contents of this backup. User accounts are not changed. Create a fresh backup first if you may need the current data.`,
         {
           title: "Restore backup",
           confirmLabel: "Restore backup",
@@ -449,8 +451,8 @@ function Backup() {
       ))
     ) return;
     try {
-      await api.post(`/backups/${b.id}/restore`);
-      setMsg(`Backup ${b.name} restored.`);
+      const result = await api.post(`/backups/${b.id}/restore`);
+      setMsg(`Backup ${b.name} restored.${result?.warnings?.length ? ` Note: ${result.warnings.join(" ")}` : ""}`);
     } catch (error) {
       setMsg(`Could not restore backup: ${error.message}`);
     }

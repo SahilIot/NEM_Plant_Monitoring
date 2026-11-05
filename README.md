@@ -46,9 +46,10 @@ maintenance work and recurring calendar schedules.
   Administrator, Supervisor, and Operator accounts, and revoke sessions.
   Sessions expire after eight hours. Passwords are hashed; browser sessions
   use a bearer token held in local storage.
-- **Dashboard configuration:** Manage rule collections and templates,
-  instruction documents and attachments, profile and email settings, usage
-  information, and database backup/restore.
+- **Dashboard configuration:** Manage the Monitoring Rule Library and Rule
+  Collection Library, instructions and documents (with optional attachments),
+  configuration import/export, profile and email settings, usage information,
+  and database backup/restore.
 - **Email notifications:** Eligible alert transitions can enqueue email jobs
   for assigned supervisors. A separate worker delivers and retries jobs using
   configured SMTP settings. Actual delivery depends on recipient assignments,
@@ -126,8 +127,10 @@ NEM_Plant_Monitoring/
                                     rules/monitoringRuleFlow.js
         plc/                        pages/Plc.jsx, styles/Plc.css
         rules/                      components/PredefinedRulesModal, pages/AlertRules, RuleCreatePage
-        configuration/pages/        Rule library, visibility dialog, collections, documents,
-                                    instructions, import/export
+        configuration/pages/        RuleLibrary, CollectionLibrary, visibility dialog,
+                                    DocumentsPage / DocumentCreatePage / DocumentViewerPage /
+                                    CreateInstructionPage (utils/documents.js helpers),
+                                    ImportConfigurationPage + panel, ExportConfigurationPage
         settings/pages/             Profile, email, usage, backup/restore
         auth/                       AuthContext, LoginPage, AdminUsersPage
       services/                     api.js (REST client), liveUpdates.js (WebSocket client)
@@ -348,6 +351,52 @@ A shared rule is a single record: a Supervisor allowed to edit its thresholds
 changes it for every asset and user using it, after a confirmation dialog, and
 the change is written to the rule history.
 
+### Monitoring Rule Library and Rule Collection Library
+
+`/configuration/rules` lists the reusable (shared) rules that belong to no
+collection, with an overview (total, available, disabled, added in the last 30
+days, rules per category), search, filters (rule type, category, availability,
+labels) and sorting. Categories are derived from the implemented rule types:
+Runtime-based, Cycle count, Time interval, Boolean condition and Threshold.
+**View** opens the read-only details (configuration, assigned assets within the
+caller's scope, change history). Editing, duplicating, deleting and visibility
+keep their existing role restrictions.
+
+`/configuration/collections` lists collections with their rule count (at most
+five rules each), rule-category summary, labels, search and sorting. A
+collection **owns** its rules (each rule template has one `collection_id`);
+library rules are the templates without one. Collection management is
+Administrator-only; other roles can view the contents they are allowed to see.
+Deleting a collection deletes the rules inside it (the confirmation says so);
+rules already assigned to assets are not changed. Moving an existing library
+rule into a collection is not offered, because it would change ownership.
+
+### Instructions & Documents
+
+`/configuration/documents` combines two independent capabilities, both stored
+in `instruction_documents` (with `instruction_document_files` for attachments):
+
+- **Instruction** (`entry_type = "instruction"`, **Create New Instruction**):
+  a title, category, content (required, up to 10,000 characters), optional asset
+  and labels, and an **optional** attachment. An instruction with no file is
+  valid and shows the status "No attachment".
+- **Document** (`entry_type = "document"`, **Upload document**): one or more
+  files are required.
+
+Attachments: `.pdf`, `.doc`, `.docx`, `.txt` (content signatures are checked on
+the server), up to 10 files, 10 MB each and 24 MB in total, stored under
+`Nem_Backend/uploads/instruction_documents`. Administrators and Supervisors can
+create; editing, deleting and replacing/adding/removing files are
+Administrator-only. Every role can read and download, except entries hidden by
+asset scope (`asset_id`) or schedule attachment. Rows record creator, last
+editor and timestamps. Existing rows keep working: the startup upgrade adds
+`entry_type` (default `document`), `asset_id` and the audit columns, and legacy
+rows with kind `Instruction` are shown as instructions.
+
+Endpoints: `GET/POST /documents`, `POST /documents/with-files`,
+`PATCH/DELETE /documents/{id}`, `POST /documents/{id}/files`,
+`PUT/DELETE /documents/{id}/files/{file_id}`, and `GET .../view|download`.
+
 ### Configuration import / export (Administrators only)
 
 `GET /api/v1/config-transfer/export` returns a versioned JSON package
@@ -363,6 +412,17 @@ Missing destination Supervisors fall back to Admin Only unless the Administrator
 maps them; maintenance rules need a matching or selected destination asset. The
 importing Administrator is recorded as creator and each import is logged in
 `nem_configuration_imports`.
+
+`GET /config-transfer/export` accepts optional `categories`
+(`monitoring_rules,collection_rules,maintenance_rules`) and `asset_ids`
+(limits maintenance rules); with no parameters the output is unchanged.
+`GET /config-transfer/export/summary` returns the counts shown before
+downloading, and each export writes a log line (user id, categories, counts).
+JSON is the only supported format. The Import page (`/configuration/import`)
+takes a `.json` file up to 5 MB, shows a server-side preview with counts per
+status, lets the Administrator confirm what will be created, skipped or
+rejected, and offers a CSV validation/error report. Database backup and restore
+are separate (Settings → Backup and restore).
 
 Visibility, editing and assignment are separate checks, all enforced by the
 backend. A Supervisor who can see a shared rule may change only its numeric
@@ -436,7 +496,7 @@ API routers are mounted under `/api/v1`:
 | Maintenance | `/maintenance`, `/maintenance/schedules`, start/complete/cancel and next-date actions |
 | PLC / OPC UA | `/plc/status`, `/plc/test`, `/plc/discover`, `/plc/read` |
 | Notifications | Asset supervisor assignment and email delivery summary |
-| Dashboard/configuration | Summary, collections, documents, settings, import/export, usage, backups |
+| Dashboard/configuration | Summary, `/collections`, `/documents` (instructions and files), settings, `/config-transfer/*` (export, export/summary, preview, import), usage, backups |
 | Live updates | WebSocket `/api/v1/live` and `/api/v1/ws/live` |
 
 Use `/docs` or `/openapi.json` for the exact request/response schemas and query
@@ -471,6 +531,29 @@ is not a substitute for reviewing schema changes. Back
 up the database before deploying updates. Dashboard backups are separate snapshots managed through
 the Settings workflow; restoring one replaces current monitoring data.
 Protect database backups and the backend `backups/` directory.
+
+**Dashboard backup and restore** (Administrators only). A backup is one ZIP file
+(`format_version` 2) written from a single PostgreSQL `REPEATABLE READ` snapshot, so all
+tables show the same moment even while users work. It contains `manifest.json` (row counts and
+SHA-256 checksums), one `tables/<name>.jsonl` per table, and the uploaded document attachments
+(`files/`). Scope: assets, variables, readings, rule collections, templates and rules (with their
+label links, supervisor grants and change history), rule states and counters, alerts, events,
+maintenance schedules and records, machine states, labels, instructions with attachment metadata
+and files, asset supervisor assignments and dashboard configuration. Not included: user accounts
+and sessions, the email outbox, rule suggestions, configuration-import log, scheduler leases and
+the backup history itself. Settings may hold SMTP credentials, so treat backup files as secrets.
+
+Restore validates the whole file first (format version, tables, columns, types, primary keys,
+references, checksums) and stages attachment files; nothing is deleted if that fails. The database
+part (exclusive table locks, delete, insert, sequence reset) is one transaction, so it is
+all-or-nothing. After the commit, attachments are moved into `uploads/` (existing files are never
+overwritten or deleted) and the start-up rule migrations are re-run; problems in those post-commit
+steps are reported as warnings and do not undo the restore. Records pointing at user accounts
+that no longer exist are kept with the reference cleared. If an upload with the same file name but different content already exists, the restored attachment is stored under a new name and the existing file is kept. Writers wait while a restore runs, and
+only one restore can run at a time. Old `.json` backups (format version 1) can still be restored,
+but they do not contain schedules, label links, attachment files and similar data, so a restore is
+refused when maintenance schedules or machine states exist now, and other data in those tables is
+reported as removed.
 
 Application datetimes are handled as UTC. The SQLAlchemy `UTCDateTime` type
 stores UTC-naive values in the database and returns aware UTC datetimes to the

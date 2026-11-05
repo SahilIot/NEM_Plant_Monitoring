@@ -105,6 +105,20 @@ the rendered UI, a live login, PLC or SMTP, and the upgrades against the
 deployed database. Run `npm run build` and restart the backend before relying
 on them.
 
+## Instructions, libraries and import/export (latest session)
+
+Implemented but **not run**: the backend changes (`entry_type`, `asset_id` and
+audit columns on `instruction_documents`, document file add/replace/remove,
+export filters and summary) and the redesigned Documents, Create Instruction,
+Rule Library, Collection Library and Import/Export pages were only
+syntax-checked (Python `ast`, Babel). The additive `entry_type` upgrade SQL was
+run against a scratch PostgreSQL 16 instance. `npm run build` could not be run
+(Windows `node_modules` in a Linux sandbox) and the new API behaviour has not
+been exercised over HTTP. Design facts worth keeping: a collection owns its
+rules (`collection_id`, max five), so "add/remove library rule to collection"
+is intentionally absent; `GET /collections` returns no creation date;
+Instruction content lives in `description`.
+
 ## Recently corrected UI root cause
 
 The Current status maintenance details modal passed `now={clockNow}` from

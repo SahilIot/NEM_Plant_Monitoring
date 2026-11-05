@@ -66,8 +66,8 @@ class MaintenanceSchedule(AuditNamesMixin, Base):
     )
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True)
     updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True)
-    created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
-    updated_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
+    created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_id], lazy="selectin") # type: ignore
+    updated_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[updated_by_id], lazy="selectin") # type: ignore
 
 #stores the maintenance work performed on machines 
 class MaintenanceRecord(AuditNamesMixin, Base):
@@ -107,8 +107,8 @@ class MaintenanceRecord(AuditNamesMixin, Base):
     updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True)
     updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True)
-    created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
-    updated_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
+    created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_id], lazy="selectin") # type: ignore
+    updated_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[updated_by_id], lazy="selectin") # type: ignore
 
     @property
     def title(self) -> str:

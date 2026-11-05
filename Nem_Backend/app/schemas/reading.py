@@ -5,9 +5,7 @@ import math
 # any -> allows metadata or returned values to contain different data types
 # Union -> means a value can belong to one of several allowed types
 from typing import Any, Union
-
 from pydantic import AliasChoices, Field, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator
- # 
 from app.schemas.common import ORMModel
  # what values can a plc reading contains
 ReadingValue = Union[StrictStr, StrictBool, StrictInt, StrictFloat]
@@ -48,6 +46,4 @@ class ReadingRead(ORMModel):
     value: Any
     recorded_at: datetime
     source_id: str | None
-    metadata: dict[str, Any] | None = Field(
-        default=None, validation_alias=AliasChoices("metadata_json", "metadata")
-    )
+    metadata: dict[str, Any] | None = Field(default=None, validation_alias=AliasChoices("metadata_json", "metadata"))

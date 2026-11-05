@@ -37,8 +37,7 @@ class RuleVisibilityChange(Base):
     __tablename__ = "nem_rule_visibility_changes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    template_id: Mapped[int] = mapped_column(
-        ForeignKey("nem_monitoring_rule_templates.id", ondelete="CASCADE"),
+    template_id: Mapped[int] = mapped_column(ForeignKey("nem_monitoring_rule_templates.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -69,5 +68,4 @@ class RuleTemplateChange(Base):
     field: Mapped[str] = mapped_column(String(60), nullable=False)
     previous_value: Mapped[Any | None] = mapped_column(JSON)
     new_value: Mapped[Any | None] = mapped_column(JSON)
-
     changed_by: Mapped["User | None"] = relationship( "User", foreign_keys=[changed_by_id], lazy="selectin") # type: ignore

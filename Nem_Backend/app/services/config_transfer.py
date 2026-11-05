@@ -244,10 +244,7 @@ def check_package(package: Any) -> dict[str, list]:
         problems.append("The export has no 'contents' section.")
         contents = {}
     if not _within_limits(package):
-        raise HTTPException(
-            status_code=422,
-            detail=f"The file is too deeply nested (more than {MAX_NESTING_DEPTH} levels) or too large to import.",
-        )
+        raise HTTPException(status_code=422,detail=f"The file is too deeply nested (more than {MAX_NESTING_DEPTH} levels) or too large to import.",)
     result: dict[str, list] = {}
     for category in CATEGORIES:
         items = contents.get(category, [])
@@ -328,9 +325,7 @@ def _parse_template(raw: Any, supervisors, options, valid_ids):
         payload = RuleTemplateCreate.model_validate({**data, "collection_id": None})
     except ValidationError as error:
         errors.extend(_error_text(error))
-    vis_type, ids, vis_errors, warnings, unresolved = _resolve_visibility(
-        raw.get("visibility"), supervisors, options, valid_ids
-    )
+    vis_type, ids, vis_errors, warnings, unresolved = _resolve_visibility(raw.get("visibility"), supervisors, options, valid_ids)
     errors.extend(vis_errors)
     return payload, (vis_type, ids), errors, warnings, unresolved
 
@@ -356,9 +351,7 @@ def analyse(session: Session, package: Any, options: ImportOptions) -> dict[str,
     parent_names = {asset.id: asset.name for asset in assets}
     existing_schedules = {
         (s.asset_id, s.title.casefold(), s.maintenance_type)
-        for s in session.scalars(
-            select(MaintenanceSchedule).where(MaintenanceSchedule.status.in_(("active", "paused", "awaiting_approval")))
-        )
+        for s in session.scalars(select(MaintenanceSchedule).where(MaintenanceSchedule.status.in_(("active", "paused", "awaiting_approval"))))
     }
     seen_schedules: set[tuple] = set()
     start = options.maintenance_start_date or datetime.now(timezone.utc).date()

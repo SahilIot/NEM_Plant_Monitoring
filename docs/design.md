@@ -40,9 +40,12 @@ loads `src/styles/global.css`.
   connection status, mapping and publishing details, monitoring state,
   connection test, discovery, and one-shot read-and-save controls. The page
   shows whether the OPC UA connection is secured, and warns only when it is unencrypted.
-- **Configuration** (`features/configuration/pages/`): rule library and
-  collections, instruction/document creation and viewing, import/export, and
-  related configuration workflows. The rule library lists only the shared rules
+- **Configuration** (`features/configuration/pages/`): Monitoring Rule Library
+  (overview, filters, table) and Rule Collection Library (cards, contents
+  view), Instructions & Documents (category tabs, filters, read view for
+  instructions, viewer for files, separate Create New Instruction and Upload
+  document forms), and import/export (stepped import with preview and
+  confirmation, export with category/asset selection and preview). The rule library lists only the shared rules
   the signed-in role may see. Its **View** dialog shows the rule, the assets
   using it (within the caller's asset scope) and its change history.
   Administrators also get the visibility dialog (Admin Only, Specific

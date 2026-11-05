@@ -33,6 +33,12 @@ deployment configuration or field validation.
   the only visibilities (`all_supervisors` retired by a startup migration).
 - Administrator-only versioned JSON export / preview / import of monitoring
   rules, collections and maintenance definitions (`/api/v1/config-transfer/*`).
+- Instructions & Documents: category/asset/status filtering, drag-and-drop
+  upload with progress, file replace/add/remove, viewer, and a separate
+  Create New Instruction form (`entry_type`; attachment optional).
+- Monitoring Rule Library and Rule Collection Library redesigned (overview,
+  search, filters, sorting, details); Import/Export pages redesigned with
+  export category/asset filters and a confirmed, previewed import.
 - Hardened, idempotent startup upgrades for audit columns, rule visibility and
   request removal (PostgreSQL only; see `docs/architecture.md`).
 - Codebase cleanup: unused imports, functions, components, icons, styles and
@@ -110,9 +116,11 @@ deployment configuration or field validation.
 Found during the cleanup but not removed because they could not be confirmed
 unnecessary:
 
-- `Nem_Frontend/src/features/assets/pages/ExportConfigurationPage.jsx` is not
-  imported anywhere; the router uses the near-identical copy in
-  `features/configuration/pages/`.
+- (Resolved) The unused `features/assets/pages/ExportConfigurationPage.jsx`,
+  the generic `ConfigSub` page and its CSS, two orphan CSS files and the
+  unreferenced rule `AssignmentModal` were removed; `/configuration/import` is
+  now `ImportConfigurationPage` and unknown `/configuration/*` paths redirect
+  to `/configuration`.
 - Backend routes with no frontend caller (possible external integrations, see
   `.postman`): asset `children`, `hierarchy`, `move` and `rules/time|usage`;
   document file `download`/`view`; maintenance `cancel` and `permanent`;

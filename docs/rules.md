@@ -140,7 +140,10 @@ suspend/resume/activate/deactivate and verify legacy rule records.
   the shared tables.
 - Authorization remains governed by each entry's existing route permission.
   Collection and document metadata updates are Administrator-only; rule and
-  template updates continue to use their existing role restrictions.
+  template updates continue to use their existing role restrictions. Creating
+  instructions and uploading documents is open to Administrators and
+  Supervisors; an instruction never requires an attachment. Removing a rule
+  from a collection is not an operation: a collection owns its rules.
 
 ## Shared rule visibility and editing
 
