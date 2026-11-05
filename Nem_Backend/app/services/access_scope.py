@@ -27,7 +27,7 @@ from fastapi import HTTPException
 from sqlalchemy import and_, false, or_, select, true
 from sqlalchemy.orm import Session
 
-from app.models import Asset, AssetSupervisor, MaintenanceSchedule, MonitoringRule, User, Variable
+from app.models import Asset, AssetSupervisor, InstructionDocument, MaintenanceSchedule, MonitoringRule, User, Variable
 
 SCOPED_ROLES = frozenset({"Supervisor", "Operator"})
 REQUEST_SESSION_KEY = "access_scope_required"
@@ -189,10 +189,11 @@ def require_rule_access(session: Session, rule, detail: str | None = None) -> No
 def hidden_document_ids(session: Session) -> set[int]:
     """Instruction documents a restricted caller must not see.
 
-    Documents have no asset of their own; they are attached to maintenance
-    schedules. A document attached to schedules is visible only when at least one
-    of those schedules is on an asset inside the scope. Documents attached to no
-    schedule form a shared library and stay visible to every signed-in user.
+    A document attached to maintenance schedules is visible when at least one of
+    those schedules is on an asset inside the scope. Otherwise a document linked
+    to an asset (``asset_id``) is visible only when that asset is in scope.
+    Documents with neither link form a shared library and stay visible to every
+    signed-in user.
     """
     scope = access_scope(session)
     if scope.unrestricted:
@@ -208,4 +209,11 @@ def hidden_document_ids(session: Session) -> set[int]:
             attached.add(document_id)
             if scope.allows(asset_id):
                 visible.add(document_id)
-    return attached - visible
+    linked_out_of_scope = {
+        document_id
+        for document_id, asset_id in session.execute(
+            select(InstructionDocument.id, InstructionDocument.asset_id).where(InstructionDocument.asset_id.is_not(None))
+        )
+        if document_id not in visible and not scope.allows(asset_id)
+    }
+    return (attached - visible) | linked_out_of_scope

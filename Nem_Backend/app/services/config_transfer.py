@@ -100,7 +100,14 @@ def _asset_reference(session: Session, asset: Asset) -> dict[str, Any]:
     return {"name": asset.name, "asset_type": asset.asset_type, "parent_name": parent.name if parent else None}
 
 # Main export function 
-def build_export(session: Session) -> dict[str, Any]:
+def build_export(
+    session: Session,
+    categories: tuple[str, ...] | None = None,
+    maintenance_asset_ids: set[int] | None = None,
+) -> dict[str, Any]:
+    # ``categories`` limits which sections are exported (default: all, the original format).
+    # ``maintenance_asset_ids`` limits maintenance definitions to schedules on those assets.
+    selected = set(CATEGORIES if categories is None else categories)
     templates = session.scalars(select(MonitoringRuleTemplate).order_by(MonitoringRuleTemplate.id)).all()
     standalone = [t for t in templates if t.collection_id is None]
     collections = session.scalars(select(RuleCollection).order_by(RuleCollection.id)).all()
@@ -109,6 +116,8 @@ def build_export(session: Session) -> dict[str, Any]:
         .where(MaintenanceSchedule.status.in_(_EXPORTED_SCHEDULE_STATUSES))
         .order_by(MaintenanceSchedule.id)
     ).all()
+    if maintenance_asset_ids is not None:
+        schedules = [s for s in schedules if s.asset_id in maintenance_asset_ids]
 
     monitoring = [{"ref": f"MR-{i}", **_template_item(t)} for i, t in enumerate(standalone, 1)]
     collection_items = []
@@ -147,10 +156,43 @@ def build_export(session: Session) -> dict[str, Any]:
         "format_version": FORMAT_VERSION,
         "exported_at": _iso(datetime.now(timezone.utc)),
         "contents": {
-            "monitoring_rules": monitoring,
-            "collection_rules": collection_items,
-            "maintenance_rules": maintenance,
+            name: items
+            for name, items in (
+                ("monitoring_rules", monitoring),
+                ("collection_rules", collection_items),
+                ("maintenance_rules", maintenance),
+            )
+            if name in selected
         },
+    }
+
+def export_summary(session: Session) -> dict[str, Any]:
+    # What an export would contain: record counts per category and the assets that carry exportable
+    # maintenance definitions (used by the export page to offer an asset filter). Reads only.
+    package = build_export(session)
+    contents = package["contents"]
+    per_asset: dict[int, int] = {}
+    schedules = session.scalars(
+        select(MaintenanceSchedule).where(MaintenanceSchedule.status.in_(_EXPORTED_SCHEDULE_STATUSES))
+    ).all()
+    for schedule in schedules:
+        per_asset[schedule.asset_id] = per_asset.get(schedule.asset_id, 0) + 1
+    assets = []
+    for asset_id, count in per_asset.items():
+        asset = session.get(Asset, asset_id)
+        if asset is not None:
+            assets.append({"id": asset.id, "name": asset.name, "asset_type": asset.asset_type, "maintenance_rules": count})
+    assets.sort(key=lambda item: item["name"].casefold())
+    return {
+        "counts": {
+            "monitoring_rules": len(contents["monitoring_rules"]),
+            "collection_rules": len(contents["collection_rules"]),
+            "collection_rule_members": sum(len(item["rules"]) for item in contents["collection_rules"]),
+            "maintenance_rules": len(contents["maintenance_rules"]),
+        },
+        "maintenance_assets": assets,
+        "formats": ["json"],
+        "format_version": FORMAT_VERSION,
     }
 
 #Creates a portable lookup key from an asset reference.

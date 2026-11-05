@@ -1,395 +1,245 @@
-
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  Upload,
-  FileText,
-  X,
-  Clock3,
-  ClipboardList,
-  Paperclip,
-} from "lucide-react";
-
+import { FileText, Upload, X } from "lucide-react";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
+import { BackIcon } from "../../../components/common/Icons.jsx";
 import LabelsField from "../../../components/common/LabelsField.jsx";
-import "./CreateInstructionPage.css";
+import {
+  DOCUMENT_CATEGORIES,
+  MAX_INSTRUCTION_CHARS,
+  fileTypeLabel,
+  formatBytes,
+  validateFiles,
+} from "../../../utils/documents.js";
+import "./Documents.css";
 
-const MAX_FILES = 10;
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const ALLOWED_EXTENSIONS = [".pdf", ".doc", ".docx", ".txt"];
-
+// Creates an instruction (text content). An attachment is optional: with no file the
+// instruction is saved as text only; with files it is saved together with them.
 export default function CreateInstructionPage() {
   const { user } = useAuth();
+  const canCreate = user?.role === "Administrator" || user?.role === "Supervisor";
   const nav = useNavigate();
+  const fileInput = useRef(null);
 
-  const canManageInstructions =
-    user?.role === "Administrator" ||
-    user?.role === "Supervisor";
-
-  const [name, setName] = useState("");
+  const [title, setTitle] = useState("");
+  const [kind, setKind] = useState(DOCUMENT_CATEGORIES[0]);
+  const [assetId, setAssetId] = useState("");
+  const [content, setContent] = useState("");
   const [labels, setLabels] = useState([]);
-  const [duration, setDuration] = useState("30");
-  const [text, setText] = useState("");
   const [files, setFiles] = useState([]);
-  const [busy, setBusy] = useState(false);
+  const [problems, setProblems] = useState([]);
+  const [assets, setAssets] = useState([]);
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [dragging, setDragging] = useState(false);
+  const [progress, setProgress] = useState(null);
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  function handleFileChange(event) {
-    const selectedFiles = Array.from(event.target.files || []);
-    setError("");
+  useEffect(() => {
+    let active = true;
+    api.getAll("/assets")
+      .then((rows) => { if (active) setAssets(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (active) setAssets([]); });
+    return () => { active = false; };
+  }, []);
 
-    if (selectedFiles.length > MAX_FILES) {
-      setError("You can attach up to 10 documents.");
-      event.target.value = "";
-      return;
-    }
+  const addFiles = (list) => {
+    const result = validateFiles(Array.from(list || []), files);
+    setFiles(result.files);
+    setProblems(result.problems);
+  };
 
-    const invalidFile = selectedFiles.find((file) => {
-      const extension = `.${file.name.split(".").pop().toLowerCase()}`;
-
-      return (
-        !ALLOWED_EXTENSIONS.includes(extension) ||
-        file.size > MAX_FILE_SIZE
-      );
-    });
-
-    if (invalidFile) {
-      const extension = `.${invalidFile.name.split(".").pop().toLowerCase()}`;
-
-      setError(
-        !ALLOWED_EXTENSIONS.includes(extension)
-          ? "Only PDF, DOC, DOCX and TXT documents are allowed."
-          : `${invalidFile.name} exceeds the 10 MB file size limit.`
-      );
-
-      event.target.value = "";
-      return;
-    }
-
-    setFiles(selectedFiles);
-    event.target.value = "";
-  }
-
-  function removeFile(index) {
-    setFiles((previous) =>
-      previous.filter((_, fileIndex) => fileIndex !== index)
-    );
-    setError("");
-  }
-
-  async function submit(event) {
+  const submit = async (event) => {
     event.preventDefault();
-
-    if (!canManageInstructions || busy) return;
-
+    if (!canCreate || busy) return;
     setError("");
-
-    const cleanName = name.trim();
-    const cleanText = text.trim();
-    const minutes = Number(duration);
-
-    if (cleanName.length < 2 || cleanName.length > 50) {
-      setError("Name must contain 2–50 characters.");
-      return;
-    }
-
-    if (!Number.isInteger(minutes) || minutes < 1) {
-      setError("Duration must be at least 1 minute.");
-      return;
-    }
-
-    if (!cleanText || cleanText.length > 10000) {
-      setError(
-        "Instruction text is required and limited to 10,000 characters."
-      );
-      return;
-    }
-
-    if (files.length > MAX_FILES) {
-      setError("You can attach up to 10 documents.");
-      return;
-    }
-
-    if (files.some((file) => file.size > MAX_FILE_SIZE)) {
-      setError("Each document must be 10 MB or smaller.");
-      return;
-    }
+    const errors = {};
+    if (!title.trim()) errors.title = "Title is required.";
+    if (!kind) errors.kind = "Category is required.";
+    if (!content.trim()) errors.content = "Instruction content is required.";
+    else if (content.length > MAX_INSTRUCTION_CHARS) errors.content = `Instruction content is limited to ${MAX_INSTRUCTION_CHARS.toLocaleString()} characters.`;
+    setFieldErrors(errors);
+    if (Object.keys(errors).length) return;
 
     setBusy(true);
-
     try {
-      if (files.length > 0) {
+      if (files.length) {
         const form = new FormData();
-        form.append("title", cleanName);
-        form.append("kind", "Instruction");
-        form.append("description", cleanText);
+        form.append("title", title.trim());
+        form.append("kind", kind);
+        form.append("description", content.trim());
+        form.append("entry_type", "instruction");
         form.append("labels", JSON.stringify(labels));
-        form.append("duration_minutes", String(minutes));
-        files.forEach((file) => {
-          form.append("files", file);
-        });
-        
-        await api.postForm("/documents/with-files", form);
+        if (assetId) form.append("asset_id", assetId);
+        files.forEach((file) => form.append("files", file));
+        setProgress(0);
+        await api.upload("/documents/with-files", form, { onProgress: setProgress });
       } else {
         await api.post("/documents", {
-          title: cleanName,
-          kind: "Instruction",
-          description: cleanText,
+          title: title.trim(),
+          kind,
+          description: content.trim(),
+          entry_type: "instruction",
           labels,
+          asset_id: assetId ? Number(assetId) : null,
         });
       }
-
-  nav("/configuration/documents", {
-    state: { documentCreated: true },
-  });
-} catch (err) {
-  setError(err.message || "Unable to create instruction.");
-} finally {
-  setBusy(false);
-}
-  }
+      nav("/configuration/documents", {
+        state: { notice: `Instruction "${title.trim()}" was created.` },
+      });
+    } catch (err) {
+      setError(err?.message || "Could not create the instruction.");
+      setProgress(null);
+      setBusy(false);
+    }
+  };
 
   return (
-    <div className="create-instruction-page">
-      <button
-        type="button"
-        className="link-btn instruction-back-btn"
-        onClick={() => nav("/configuration/documents")}
-      >
-        ‹ Back to Instructions and documents
+    <div className="docs-page docs-form-page">
+      <button type="button" className="link-btn" onClick={() => nav("/configuration/documents")}>
+        <BackIcon size={14} /> Back to instructions &amp; documents
       </button>
 
-      <header className="instruction-page-heading">
-        <div className="instruction-heading-icon">
-          <ClipboardList size={23} />
-        </div>
-
+      <div className="docs-head">
         <div>
           <h1 className="page-title">Create New Instruction</h1>
-          <p>
-            Define the task details, expected duration and supporting documents.
-          </p>
+          <p>Write an instruction for operators. Attaching a file is optional.</p>
         </div>
-      </header>
+      </div>
 
-      <form
-        className="panel instruction-form"
-        onSubmit={submit}
-      >
-        {!canManageInstructions && (
-          <p className="notice" role="status">
-            Only Administrators and Supervisors can create instructions.
-          </p>
+      <form className="docs-form-card" onSubmit={submit} noValidate>
+        {!canCreate && (
+          <p className="notice" role="status">Only Administrators and Supervisors can create instructions.</p>
         )}
-
-        {error && (
-          <p className="notice error" role="alert">
-            {error}
-          </p>
-        )}
-
-        <fieldset
-          disabled={!canManageInstructions || busy}
-          className="instruction-form-fields"
-        >
-          {/* Instruction Name */}
-          <div className="instruction-field">
-            <label htmlFor="instruction-name">
-              Instruction Name <span className="required">*</span>
-            </label>
-
-            <input
-              id="instruction-name"
-              type="text"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              minLength={2}
-              maxLength={50}
-              required
-              placeholder="e.g. Motor Inspection and Lubrication"
-            />
-
-            <small>
-              Enter a clear and descriptive name for this task.
-              {` ${name.length}/50 characters`}
-            </small>
-          </div>
-
-          {/* Labels */}
-          <div className="instruction-field">
-            <label htmlFor="instruction-label">
-              Labels <span className="optional">(Optional)</span>
-            </label>
-
-            <LabelsField
-              id="instruction-label"
-              value={labels}
-              onChange={setLabels}
-              disabled={!canManageInstructions || busy}
-            />
-
-            <small>
-              Add relevant labels to organize and identify instructions easily.
-              Maximum 10 labels.
-            </small>
-          </div>
-
-          {/* Duration */}
-          <div className="instruction-field">
-            <label htmlFor="instruction-duration">
-              Expected Duration <span className="required">*</span>
-            </label>
-
-            <div className="instruction-duration-control">
-              <Clock3 size={18} />
-
+        <fieldset disabled={!canCreate || busy}>
+          <div className="docs-form-grid">
+            <div className="field full">
+              <label htmlFor="instruction-title">Title <span className="req">*</span></label>
               <input
-                id="instruction-duration"
-                type="number"
-                min="1"
-                step="1"
-                required
-                value={duration}
-                onChange={(event) => setDuration(event.target.value)}
-                placeholder="Enter duration"
+                id="instruction-title"
+                autoFocus
+                value={title}
+                maxLength={200}
+                placeholder="e.g. Start-up checks for the mixer"
+                aria-invalid={Boolean(fieldErrors.title)}
+                onChange={(event) => setTitle(event.target.value)}
               />
-
-              <span>Minutes</span>
+              {fieldErrors.title && <small className="field-error" role="alert">{fieldErrors.title}</small>}
             </div>
 
-            <small>
-              Estimated time required to complete this task.
-            </small>
-          </div>
-
-          {/* Instructions Text */}
-          <div className="instruction-field">
-            <div className="instruction-field-heading">
-              <label htmlFor="instruction-text">
-                Instructions Text <span className="required">*</span>
-              </label>
-
-              <span className="instruction-character-count">
-                {text.length.toLocaleString("en-IN")}/10,000
-              </span>
+            <div className="field">
+              <label htmlFor="instruction-kind">Category <span className="req">*</span></label>
+              <select id="instruction-kind" value={kind} onChange={(event) => setKind(event.target.value)}>
+                {DOCUMENT_CATEGORIES.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+              {fieldErrors.kind && <small className="field-error" role="alert">{fieldErrors.kind}</small>}
             </div>
 
-            <textarea
-              id="instruction-text"
-              rows={2}
-              maxLength={10000}
-              required
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              placeholder={
-                "Describe the task step by step.\n\nInclude required tools, safety precautions, inspection steps and completion criteria..."
-              }
-            />
+            <div className="field">
+              <label htmlFor="instruction-asset">Machine / asset</label>
+              <select id="instruction-asset" value={assetId} onChange={(event) => setAssetId(event.target.value)}>
+                <option value="">General (no specific asset)</option>
+                {assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.name}</option>)}
+              </select>
+            </div>
 
-            <small>
-              Provide clear instructions so technicians can perform the task
-              correctly and safely.
-            </small>
-          </div>
+            <div className="field full">
+              <label htmlFor="instruction-content">Instruction content <span className="req">*</span></label>
+              <textarea
+                id="instruction-content"
+                rows={9}
+                value={content}
+                placeholder="Describe the steps or guidance operators should follow."
+                aria-invalid={Boolean(fieldErrors.content)}
+                onChange={(event) => setContent(event.target.value)}
+              />
+              <div className="docs-char-count">{content.length.toLocaleString()} / {MAX_INSTRUCTION_CHARS.toLocaleString()}</div>
+              {fieldErrors.content && <small className="field-error" role="alert">{fieldErrors.content}</small>}
+            </div>
 
-          {/* Supporting Documents */}
-          <div className="instruction-field">
-            <label htmlFor="instruction-documents">
-              Attach Supporting Documents{" "}
-            </label>
+            <div className="field full">
+              <label htmlFor="instruction-labels">Labels</label>
+              <LabelsField id="instruction-labels" value={labels} onChange={setLabels} />
+            </div>
 
-            <label
-              className="instruction-upload-area"
-              htmlFor="instruction-documents"
-            >
-              <div className="instruction-upload-icon">
-                <Upload size={23} />
+            <div className="field full">
+              <label htmlFor="instruction-files">Attachment <span className="docs-muted">(optional)</span></label>
+              <div
+                className={`docs-dropzone${dragging ? " dragging" : ""}`}
+                onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setDragging(false);
+                  addFiles(event.dataTransfer.files);
+                }}
+              >
+                <Upload size={22} aria-hidden="true" />
+                <strong>Drop a supporting file here, or leave empty</strong>
+                <small>PDF, DOC, DOCX or TXT · up to 10 files · 10 MB each · 24 MB total</small>
+                <button type="button" className="btn-outline" style={{ marginTop: 6 }} onClick={() => fileInput.current?.click()}>
+                  Browse files
+                </button>
+                <input
+                  id="instruction-files"
+                  ref={fileInput}
+                  type="file"
+                  multiple
+                  accept=".pdf,.doc,.docx,.txt"
+                  onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }}
+                />
               </div>
 
-              <strong>Click to upload documents</strong>
+              {problems.length > 0 && (
+                <ul className="docs-problems" role="alert">
+                  {problems.map((problem) => <li key={problem}>{problem}</li>)}
+                </ul>
+              )}
 
-              <span>
-                Choose PDF, DOC, DOCX or TXT files
-              </span>
-
-              <small>
-                Maximum 10 documents · 10 MB per document
-              </small>
-            </label>
-
-            <input
-              id="instruction-documents"
-              className="instruction-file-input"
-              type="file"
-              accept=".pdf,.doc,.docx,.txt"
-              multiple
-              onChange={handleFileChange}
-              disabled={busy}
-            />
-
-            {files.length > 0 && (
-              <div className="instruction-selected-files">
-                <div className="instruction-files-heading">
-                  <span>
-                    <Paperclip size={15} />
-                    Selected Documents
-                  </span>
-                  <small>{files.length}/10</small>
-                </div>
-
-                {files.map((file, index) => (
-                  <div
-                    className="instruction-file-item"
-                    key={`${file.name}-${file.lastModified}`}
-                  >
-                    <FileText size={19} />
-
-                    <div className="instruction-file-info">
-                      <strong>{file.name}</strong>
-                      <small>
-                        {(file.size / (1024 * 1024)).toFixed(2)} MB
-                      </small>
-                    </div>
-
-                    <button
-                      type="button"
-                      className="instruction-remove-file"
-                      onClick={() => removeFile(index)}
-                      aria-label={`Remove ${file.name}`}
-                    >
-                      <X size={17} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+              {files.length > 0 && (
+                <ul className="docs-selected" aria-label="Selected files">
+                  {files.map((file, index) => (
+                    <li key={`${file.name}-${file.size}`}>
+                      <FileText size={16} aria-hidden="true" />
+                      <span className="docs-badge">{fileTypeLabel(file.name)}</span>
+                      <span className="name" title={file.name}>{file.name}</span>
+                      <span className="docs-file-size">{formatBytes(file.size)}</span>
+                      <button
+                        type="button"
+                        className="docs-icon-btn"
+                        aria-label={`Remove ${file.name}`}
+                        onClick={() => { setFiles((current) => current.filter((_, position) => position !== index)); setProblems([]); }}
+                      >
+                        <X size={14} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
         </fieldset>
 
-        {/* Form Actions */}
-        <div className="instruction-form-actions">
-          <button
-            type="button"
-            className="btn-secondary"
-            disabled={busy}
-            onClick={() => nav("/configuration/documents")}
-          >
-            Cancel
-          </button>
+        {progress !== null && (
+          <>
+            <div className="docs-progress" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
+              <span style={{ width: `${progress}%` }} />
+            </div>
+            <p className="docs-progress-text">{progress < 100 ? `Uploading… ${progress}%` : "Saving instruction…"}</p>
+          </>
+        )}
 
-          <button
-            type="submit"
-            className="btn-primary"
-            disabled={busy || !canManageInstructions}
-            title={
-              !canManageInstructions
-                ? "Only Administrators and Supervisors can create instructions."
-                : undefined
-            }
-          >
-            {busy ? "Submitting..." : "Create Instruction"}
-          </button>
+        {error && <p className="notice error" role="alert">{error}</p>}
+
+        <div className="docs-form-footer">
+          <span className="docs-muted" style={{ fontSize: 12 }}><span style={{ color: "var(--alert)" }}>*</span> Required</span>
+          <div className="docs-form-actions">
+            <button type="button" className="btn-outline" disabled={busy} onClick={() => nav("/configuration/documents")}>Cancel</button>
+            <button type="submit" className="btn-primary" disabled={busy || !canCreate}>
+              {busy ? "Saving..." : "Create instruction"}
+            </button>
+          </div>
         </div>
       </form>
     </div>

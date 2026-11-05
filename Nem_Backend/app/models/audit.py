@@ -12,10 +12,11 @@ from sqlalchemy import event, inspect
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.models.frontend_data import InstructionDocument
 from app.models.maintenance import MaintenanceRecord, MaintenanceSchedule
 from app.models.rule import MonitoringRule, MonitoringRuleTemplate
 
-AUDITED_MODELS = (MonitoringRule, MonitoringRuleTemplate, MaintenanceSchedule, MaintenanceRecord)
+AUDITED_MODELS = (MonitoringRule, MonitoringRuleTemplate, MaintenanceSchedule, MaintenanceRecord, InstructionDocument)
 _IMMUTABLE_COLUMNS = ("created_by_id", "created_at")
 
 

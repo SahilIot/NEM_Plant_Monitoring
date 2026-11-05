@@ -1,330 +1,228 @@
-﻿
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { FileText, Upload, X } from "lucide-react";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { BackIcon } from "../../../components/common/Icons.jsx";
 import LabelsField from "../../../components/common/LabelsField.jsx";
-import "./DocumentCreatePage.css";
-
-const DOC_TYPES = [
-  ["Instruction", "Instruction"],
-  ["Manual", "Manual"],
-  ["Checklist", "Checklist"],
-  ["Other", "Other"],
-];
+import {
+  DOCUMENT_CATEGORIES,
+  fileTypeLabel,
+  formatBytes,
+  validateFiles,
+} from "../../../utils/documents.js";
+import "./Documents.css";
 
 export default function DocumentCreatePage() {
   const { user } = useAuth();
   const canManageDocuments =
     user?.role === "Administrator" || user?.role === "Supervisor";
   const nav = useNavigate();
+  const fileInput = useRef(null);
 
   const [title, setTitle] = useState("");
-  const [kind, setKind] = useState("Instruction");
+  const [kind, setKind] = useState(DOCUMENT_CATEGORIES[0]);
+  const [assetId, setAssetId] = useState("");
   const [description, setDescription] = useState("");
   const [labels, setLabels] = useState([]);
   const [files, setFiles] = useState([]);
+  const [problems, setProblems] = useState([]);
+  const [assets, setAssets] = useState([]);
+  const [dragging, setDragging] = useState(false);
+  const [progress, setProgress] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    let active = true;
+    api.getAll("/assets")
+      .then((rows) => { if (active) setAssets(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (active) setAssets([]); });
+    return () => { active = false; };
+  }, []);
+
+  const addFiles = (list) => {
+    const result = validateFiles(Array.from(list || []), files);
+    setFiles(result.files);
+    setProblems(result.problems);
+  };
+
+  const removeFile = (index) => {
+    setFiles((current) => current.filter((_, position) => position !== index));
+    setProblems([]);
+  };
+
   const submit = async (event) => {
     event.preventDefault();
-    if (!canManageDocuments) return;
+    if (!canManageDocuments || busy) return;
     setError("");
-
     if (!title.trim()) {
       setError("Title is required.");
       return;
     }
-
-    if (files.length > 10) {
-      setError("You can attach up to 10 files.");
+    if (!files.length) {
+      setError("Attach at least one file.");
       return;
     }
 
-    if (files.some((file) => file.size > 10 * 1024 * 1024)) {
-      setError("Each file must be 10 MB or smaller.");
-      return;
-    }
+    const form = new FormData();
+    form.append("title", title.trim());
+    form.append("kind", kind);
+    form.append("description", description.trim());
+    form.append("labels", JSON.stringify(labels));
+    if (assetId) form.append("asset_id", assetId);
+    files.forEach((file) => form.append("files", file));
 
     setBusy(true);
-
+    setProgress(0);
     try {
-      if (files.length) {
-        const form = new FormData();
-        form.append("title", title.trim());
-        form.append("kind", kind);
-        form.append("description", description.trim());
-        form.append("labels", JSON.stringify(labels));
-        files.forEach((file) => form.append("files", file));
-
-        await api.postForm("/documents/with-files", form);
-      } else {
-        await api.post("/documents", {
-          title: title.trim(),
-          kind,
-          description: description.trim() || null,
-          labels,
-        });
-      }
-
+      await api.upload("/documents/with-files", form, { onProgress: setProgress });
       nav("/configuration/documents", {
-        state: { documentCreated: true },
+        state: { notice: `"${title.trim()}" was uploaded.` },
       });
     } catch (err) {
-      setError(err?.message || "Could not create document.");
-    } finally {
+      setError(err?.message || "Could not upload the document.");
+      setProgress(null);
       setBusy(false);
     }
   };
 
   return (
-    <div className="document-create-page">
-      <button
-        type="button"
-        className="link-btn document-back"
-        onClick={() => nav("/configuration/documents")}
-      >
+    <div className="docs-page docs-form-page">
+      <button type="button" className="link-btn" onClick={() => nav("/configuration/documents")}>
         <BackIcon size={14} /> Back to documents
       </button>
 
-      <header className="document-hero">
-        <div className="document-hero-icon">
-          <svg
-            width="29"
-            height="29"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.7"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
-            <path d="M13 2v7h7" />
-            <path d="M8 13h8M8 17h8" />
-            <path d="M8 9h1" />
-          </svg>
+      <div className="docs-head">
+        <div>
+          <h1 className="page-title">Upload document</h1>
+          <p>Add an instruction, manual or procedure and link it to a machine.</p>
         </div>
+      </div>
 
-        <div className="document-hero-copy">
-          <h1>Create document</h1>
-          <p>
-            Add instructions, manuals and checklists to keep important
-            machine information organised and accessible.
-          </p>
-        </div>
-      </header>
+      <form className="docs-form-card" onSubmit={submit} noValidate>
+        {!canManageDocuments && (
+          <p className="notice" role="status">Only Administrators and Supervisors can upload documents.</p>
+        )}
+        <fieldset disabled={!canManageDocuments || busy}>
+          <div className="docs-form-grid">
+            <div className="field full">
+              <label htmlFor="document-title">Title <span className="req">*</span></label>
+              <input
+                id="document-title"
+                autoFocus
+                value={title}
+                maxLength={200}
+                placeholder="e.g. Mixer inspection steps"
+                onChange={(event) => setTitle(event.target.value)}
+              />
+            </div>
 
-      <section className="document-form-card">
-        <div className="document-form-heading">
-          <div className="document-section-icon">
-            <svg
-              width="21"
-              height="21"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M12 20h9" />
-              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L9 17l-4 1 1-4Z" />
-            </svg>
-          </div>
-          <div>
-            <h2>Document details</h2>
-            <p>Enter the document information and attach relevant files.</p>
-          </div>
-        </div>
+            <div className="field">
+              <label htmlFor="document-kind">Category <span className="req">*</span></label>
+              <select id="document-kind" value={kind} onChange={(event) => setKind(event.target.value)}>
+                {DOCUMENT_CATEGORIES.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </div>
 
-        <div className="document-form-body">
-          <form onSubmit={submit}>
-            {!canManageDocuments && (
-              <p className="notice" role="status">
-                Only Administrators and Supervisors can create documents.
-              </p>
-            )}
-            <fieldset
-              disabled={!canManageDocuments || busy}
-              style={{ border: 0, margin: 0, minWidth: 0, padding: 0 }}
-            >
-            <div className="document-fields-grid">
-              <div className="field">
-                <label htmlFor="document-title">
-                  Title <span className="req"> * </span>
-                </label>
+            <div className="field">
+              <label htmlFor="document-asset">Machine / asset</label>
+              <select id="document-asset" value={assetId} onChange={(event) => setAssetId(event.target.value)}>
+                <option value="">General (no specific asset)</option>
+                {assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.name}</option>)}
+              </select>
+            </div>
+
+            <div className="field full">
+              <label htmlFor="document-description">Description</label>
+              <textarea
+                id="document-description"
+                rows={2}
+                value={description}
+                placeholder="What is this document for?"
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </div>
+
+            <div className="field full">
+              <label htmlFor="document-labels">Labels</label>
+              <LabelsField id="document-labels" value={labels} onChange={setLabels} />
+            </div>
+
+            <div className="field full">
+              <label htmlFor="document-files">Files <span className="req">*</span></label>
+              <div
+                className={`docs-dropzone${dragging ? " dragging" : ""}`}
+                onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setDragging(false);
+                  addFiles(event.dataTransfer.files);
+                }}
+              >
+                <Upload size={24} aria-hidden="true" />
+                <strong>Drag and drop files here</strong>
+                <small>PDF, DOC, DOCX or TXT · up to 10 files · 10 MB each · 24 MB total</small>
+                <button type="button" className="btn-outline" style={{ marginTop: 6 }} onClick={() => fileInput.current?.click()}>
+                  Browse files
+                </button>
                 <input
-                  id="document-title"
-                  autoFocus
-                  required
-                  value={title}
-                  placeholder="e.g. Mixer inspection steps"
-                  disabled={busy}
-                  onChange={(event) => setTitle(event.target.value)}
-                />
-              </div>
-
-              <div className="field">
-                <label htmlFor="document-kind">Type</label>
-                <select
-                  id="document-kind"
-                  value={kind}
-                  disabled={busy}
-                  onChange={(event) => setKind(event.target.value)}
-                >
-                  {DOC_TYPES.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="field document-description-field">
-                <label htmlFor="document-description">Description</label>
-                <textarea
-                  id="document-description"
-                  rows={1}
-                  value={description}
-                  placeholder="Add useful details about this document..."
-                  disabled={busy}
-                  onChange={(event) => setDescription(event.target.value)}
-                />
-              </div>
-
-              <div className="field">
-                <label htmlFor="document-labels">Labels</label>
-                <LabelsField
-                  id="document-labels"
-                  value={labels}
-                  onChange={setLabels}
-                  disabled={busy}
-                />
-              </div>
-
-              <div className="field document-attachments-field">
-                <label htmlFor="document-files">
-                  Attach files Required <span className="req"> *</span>
-                </label>
-
-                <div className="document-upload-zone">
-                  <div className="document-upload-icon">
-                    <svg
-                      width="26"
-                      height="26"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.7"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                      <path d="m17 8-5-5-5 5" />
-                      <path d="M12 3v12" />
-                    </svg>
-                  </div>
-
-                  <div className="document-upload-title">
-                    Upload your files
-                  </div>
-                  <div className="document-upload-subtitle">
-                    PDF, DOC, DOCX or TXT · Up to 10 files · 10 MB each
-                  </div>
-                  
-                  <input
                   id="document-files"
+                  ref={fileInput}
                   type="file"
                   multiple
-                  required
                   accept=".pdf,.doc,.docx,.txt"
-                  disabled={busy}
-                  onChange={(event) =>
-                    setFiles(Array.from(event.target.files || []))
-                    }
-                  />
-
-                  {files.length > 0 && (
-                    <div className="document-selected-files">
-                      {files.map((file) => (
-                        <div
-                          className="document-selected-file"
-                          key={`${file.name}-${file.size}`}
-                        >
-                          <div className="document-selected-file-icon">
-                            <svg
-                              width="18"
-                              height="18"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.8"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              aria-hidden="true"
-                            >
-                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                              <path d="M14 2v6h6" />
-                              <path d="M8 13h8M8 17h8" />
-                            </svg>
-                          </div>
-                          <div className="document-selected-file-info">
-                            <div className="document-selected-file-name">
-                              {file.name}
-                            </div>
-                            <div className="document-selected-file-size">
-                              {(file.size / 1024).toFixed(1)} KB
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                  onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }}
+                />
               </div>
+
+              {problems.length > 0 && (
+                <ul className="docs-problems" role="alert">
+                  {problems.map((problem) => <li key={problem}>{problem}</li>)}
+                </ul>
+              )}
+
+              {files.length > 0 && (
+                <ul className="docs-selected" aria-label="Selected files">
+                  {files.map((file, index) => (
+                    <li key={`${file.name}-${file.size}`}>
+                      <FileText size={16} aria-hidden="true" />
+                      <span className="docs-badge">{fileTypeLabel(file.name)}</span>
+                      <span className="name" title={file.name}>{file.name}</span>
+                      <span className="docs-file-size">{formatBytes(file.size)}</span>
+                      <button type="button" className="docs-icon-btn" aria-label={`Remove ${file.name}`} disabled={busy} onClick={() => removeFile(index)}>
+                        <X size={14} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
+          </div>
+        </fieldset>
 
-            {error && (
-              <p className="notice error document-form-error" role="alert">
-                {error}
-              </p>
-            )}
-
-            </fieldset>
-            <div className="document-form-footer">
-              <span className="document-footer-note">
-                <span className="req">*</span> Required field
-              </span>
-
-              <div className="document-form-actions">
-                <button
-                  type="button"
-                  className="btn-outline"
-                  disabled={busy}
-                  onClick={() => nav("/configuration/documents")}
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  className="btn-primary"
-                  disabled={busy || !canManageDocuments}
-                  title={!canManageDocuments ? "Only Administrators and Supervisors can create documents." : undefined}
-                >
-                  {busy ? "Saving..." : "Create document"}
-                </button>
-              </div>
+        {progress !== null && (
+          <>
+            <div className="docs-progress" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
+              <span style={{ width: `${progress}%` }} />
             </div>
-          </form>
+            <p className="docs-progress-text">{progress < 100 ? `Uploading… ${progress}%` : "Saving document…"}</p>
+          </>
+        )}
+
+        {error && <p className="notice error" role="alert">{error}</p>}
+
+        <div className="docs-form-footer">
+          <span className="docs-muted" style={{ fontSize: 12 }}><span className="req" style={{ color: "var(--alert)" }}>*</span> Required</span>
+          <div className="docs-form-actions">
+            <button type="button" className="btn-outline" disabled={busy} onClick={() => nav("/configuration/documents")}>Cancel</button>
+            <button type="submit" className="btn-primary" disabled={busy || !canManageDocuments}>
+              {busy ? "Uploading..." : "Upload document"}
+            </button>
+          </div>
         </div>
-      </section>
+      </form>
     </div>
   );
 }

@@ -17,7 +17,9 @@ import ConfigSub from "../features/configuration/pages/ConfigSub.jsx";
 import DocumentCreatePage from "../features/configuration/pages/DocumentCreatePage.jsx";
 import CreateInstructionPage from "../features/configuration/pages/CreateInstructionPage.jsx";
 import DocumentViewerPage from "../features/configuration/pages/DocumentViewerPage.jsx";
+import DocumentsPage from "../features/configuration/pages/DocumentsPage.jsx";
 import RuleLibrary from "../features/configuration/pages/RuleLibrary.jsx";
+import CollectionLibrary from "../features/configuration/pages/CollectionLibrary.jsx";
 
 import Plc from "../features/plc/pages/Plc.jsx";
 
@@ -91,6 +93,14 @@ export default function App() {
         <Route
           path="/configuration/rules"
           element={<RuleLibrary />}
+        />
+        <Route
+          path="/configuration/collections"
+          element={<CollectionLibrary />}
+        />
+        <Route
+          path="/configuration/documents"
+          element={<DocumentsPage />}
         />
         <Route
           path="/configuration/documents/new"

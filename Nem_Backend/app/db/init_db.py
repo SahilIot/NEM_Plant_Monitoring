@@ -136,6 +136,7 @@ _AUDIT_TABLES = (
     "nem_monitoring_rules",
     "nem_maintenance_schedules",
     "nem_maintenance_records",
+    "instruction_documents",
 )
 
 logger = logging.getLogger(__name__)
@@ -275,6 +276,29 @@ def _ensure_timestamp_column(engine: Engine, table: str, column: str) -> None:
             ))
 
 
+def _ensure_entry_type_column(engine: Engine, table: str) -> None:
+    # Additive: existing rows become "document"; legacy "Instruction" rows are recognised when serialised.
+    with engine.begin() as connection:
+        columns = {col["name"] for col in inspect(connection).get_columns(table)}
+        if "entry_type" not in columns:
+            connection.execute(text(
+                f"ALTER TABLE {_ident(engine, table)} ADD COLUMN IF NOT EXISTS entry_type "
+                "VARCHAR(20) NOT NULL DEFAULT 'document'"
+            ))
+
+
+def _ensure_asset_reference_column(engine: Engine, table: str, column: str) -> None:
+    # Add a nullable INTEGER FK to assets(id) ON DELETE SET NULL with an index when missing; never alters data.
+    with engine.begin() as connection:
+        columns = {col["name"]: col for col in inspect(connection).get_columns(table)}
+        if column not in columns:
+            connection.execute(text(
+                f"ALTER TABLE {_ident(engine, table)} ADD COLUMN IF NOT EXISTS {_ident(engine, column)} "
+                "INTEGER REFERENCES assets(id) ON DELETE SET NULL"
+            ))
+        _ensure_single_column_index(connection, table, column)
+
+
 # add missing audit columns to tables that should have them, and create indexes on those columns
 def _upgrade_audit_columns(engine: Engine) -> None:
     """Add/verify created_by_id, updated_by_id (FK to auth_users, indexed) and records.updated_at.
@@ -293,6 +317,12 @@ def _upgrade_audit_columns(engine: Engine) -> None:
             _ensure_user_reference_column(engine, table, column)
         if table == "nem_maintenance_records":
             _ensure_timestamp_column(engine, table, "updated_at")
+        if table == "instruction_documents":
+            for column in ("created_at", "updated_at"):
+                _ensure_timestamp_column(engine, table, column)
+            if "assets" in table_names:
+                _ensure_asset_reference_column(engine, table, "asset_id")
+            _ensure_entry_type_column(engine, table)
     _warn_timezone_aware_audit_columns(engine, table_names)
 
 

@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, StrictInt, ValidationError, field_validat
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError # Handles database constraint failures,such as duplicate collection name
 from sqlalchemy.orm import Session 
+from sqlalchemy.orm.attributes import flag_modified
 from docx import Document as WordDocument
 from docx.opc.exceptions import PackageNotFoundError
 
@@ -148,12 +149,27 @@ class MaintenanceSuggestionPayload(BaseModel):
     maintenance: MaintenanceScheduleCreate
 
 #Validate an instruction document`s title and type
+INSTRUCTION_MAX_CHARS = 10_000
+
+
+def _require_instruction_content(entry_type: str, description: str | None) -> None:
+    # An instruction is its text: content is required and bounded; an attachment is never required.
+    if entry_type != "instruction":
+        return
+    if not (description or "").strip():
+        raise ValueError("Instruction content is required")
+    if len(description) > INSTRUCTION_MAX_CHARS:
+        raise ValueError(f"Instruction content is limited to {INSTRUCTION_MAX_CHARS:,} characters")
+
+
 class DocumentCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     kind: str = Field(min_length=1, max_length=50)
     description: str | None = None
     labels: list[str] = Field(default_factory=list, max_length=10)
     duration_minutes: int | None = Field(default=None, ge=1)
+    asset_id: int | None = Field(default=None, gt=0)
+    entry_type: Literal["document", "instruction"] = "document"
 
     @field_validator("title", "kind")
     @classmethod
@@ -162,6 +178,11 @@ class DocumentCreate(BaseModel):
         if not value:
             raise ValueError("This field cannot be empty")
         return value
+
+    @model_validator(mode="after")
+    def instruction_needs_content(self):
+        _require_instruction_content(self.entry_type, self.description)
+        return self
 
     @field_validator("labels")
     @classmethod
@@ -175,6 +196,7 @@ class DocumentUpdate(BaseModel):
     description: str | None = None
     labels: list[str] | None = Field(default=None, max_length=10)
     duration_minutes: int | None = Field(default=None, ge=1)
+    asset_id: int | None = Field(default=None, gt=0)
 
     @field_validator("title", "kind")
     @classmethod
@@ -2147,6 +2169,105 @@ def delete_collection(collection_id: int, session: Session = Depends(get_db)) ->
     session.commit()
 
 #Instruction Documents
+# Leading bytes each allowed type must start with, so a renamed file is not accepted as a document.
+DOCUMENT_SIGNATURES = {".pdf": (b"%PDF",), ".docx": (b"PK\x03\x04",), ".doc": (b"\xd0\xcf\x11\xe0",)}
+
+
+def _document_asset_id(session: Session, asset_id: int | None) -> int | None:
+    # An associated asset must exist and be inside the caller's scope.
+    if asset_id is None:
+        return None
+    if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
+        raise HTTPException(status_code=422, detail="The selected asset was not found")
+    return asset_id
+
+
+def _stored_file_available(attachment: InstructionDocumentFile) -> bool:
+    try:
+        _stored_instruction_file_path(attachment)
+    except HTTPException:
+        return False
+    return True
+
+
+def _document_payloads(session: Session, documents: list[InstructionDocument]) -> list[dict[str, Any]]:
+    # One serializer for every document response: attachments, asset name, status and audit info.
+    ids = [document.id for document in documents]
+    files_by_document: dict[int, list[InstructionDocumentFile]] = {}
+    if ids:
+        for attachment in session.scalars(
+            select(InstructionDocumentFile)
+            .where(InstructionDocumentFile.document_id.in_(ids))
+            .order_by(InstructionDocumentFile.id)
+        ):
+            files_by_document.setdefault(attachment.document_id, []).append(attachment)
+    asset_ids = {document.asset_id for document in documents if document.asset_id is not None}
+    asset_names = (
+        {asset.id: asset.name for asset in session.scalars(select(Asset).where(Asset.id.in_(asset_ids)))}
+        if asset_ids else {}
+    )
+    result: list[dict[str, Any]] = []
+    for document in documents:
+        attachments = files_by_document.get(document.id, [])
+        files = [{
+            "id": item.id, "name": item.original_name, "size_bytes": item.size_bytes,
+            "content_type": item.content_type, "available": _stored_file_available(item),
+            "view_url": f"/api/v1/documents/{document.id}/files/{item.id}/view",
+            "download_url": f"/api/v1/documents/{document.id}/files/{item.id}/download",
+        } for item in attachments]
+        is_instruction = document.entry_type == "instruction" or document.kind == "Instruction"
+        if not files:
+            status = "no_attachment" if is_instruction else "no_file"
+        else:
+            status = "available" if all(item["available"] for item in files) else "missing"
+        result.append({
+            "id": document.id, "title": document.title, "kind": document.kind,
+            "entry_type": "instruction" if is_instruction else "document",
+            "description": document.description, "labels": document.labels or [],
+            "duration_minutes": document.duration_minutes,
+            "asset_id": document.asset_id, "asset_name": asset_names.get(document.asset_id),
+            "status": status,
+            "created_at": document.created_at.isoformat() if document.created_at else None,
+            "updated_at": document.updated_at.isoformat() if document.updated_at else None,
+            "created_by": document.created_by, "updated_by": document.updated_by,
+            "files": files,
+        })
+    return result
+
+
+async def _store_upload(upload: UploadFile, total_so_far: int) -> tuple[str, str, int, str | None]:
+    # Validate type/signature/size, stream one upload into UPLOAD_DIR; returns (original, stored, size, content_type).
+    original = Path(upload.filename or "document").name
+    suffix = Path(original).suffix.lower()
+    if suffix not in ALLOWED_DOCUMENT_EXTENSIONS:
+        raise HTTPException(status_code=415, detail=f"Unsupported file type: {original}. Allowed: PDF, DOC, DOCX, TXT")
+    stored = f"{uuid4().hex}{suffix}"
+    destination = UPLOAD_DIR / stored
+    size = 0
+    try:
+        with destination.open("wb") as output:
+            while True:
+                chunk = await upload.read(1024 * 1024)
+                if not chunk:
+                    break
+                if size == 0:
+                    signatures = DOCUMENT_SIGNATURES.get(suffix)
+                    if (signatures and not chunk.startswith(signatures)) or (not signatures and b"\x00" in chunk):
+                        raise HTTPException(status_code=415, detail=f"{original} is not a valid {suffix[1:].upper()} file")
+                size += len(chunk)
+                if size > MAX_FILE_BYTES:
+                    raise HTTPException(status_code=413, detail=f"{original} exceeds the 10 MB per-file limit")
+                if total_so_far + size > MAX_TOTAL_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="Combined uploads exceed the 24 MB limit")
+                output.write(chunk)
+        if size == 0:
+            raise HTTPException(status_code=422, detail=f"{original} is empty")
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    return original, stored, size, mimetypes.guess_type(original)[0] or upload.content_type
+
+
 # Lists documents
 @router.get("/documents")
 def list_documents(
@@ -2162,22 +2283,7 @@ def list_documents(
         row for row in session.scalars(query.order_by(InstructionDocument.id)).all()
         if row.id not in hidden_documents
     ]
-    result: list[dict[str, Any]] = []
-    for row in rows:
-        attachments = session.scalars(
-            select(InstructionDocumentFile).where(InstructionDocumentFile.document_id == row.id)
-            .order_by(InstructionDocumentFile.id)
-        ).all()
-        result.append({
-            "id": row.id, "title": row.title, "kind": row.kind, "description": row.description,
-            "labels": row.labels or [], "duration_minutes": row.duration_minutes,
-            "files": [{"id": f.id, "name": f.original_name, "size_bytes": f.size_bytes,
-                       "content_type": f.content_type,
-                       "view_url": f"/api/v1/documents/{row.id}/files/{f.id}/view",
-                       "download_url": f"/api/v1/documents/{row.id}/files/{f.id}/download"}
-                      for f in attachments],
-        })
-    return result
+    return _document_payloads(session, rows)
 
 #Creates a document
 @router.post("/documents", status_code=201)
@@ -2187,14 +2293,14 @@ def create_document(payload: DocumentCreate, session: Session = Depends(get_db))
         kind=payload.kind.strip(),
         description=payload.description,
         duration_minutes=payload.duration_minutes,
+        entry_type=payload.entry_type,
+        asset_id=_document_asset_id(session, payload.asset_id),
     )
     session.add(document)
     assign_labels(session, document, payload.labels)
     session.commit()
     session.refresh(document)
-    return {"id": document.id, "title": document.title, "kind": document.kind,
-            "description": document.description, "labels": document.labels,
-            "duration_minutes": document.duration_minutes}
+    return _document_payloads(session, [document])[0]
 
 # updating an existing instruction document. 
 @router.patch("/documents/{document_id}",dependencies=[Depends(require_roles("Administrator"))],)
@@ -2209,20 +2315,21 @@ def update_document(
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status_code=422, detail="Provide at least one field to update")
+    if "description" in changes and (document.entry_type == "instruction" or document.kind == "Instruction"):
+        try:
+            _require_instruction_content("instruction", changes["description"])
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
     for field in ("title", "kind", "description", "duration_minutes"):
         if field in changes:
             setattr(document, field, changes[field])
+    if "asset_id" in changes:
+        document.asset_id = _document_asset_id(session, changes["asset_id"])
     if "labels" in changes:
         assign_labels(session, document, changes["labels"])
     session.commit()
-    return {
-        "id": document.id,
-        "title": document.title,
-        "kind": document.kind,
-        "description": document.description,
-        "labels": document.labels,
-        "duration_minutes": document.duration_minutes,
-    }
+    session.refresh(document)
+    return _document_payloads(session, [document])[0]
 
 # Create a document and store multiple attachments in the backend uploads directory.
 @router.post("/documents/with-files", status_code=201)
@@ -2232,12 +2339,18 @@ async def create_document_with_files(
     description: str = Form(""),
     labels: str = Form("[]"),
     duration_minutes: int | None = Form(default=None, ge=1),
+    asset_id: int | None = Form(default=None, gt=0),
+    entry_type: Literal["document", "instruction"] = Form("document"),
     files: list[UploadFile] = File(...),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
     title, kind = title.strip(), kind.strip()
     if not title or not kind:
         raise HTTPException(status_code=422, detail="Title and type are required")
+    try:
+        _require_instruction_content(entry_type, description.strip())
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     if not files or all(not (upload.filename or "").strip() for upload in files):
         raise HTTPException(
             status_code=422,
@@ -2264,50 +2377,23 @@ async def create_document_with_files(
             kind=kind,
             description=description.strip() or None,
             duration_minutes=duration_minutes,
+            entry_type=entry_type,
+            asset_id=_document_asset_id(session, asset_id),
         )
         session.add(document)
         session.flush()
         assign_labels(session, document, parsed_labels)
         for upload in files:
-            original = Path(upload.filename or "document").name
-            suffix = Path(original).suffix.lower()
-            if suffix not in ALLOWED_DOCUMENT_EXTENSIONS:
-                raise HTTPException(status_code=415, detail=f"Unsupported file type: {original}. Allowed: PDF, DOC, DOCX, TXT")
-            stored = f"{uuid4().hex}{suffix}"
-            destination = UPLOAD_DIR / stored
-            size = 0
-            try:
-                with destination.open("wb") as output:
-                    while True:
-                        chunk = await upload.read(1024 * 1024)
-                        if not chunk:
-                            break
-                        size += len(chunk)
-                        total += len(chunk)
-                        if size > MAX_FILE_BYTES:
-                            raise HTTPException(status_code=413, detail=f"{original} exceeds the 10 MB per-file limit")
-                        if total > MAX_TOTAL_UPLOAD_BYTES:
-                            raise HTTPException(status_code=413, detail="Combined uploads exceed the 24 MB limit")
-                        output.write(chunk)
-                saved_paths.append(destination)
-            except Exception:
-                destination.unlink(missing_ok=True)
-                raise
+            original, stored, size, content_type = await _store_upload(upload, total)
+            total += size
+            saved_paths.append(UPLOAD_DIR / stored)
             session.add(InstructionDocumentFile(
                 document_id=document.id, original_name=original, stored_name=stored,
-                content_type=upload.content_type, size_bytes=size,
+                content_type=content_type, size_bytes=size,
             ))
         session.commit()
         session.refresh(document)
-        return {
-            "id": document.id,
-            "title": document.title,
-            "kind": document.kind,
-            "description": document.description,
-            "labels": document.labels,
-            "duration_minutes": document.duration_minutes,
-            "file_count": len(saved_paths),
-        }
+        return _document_payloads(session, [document])[0] | {"file_count": len(saved_paths)}
     except Exception:
         session.rollback()
         for path in saved_paths:
@@ -2432,6 +2518,98 @@ def download_document_file(
         media_type=media_type or "application/octet-stream",
         content_disposition_type="attachment",
     )
+
+
+# Add another attachment to an existing document (Administrator only by the route policy).
+@router.post("/documents/{document_id}/files", status_code=201)
+async def add_document_file(
+    document_id: int,
+    file: UploadFile = File(...),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    document = session.get(InstructionDocument, document_id)
+    if document is None or document_id in hidden_document_ids(session):
+        raise HTTPException(status_code=404, detail="Document was not found")
+    existing = session.scalar(select(func.count()).select_from(InstructionDocumentFile).where(
+        InstructionDocumentFile.document_id == document_id)) or 0
+    if existing >= MAX_FILES_PER_DOCUMENT:
+        raise HTTPException(status_code=413, detail=f"A document can have at most {MAX_FILES_PER_DOCUMENT} files")
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    stored_path: Path | None = None
+    try:
+        original, stored, size, content_type = await _store_upload(file, 0)
+        stored_path = UPLOAD_DIR / stored
+        session.add(InstructionDocumentFile(
+            document_id=document_id, original_name=original, stored_name=stored,
+            content_type=content_type, size_bytes=size,
+        ))
+        flag_modified(document, "updated_at")
+        session.commit()
+    except Exception:
+        session.rollback()
+        if stored_path is not None:
+            stored_path.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
+    session.refresh(document)
+    return _document_payloads(session, [document])[0]
+
+
+# Replace one attachment's file; the file id, document and metadata stay the same (Administrator only).
+@router.put("/documents/{document_id}/files/{file_id}")
+async def replace_document_file(
+    document_id: int,
+    file_id: int,
+    file: UploadFile = File(...),
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    document = session.get(InstructionDocument, document_id)
+    attachment = session.scalar(select(InstructionDocumentFile).where(
+        InstructionDocumentFile.id == file_id,
+        InstructionDocumentFile.document_id == document_id,
+    ))
+    if document is None or attachment is None or document_id in hidden_document_ids(session):
+        raise HTTPException(status_code=404, detail="Document attachment was not found")
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    old_path = UPLOAD_DIR / attachment.stored_name
+    new_path: Path | None = None
+    try:
+        original, stored, size, content_type = await _store_upload(file, 0)
+        new_path = UPLOAD_DIR / stored
+        attachment.original_name = original
+        attachment.stored_name = stored
+        attachment.content_type = content_type
+        attachment.size_bytes = size
+        flag_modified(document, "updated_at")
+        session.commit()
+    except Exception:
+        session.rollback()
+        if new_path is not None:
+            new_path.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
+    old_path.unlink(missing_ok=True)
+    session.refresh(document)
+    return _document_payloads(session, [document])[0]
+
+
+# Remove one attachment from a document (Administrator only); the document itself is kept.
+@router.delete("/documents/{document_id}/files/{file_id}", status_code=204)
+def delete_document_file(document_id: int, file_id: int, session: Session = Depends(get_db)) -> None:
+    document = session.get(InstructionDocument, document_id)
+    attachment = session.scalar(select(InstructionDocumentFile).where(
+        InstructionDocumentFile.id == file_id,
+        InstructionDocumentFile.document_id == document_id,
+    ))
+    if document is None or attachment is None or document_id in hidden_document_ids(session):
+        raise HTTPException(status_code=404, detail="Document attachment was not found")
+    stored_path = UPLOAD_DIR / attachment.stored_name
+    session.delete(attachment)
+    flag_modified(document, "updated_at")
+    session.commit()
+    stored_path.unlink(missing_ok=True)
 
 
 #Delete a document

@@ -4,6 +4,7 @@ from sqlalchemy import JSON, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 from app.db.session import UTCDateTime
+from app.models.audit_mixin import AuditNamesMixin
 from app.models.labels import (
     Label,
     instruction_document_labels,
@@ -32,7 +33,7 @@ class RuleCollection(Base):
         return [label.name for label in self.label_records]
 
 # storing document information
-class InstructionDocument(Base):
+class InstructionDocument(AuditNamesMixin, Base):
     __tablename__ = "instruction_documents"
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -40,6 +41,17 @@ class InstructionDocument(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     legacy_labels: Mapped[list[str]] = mapped_column( "labels", JSON, nullable=False, default=list)
     duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # "instruction" (text content in ``description``, attachment optional) or "document" (uploaded file).
+    entry_type: Mapped[str] = mapped_column(String(20), nullable=False, default="document", server_default="document")
+    # Optional machine/asset the document belongs to; NULL means a shared library document.
+    asset_id: Mapped[int | None] = mapped_column(ForeignKey("assets.id", ondelete="SET NULL"), index=True)
+    # Audit columns are stamped by app.models.audit; legacy rows stay NULL (history unknown).
+    created_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True)
+    updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"), index=True)
+    created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_id], lazy="selectin")  # type: ignore
+    updated_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")  # type: ignore
     label_records: Mapped[list[Label]] = relationship(secondary=instruction_document_labels,lazy="selectin",)
 
     @property

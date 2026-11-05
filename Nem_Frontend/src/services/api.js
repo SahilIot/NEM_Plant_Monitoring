@@ -100,6 +100,42 @@ async function getAll(path, pageSize = 200) {
   return all;
 }
 
+// Multipart upload with progress (fetch cannot report upload progress). Same auth and error handling as req().
+function upload(path, formData, { method = "POST", onProgress } = {}) {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open(method, `${BASE}${path}`);
+    const token = getAuthToken();
+    if (token) request.setRequestHeader("Authorization", `Bearer ${token}`);
+    if (onProgress && request.upload) {
+      request.upload.onprogress = (event) => {
+        if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+      };
+    }
+    request.onerror = () => reject(new ApiError(
+      "Cannot reach the backend. Check that the API server is running on port 8000.",
+      0
+    ));
+    request.onload = () => {
+      let body = null;
+      if (request.responseText) {
+        try {
+          body = JSON.parse(request.responseText);
+        } catch {
+          body = request.responseText;
+        }
+      }
+      if (request.status >= 200 && request.status < 300) {
+        resolve(body);
+        return;
+      }
+      if (request.status === 401) window.dispatchEvent(new Event("nem-auth-expired"));
+      reject(new ApiError(describeError(body, request.statusText || "Upload failed"), request.status));
+    };
+    request.send(formData);
+  });
+}
+
 export const api = {
   get: async (p) => {
     const result = await req(p);
@@ -109,6 +145,7 @@ export const api = {
   post: (p, body = {}) => req(p, { method: "POST", body: JSON.stringify(body) }),
   postForm: (p, formData) =>
     req(p, { method: "POST", body: formData }),
+  upload,
   put: (p, body) => req(p, { method: "PUT", body: JSON.stringify(body) }),
   patch: (p, body) => req(p, { method: "PATCH", body: JSON.stringify(body) }),
   del: (p, body) =>

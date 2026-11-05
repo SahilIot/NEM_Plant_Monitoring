@@ -4,6 +4,7 @@ import {
   Activity,
   Copy,
   Eye,
+  Layers,
   Pencil,
   Plus,
   Search,
@@ -135,7 +136,7 @@ function formatInterval(seconds) {
   return `${seconds} second${seconds === 1 ? "" : "s"}`;
 }
 
-function templateSummary(template) {
+export function templateSummary(template) {
   const parameters = template.parameters || {};
   if (
     template.rule_type === "parameter_threshold" &&
@@ -199,6 +200,23 @@ export const displayType = (rule) =>
     : RULE_TYPES.find(([value]) => value === rule.rule_type)?.[1] ||
       rule.rule_type?.replaceAll("_", " ") ||
       "Monitoring rule";
+
+// Monitoring category, derived only from the rule types the system implements.
+export const ruleKind = (rule) => {
+  const parameters = rule.parameters || {};
+  if (rule.rule_type === "runtime_duration") return "Runtime-based";
+  if (rule.rule_type === "boolean_count_threshold") return "Cycle count";
+  if (rule.rule_type === "duration") return "Time interval";
+  if (rule.rule_type === "parameter_threshold") {
+    if (rule.required_variable_types?.includes("boolean")) {
+      return parameters.evaluation_mode === "state" ? "Boolean condition" : "Runtime-based";
+    }
+    return "Threshold";
+  }
+  return displayType(rule);
+};
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const supportsCurrentRuleEditor = (rule) =>
   rule.rule_type === "parameter_threshold" ||
@@ -443,7 +461,7 @@ function formatHistoryValue(value) {
   return String(value).replaceAll("_", " ");
 }
 
-function RuleViewModal({ template, onClose, onManageVisibility }) {
+export function RuleViewModal({ template, onClose, onManageVisibility }) {
   const [history, setHistory] = useState(null);
   const [assignments, setAssignments] = useState(null);
   const [visibleTo, setVisibleTo] = useState(null);
@@ -740,6 +758,9 @@ export default function RuleLibrary() {
       ? location.state.ruleLibraryStatus
       : "all"
   );
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [kindFilter, setKindFilter] = useState("all");
+  const [sort, setSort] = useState("newest");
   const [labelIds, setLabelIds] = useState([]);
   const [labelsRevision, setLabelsRevision] = useState(0);
   const templateLoadGeneration = useRef(0);
@@ -884,12 +905,48 @@ useEffect(() => {
 
   const visible = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return (templates || []).filter((template) => {
-      const matchesText = !query || `${template.name} ${template.description || ""} ${template.rule_type}`.toLowerCase().includes(query);
-      const matchesStatus = status === "all" || String(template.is_enabled) === status;
-      return matchesText && matchesStatus;
+    const created = (template) => (template.created_at ? Date.parse(template.created_at) || 0 : 0);
+    const sorters = {
+      newest: (a, b) => created(b) - created(a) || b.id - a.id,
+      oldest: (a, b) => created(a) - created(b) || a.id - b.id,
+      "name-asc": (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+      "name-desc": (a, b) => b.name.localeCompare(a.name, undefined, { sensitivity: "base" }),
+    };
+    return (templates || [])
+      .filter((template) => {
+        const matchesText = !query || `${template.name} ${template.description || ""} ${template.rule_type}`.toLowerCase().includes(query);
+        const matchesStatus = status === "all" || String(template.is_enabled) === status;
+        const matchesType = typeFilter === "all" || displayType(template) === typeFilter;
+        const matchesKind = kindFilter === "all" || ruleKind(template) === kindFilter;
+        return matchesText && matchesStatus && matchesType && matchesKind;
+      })
+      .sort(sorters[sort] || sorters.newest);
+  }, [templates, search, status, typeFilter, kindFilter, sort]);
+
+  // Overview figures, all computed from the loaded library rules.
+  const stats = useMemo(() => {
+    const rows = templates || [];
+    const kinds = new Map();
+    const types = new Map();
+    rows.forEach((template) => {
+      kinds.set(ruleKind(template), (kinds.get(ruleKind(template)) || 0) + 1);
+      types.set(displayType(template), (types.get(displayType(template)) || 0) + 1);
     });
-  }, [templates, search, status]);
+    const since = Date.now() - 30 * DAY_MS;
+    return {
+      total: rows.length,
+      available: rows.filter((template) => template.is_enabled).length,
+      disabled: rows.filter((template) => !template.is_enabled).length,
+      recent: rows.filter((template) => template.created_at && Date.parse(template.created_at) >= since).length,
+      kinds: [...kinds.entries()].sort((a, b) => b[1] - a[1]),
+      types: [...types.keys()].sort(),
+    };
+  }, [templates]);
+
+  const hasFilters = Boolean(search.trim() || status !== "all" || typeFilter !== "all" || kindFilter !== "all" || labelIds.length);
+  const clearFilters = () => {
+    setSearch(""); setStatus("all"); setTypeFilter("all"); setKindFilter("all"); setLabelIds([]);
+  };
 
   const save = async (values) => {
     if (suggesting) {
@@ -1138,11 +1195,14 @@ const reviewRequest = async (request, action) => {
         <div>
           <h1 className="page-title">Monitoring Rule Library</h1>
           <p className="muted">
-            Create reusable monitoring rules, then assign them to assets.
-            Assigned rules are activated automatically.
+            Reusable monitoring rules, ready to assign to assets. Rules that belong to a collection are managed in the Rule Collection Library.
             </p>
             </div>
 <div className="rule-library-heading-actions">
+  <button type="button" className="btn-outline" onClick={() => navigate("/configuration/collections")}>
+    <Layers size={17} />
+    Rule collections
+  </button>
   <button
     type="button"
     className="btn-primary"
@@ -1335,13 +1395,45 @@ const reviewRequest = async (request, action) => {
   </section>
 )}
 
+      {templates !== null && templates.length > 0 && (
+        <div className="rl-stats" aria-label="Library overview">
+          <div className="rl-stat"><b>{stats.total}</b><span>Library rules</span></div>
+          <div className="rl-stat good"><b>{stats.available}</b><span>Available</span></div>
+          <div className="rl-stat"><b>{stats.disabled}</b><span>Disabled</span></div>
+          <div className="rl-stat"><b>{stats.recent}</b><span>Added in last 30 days</span></div>
+          <div className="rl-stat wide">
+            <span>By category</span>
+            <div className="rl-chips">
+              {stats.kinds.map(([kind, count]) => (
+                <button key={kind} type="button" className={`rl-chip${kindFilter === kind ? " on" : ""}`}
+                  onClick={() => setKindFilter(kindFilter === kind ? "all" : kind)}>{kind} · {count}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       <section className="rule-library-panel">
-        <div className="rule-library-tools">
-          <label className="rule-library-search"><Search size={17} /><input aria-label="Search rules" placeholder="Search rules…" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+        <div className="rule-library-tools rl-tools">
+          <label className="rule-library-search"><Search size={17} /><input aria-label="Search rules" placeholder="Search by name or description…" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+          <select aria-label="Filter by rule type" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
+            <option value="all">All rule types</option>
+            {stats.types.map((type) => <option key={type} value={type}>{type}</option>)}
+          </select>
+          <select aria-label="Filter by category" value={kindFilter} onChange={(event) => setKindFilter(event.target.value)}>
+            <option value="all">All categories</option>
+            {stats.kinds.map(([kind]) => <option key={kind} value={kind}>{kind}</option>)}
+          </select>
           <select aria-label="Filter rule availability" value={status} onChange={(event) => setStatus(event.target.value)}>
-            <option value="all">All rules</option>
+            <option value="all">All statuses</option>
             <option value="true">Available</option>
             <option value="false">Disabled</option>
+          </select>
+          <select aria-label="Sort rules" value={sort} onChange={(event) => setSort(event.target.value)}>
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="name-asc">Name A–Z</option>
+            <option value="name-desc">Name Z–A</option>
           </select>
           <LabelsField
             mode="filter"
@@ -1351,35 +1443,56 @@ const reviewRequest = async (request, action) => {
           />
         </div>
         {templates === null ? <LoadingIndicator className="loading" message="Loading rules" /> : visible.length === 0 ? (
-          <EmptyState art={false} title={templates.length === 0 ? "The rule library is empty" : "No rules match"} lines={[templates.length === 0 ? "Create a reusable rule here. Asset-specific rules do not appear in this library." : "Try a different search or availability filter."]} />
-        ) : (
-          <div className="rule-library-list">
-            {visible.map((template) => (
-              <article className="rule-library-card" key={template.id}>
-                <div className="rule-library-card-icon"><Activity size={19} /></div>
-                <div className="rule-library-card-main">
-                  <div className="rule-library-card-title"><h2>{template.name}</h2><span className={`rule-library-status ${template.is_enabled ? "available" : "disabled"}`}>{template.is_enabled ? "Available" : "Disabled"}</span><VisibilityBadge type={template.visibility_type} /></div>
-                  <p>{template.description || "No description provided."}</p>
-                  <small>{displayType(template)} · {templateSummary(template)} · Created by {auditUser(template.created_by)} · {formatAuditDate(template.created_at)}</small>
-                  {template.labels?.length > 0 && (
-                    <span className="labels-chips rule-library-labels">
-                      {template.labels.map((label) => (
-                        <span className="label-chip" key={label}>{label}</span>
-                      ))}
-                    </span>
-                  )}
-                </div>
-                <div className="rule-library-actions">
-                  <button type="button" className="btn-outline" onClick={() => setCopying(template)} disabled={!canCreateRules} title={!canCreateRules? "Administrator access required to copy reusable rules.": "Copy this reusable rule"}><Copy size={15} /></button>
-                  <button className="btn-outline" onClick={() => {setSuggesting(false);setEditing(template);setModalOpen(true);}} disabled={!canEditRules} title="Edit rule" aria-label="Edit rule"><Pencil size={15} /></button>
-                  <button className="btn-outline danger" onClick={() => remove(template)} disabled={busyId === template.id || !isAdministrator} title={!isAdministrator ? "Administrator access required to delete reusable rules." : undefined}>{busyId === template.id ? "Deleting…" : <><Trash2 size={15} /></>}</button>
-                </div>
-              </article>
-            ))}
+          <div className="rl-empty">
+            <EmptyState art={false} title={templates.length === 0 && !hasFilters ? "The rule library is empty" : "No rules match"} lines={[templates.length === 0 && !hasFilters ? "Create a reusable rule here. Asset-specific rules and rules inside collections do not appear in this library." : "Nothing matches the current search and filters."]} />
+            {hasFilters && <button type="button" className="btn-outline" onClick={clearFilters}>Clear filters</button>}
           </div>
+        ) : (
+          <>
+            <div className="rl-table-wrap">
+              <table className="rl-table" aria-label="Monitoring rules">
+                <thead>
+                  <tr><th>Rule</th><th>Type</th><th>Category</th><th>Configuration</th><th>Variable</th><th>Status</th><th>Created</th><th><span className="sr-only">Actions</span></th></tr>
+                </thead>
+                <tbody>
+                  {visible.map((template) => (
+                    <tr key={template.id}>
+                      <td className="rl-name">
+                        <button type="button" className="rl-link" onClick={() => setViewing(template)}>{template.name}</button>
+                        <div className="rl-desc">{template.description || "No description provided."}</div>
+                        {template.labels?.length > 0 && (
+                          <span className="labels-chips rule-library-labels">
+                            {template.labels.map((label) => <span className="label-chip" key={label}>{label}</span>)}
+                          </span>
+                        )}
+                      </td>
+                      <td>{displayType(template)}</td>
+                      <td>{ruleKind(template)}</td>
+                      <td className="rl-config">{templateSummary(template)}</td>
+                      <td>{template.required_variable_types?.length ? template.required_variable_types.join(" / ") : "—"}{template.variable_key ? <div className="rl-desc">prefers {template.variable_key}</div> : null}</td>
+                      <td>
+                        <span className={`rule-library-status ${template.is_enabled ? "available" : "disabled"}`}>{template.is_enabled ? "Available" : "Disabled"}</span>
+                        <div><VisibilityBadge type={template.visibility_type} /></div>
+                      </td>
+                      <td className="rl-date">{formatAuditDate(template.created_at)}<div className="rl-desc">{auditUser(template.created_by)}</div></td>
+                      <td>
+                        <div className="rule-library-actions rl-actions">
+                          <button type="button" className="btn-outline" onClick={() => setViewing(template)} title="View details" aria-label={`View ${template.name}`}><Eye size={15} /></button>
+                          <button type="button" className="btn-outline" onClick={() => setCopying(template)} disabled={!canCreateRules} title={!canCreateRules ? "Administrator access required to copy reusable rules." : "Duplicate this reusable rule"} aria-label={`Duplicate ${template.name}`}><Copy size={15} /></button>
+                          <button type="button" className="btn-outline" onClick={() => {setSuggesting(false);setEditing(template);setModalOpen(true);}} disabled={!canEditRules} title="Edit rule" aria-label={`Edit ${template.name}`}><Pencil size={15} /></button>
+                          <button type="button" className="btn-outline danger" onClick={() => remove(template)} disabled={busyId === template.id || !isAdministrator} title={!isAdministrator ? "Administrator access required to delete reusable rules." : "Delete rule"} aria-label={`Delete ${template.name}`}>{busyId === template.id ? "…" : <Trash2 size={15} />}</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="rl-count">Showing {visible.length} of {templates.length} rule{templates.length === 1 ? "" : "s"}</p>
+          </>
         )}
       </section>
-     
+
 {suggestionChoiceOpen && (
   <Modal
     title="Suggest a new rule"
