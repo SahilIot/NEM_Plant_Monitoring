@@ -1,11 +1,9 @@
 """Central authorization for shared (reusable) monitoring rule visibility.
-
  Administrators see and manage every shared rule.
  Supervisors see a shared rule only when it is specific_supervisors and they are
   on its list. admin_onl` hides it. There is no "all supervisors" visibility.
  Operators have no access to the global shared-rule section.
  Background/system sessions (no request) are not restricted.
-
 Visibility only governs the shared rule definition and its global edit. It never
 grants access to assets: asset-level access stays with ``access_scope``. A rule the
 user may not see answers 404, identical to a missing rule.

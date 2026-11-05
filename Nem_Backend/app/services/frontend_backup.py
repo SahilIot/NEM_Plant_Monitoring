@@ -138,10 +138,9 @@ DOCUMENT_UPLOAD_DIR = Path(__file__).resolve().parents[2] / "uploads" / "instruc
 
 
 class BackupError(Exception):
-    """The backup is unreadable, incomplete or inconsistent. Nothing has been changed."""
+    # The backup is unreadable, incomplete or inconsistent. Nothing has been changed.
 
-
-def _ordered_tables(names: set[str] | None = None) -> list:
+ def _ordered_tables(names: set[str] | None = None) -> list:
     # Parents before children, computed from the foreign keys declared on the models.
     return [
         table for table in Base.metadata.sorted_tables
@@ -329,7 +328,7 @@ def _reject_constant(name: str) -> Any:
 # Creating a backup
 
 def _write_archive(engine: Engine, path: Path) -> dict[str, Any]:
-    tables = _ordered_tables()
+    tables = _ordered_tables() # type: ignore
     manifest: dict[str, Any] = {
         "format": FORMAT_NAME,
         "format_version": FORMAT_VERSION,
@@ -404,7 +403,7 @@ def _describe_documents(details: list[dict[str, Any]], limit: int = 10) -> str:
 
 
 def create_backup_with_report(session: Session, settings: Settings, name: str, note: str | None):
-    """Create a backup; returns (BackupRecord, report) where the report lists tables, files and warnings."""
+    # Create a backup; returns (BackupRecord, report) where the report lists tables, files and warnings.
     from app.models import BackupRecord
 
     bind = session.get_bind()
@@ -487,7 +486,7 @@ class _Source:
 
 
 class _LegacySource(_Source):
-    """Format version 1: one JSON object, table name -> list of rows."""
+    # Format version 1: one JSON object, table name -> list of rows.
 
     version = 1
 
@@ -658,7 +657,7 @@ def _open_source(path: Path) -> _Source:
 
 # Validation and row preparation
 class _Context:
-    """Validates rows against the models and tracks what is needed to check references."""
+    # Validates rows against the models and tracks what is needed to check references.
 
     def __init__(self, source: _Source, tables: list, user_ids: set[int]):
         self.source = source
@@ -704,8 +703,7 @@ class _Context:
             raise BackupError(f"Table {name}, row {number}: expected an object.")
         unknown = sorted(set(raw) - {column.name for column in table.columns})
         if unknown:
-            raise BackupError(
-                f"Table {name}, row {number}: unknown column {unknown[0]!r}. The backup was made by a different "
+            raise BackupError(f"Table {name}, row {number}: unknown column {unknown[0]!r}. The backup was made by a different "
                 "version of NEM."
             )
         row: dict[str, Any] = {}
@@ -755,8 +753,7 @@ class _Context:
             if is_self:
                 self.parents[key[0]] = value  # may point forward in the file: checked in end_table
             elif value not in self.ids[(target.table.name, target.name)]:
-                raise BackupError(
-                    f"Table {name}, row {number}: {column.name}={value} refers to a {target.table.name} row that "
+                raise BackupError(f"Table {name}, row {number}: {column.name}={value} refers to a {target.table.name} row that "
                     "is not in the backup."
                 )
         for table_name, column_name in self.watched:
@@ -839,7 +836,7 @@ def _remove_stale_work_files(directory: Path, pattern: str) -> None:
 
 
 def _classify_attachments(source: _Source, names: list[str]) -> tuple[list[str], list[str]]:
-    """Split the attachment names the rows refer to into (included in the backup, reported missing)."""
+    # Split the attachment names the rows refer to into (included in the backup, reported missing).
     info, known_missing = source.file_info(), source.missing_files()
     included, missing = [], []
     for name in dict.fromkeys(names):
@@ -855,12 +852,11 @@ def _classify_attachments(source: _Source, names: list[str]) -> tuple[list[str],
 
 
 def _stage_attachments(source: _Source, names: list[str]) -> tuple[Path | None, dict[str, str], list[str]]:
-    """Copy and verify the attachments in a staging folder beside the upload folder.
+    # Copy and verify the attachments in a staging folder beside the upload folder.
 
-    Returns (folder, {name in backup: name to store under}, names that were already missing when the backup
-    was made). If the upload folder already holds a DIFFERENT file with a restored attachment's name, the
-    restored file gets a new unique name (the database rows are rewritten to match); the existing file is kept.
-    """
+    # Returns (folder, {name in backup: name to store under}, names that were already missing when the backup
+    # was made). If the upload folder already holds a DIFFERENT file with a restored attachment's name, the
+    # restored file gets a new unique name (the database rows are rewritten to match); the existing file is kept.
     staged, missing = _classify_attachments(source, names)
     if not staged:
         return None, {}, missing
@@ -965,7 +961,7 @@ def _promote_attachments(folder: Path | None, names: list[str], owners: dict[str
 
 
 def resolve_backup_path(settings: Settings, filename: str) -> Path:
-    """Map a stored backup file name to its path inside the backup directory (nothing else is ever reachable)."""
+    # Map a stored backup file name to its path inside the backup directory (nothing else is ever reachable).
     if not _SAFE_BACKUP_NAME.match(filename):
         raise HTTPException(status_code=422, detail="Invalid backup filename")
     directory = backup_directory(settings)
@@ -978,7 +974,7 @@ def resolve_backup_path(settings: Settings, filename: str) -> Path:
 
 
 def _load(engine: Engine, target: Path):
-    """Open and fully validate a backup. Returns (source, is_legacy, tables, context). Changes nothing."""
+    # Open and fully validate a backup. Returns (source, is_legacy, tables, context). Changes nothing.
     source = _open_source(target)
     try:
         legacy = source.version == 1
@@ -987,14 +983,14 @@ def _load(engine: Engine, target: Path):
             expected = set(_LEGACY_TABLE_NAMES)
             missing_tables = sorted(expected - _LEGACY_OPTIONAL - names)
         else:
-            expected = {table.name for table in _ordered_tables()}
+            expected = {table.name for table in _ordered_tables()} # type: ignore
             missing_tables = sorted(expected - names)
         unknown = sorted(names - expected)
         if unknown:
             raise BackupError(f"The backup contains an unknown table ({unknown[0]}).")
         if missing_tables:
             raise BackupError(f"The backup is incomplete (missing table {missing_tables[0]}).")
-        tables = _ordered_tables(expected)
+        tables = _ordered_tables(expected) # type: ignore
         with engine.connect() as probe:  # a separate connection: the caller's session is not used
             user_ids = {value for (value,) in probe.execute(text("SELECT id FROM auth_users"))}
         context = _validate(source, tables, user_ids)
@@ -1004,10 +1000,9 @@ def _load(engine: Engine, target: Path):
         raise
 
 
-# ---- impact of replacing the tables on rows OUTSIDE the backup -----------------------------------------------
-
+#  impact of replacing the tables on rows OUTSIDE the backup 
 def _external_references(tables: list) -> list:
-    """Foreign keys from tables that are NOT replaced to tables that ARE replaced: [(table, fk, ON DELETE rule)]."""
+    # Foreign keys from tables that are NOT replaced to tables that ARE replaced: [(table, fk, ON DELETE rule)].
     replaced = set(tables)
     found = []
     for table in sorted(Base.metadata.tables.values(), key=lambda item: item.name):
@@ -1062,12 +1057,9 @@ def _external_impact(connection: Connection, tables: list, restored_ids: dict) -
 
 
 def _needs_confirmation(impact: dict[str, list], legacy: bool) -> bool:
-    return bool(
-        legacy or impact["cascade"] or impact["set_default"] or any(item["cleared"] for item in impact["set_null"])
-    )
+    return bool(legacy or impact["cascade"] or impact["set_default"] or any(item["cleared"] for item in impact["set_null"]))
 
-
-# ---- confirmation bound to one backup and its exact impact ---------------------------------------------------
+# confirmation bound to one backup and its exact impact 
 
 def _confirmation_key(settings: Settings) -> bytes:
     secret = settings.settings_encryption_key.get_secret_value().encode("utf-8")
@@ -1087,7 +1079,7 @@ def _issue_confirmation(settings: Settings, filename: str, backup_sha256: str, f
 
 
 def _check_confirmation(settings: Settings, token: str | None, filename: str, backup_sha256: str, fingerprint: str, user_id: Any) -> str | None:
-    """Returns None when the confirmation is valid, otherwise the message to show."""
+    # Returns None when the confirmation is valid, otherwise the message to show.
     if not token:
         return "This restore needs explicit confirmation of its impact. Run the restore preview and confirm it first. Nothing was changed."
     try:
@@ -1108,7 +1100,7 @@ def _check_confirmation(settings: Settings, token: str | None, filename: str, ba
     return None
 
 
-# ---- preview -------------------------------------------------------------------------------------------------
+#preview 
 
 _LEGACY_LIMITATIONS = (
     "This backup uses the old format (version 1). It does not contain labels and label links, instruction attachment "
@@ -1119,7 +1111,7 @@ _LEGACY_LIMITATIONS = (
 
 
 def analyze_restore(settings: Settings, engine: Engine, filename: str, user_id: Any = None) -> dict[str, Any]:
-    """Validate a backup completely and describe exactly what a restore would do. Changes nothing."""
+    # Validate a backup completely and describe exactly what a restore would do. Changes nothing.
     target = resolve_backup_path(settings, filename)
     base: dict[str, Any] = {"valid": False, "can_restore": False, "confirmation_required": False, "confirmation_token": None, "issues": []}
     source = None
@@ -1183,10 +1175,9 @@ def analyze_restore(settings: Settings, engine: Engine, filename: str, user_id: 
         source.close()
 
 
-# ---- restore -------------------------------------------------------------------------------------------------
-
+# restore 
 def _database_error(error: DBAPIError) -> HTTPException:
-    """A safe message for a database failure: schema names only, never SQL, parameters or row values."""
+    # A safe message for a database failure: schema names only, never SQL, parameters or row values.
     original = getattr(error, "orig", None)
     code = getattr(original, "pgcode", None) or ""
     diag = getattr(original, "diag", None)
@@ -1209,14 +1200,14 @@ def _database_error(error: DBAPIError) -> HTTPException:
 
 def restore_backup(session: Session, engine: Engine, settings: Settings, filename: str,
                    confirmation_token: str | None = None, user_id: Any = None) -> dict[str, Any]:
-    """Replace the data in scope with the backup. Returns a report; raises HTTPException on failure.
+    # Replace the data in scope with the backup. Returns a report; raises HTTPException on failure.
 
-    The database part (locks, impact check, delete, insert, sequence reset) is ONE transaction on its own
-    connection: if any of it fails it is rolled back and the existing data is unchanged. The caller's session is
-    never committed, rolled back or flushed (it is only expired afterwards, so it cannot return stale objects).
-    Attachment files are moved into place and the follow-up migrations run only after that transaction has
-    committed; they are reported separately (outcome 'partial' if files could not be placed) and cannot undo the restore.
-    """
+   # The database part (locks, impact check, delete, insert, sequence reset) is ONE transaction on its own
+   # connection: if any of it fails it is rolled back and the existing data is unchanged. The caller's session is
+   # never committed, rolled back or flushed (it is only expired afterwards, so it cannot return stale objects).
+   # Attachment files are moved into place and the follow-up migrations run only after that transaction has
+   # committed; they are reported separately (outcome 'partial' if files could not be placed) and cannot undo the restore.
+
     target = resolve_backup_path(settings, filename)
     # Policy: refuse while the caller's session has unsaved changes, which the restore would otherwise bypass.
     if session.new or session.dirty or session.deleted:
@@ -1226,7 +1217,7 @@ def restore_backup(session: Session, engine: Engine, settings: Settings, filenam
     staging: Path | None = None
     committed = False
     try:
-        # ---- 1. Read and validate everything; stage the attachments. Nothing in the database has changed yet. ----
+        #  1. Read and validate everything; stage the attachments. Nothing in the database has changed yet.
         try:
             backup_sha256 = _sha256(target)
             source, legacy, tables, context = _load(engine, target)
@@ -1235,7 +1226,7 @@ def restore_backup(session: Session, engine: Engine, settings: Settings, filenam
         except BackupError as error:
             raise HTTPException(status_code=422, detail=f"The backup cannot be restored: {error} Nothing was changed.") from error
 
-        # ---- 2. One transaction: lock, re-check the impact, delete, insert, reset sequences, commit. ----
+        #  2. One transaction: lock, re-check the impact, delete, insert, reset sequences, commit.
         connection = engine.connect()
         transaction = connection.begin()
         try:
@@ -1251,13 +1242,11 @@ def restore_backup(session: Session, engine: Engine, settings: Settings, filenam
             impact, captured = _external_impact(connection, tables, context.ids)
             if impact["blockers"]:
                 first = impact["blockers"][0]
-                raise BackupError(
-                    f"{first['rows']} row(s) in {first['table']} still refer to data that the restore replaces "
+                raise BackupError(f"{first['rows']} row(s) in {first['table']} still refer to data that the restore replaces "
                     f"({first['rule']}). Remove or migrate them first."
                 )
             if _needs_confirmation(impact, legacy):
-                problem = _check_confirmation(
-                    settings, confirmation_token, filename, backup_sha256,
+                problem = _check_confirmation(settings, confirmation_token, filename, backup_sha256,
                     _impact_fingerprint(backup_sha256, legacy, impact), user_id,
                 )
                 if problem:
@@ -1312,23 +1301,18 @@ def restore_backup(session: Session, engine: Engine, settings: Settings, filenam
             raise
         except BackupError as error:
             _rollback(transaction)
-            raise HTTPException(
-                status_code=422,
-                detail=f"The backup cannot be restored: {error} The restore was rolled back; nothing was changed.",
-            ) from error
+            raise HTTPException(status_code=422,detail=f"The backup cannot be restored: {error} The restore was rolled back; nothing was changed.", ) from error
         except DBAPIError as error:
             _rollback(transaction)
             raise _database_error(error) from None
         except Exception as error:
             _rollback(transaction)
             logger.error("Restore failed and was rolled back (%s)", error.__class__.__name__)
-            raise HTTPException(
-                status_code=500, detail="The restore failed and was rolled back; the existing data was not changed."
-            ) from None
+            raise HTTPException(status_code=500, detail="The restore failed and was rolled back; the existing data was not changed.") from None
         finally:
             connection.close()
 
-        # ---- 3. Committed. Everything below only completes the restore and reports on it. ----
+        # 3. Committed. Everything below only completes the restore and reports on it.
         session.expire_all()  # sessions use expire_on_commit=False: drop objects loaded before the swap
         owners = {renames.get(old, old): owner for old, owner in context.attachment_documents.items()}
         failed_files, recovery_folder = _promote_attachments(staging, list(staged.values()), owners)
@@ -1452,7 +1436,7 @@ def _post_restore_migrations(engine: Engine) -> list[str]:
     return warnings
 
 
-# ---- backup history helpers: summary, details, delete, upload, storage, recovery --------------------------------
+# backup history helpers: summary, details, delete, upload, storage, recovery
 
 _SUMMARY_CACHE: dict[tuple, dict[str, Any]] = {}
 
@@ -1469,7 +1453,6 @@ def _safe_backup_file(settings: Settings, filename: str) -> Path | None:
 
 def backup_summary(settings: Settings, filename: str, detailed: bool = False) -> dict[str, Any]:
     """Facts about one stored backup read from its manifest (no database access, no full validation).
-
     status: 'ok' | 'warning' (attachment problems or old format) | 'file_missing' | 'unreadable'.
     Full checksum validation happens in the restore preview.
     """
@@ -1525,7 +1508,7 @@ def backup_summary(settings: Settings, filename: str, detailed: bool = False) ->
 
 
 def delete_backup_file(engine: Engine, settings: Settings, filename: str) -> None:
-    """Remove a backup file. Refused while a restore is running (which may be reading it)."""
+    # Remove a backup file. Refused while a restore is running (which may be reading it).
     with engine.connect() as connection:
         if not connection.execute(text("SELECT pg_try_advisory_xact_lock(:key)"), {"key": _RESTORE_LOCK_KEY}).scalar():
             raise HTTPException(status_code=409, detail="A restore is running; backups cannot be deleted right now.")
@@ -1539,7 +1522,7 @@ def delete_backup_file(engine: Engine, settings: Settings, filename: str) -> Non
 
 
 def import_backup_file(engine: Engine, settings: Settings, stream, original_name: str, name: str | None, note: str | None):
-    """Store an uploaded backup (ZIP v2 or old JSON v1) and add it to the history. Returns (record, summary)."""
+    # Store an uploaded backup (ZIP v2 or old JSON v1) and add it to the history. Returns (record, summary).
     from app.models import BackupRecord
 
     directory = backup_directory(settings)
@@ -1591,7 +1574,7 @@ def import_backup_file(engine: Engine, settings: Settings, stream, original_name
 
 
 def storage_report(settings: Settings, known_files: set[str]) -> dict[str, Any]:
-    """Disk use of the backup folder, files no history record refers to, and unresolved attachment recoveries."""
+    # Disk use of the backup folder, files no history record refers to, and unresolved attachment recoveries.
     directory = backup_directory(settings)
     used, orphans = 0, []
     for path in directory.iterdir():
@@ -1603,7 +1586,7 @@ def storage_report(settings: Settings, known_files: set[str]) -> dict[str, Any]:
 
 
 def list_recovery() -> list[dict[str, Any]]:
-    """Folders left by a restore whose attachment files could not be placed, with what is still outstanding."""
+    # Folders left by a restore whose attachment files could not be placed, with what is still outstanding.
     root = DOCUMENT_UPLOAD_DIR.parent
     result = []
     if not root.is_dir():
@@ -1628,7 +1611,7 @@ def list_recovery() -> list[dict[str, Any]]:
 
 
 def retry_recovery(folder_name: str) -> dict[str, Any]:
-    """Try again to place the files of one recovery folder (never overwriting); the folder is removed once empty."""
+   # Try again to place the files of one recovery folder (never overwriting); the folder is removed once empty.
     if not _RECOVERY_NAME.match(folder_name):
         raise HTTPException(status_code=422, detail="Invalid recovery folder")
     folder = DOCUMENT_UPLOAD_DIR.parent / folder_name

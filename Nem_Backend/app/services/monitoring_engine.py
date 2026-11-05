@@ -210,19 +210,14 @@ def current_rule_runtime_seconds(
         or counter.runtime_checkpoint_at is None
     ):
         return total
-    end = min(
-        at,
-        counter.last_signal_at + timedelta(seconds=stale_after_seconds),
-    )
+    end = min(at,counter.last_signal_at + timedelta(seconds=stale_after_seconds))
     runtime_start = (
         max(counter.runtime_checkpoint_at, activation_at)
         if activation_at is not None
         else counter.runtime_checkpoint_at
     )
     if end > runtime_start:
-        total += Decimal(
-            str((end - runtime_start).total_seconds())
-        )
+        total += Decimal(str((end - runtime_start).total_seconds()))
     return total
 
 
@@ -290,10 +285,7 @@ def update_rule_signal_states(
             try:
                 activation_at = runtime_activation_at(rule)
             except ValueError:
-                LOGGER.warning(
-                    "Skipping signal update for rule %s with invalid activation time",
-                    rule.id,
-                )
+                LOGGER.warning( "Skipping signal update for rule %s with invalid activation time",rule.id,)
                 continue
             advance_rule_runtime(
                 counter,
@@ -449,9 +441,7 @@ def _transition_state(
                 severity=next_status,
                 metadata={
                     "value": value,
-                    "threshold": (
-                        str(threshold) if threshold is not None else None
-                    ),
+                    "threshold": (str(threshold) if threshold is not None else None ),
                 },
             )
 
@@ -583,11 +573,7 @@ def evaluate_boolean_count_threshold(
             raise ValueError("Thresholds must be strictly increasing")
 
     except (KeyError, TypeError, ValueError) as error:
-        LOGGER.warning(
-            "Invalid count thresholds for rule %s: %s",
-            rule.id,
-            error,
-        )
+        LOGGER.warning("Invalid count thresholds for rule %s: %s", rule.id, error)
         return _transition_state(
             session,
             rule,
@@ -805,9 +791,7 @@ def evaluate_runtime_duration(
         )
 
     stale_after = rule.stale_after_seconds or stale_after_seconds
-    running_seconds = current_rule_runtime_seconds(
-        counter, evaluated_at, stale_after, activation_at
-    )
+    running_seconds = current_rule_runtime_seconds(counter, evaluated_at, stale_after, activation_at)
     if evaluated_at - counter.last_signal_at > timedelta(seconds=stale_after):
         return _transition_state(
             session,
@@ -1136,9 +1120,7 @@ def evaluate_rule(
                 error_message="invalid_count_variable_type",
             )
 
-        return evaluate_boolean_count_threshold(
-            session, rule, asset, state, now
-        )
+        return evaluate_boolean_count_threshold(session, rule, asset, state, now)
 
     if (
         rule.rule_type == "runtime_duration"
@@ -1236,10 +1218,7 @@ def evaluate_rule(
     try:
         holds = _condition_holds(rule, reading.value)
     except (TypeError, ValueError, ArithmeticError) as error:
-        LOGGER.warning("Invalid rule configuration for rule %s: %s",
-            rule.id,
-            error,
-        )
+        LOGGER.warning("Invalid rule configuration for rule %s: %s",rule.id,error,)
         return _transition_state(
             session,
             rule,
@@ -1303,14 +1282,11 @@ def evaluate_rule(
         severity = rule.severity
         expected_value = (rule.parameters or {}).get("expected_value")
         if rule.rule_type == "parameter_threshold" and isinstance(expected_value, bool):
-            message = (
-                f"Boolean signal is {'ON' if reading.value else 'OFF'} "
-                f"({rule.operator} {'ON' if expected_value else 'OFF'})."
-            )
+            message = (f"Boolean signal is {'ON' if reading.value else 'OFF'} "
+                f"({rule.operator} {'ON' if expected_value else 'OFF'}).")
         else:
             message = (f"Rule '{rule.name}' condition met: value {reading.value} "
-                f"{rule.operator} {rule.threshold}."
-            )
+                f"{rule.operator} {rule.threshold}.")
         threshold = rule.threshold
 
     return _transition_state(
@@ -1455,7 +1431,6 @@ def release_scheduler_lease(
     name: str = "monitoring-evaluation",
 ) -> None:
     """Give up a lease this owner holds so another instance can take over immediately.
-
     Only the current owner's row is touched; a lease that already expired or moved to
     another owner is left alone.
     """
@@ -1573,10 +1548,7 @@ def set_rule_enabled_state(
     emit_event(
         session,
         event_type="rule_enabled" if enabled else "rule_disabled",
-        message=(
-            f"Rule '{rule.name}' "
-            f"{'enabled' if enabled else 'disabled'}."
-        ),
+        message=(f"Rule '{rule.name}' {'enabled' if enabled else 'disabled'}."),
         occurred_at=now,
         asset_id=asset.id if asset else None,
         rule_id=rule.id,

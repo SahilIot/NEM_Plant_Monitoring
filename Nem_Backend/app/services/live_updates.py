@@ -171,9 +171,7 @@ class LiveUpdateHub:
             retained_events.extend(item.get("critical_events", ()))
             if item.get("critical") and not item.get("resync_required"):
                 retained_events.append(item)
-        truncated = any(
-            item.get("critical_events_truncated", False) for item in events
-        )
+        truncated = any(item.get("critical_events_truncated", False) for item in events)
         if len(retained_events) > _MAX_RETAINED_CRITICAL_EVENTS:
             retained_events = retained_events[-_MAX_RETAINED_CRITICAL_EVENTS:]
             truncated = True
@@ -207,9 +205,7 @@ def _collect_changed_tables(session: Session, flush_context: object) -> None:
             value = getattr(instance, attribute, None)
             if isinstance(value, int) and not isinstance(value, bool):
                 ids.add(value)
-                if attribute in {"asset_id", "target_asset_id"} or (
-                    table_name == "assets" and attribute == "id"
-                ):
+                if attribute in {"asset_id", "target_asset_id"} or (table_name == "assets" and attribute == "id"):
                     asset_ids.add(value)
 
 
