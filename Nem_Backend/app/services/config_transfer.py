@@ -423,6 +423,8 @@ def analyse(session: Session, package: Any, options: ImportOptions) -> dict[str,
         if not isinstance(children_raw, list) or len(children_raw) > MAX_COLLECTION_RULES:
             errors.append(f"A collection can contain at most {MAX_COLLECTION_RULES} rules.")
             children_raw = []
+        if not errors and not children_raw:
+            errors.append("A collection must contain at least one monitoring rule.")
         child_names: set[str] = set()
         for position, child_raw in enumerate(children_raw, 1):
             payload, visibility, child_errors, child_warnings, unresolved = _parse_template(

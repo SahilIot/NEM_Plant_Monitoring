@@ -131,9 +131,8 @@ export default function CollectionLibrary() {
     setBusyId(collection.id);
     setMessage({ text: "", error: false });
     try {
-      // Same sequence the library has always used: the collection's own rules first, then the collection.
-      for (const rule of members) await api.del(`/rule-templates/${rule.id}`);
-      await api.del(`/collections/${collection.id}`);
+      // One request deletes the collection and its own rules together (all or nothing).
+      await api.del(`/collections/${collection.id}?delete_rules=true`);
       if (viewingId === collection.id) setViewingId(null);
       await refresh(`Collection “${collection.name}” and its ${members.length} rule${members.length === 1 ? "" : "s"} deleted.`);
     } catch (error) {

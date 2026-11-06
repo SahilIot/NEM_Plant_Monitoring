@@ -98,6 +98,13 @@ MAX_FILES_PER_DOCUMENT = 10
 
 ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt"}
 
+# Shown whenever an operation would create or leave a collection without a monitoring rule.
+COLLECTION_NEEDS_RULE_MESSAGE = "Add at least one monitoring rule to the collection."
+COLLECTION_KEEP_RULE_MESSAGE = (
+    "A collection must keep at least one monitoring rule. Add another rule first, or delete the collection."
+)
+
+
 #Validate a rule collection`s name and description.
 class CollectionCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
@@ -110,6 +117,8 @@ class CollectionCreate(BaseModel):
 
     @model_validator(mode="after")
     def check_rule_visibility(self):
+        if not self.rules:
+            raise ValueError(COLLECTION_NEEDS_RULE_MESSAGE)
         if self.rules:
             if self.visibility_type is None:
                 raise ValueError("Choose a visibility for the collection rules")
@@ -739,6 +748,22 @@ def _validate_template_collection(
         if (session.scalar(query) or 0) >= 5:
             raise HTTPException(status_code=422,detail="A rule collection can contain no more than five rules",)
 
+# A rule may only leave a collection (be moved out or deleted) if at least one other rule stays in it.
+# The collection row is locked so two concurrent removals cannot both pass the check.
+def _ensure_collection_keeps_rule(session: Session, collection_id: int | None, leaving_template_id: int) -> None:
+    if collection_id is None:
+        return
+    if session.scalar(select(RuleCollection.id).where(RuleCollection.id == collection_id).with_for_update()) is None:
+        return
+    remaining = session.scalar(
+        select(func.count()).select_from(MonitoringRuleTemplate).where(
+            MonitoringRuleTemplate.collection_id == collection_id,
+            MonitoringRuleTemplate.id != leaving_template_id,
+        )
+    ) or 0
+    if remaining == 0:
+        raise HTTPException(status_code=422, detail=COLLECTION_KEEP_RULE_MESSAGE)
+
 # Converts a MonitoringRuleTemplateRequest db record into a dict suitable for returning through an API.
 def _rule_template_request_row(
     item: MonitoringRuleTemplateRequest,
@@ -1039,6 +1064,7 @@ def apply_template_update(
     """
     enforce_template_edit_permission(session, template, values,labels,)
     if values["collection_id"] != template.collection_id:
+        _ensure_collection_keeps_rule(session, template.collection_id, template.id)
         _validate_template_collection(session, values["collection_id"], excluded_template_id=template.id)
     semantic_fields = (
         "rule_type",
@@ -1055,10 +1081,7 @@ def apply_template_update(
         getattr(template, field) != values[field]
         for field in semantic_fields
     )
-    change_log = record_template_changes(
-        session, template, values,
-        labels,
-    )
+    change_log = record_template_changes(session, template, values,labels,)
     for field, value in values.items():
         setattr(template, field, value)
     if labels is not None:
@@ -1128,6 +1151,7 @@ def delete_rule_template(template_id: int, session: Session = Depends(get_db)) -
         template = session.get(MonitoringRuleTemplate, template_id)
         if template is None:
             raise HTTPException(status_code=404, detail="Rule template was not found")
+        _ensure_collection_keeps_rule(session, template.collection_id, template.id)
         assigned_count = session.scalar(
             select(func.count())
             .select_from(MonitoringRule)
@@ -2168,7 +2192,11 @@ def update_collection(
 
 #Delete a collection
 @router.delete("/collections/{collection_id}", status_code=204)
-def delete_collection(collection_id: int, session: Session = Depends(get_db)) -> None:
+def delete_collection(
+    collection_id: int,
+    delete_rules: bool = Query(False),
+    session: Session = Depends(get_db),
+) -> None:
     collection = session.get(RuleCollection, collection_id)
     if collection is None:
         raise HTTPException(status_code=404, detail="Collection was not found")
@@ -2177,8 +2205,20 @@ def delete_collection(collection_id: int, session: Session = Depends(get_db)) ->
             MonitoringRuleTemplate.collection_id == collection_id
         )
     ).all()
-    for template in templates:
-        template.collection_id = None
+    if delete_rules:
+        # The collection and its own rule definitions go together in one transaction. Rules that still have
+        # assigned asset rules cannot be deleted, exactly as for a single rule, and nothing is changed then.
+        for template in templates:
+            assigned = session.scalar(
+                select(func.count()).select_from(MonitoringRule).where(MonitoringRule.source_template_id == template.id)
+            )
+            if assigned:
+                raise HTTPException(status_code=409,detail=f"Rule '{template.name}' has assigned rules; disable it instead of deleting the collection.",)
+        for template in templates:
+            session.delete(template)
+    else:
+        for template in templates:
+            template.collection_id = None
     session.delete(collection)
     session.commit()
 
