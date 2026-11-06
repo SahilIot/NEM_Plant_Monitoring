@@ -78,3 +78,37 @@
 .xfer-side dl { margin: 0; display: grid; gap: 6px; font-size: 13px; }
 .xfer-side dt { color: var(--muted); font-size: 12px; }
 .xfer-side dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+
+/* Asset mapping review */
+.xfer-map { border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--surface-2); margin-bottom: 10px; overflow: hidden; }
+.xfer-map-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.xfer-map-head h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+.xfer-map-list { list-style: none; margin: 0; padding: 0; }
+.xfer-map-item { display: grid; grid-template-columns: minmax(160px, 0.8fr) minmax(0, 2fr); gap: 8px 18px; align-items: start; padding: 10px 12px; border-left: 3px solid transparent; transition: background 0.12s ease; }
+.xfer-map-item + .xfer-map-item { border-top: 1px solid var(--line); }
+.xfer-map-item:hover { background: var(--surface); }
+.xfer-map-item.mapped { border-left-color: var(--ok); }
+.xfer-map-src { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.xfer-map-src strong { font-size: 14px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xfer-map-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.xfer-map-dest { min-width: 0; }
+.xfer-map-row { display: flex; gap: 8px; align-items: center; }
+.xfer-map-row select { flex: 1 1 auto; min-width: 0; width: 100%; height: var(--ctl, 34px); }
+.xfer-map-row select:focus-visible, .xfer-ghost:focus-visible { outline: 2px solid var(--action); outline-offset: 1px; }
+.xfer-ghost { flex: none; height: 28px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--r-ctl); background: transparent; color: var(--muted); font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.xfer-ghost:hover:not(:disabled) { color: var(--ink); border-color: var(--line); background: var(--surface); }
+.xfer-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+.xfer-map-msg { display: flex; align-items: center; gap: 5px; margin: 5px 0 0; font-size: 12.5px; color: var(--muted); }
+.xfer-map-msg.ok { color: var(--ok); }
+.xfer-map-msg.err { color: var(--alert); }
+@media (max-width: 720px) { .xfer-map-item { grid-template-columns: 1fr; } }
+
+/* Duplicate-handling prompt */
+.xfer-dup { border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--surface-2); padding: 10px 12px; margin-bottom: 10px; }
+.xfer-dup .xfer-dup-title { margin: 0 0 2px; font-size: 14px; font-weight: 600; color: var(--ink); }
+.xfer-dup-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px; margin: 8px 0; }
+.xfer-dup-choices .xfer-cat { background: var(--surface); }
+.xfer-dup-choices .xfer-cat.on { border-color: var(--ok); box-shadow: inset 3px 0 0 var(--ok); }
+.xfer-dup-choices .xfer-cat.warn.on { border-color: var(--warn); box-shadow: inset 3px 0 0 var(--warn); }
+.xfer-dup-choices .xfer-cat:focus-within { outline: 2px solid var(--action); outline-offset: 1px; }
+.xfer-dup .xfer-dup-summary { margin: 0; font-size: 13px; color: var(--ink); }

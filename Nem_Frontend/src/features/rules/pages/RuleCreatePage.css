@@ -240,11 +240,6 @@
   color: var(--ink);
 }
 
-.rule-create-page .loading {
-  padding: 24px 4px;
-  color: var(--muted);
-}
-
 [data-theme="dark"] .rule-create-page .form-group select {
   color-scheme: dark;
 }

@@ -2406,10 +2406,7 @@ async def create_document_with_files(
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     if not files or all(not (upload.filename or "").strip() for upload in files):
-        raise HTTPException(
-            status_code=422,
-            detail="At least one attachment is required.",
-        )
+        raise HTTPException(status_code=422,detail="At least one attachment is required.",)
     if len(files) > MAX_FILES_PER_DOCUMENT:
         raise HTTPException(status_code=413, detail=f"Choose no more than {MAX_FILES_PER_DOCUMENT} files")
     try:
@@ -2418,10 +2415,7 @@ async def create_document_with_files(
             raise ValueError("Labels must be a JSON array")
         parsed_labels = normalize_label_names(parsed_labels)
     except (json.JSONDecodeError, TypeError, ValueError) as error:
-        raise HTTPException(
-            status_code=422,
-            detail=str(error) or "Labels must be a JSON array of text values",
-        ) from error
+        raise HTTPException(status_code=422,detail=str(error) or "Labels must be a JSON array of text values",) from error
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     saved_paths: list[Path] = []
     total = 0

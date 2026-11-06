@@ -181,10 +181,15 @@ h3 { margin: 0; }
   0%, 15%, 100% { opacity: 0.18; }
   45%, 70% { opacity: 1; }
 }
+/* The loading indicator is essential feedback, so it keeps moving when "reduce motion" is requested (Windows
+   "Animation effects" off, OS accessibility setting). Only the speed is softened: the ring turns slowly and the
+   dots fade in and out. The selectors are deliberately more specific than the page-wide "animation: none"
+   reduced-motion rules (for example .plc-page *), which would otherwise freeze it. */
 @media (prefers-reduced-motion: reduce) {
-  .loading-spinner,
-  .loading-dots span { animation: none; }
-  .loading-dots span { opacity: 1; }
+  .loading-indicator .loading-spinner { animation: app-loading-spin 1.6s linear infinite !important; }
+  .loading-indicator .loading-dots span { animation: app-loading-dot 1.8s ease-in-out infinite !important; }
+  .loading-indicator .loading-dots span:nth-child(2) { animation-delay: 360ms !important; }
+  .loading-indicator .loading-dots span:nth-child(3) { animation-delay: 720ms !important; }
 }
 .spacer { flex: 1; }
 .right { text-align: right; }

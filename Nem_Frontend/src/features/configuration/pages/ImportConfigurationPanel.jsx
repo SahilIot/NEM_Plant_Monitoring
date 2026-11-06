@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Download, FileText, Upload, X } from "lucide-react";
+import { Check, Download, FileText, Upload, X } from "lucide-react";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import "./ConfigTransfer.css";
@@ -21,6 +21,85 @@ const STATUS_LABELS = {
   invalid: "Invalid",
   imported: "Imported",
 };
+
+// Asset mapping review. Each row is an exported asset that was not matched automatically. The destination list holds
+// active assets of the same type only; assets with exactly the same name are offered first as suggestions. A
+// suggestion is only ever applied by the Administrator (select it, or press "Use suggestion").
+function AssetMapping({ references, disabled, onMap }) {
+  const mappedCount = references.filter((ref) => ref.selected).length;
+  return (
+    <section className="xfer-map" aria-label="Asset mapping">
+      <header className="xfer-map-head">
+        <h3>Asset mapping</h3>
+        <span className="xfer-muted">{mappedCount} of {references.length} mapped</span>
+      </header>
+      <ul className="xfer-map-list">
+        {references.map((ref) => {
+          const suggestions = ref.compatible.filter((a) => a.name_match);
+          const others = ref.compatible.filter((a) => !a.name_match);
+          const selected = ref.selected;
+          const label = (a) => `${a.name}${a.parent_name ? ` — in ${a.parent_name}` : ""}`;
+          const selectId = `map-${ref.key}`;
+          return (
+            <li key={ref.key} className={`xfer-map-item${selected ? " mapped" : ""}`}>
+              <div className="xfer-map-src">
+                <strong title={ref.name}>{ref.name}</strong>
+                <div className="xfer-map-tags">
+                  <span className="xfer-chip">{ref.asset_type}</span>
+                  <span className="xfer-chip">{ref.records} {ref.records === 1 ? "rule" : "rules"}</span>
+                </div>
+                {ref.parent_name ? <span className="xfer-muted">in {ref.parent_name}</span> : null}
+              </div>
+              <div className="xfer-map-dest">
+                {ref.compatible.length === 0 ? (
+                  <p className="xfer-map-msg err">No {ref.asset_type} asset is available in this installation. These rules stay unresolved and are skipped.</p>
+                ) : (
+                  <>
+                    <div className="xfer-map-row">
+                      <select
+                        id={selectId}
+                        aria-label={`Destination for ${ref.name}`}
+                        value={selected ? String(selected.id) : ""}
+                        disabled={disabled}
+                        onChange={(e) => onMap(ref.key, e.target.value)}
+                      >
+                        <option value="">Not mapped (skip these rules)</option>
+                        {suggestions.length > 0 && (
+                          <optgroup label="Suggested — same name">
+                            {suggestions.map((a) => <option key={a.id} value={a.id}>{label(a)}</option>)}
+                          </optgroup>
+                        )}
+                        {others.length > 0 && (
+                          <optgroup label={`Other ${ref.asset_type} assets`}>
+                            {others.map((a) => <option key={a.id} value={a.id}>{label(a)}</option>)}
+                          </optgroup>
+                        )}
+                      </select>
+                      {selected && (
+                        <button type="button" className="xfer-ghost" disabled={disabled} onClick={() => onMap(ref.key, "")}>Clear</button>
+                      )}
+                      {!selected && suggestions.length > 0 && (
+                        <button type="button" className="xfer-ghost" disabled={disabled} onClick={() => onMap(ref.key, suggestions[0].id)}>Use suggestion</button>
+                      )}
+                    </div>
+                    {selected ? (
+                      <p className="xfer-map-msg ok"><Check size={13} aria-hidden="true" /> Confirmed: {selected.name} ({selected.asset_type})</p>
+                    ) : suggestions.length > 0 ? (
+                      <p className="xfer-map-msg">Suggested match: {suggestions[0].name} — not applied until you choose it.</p>
+                    ) : (
+                      <p className="xfer-map-msg">No asset with this name. Choose one of the {ref.asset_type} assets if it is the same equipment.</p>
+                    )}
+                  </>
+                )}
+                {ref.problem ? <p className="xfer-map-msg err">{ref.problem}</p> : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
 
 const statusClass = (status) =>
   status === "invalid" ? "alert" : status === "new" || status === "imported" ? "" : "warning";
@@ -109,7 +188,6 @@ export default function ImportConfigurationPanel() {
   const [file, setFile] = useState(null); // { name, size }
   const [options, setOptions] = useState(FRESH_OPTIONS);
   const [preview, setPreview] = useState(null);
-  const [assets, setAssets] = useState([]);
   const [supervisors, setSupervisors] = useState([]);
   const [phase, setPhase] = useState(null); // reading | validating | importing
   const [confirming, setConfirming] = useState(false);
@@ -120,7 +198,6 @@ export default function ImportConfigurationPanel() {
 
   useEffect(() => {
     if (!isAdministrator) return;
-    api.getAll("/assets").then((list) => setAssets(list || [])).catch(() => {});
     api.get("/rule-visibility/supervisors").then((list) => setSupervisors(list || [])).catch(() => {});
   }, [isAdministrator]);
 
@@ -220,6 +297,9 @@ export default function ImportConfigurationPanel() {
   const total = preview ? preview.items.length : 0;
   const renamed = preview ? preview.items.filter((i) => i.status === "renamed").length : 0;
   const newCount = preview ? preview.items.filter((i) => i.status === "new").length : 0;
+  // Records that already exist, whichever way the Administrator decided to handle them (skipped, or renamed).
+  const existingCount = preview ? preview.totals.duplicates + renamed : 0;
+  const skippedCount = preview ? preview.totals.duplicates + preview.totals.unresolved : 0;
 
   return (
     <div className="xfer-page">
@@ -301,34 +381,49 @@ export default function ImportConfigurationPanel() {
             <div className={`xfer-stat${preview.totals.invalid ? " bad" : ""}`}><b>{preview.totals.invalid}</b><span>Invalid</span></div>
           </div>
 
-          <div className="xfer-fields">
-            <div className="field">
-              <label htmlFor="import-duplicates">If a record with the same name already exists</label>
-              <select id="import-duplicates" value={options.on_duplicate} disabled={busy} onChange={(e) => changeOptions({ on_duplicate: e.target.value })}>
-                <option value="skip">Skip it (leave the existing record unchanged)</option>
-                <option value="rename">Import it under a new name</option>
-              </select>
+          {existingCount > 0 && (
+            <div className="xfer-dup" role="radiogroup" aria-labelledby="import-dup-title">
+              <p id="import-dup-title" className="xfer-dup-title">
+                Some records already exist in your system. Do you want to import them again?
+              </p>
+              <p className="xfer-muted">
+                {existingCount} existing {existingCount === 1 ? "record was" : "records were"} detected (monitoring rules, rule collections and maintenance rules).
+              </p>
+              <div className="xfer-dup-choices">
+                <label className={`xfer-cat${options.on_duplicate === "skip" ? " on" : ""}`}>
+                  <input type="radio" name="import-duplicates" checked={options.on_duplicate === "skip"} disabled={busy} onChange={() => changeOptions({ on_duplicate: "skip" })} />
+                  <span>
+                    <span className="title">No, Skip Existing</span>
+                    <span className="desc" style={{ display: "block" }}>Skip all {existingCount} existing {existingCount === 1 ? "record" : "records"}. Nothing in your system is changed.</span>
+                  </span>
+                </label>
+                <label className={`xfer-cat warn${options.on_duplicate === "rename" ? " on" : ""}`}>
+                  <input type="radio" name="import-duplicates" checked={options.on_duplicate === "rename"} disabled={busy} onChange={() => changeOptions({ on_duplicate: "rename" })} />
+                  <span>
+                    <span className="title">Yes, Import Again</span>
+                    <span className="desc" style={{ display: "block" }}>Add them as additional records with automatically generated unique names, for example “Name (imported)”. Existing records are never overwritten or modified.</span>
+                  </span>
+                </label>
+              </div>
+              <p className="xfer-dup-summary" role="status">
+                With this choice: <strong>{toImport.length}</strong> will be imported
+                {options.on_duplicate === "rename" && renamed ? <> (including <strong>{renamed}</strong> under new names)</> : null}
+                , <strong>{skippedCount}</strong> will be skipped.
+              </p>
             </div>
-            {preview.totals.invalid > 0 && (
-              <label className="rule-visibility-option" style={{ alignSelf: "end" }}>
+          )}
+
+          {preview.totals.invalid > 0 && (
+            <div className="xfer-fields">
+              <label className="rule-visibility-option">
                 <input type="checkbox" checked={options.skip_invalid} disabled={busy} onChange={(e) => changeOptions({ skip_invalid: e.target.checked })} />
                 <span>Reject invalid records and import the rest</span>
               </label>
-            )}
-          </div>
-
-          {preview.unresolved_assets.length > 0 && (
-            <div className="xfer-fields">
-              {preview.unresolved_assets.map((asset) => (
-                <div className="field" key={asset.key}>
-                  <label>Destination for maintenance rules on “{asset.name}” ({asset.asset_type}{asset.parent_name ? `, in ${asset.parent_name}` : ""})</label>
-                  <select value={options.asset_mappings[asset.key] || ""} disabled={busy} onChange={(e) => mapAsset(asset.key, e.target.value)}>
-                    <option value="">Skip these maintenance rules</option>
-                    {assets.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.asset_type})</option>)}
-                  </select>
-                </div>
-              ))}
             </div>
+          )}
+
+          {(preview.asset_references || []).length > 0 && (
+            <AssetMapping references={preview.asset_references} disabled={busy} onMap={mapAsset} />
           )}
 
           {preview.unresolved_supervisors.length > 0 && (

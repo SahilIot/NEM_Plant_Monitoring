@@ -409,7 +409,11 @@ package and writes nothing; `POST /config-transfer/import` re-validates and
 creates the records in one transaction (all or nothing). Existing rules are
 never overwritten: duplicates are skipped or imported under a new name.
 Missing destination Supervisors fall back to Admin Only unless the Administrator
-maps them; maintenance rules need a matching or selected destination asset. The
+maps them. Maintenance rules need a destination asset: an exact name, type and parent match is used
+automatically; otherwise the import review lists the exported asset with the active assets of the same type
+(same-name assets first as suggestions) and the Administrator picks one, which applies to every rule on that
+source asset. Nothing is mapped automatically, assets are never created, and the choice is re-validated
+(exists, active, same type) and duplicate-checked on the server. The
 importing Administrator is recorded as creator and each import is logged in
 `nem_configuration_imports`.
 

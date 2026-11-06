@@ -195,6 +195,27 @@ def export_summary(session: Session) -> dict[str, Any]:
         "format_version": FORMAT_VERSION,
     }
 
+# One row of the asset-mapping review: the exported asset and the destination assets the Administrator may pick.
+# Only active assets of the same asset type are compatible. Assets with exactly the same name come first and are
+# flagged as suggestions; nothing is ever selected on the Administrator's behalf.
+def _asset_reference_entry(key: str, reference: dict[str, Any], assets: list[Asset], parent_names: dict[int, str]) -> dict[str, Any]:
+    wanted_type = reference["asset_type"].casefold()
+    wanted_name = reference["name"].casefold()
+    compatible = [
+        {
+            "id": a.id, "name": a.name, "asset_type": a.asset_type,
+            "parent_name": parent_names.get(a.parent_asset_id),
+            "name_match": a.name.casefold() == wanted_name,
+        }
+        for a in assets if a.asset_type.casefold() == wanted_type
+    ]
+    compatible.sort(key=lambda a: (not a["name_match"], a["name"].casefold(), a["id"]))
+    return {
+        "key": key, "name": reference["name"], "asset_type": reference["asset_type"],
+        "parent_name": reference.get("parent_name"), "records": 0, "state": "unresolved",
+        "selected": None, "problem": None, "compatible": compatible,
+    }
+
 #Creates a portable lookup key from an asset reference.
 def _asset_key(reference: dict[str, Any]) -> str:
     parent = reference.get("parent_name") or ""
@@ -349,6 +370,7 @@ def analyse(session: Session, package: Any, options: ImportOptions) -> dict[str,
     collection_names = _Names({name for (name,) in session.execute(select(RuleCollection.name))})
     assets = session.scalars(select(Asset).where(Asset.is_active.is_(True))).all()
     parent_names = {asset.id: asset.name for asset in assets}
+    assets_by_id = {asset.id: asset for asset in assets}
     existing_schedules = {
         (s.asset_id, s.title.casefold(), s.maintenance_type)
         for s in session.scalars(select(MaintenanceSchedule).where(MaintenanceSchedule.status.in_(("active", "paused", "awaiting_approval"))))
@@ -359,13 +381,19 @@ def analyse(session: Session, package: Any, options: ImportOptions) -> dict[str,
     report_items: list[dict[str, Any]] = []
     work: list[dict[str, Any]] = []
     unresolved_assets: dict[str, dict[str, Any]] = {}
+    # Every source asset that was not matched automatically, whether still open or already mapped by the
+    # Administrator, so the review screen can keep offering the choice (change / clear) after a mapping.
+    asset_references: dict[str, dict[str, Any]] = {}
     unresolved_supervisors: set[str] = set()
 # Nested helper function adds an item to the report.
-    def add(category, ref, name, status, *, errors=(), warnings=(), final_name=None, note=None, payload=None):
+    def add(category, ref, name, status, *, errors=(), warnings=(), final_name=None, note=None, payload=None,
+            asset_key=None):
         item = {
             "category": category, "ref": ref, "name": name, "status": status,
             "final_name": final_name or name, "errors": list(errors), "warnings": list(warnings), "note": note,
         }
+        if asset_key is not None:
+            item["asset_key"] = asset_key
         report_items.append(item)
         if payload is not None:
             work.append({"item": item, **payload})
@@ -378,8 +406,8 @@ def analyse(session: Session, package: Any, options: ImportOptions) -> dict[str,
         if options.on_duplicate == "rename":
             final = names.unique(name)
             names.claim(final)
-            return "renamed", final, f"A rule named '{name}' already exists; imported as '{final}'."
-        return "duplicate", name, "A rule with this name already exists; it was left unchanged."
+            return "renamed", final, f"'{name}' already exists; imported again as '{final}'. The existing record is unchanged."
+        return "duplicate", name, "A record with this name already exists; it was left unchanged."
 
     # --- Monitoring rules
     for index, raw in enumerate(contents["monitoring_rules"], 1):
@@ -496,9 +524,24 @@ def analyse(session: Session, package: Any, options: ImportOptions) -> dict[str,
         key = _asset_key(asset_ref)
         asset_id = options.asset_mappings.get(key)
         if asset_id is not None:
-            if asset_id not in parent_names:
-                add("maintenance_rules", ref, candidate.title, "invalid",
-                    errors=[f"The selected destination asset for '{asset_ref['name']}' does not exist or is inactive."])
+            # The Administrator's choice is never trusted as sent: the asset must still exist, be active and be of
+            # the same asset type as the exported one.
+            chosen = assets_by_id.get(asset_id)
+            reference = asset_references.setdefault(key, _asset_reference_entry(key, asset_ref, assets, parent_names))
+            reference["records"] += 1
+            if chosen is None:
+                problem = f"The selected destination asset for '{asset_ref['name']}' does not exist or is inactive."
+            elif chosen.asset_type.casefold() != asset_ref["asset_type"].casefold():
+                problem = (f"The selected destination asset '{chosen.name}' is a {chosen.asset_type}, "
+                           f"but '{asset_ref['name']}' is a {asset_ref['asset_type']}.")
+            else:
+                problem = None
+                reference["state"] = "mapped"
+                reference["selected"] = {"id": chosen.id, "name": chosen.name, "asset_type": chosen.asset_type}
+            if problem:
+                reference["state"] = "invalid_mapping"
+                reference["problem"] = problem
+                add("maintenance_rules", ref, candidate.title, "invalid", errors=[problem], asset_key=key)
                 continue
         else:
             matches = [
@@ -521,7 +564,9 @@ def analyse(session: Session, package: Any, options: ImportOptions) -> dict[str,
                     "key": key, **{k: asset_ref.get(k) for k in ("name", "asset_type", "parent_name")},
                     "candidates": [{"id": a.id, "name": a.name, "asset_type": a.asset_type} for a in candidates],
                 }
-                add("maintenance_rules", ref, candidate.title, "unresolved",
+                reference = asset_references.setdefault(key, _asset_reference_entry(key, asset_ref, assets, parent_names))
+                reference["records"] += 1
+                add("maintenance_rules", ref, candidate.title, "unresolved", asset_key=key,
                     note="No single matching asset in this installation. Choose a destination asset to import it.")
                 continue
         signature = (asset_id, candidate.title.casefold(), candidate.maintenance_type)
@@ -569,6 +614,7 @@ def analyse(session: Session, package: Any, options: ImportOptions) -> dict[str,
             "invalid": invalid,
         },
         "unresolved_assets": list(unresolved_assets.values()),
+        "asset_references": list(asset_references.values()),
         "unresolved_supervisors": sorted(unresolved_supervisors),
         "can_import": can_import,
         "_work": work,
