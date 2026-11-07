@@ -18,6 +18,7 @@ from app.models import (
     MaintenanceSchedule,
     MonitoringEvent,
     User,
+    Variable,
 )
 from app.schemas.maintenance import (
     MaintenanceCreate,
@@ -98,23 +99,74 @@ def _authorize_operator_due_occurrence(
     *,
     action: str,
 ) -> None:
+    # Non-Operator users continue without this restriction.
     if user.role != "Operator":
         return
-    if (
-        record.schedule_id is None
-        or record.planned_due_date is None
-        or record.planned_due_date > utc_now().date()
-        or (action == "complete" and record.status != "in_progress")
-    ):
-        raise HTTPException(status_code=403,detail="Operators may only start or complete scheduled maintenance due today or overdue.",)
+
+    # Operator can only work on scheduled maintenance records.
+    if record.schedule_id is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Operators may only start or complete scheduled maintenance.",
+        )
+
+    # Fetch the associated maintenance schedule.
     schedule = _schedule_or_404(session, record.schedule_id)
+
+    # Maintenance must be in progress before an Operator can complete it.
+    if action == "complete" and record.status != "in_progress":
+        raise HTTPException(
+            status_code=403,
+            detail="Maintenance must be in progress before an Operator can complete it.",
+        )
+
+    # Runtime and usage-based schedules do not depend on calendar due dates.
+    if schedule.schedule_mode in {"runtime", "usage"}:
+
+        # Allow Operators only on the active occurrence of the schedule.
+        if (
+            schedule.current_occurrence_id != record.id
+            or schedule.status != "active"
+            or schedule.approval_status == "pending"
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Operators may only start or complete the active "
+                    "runtime/usage maintenance occurrence."
+                ),
+            )
+
+        # Runtime/usage authorization is complete; skip calendar checks.
+        return
+
+    # Due date must be today or overdue.
+    if (
+        record.planned_due_date is None
+        or record.planned_due_date > utc_now().date()
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Operators may only start or complete scheduled "
+                "maintenance due today or overdue."
+            ),
+        )
+
+    # Verify that this is the active occurrence.
     if (
         schedule.current_occurrence_id != record.id
         or schedule.current_due_date != record.planned_due_date
         or schedule.status != "active"
         or schedule.approval_status == "pending"
     ):
-        raise HTTPException(status_code=403,detail="Operators may only start or complete the active maintenance occurrence due today or overdue.",)
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Operators may only start or complete the active "
+                "maintenance occurrence due today or overdue."
+            ),
+        )
 
 # This prepares a db schedule for the frontend
 def _validate_instruction_documents(
@@ -143,7 +195,22 @@ def _schedule_read(
     *,
     today: date | None = None,
 ) -> MaintenanceScheduleRead:
+    # Identify the schedule mode for response calculations.
+    is_calendar = schedule.schedule_mode == "calendar"
+
+    # Select the progress unit for the active schedule mode.
+    progress_unit = (
+        "days"
+        if is_calendar
+        else "hours"
+        if schedule.schedule_mode == "runtime"
+        else "cycles"
+    )
+
+    # Use the current date for active schedules.
     progress_date = today or utc_now().date()
+
+    # Preserve the last completion date for completed or cancelled schedules.
     if schedule.status in {"completed", "cancelled"} and schedule.last_completed_at:
         progress_date = schedule.last_completed_at.date()
     document_ids = schedule.instruction_document_ids or []
@@ -180,35 +247,58 @@ def _schedule_read(
         if (document := documents_by_id.get(document_id)) is not None
     ]
     return MaintenanceScheduleRead.model_validate(
-        {
-            column.name: getattr(schedule, column.name)
-            for column in MaintenanceSchedule.__table__.columns
-        }
-        | {
-            "created_by": schedule.created_by,
-            "updated_by": schedule.updated_by,
-            "instruction_documents": instruction_documents,
-            "due_status": due_status(
+    {
+        column.name: getattr(schedule, column.name)
+        for column in MaintenanceSchedule.__table__.columns
+    }
+    | {
+        "created_by": schedule.created_by,
+        "updated_by": schedule.updated_by,
+        "instruction_documents": instruction_documents,
+
+        # Calculate due status differently for calendar and non-calendar schedules.
+        "due_status": (
+            due_status(
                 schedule.current_due_date,
                 today=today or utc_now().date(),
                 completed=schedule.status == "completed",
                 cancelled=schedule.status == "cancelled",
                 awaiting_approval=schedule.approval_status == "pending",
-            ),
-            "current_day_count": max(
-                0,
+            )
+            if is_calendar
+            else (
+                "completed"
+                if schedule.status == "completed"
+                else "not_scheduled"
+            )
+        ),
+
+        # UPDATED: Calculate day count only for calendar-based schedules.
+        "current_day_count": (
+            max(
+                1,
                 (progress_date - schedule.current_period_start_date).days + 1,
-            ),
-            "total_days": max(
+            )
+            if is_calendar
+            else 0
+        ),
+        # UPDATED: Calculate total days only for calendar-based schedules.
+        "total_days": (
+            max(
                 1,
                 (
                     (schedule.current_due_date or schedule.first_due_date)
                     - schedule.current_period_start_date
-                ).days
-                + 1,
-            ),
-        }
-    )
+                ).days + 1,
+            )
+            if is_calendar
+            else 0
+        ),
+
+        # Return the appropriate progress unit (hours, cycles, or days).
+        "progress_unit": progress_unit,
+    }
+)
 
 #This function creates an individual maintenance job from a recurring schedule
 def _create_occurrence(
@@ -422,8 +512,74 @@ def _create_maintenance_schedule(
     session: Session,
     payload: MaintenanceScheduleCreate,
 ) -> MaintenanceSchedule:
-    if session.get(Asset, payload.asset_id) is None or not access_scope(session).allows(payload.asset_id):
-        raise HTTPException(status_code=404,detail=f"Asset {payload.asset_id} was not found",)
+
+    # Verify that the asset exists and is accessible.
+    asset = session.get(Asset, payload.asset_id)
+
+    if asset is None or not access_scope(session).allows(payload.asset_id):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Asset {payload.asset_id} was not found",
+        )
+
+    # Identify the selected maintenance scheduling mode.
+    schedule_mode = payload.schedule_mode
+    
+    if schedule_mode == "calendar":
+        # Create the first maintenance occurrence for calendar schedules.
+        _create_occurrence(
+            session,
+            schedule,
+            due_date=first_due_date,
+        )
+
+        event_message = (
+            f"Maintenance scheduled: {schedule.title}, "
+            f"due {first_due_date}."
+        )
+
+    elif schedule_mode == "runtime":
+        event_message = (
+            f"Runtime maintenance scheduled: {schedule.title}. "
+            f"Interval: {payload.runtime_interval_hours} running hours."
+        )
+
+    else:
+        event_message = (
+            f"Usage-based maintenance scheduled: {schedule.title}. "
+            f"Interval: {payload.usage_interval_count} cycles."
+        )
+
+        variable = session.get(Variable, payload.signal_variable_id)
+
+        if (
+            variable is None
+            or variable.asset_id != payload.asset_id
+            or not variable.is_active
+            or variable.data_type != "boolean"
+            or variable.signal_role != expected_role
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"{schedule_mode.capitalize()} maintenance requires "
+                    f"an active Boolean variable on this asset with "
+                    f"signal role '{expected_role}'."
+                ),
+            )
+
+        # Use the current date as the initial anchor for non-calendar schedules.
+        anchor_date = utc_now().date()
+
+        schedule_start_date = anchor_date
+        first_due_date = anchor_date
+        current_due_date = None
+
+        # Calendar recurrence settings do not apply to runtime or usage schedules.
+        recurrence_enabled = False
+        recurrence_interval = None
+        recurrence_unit = None
+
     schedule = MaintenanceSchedule(
         asset_id=payload.asset_id,
         title=payload.title,
@@ -431,27 +587,95 @@ def _create_maintenance_schedule(
         priority=payload.priority,
         assigned_technician=payload.assigned_technician,
         description=payload.description,
-        instruction_document_ids=_validate_instruction_documents(session, payload.instruction_document_ids),
-        schedule_start_date=payload.schedule_start_date,
-        current_period_start_date=payload.schedule_start_date,
-        first_due_date=payload.first_due_date,
-        current_due_date=payload.first_due_date,
-        recurrence_enabled=payload.recurrence_enabled,
-        recurrence_interval=payload.recurrence_interval,
-        recurrence_unit=payload.recurrence_unit,
+
+        # Preserve instruction document validation.
+        instruction_document_ids=_validate_instruction_documents(
+            session,
+            payload.instruction_document_ids,
+        ),
+
+        schedule_start_date=schedule_start_date,
+        current_period_start_date=schedule_start_date,
+        first_due_date=first_due_date,
+        current_due_date=current_due_date,
+
+        recurrence_enabled=recurrence_enabled,
+        recurrence_interval=recurrence_interval,
+        recurrence_unit=recurrence_unit,
+
+        # Store the selected scheduling mode.
+        schedule_mode=schedule_mode,
+
+        # Store the signal variable only for runtime and usage schedules.
+        signal_variable_id=(
+            payload.signal_variable_id
+            if schedule_mode != "calendar"
+            else None
+        ),
+
+        # Store runtime interval only for runtime schedules.
+        runtime_interval_hours=(
+            payload.runtime_interval_hours
+            if schedule_mode == "runtime"
+            else None
+        ),
+
+        # Store usage interval only for usage schedules.
+        usage_interval_count=(
+            payload.usage_interval_count
+            if schedule_mode == "usage"
+            else None
+        ),
+
+        # Initialize progress and signal tracking fields.
+        current_progress=0.0,
+        last_signal_value=None,
+        last_signal_at=None,
+
+        # Preserve initial schedule status.
         status="active",
         approval_status="not_required",
     )
+
     session.add(schedule)
     session.flush()
-    _create_occurrence(session, schedule, due_date=payload.first_due_date)
+
+    if schedule_mode == "calendar":
+        # Create the first maintenance occurrence for calendar schedules.
+        _create_occurrence(
+            session,
+            schedule,
+            due_date=first_due_date,
+        )
+
+        event_message = (
+            f"Maintenance scheduled: {schedule.title}, "
+            f"due {first_due_date}."
+        )
+
+    elif schedule_mode == "runtime":
+        # Create an appropriate event message for runtime scheduling.
+        event_message = (
+            f"Runtime maintenance scheduled: {schedule.title}. "
+            f"Interval: {payload.runtime_interval_hours} running hours."
+        )
+
+    else:
+        # Create an appropriate event message for usage-based scheduling.
+        event_message = (
+            f"Usage-based maintenance scheduled: {schedule.title}. "
+            f"Interval: {payload.usage_interval_count} cycles."
+        )
+
+    # Preserve maintenance schedule event logging for all modes.
     _emit_schedule_event(
         session,
         schedule,
         event_type="maintenance_schedule_created",
-        message=f"Maintenance scheduled: {schedule.title}, due {payload.first_due_date}.",
-        due_date=payload.first_due_date,
+        message=event_message,
+        due_date=first_due_date if schedule_mode == "calendar" else None,
     )
+
     return schedule
 
 #Listing and viewing schedules
@@ -602,7 +826,156 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status_code=422,detail="Provide at least one field to update",)
+    # Prevent changing the scheduling mode of an existing schedule.
+    if (
+        "schedule_mode" in changes
+        and changes["schedule_mode"] != schedule.schedule_mode
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Changing the maintenance schedule mode is not supported. Create a new schedule instead.",
+        )
 
+    is_calendar = schedule.schedule_mode == "calendar"
+    if not is_calendar and "status" in changes:
+        allowed_runtime_statuses = {"active", "paused", "cancelled"}
+
+        if changes["status"] not in allowed_runtime_statuses:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Runtime/usage schedules support only active, paused, "
+                    "and cancelled statuses."
+                ),
+            )
+
+    calendar_fields = {
+        "schedule_start_date",
+        "first_due_date",
+        "recurrence_enabled",
+        "recurrence_interval",
+        "recurrence_unit",
+    }
+
+    runtime_usage_fields = {
+        "signal_variable_id",
+        "runtime_interval_hours",
+        "usage_interval_count",
+    }
+
+    if is_calendar:
+        supplied_runtime_fields = (
+            runtime_usage_fields.intersection(changes)
+        )
+
+        if supplied_runtime_fields:
+            raise HTTPException(
+                status_code=422,
+                detail="Runtime and usage configuration cannot be added to a calendar schedule.",
+            )
+
+        for field in ("schedule_start_date", "first_due_date"):
+            if field in changes and changes[field] is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"{field} cannot be null for a calendar schedule.",
+                )
+
+    else:
+        supplied_calendar_fields = calendar_fields.intersection(changes)
+
+        if supplied_calendar_fields:
+            raise HTTPException(
+                status_code=422,
+                detail="Calendar dates and recurrence cannot be edited for runtime/usage schedules.",
+            )
+
+        if "recurrence_enabled" in changes and changes["recurrence_enabled"] is not False:
+            raise HTTPException(
+                status_code=422,
+                detail="Runtime/usage schedules do not support calendar recurrence.",
+            )
+
+        target_signal_id = changes.get(
+            "signal_variable_id",
+            schedule.signal_variable_id,
+        )
+
+        target_runtime_interval = changes.get(
+            "runtime_interval_hours",
+            schedule.runtime_interval_hours,
+        )
+
+        target_usage_interval = changes.get(
+            "usage_interval_count",
+            schedule.usage_interval_count,
+        )
+
+        if schedule.schedule_mode == "runtime":
+            if (
+                target_runtime_interval is None
+                or target_usage_interval is not None
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Runtime schedules require runtime_interval_hours and cannot use usage_interval_count.",
+                )
+
+        elif schedule.schedule_mode == "usage":
+            if (
+                target_usage_interval is None
+                or target_runtime_interval is not None
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Usage schedules require usage_interval_count and cannot use runtime_interval_hours.",
+                )
+
+        configuration_changed = bool(
+            runtime_usage_fields.intersection(changes)
+        )
+
+        if configuration_changed and schedule.current_occurrence_id is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="Signal and interval settings cannot be changed while a maintenance occurrence is pending.",
+            )
+
+        if configuration_changed:
+            expected_role = (
+                "running"
+                if schedule.schedule_mode == "runtime"
+                else "cycle"
+            )
+
+            variable = session.get(Variable, target_signal_id)
+
+            if (
+                variable is None
+                or variable.asset_id != schedule.asset_id
+                or not variable.is_active
+                or variable.data_type != "boolean"
+                or variable.signal_role != expected_role
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"This schedule requires an active Boolean variable "
+                        f"with signal role '{expected_role}' on the same asset."
+                    ),
+                )
+
+            # Signal or interval changes require a fresh maintenance progress baseline.
+            progress_configuration_changed = (
+                target_signal_id != schedule.signal_variable_id
+                or target_runtime_interval != schedule.runtime_interval_hours
+                or target_usage_interval != schedule.usage_interval_count
+            )
+            if progress_configuration_changed:
+                schedule.current_progress = 0.0
+                schedule.last_signal_value = None
+                schedule.last_signal_at = None
+    
     # Role-based field restrictions for editing maintenance schedules
     if user.role == "Operator":
         raise HTTPException(status_code=403, detail="Operators are not allowed to edit maintenance schedules")
@@ -666,6 +1039,16 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
             ):
                 raise HTTPException(status_code=409,detail="The schedule start date cannot change after maintenance starts",)
 
+    # Clear the signal baseline when pausing runtime/usage maintenance.
+    # This prevents paused time from being included after the schedule resumes.
+    if (
+        not is_calendar
+        and changes.get("status") == "paused"
+        and schedule.status != "paused"
+    ):
+        schedule.last_signal_value = None
+        schedule.last_signal_at = None
+
     for field, value in changes.items():
         setattr(schedule, field, value)
 
@@ -692,8 +1075,15 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
     if "schedule_start_date" in changes and schedule.last_completed_at is None:
         schedule.current_period_start_date = schedule.schedule_start_date
 
-    if schedule.first_due_date < schedule.schedule_start_date:
-        raise HTTPException(status_code=422,detail="first_due_date must not precede schedule_start_date",)
+    if is_calendar and (
+        schedule.first_due_date is None
+        or schedule.schedule_start_date is None
+        or schedule.first_due_date < schedule.schedule_start_date
+        ):
+        raise HTTPException(
+            status_code=422,
+            detail="first_due_date must not precede schedule_start_date",
+            )
 
     if schedule.recurrence_enabled and (
         schedule.recurrence_interval is None
@@ -744,19 +1134,21 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
 
         schedule.current_due_date = schedule.first_due_date
         schedule.due_alerted_for = None
-
-    # Keep a pending proposal aligned with edits to its recurrence anchor or interval.
-    if (
-        schedule.recurrence_enabled
-        and schedule.approval_status == "pending"
-        and (
-            "first_due_date" in changes
-            or "recurrence_interval" in changes
-            or "recurrence_unit" in changes
-        )
-    ):
-        if schedule.current_due_date is None:
-            raise HTTPException(status_code=409,detail="The current maintenance due date is missing",)
+        # Keep a pending proposal aligned with edits to its recurrence anchor or interval.
+        if (
+            schedule.recurrence_enabled
+            and schedule.approval_status == "pending"
+            and (
+                "first_due_date" in changes
+                or "recurrence_interval" in changes
+                or "recurrence_unit" in changes
+                )
+            ):
+            if schedule.current_due_date is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="The current maintenance due date is missing",
+                    )
 
         schedule.proposed_due_date = next_due_date(
             schedule.first_due_date,
@@ -771,6 +1163,7 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
         schedule.approval_status = "declined"
 
         now = utc_now()
+
         active_due_alerts = session.scalars(
             select(Alert).where(
                 Alert.maintenance_schedule_id == schedule.id,
@@ -783,10 +1176,13 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
             alert.resolved_at = now
             alert.last_updated_at = now
 
-        _emit_schedule_event(session,schedule,
+        _emit_schedule_event(
+            session,
+            schedule,
             event_type="maintenance_schedule_cancelled",
             message=f"Maintenance schedule cancelled: {schedule.title}.",
         )
+
     session.commit()
     session.refresh(schedule)
     return _schedule_read(session, schedule)
@@ -806,6 +1202,11 @@ def confirm_next_occurrence(
 
     if schedule is None or not access_scope(session).allows(schedule.asset_id):
         raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
+    if schedule.schedule_mode != "calendar":
+        raise HTTPException(
+            status_code=409,
+            detail="Next occurrence approval is only available for calendar-based maintenance schedules.",
+            )
 
     # Make repeated requests safe after an occurrence has been created.
     if (schedule.approval_status == "approved"and schedule.current_occurrence_id):
@@ -884,6 +1285,15 @@ def decline_next_occurrence(schedule_id: int,
     )
     if schedule is None or not access_scope(session).allows(schedule.asset_id):
         raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
+    # Next occurrence approval is supported only for calendar-based schedules.
+    # Runtime/usage-based schedules automatically calculate their next due
+    # occurrence from machine usage or runtime progress, so manual calendar
+    # occurrence approval is not applicable.
+    if schedule.schedule_mode != "calendar":
+        raise HTTPException(
+            status_code=409,
+            detail="Next occurrence approval is only available for calendar-based maintenance schedules.",
+            )
     # A repeated decline is safe if the proposal has already been cleared.
     if (schedule.approval_status == "declined" and schedule.proposed_due_date is None):
         return _schedule_read(session, schedule)
@@ -1131,55 +1541,150 @@ def complete_maintenance_record(
     user: User = Depends(get_current_user),
 ) -> MaintenanceRecord:
     record = session.get(MaintenanceRecord, record_id)
+
     if record is None or not access_scope(session).allows(record.asset_id):
-        raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
+        raise HTTPException(
+            status_code=404,
+            detail=f"Maintenance record {record_id} was not found",
+        )
+
     schedule = None
+
     if record.schedule_id is not None:
         schedule = session.scalar(
             select(MaintenanceSchedule)
             .where(MaintenanceSchedule.id == record.schedule_id)
             .with_for_update()
         )
+
         if schedule is None:
-            raise HTTPException(status_code=404, detail="The maintenance schedule was not found")
+            raise HTTPException(
+                status_code=404,
+                detail="The maintenance schedule was not found",
+            )
+
     record = session.scalar(
         select(MaintenanceRecord)
         .where(MaintenanceRecord.id == record_id)
         .with_for_update()
     )
+
     if record is None or not access_scope(session).allows(record.asset_id):
-        raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
-    _authorize_operator_due_occurrence(session, record, user, action="complete")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Maintenance record {record_id} was not found",
+        )
+
+    _authorize_operator_due_occurrence(
+        session,
+        record,
+        user,
+        action="complete",
+    )
+
     if record.status in {"completed", "cancelled"}:
-        raise HTTPException(status_code=409,detail="Completed or cancelled maintenance cannot be completed",)
-    if schedule is not None and (
-        schedule.current_occurrence_id != record.id
-        or schedule.current_due_date != record.planned_due_date
-    ):
-        raise HTTPException(status_code=409,detail="Only the current scheduled maintenance occurrence can be completed.",)
+        raise HTTPException(
+            status_code=409,
+            detail="Completed or cancelled maintenance cannot be completed",
+        )
+
+    is_usage_based = (
+        schedule is not None
+        and schedule.schedule_mode in {"runtime", "usage"}
+    )
+
+    if schedule is not None:
+        if schedule.current_occurrence_id != record.id:
+            raise HTTPException(
+                status_code=409,
+                detail="Only the current scheduled maintenance occurrence can be completed.",
+            )
+
+        if (
+            not is_usage_based
+            and schedule.current_due_date != record.planned_due_date
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Only the current scheduled maintenance occurrence can be completed.",
+            )
+
     completed_at = record.actual_completed_at or utc_now()
+
     record.actual_completed_at = completed_at
     record.actual_started_at = record.actual_started_at or completed_at
+
     _validate_record_dates(record)
+
     record.performed_at = completed_at
     record.status = "completed"
+
     actual_start = _normalized(record.actual_started_at)
     normalized_completed_at = _normalized(completed_at)
+
     if schedule is not None:
-        due_alert = session.scalar(
-            select(Alert).where(
-                Alert.maintenance_schedule_id == schedule.id,
-                Alert.maintenance_due_date == record.planned_due_date,
-                Alert.status == "active",
+
+        # Resolve the alert associated with this occurrence.
+        if is_usage_based and record.alert_id is not None:
+            due_alert = session.scalar(
+                select(Alert)
+                .where(
+                    Alert.id == record.alert_id,
+                    Alert.maintenance_schedule_id == schedule.id,
+                    Alert.status == "active",
+                )
+                .with_for_update()
             )
-        )
+        else:
+            due_alert = session.scalar(
+                select(Alert)
+                .where(
+                    Alert.maintenance_schedule_id == schedule.id,
+                    Alert.maintenance_due_date == record.planned_due_date,
+                    Alert.status == "active",
+                )
+                .with_for_update()
+            )
+
         if due_alert is not None:
             due_alert.status = "resolved"
             due_alert.resolved_at = completed_at
             due_alert.last_updated_at = completed_at
+
         schedule.last_completed_at = completed_at
-        if schedule.recurrence_enabled and schedule.status != "cancelled":
+
+        if is_usage_based:
+            # Reset only maintenance-owned progress.
+            # Monitoring rule counters remain untouched.
+            schedule.current_progress = 0.0
+            schedule.last_signal_value = None
+            schedule.last_signal_at = None
+
+            schedule.current_occurrence_id = None
+            schedule.current_due_date = None
+            schedule.due_alerted_for = None
+            schedule.approval_status = "not_required"
+            schedule.proposed_due_date = None
+
+            # Keep the schedule active unless it was paused/cancelled.
+            if schedule.status not in {"paused", "cancelled"}:
+                schedule.status = "active"
+
+            _emit_schedule_event(
+                session,
+                schedule,
+                event_type="maintenance_schedule_progress_reset",
+                message=(
+                    f"{schedule.schedule_mode.capitalize()} maintenance "
+                    f"completed: {schedule.title}. "
+                    f"Progress reset for the next interval."
+                ),
+                due_date=None,
+            )
+
+        elif schedule.recurrence_enabled and schedule.status != "cancelled":
             anchor_due = record.planned_due_date or schedule.current_due_date
+
             if anchor_due is not None:
                 schedule.proposed_due_date = next_due_date(
                     schedule.first_due_date,
@@ -1187,29 +1692,42 @@ def complete_maintenance_record(
                     unit=schedule.recurrence_unit or "months",
                     after=anchor_due,
                 )
+
                 schedule.approval_status = "pending"
+
                 if schedule.status != "paused":
                     schedule.status = "awaiting_approval"
             else:
                 schedule.status = "completed"
+
+            _emit_schedule_event(
+                session,
+                schedule,
+                event_type=(
+                    "maintenance_next_due_proposed"
+                    if schedule.approval_status == "pending"
+                    else "maintenance_schedule_completed"
+                ),
+                message=(
+                    f"Next maintenance proposed for {schedule.proposed_due_date}."
+                    if schedule.proposed_due_date
+                    else f"Maintenance schedule completed: {schedule.title}."
+                ),
+                due_date=schedule.proposed_due_date,
+            )
+
         elif schedule.status != "cancelled":
             schedule.status = "completed"
             schedule.approval_status = "not_required"
-        _emit_schedule_event(
-            session,
-            schedule,
-            event_type=(
-                "maintenance_next_due_proposed"
-                if schedule.approval_status == "pending"
-                else "maintenance_schedule_completed"
-            ),
-            message=(
-                f"Next maintenance proposed for {schedule.proposed_due_date}."
-                if schedule.proposed_due_date
-                else f"Maintenance schedule completed: {schedule.title}."
-            ),
-            due_date=schedule.proposed_due_date,
-        )
+
+            _emit_schedule_event(
+                session,
+                schedule,
+                event_type="maintenance_schedule_completed",
+                message=f"Maintenance schedule completed: {schedule.title}.",
+                due_date=None,
+            )
+
     _emit_maintenance_event(
         session,
         record,
@@ -1219,33 +1737,60 @@ def complete_maintenance_record(
             "title": record.summary,
             "maintenance_type": record.maintenance_type,
             "priority": record.priority,
-            "assigned_technician": record.assigned_technician or record.performed_by,
+            "assigned_technician": (
+                record.assigned_technician or record.performed_by
+            ),
             "notes": record.notes,
             "completion_notes": record.completion_notes,
             "parts_used": record.parts_used,
             "checklist": record.checklist,
-            "planned_start_at": (record.planned_start_at.isoformat() if record.planned_start_at else None),
-            "planned_end_at": (record.planned_end_at.isoformat() if record.planned_end_at else None),
-            "actual_started_at": actual_start.isoformat() if actual_start else None,
+            "planned_start_at": (
+                record.planned_start_at.isoformat()
+                if record.planned_start_at
+                else None
+            ),
+            "planned_end_at": (
+                record.planned_end_at.isoformat()
+                if record.planned_end_at
+                else None
+            ),
+            "actual_started_at": (
+                actual_start.isoformat() if actual_start else None
+            ),
             "actual_completed_at": (
                 normalized_completed_at.isoformat()
                 if normalized_completed_at
                 else None
             ),
-            "actual_duration_seconds": max(0,
-                int((normalized_completed_at - actual_start).total_seconds()),
+            "actual_duration_seconds": max(
+                0,
+                int(
+                    (
+                        normalized_completed_at - actual_start
+                    ).total_seconds()
+                ),
             ),
             "schedule_id": record.schedule_id,
             "planned_due_date": (
-                record.planned_due_date.isoformat() if record.planned_due_date else None
+                record.planned_due_date.isoformat()
+                if record.planned_due_date
+                else None
             ),
         },
     )
+
     try:
         session.commit()
     except IntegrityError as error:
         session.rollback()
-        raise HTTPException(status_code=409,detail="Maintenance could not be completed because related data changed concurrently.",) from error
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Maintenance could not be completed because related "
+                "data changed concurrently."
+            ),
+        ) from error
+
     session.refresh(record)
     return record
 

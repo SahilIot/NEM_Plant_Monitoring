@@ -65,3 +65,150 @@
 .br-check.danger-text { color: var(--alert); }
 .modal.wide:has(.br-steps) { width: 760px; }
 @media (max-width: 720px) { .br-meta { grid-template-columns: 1fr; } }
+
+/* Allow the overview cards to use the available page width. */
+.br-overview {
+  width: 100%;
+  max-width: none;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+/* Give summary cards consistent height and spacing. */
+.br-stat {
+  min-height: 84px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.br-stat-value {
+  margin-top: 3px;
+  font-size: clamp(19px, 1.5vw, 24px);
+  line-height: 1.3;
+}
+
+.br-stat-hint {
+  margin-top: 3px;
+}
+
+/* Improve spacing and alignment in the search/action toolbar. */
+.br-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 2px 0 12px;
+}
+
+.br-toolbar input[type="text"],
+.br-toolbar input:not([type]) {
+  width: min(280px, 100%);
+  min-width: 200px;
+  flex: 1 1 220px;
+  box-sizing: border-box;
+}
+
+.br-toolbar select {
+  min-width: 135px;
+  max-width: 190px;
+  box-sizing: border-box;
+}
+
+.br-toolbar button {
+  min-height: var(--ctl);
+  white-space: nowrap;
+}
+
+.br-spacer {
+  flex: 1 1 auto;
+}
+
+/* Keep the backup table readable without forcing the page wider. */
+.br-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: var(--r-ctl);
+}
+
+.br-table {
+  width: 100%;
+  min-width: 900px;
+  border-collapse: collapse;
+}
+
+.br-table th,
+.br-table td {
+  padding: 11px 12px;
+  vertical-align: middle;
+}
+
+.br-table td:first-child {
+  min-width: 230px;
+}
+
+.br-name {
+  font-size: 14px;
+}
+
+.br-note {
+  max-width: 360px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Tablet layout: use three cards per row. */
+@media (max-width: 1050px) {
+  .br-overview {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Mobile layout: keep cards and toolbar comfortable to use. */
+@media (max-width: 640px) {
+  .br-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+  }
+
+  .br-stat {
+    min-height: 78px;
+    padding: 11px 12px;
+  }
+
+  .br-stat-value {
+    font-size: 19px;
+  }
+
+  .br-toolbar {
+    align-items: stretch;
+  }
+
+  .br-toolbar input[type="text"],
+  .br-toolbar input:not([type]),
+  .br-toolbar select {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+
+  .br-spacer {
+    display: none;
+  }
+
+  .br-toolbar button {
+    flex: 1 1 auto;
+  }
+}
+
+@media (max-width: 380px) {
+  .br-overview {
+    grid-template-columns: 1fr;
+  }
+}

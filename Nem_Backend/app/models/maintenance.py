@@ -5,6 +5,7 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     ForeignKey,
+    Float,
     Index,
     Integer,
     String,
@@ -20,15 +21,44 @@ from app.models.audit_mixin import AuditNamesMixin
 #represents the recurring maintenance plan
 class MaintenanceSchedule(AuditNamesMixin, Base):
     __tablename__ = "nem_maintenance_schedules"
+
     __table_args__ = (
+        # Ensures recurrence unit contains only valid values.
         CheckConstraint(
             "recurrence_unit IS NULL OR recurrence_unit IN ('days', 'weeks', 'months', 'years')",
             name="ck_maintenance_schedule_recurrence_unit",
         ),
+
+        # Ensures recurrence interval is positive when provided.
         CheckConstraint(
             "recurrence_interval IS NULL OR recurrence_interval > 0",
             name="ck_maintenance_schedule_recurrence_interval",
         ),
+
+        # Restricts maintenance schedules to supported scheduling modes.
+        CheckConstraint(
+            "schedule_mode IN ('calendar', 'runtime', 'usage')",
+            name="ck_maintenance_schedule_mode",
+        ),
+
+        # Ensures runtime maintenance interval is positive.
+        CheckConstraint(
+            "runtime_interval_hours IS NULL OR runtime_interval_hours > 0",
+            name="ck_maintenance_schedule_runtime_interval",
+        ),
+
+        # Ensures usage-based maintenance interval is positive.
+        CheckConstraint(
+            "usage_interval_count IS NULL OR usage_interval_count > 0",
+            name="ck_maintenance_schedule_usage_interval",
+        ),
+
+        # Prevents negative maintenance progress values.
+        CheckConstraint(
+            "current_progress >= 0",
+            name="ck_maintenance_schedule_progress",
+        ),
+
         Index(
             "ix_maintenance_schedule_asset_status_due",
             "asset_id",
@@ -44,6 +74,30 @@ class MaintenanceSchedule(AuditNamesMixin, Base):
     assigned_technician: Mapped[str | None] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text)
     instruction_document_ids: Mapped[list[int]] = mapped_column(JSON, nullable=False, default=list, server_default=text("'[]'"))
+    # Scheduling mode and signal configuration
+    schedule_mode: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="calendar",
+        server_default=text("'calendar'"),
+    )
+    signal_variable_id: Mapped[int | None] = mapped_column(
+        ForeignKey("variables.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    runtime_interval_hours: Mapped[float | None] = mapped_column(Float)
+    usage_interval_count: Mapped[int | None] = mapped_column(Integer)
+
+    # Independent maintenance progress tracking
+    current_progress: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        default=0.0,
+        server_default=text("0"),
+    )
+    last_signal_value: Mapped[bool | None] = mapped_column(Boolean)
+    last_signal_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     schedule_start_date: Mapped[date] = mapped_column(Date, nullable=False)
     current_period_start_date: Mapped[date] = mapped_column(Date, nullable=False)
     first_due_date: Mapped[date] = mapped_column(Date, nullable=False)

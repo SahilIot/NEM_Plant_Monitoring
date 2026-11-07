@@ -67,24 +67,92 @@ def _live_occurrence_exists(schedule_id, due_date):
         MaintenanceRecord.status.in_(("planned", "in_progress")),
     )
 
-# Revelant function to remove the bug 
+# Resolve orphaned maintenance due alerts.
 def resolve_orphaned_due_alerts(session: Session) -> int:
-    # A due alert is only meaningful while its occurrence exists. When the occurrence was
-    # deleted the alert can neither be completed nor ever clear, so close it.
     now = datetime.now(timezone.utc)
+
     orphaned = session.scalars(
         select(Alert)
         .where(
             Alert.maintenance_schedule_id.is_not(None),
             Alert.status == "active",
-            ~_live_occurrence_exists(Alert.maintenance_schedule_id, Alert.maintenance_due_date),
         )
         .with_for_update()
     ).all()
+
+    resolved_count = 0
+
     for alert in orphaned:
-        alert.status = "resolved"
-        alert.resolved_at = now
-    return len(orphaned)
+        schedule = session.get(
+            MaintenanceSchedule,
+            alert.maintenance_schedule_id,
+        )
+
+        # A missing schedule means its maintenance alert is orphaned.
+        if schedule is None:
+            has_live_occurrence = False
+
+        # Runtime and usage schedules are linked through alert_id
+        # because their planned_due_date is NULL.
+        elif schedule.schedule_mode in {"runtime", "usage"}:
+            linked_records = session.scalars(
+                select(MaintenanceRecord)
+                .where(
+                    MaintenanceRecord.schedule_id == schedule.id,
+                    MaintenanceRecord.alert_id == alert.id,
+                    MaintenanceRecord.status.in_(("planned", "in_progress")),
+                )
+                .order_by(MaintenanceRecord.id)
+                .limit(2)
+            ).all()
+
+            if len(linked_records) == 1:
+                live_record = linked_records[0]
+                has_live_occurrence = True
+
+                # Restore a missing or stale occurrence pointer.
+                if schedule.current_occurrence_id != live_record.id:
+                    schedule.current_occurrence_id = live_record.id
+
+                schedule.current_due_date = None
+                schedule.due_alerted_for = alert.maintenance_due_date
+
+            elif len(linked_records) > 1:
+                # Multiple live records indicate inconsistent data.
+                # Keep the alert active and avoid choosing a record blindly.
+                has_live_occurrence = True
+
+            else:
+                # Backward-compatible fallback: check the existing pointer.
+                has_live_occurrence = (
+                    schedule.current_occurrence_id is not None
+                    and session.scalar(
+                        select(MaintenanceRecord.id).where(
+                            MaintenanceRecord.id == schedule.current_occurrence_id,
+                            MaintenanceRecord.schedule_id == schedule.id,
+                            MaintenanceRecord.status.in_(("planned", "in_progress")),
+                        )
+                    ) is not None
+                )
+        else:
+            has_live_occurrence = (
+                session.scalar(
+                    select(MaintenanceRecord.id).where(
+                        MaintenanceRecord.schedule_id == schedule.id,
+                        MaintenanceRecord.planned_due_date == alert.maintenance_due_date,
+                        MaintenanceRecord.status.in_(("planned", "in_progress")),
+                    ).limit(1)
+                )
+                is not None
+            )
+
+        if not has_live_occurrence:
+            alert.status = "resolved"
+            alert.resolved_at = now
+            alert.last_updated_at = now
+            resolved_count += 1
+
+    return resolved_count
 
 # Resolve orphaned alerts , find active schedules with due occurrence, create alert if rqd , send email , commit changes if there any
 def emit_due_schedule_events(session: Session, *, today: date) -> int:
@@ -94,6 +162,7 @@ def emit_due_schedule_events(session: Session, *, today: date) -> int:
         .where(
             # No pending occurrence (e.g. it was deleted) means nothing is due.
             _live_occurrence_exists(MaintenanceSchedule.id, MaintenanceSchedule.current_due_date),
+            MaintenanceSchedule.schedule_mode == "calendar",
             MaintenanceSchedule.status == "active",
             MaintenanceSchedule.current_due_date <= today,
             MaintenanceSchedule.approval_status.in_(("not_required", "approved")),

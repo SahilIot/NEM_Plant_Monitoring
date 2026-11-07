@@ -166,8 +166,22 @@ class MaintenanceScheduleCreate(ORMModel):
     priority: Literal["low", "medium", "high", "critical"] = "medium"
     assigned_technician: str | None = Field(default=None, max_length=200)
     description: str | None = Field(default=None, max_length=10_000)
-    schedule_start_date: date
-    first_due_date: date
+        # Select the maintenance scheduling mode.
+    schedule_mode: Literal["calendar", "runtime", "usage"] = "calendar"
+
+    # Runtime and usage schedules require a Boolean signal variable.
+    signal_variable_id: int | None = Field(default=None, gt=0)
+
+    # Maintenance interval based on machine running hours.
+    runtime_interval_hours: float | None = Field(default=None, gt=0)
+
+    # Maintenance interval based on completed machine cycles.
+    usage_interval_count: int | None = Field(default=None, gt=0)
+    # Schedule start date is optional; it can be provided later.
+    schedule_start_date: date | None = None
+
+    # First due date is optional; it can be calculated or provided later.
+    first_due_date: date | None = None
     recurrence_enabled: bool = False
     recurrence_interval: int | None = Field(default=None, ge=1, le=3650)
     recurrence_unit: Literal["days", "weeks", "months", "years"] | None = None
@@ -182,14 +196,96 @@ class MaintenanceScheduleCreate(ORMModel):
         if not cleaned:
             raise ValueError("Text fields cannot be empty")
         return cleaned
+    
+    # Validate fields according to the selected maintenance schedule mode.
+    # Calendar schedules require start and first due dates.
+    # Runtime schedules require a running signal and runtime interval.
+    # Usage schedules require a cycle signal and usage interval.
+    # Prevents mixing incompatible settings between different schedule modes.
+    # Ensures recurrence settings are used only for calendar-based schedules.
     @model_validator(mode="after")
     def validate_schedule(self):
-        if self.first_due_date < self.schedule_start_date:
-            raise ValueError("first_due_date must not precede schedule_start_date")
-        if self.recurrence_enabled and (self.recurrence_interval is None or self.recurrence_unit is None):
-            raise ValueError("recurrence_interval and recurrence_unit are required for recurring schedules")
-        if not self.recurrence_enabled and (self.recurrence_interval is not None or self.recurrence_unit is not None):
-            raise ValueError("recurrence settings require recurrence_enabled=true")
+        if self.schedule_mode == "calendar":
+            if self.schedule_start_date is None or self.first_due_date is None:
+                raise ValueError(
+                    "schedule_start_date and first_due_date are required for calendar schedules"
+                )
+
+            if self.first_due_date < self.schedule_start_date:
+                raise ValueError("first_due_date must not precede schedule_start_date")
+
+            if self.signal_variable_id is not None:
+                raise ValueError(
+                    "signal_variable_id is only used for runtime or usage schedules"
+                )
+
+            if self.runtime_interval_hours is not None or self.usage_interval_count is not None:
+                raise ValueError(
+                    "Runtime and usage intervals are not valid for calendar schedules"
+                )
+
+            if self.recurrence_enabled and (
+                self.recurrence_interval is None or self.recurrence_unit is None
+            ):
+                raise ValueError(
+                    "recurrence_interval and recurrence_unit are required for recurring calendar schedules"
+                )
+
+            if not self.recurrence_enabled and (
+                self.recurrence_interval is not None or self.recurrence_unit is not None
+            ):
+                raise ValueError("recurrence settings require recurrence_enabled=true")
+        
+        elif self.schedule_mode == "runtime":
+            if self.signal_variable_id is None:
+                raise ValueError(
+                    "A running signal variable is required for runtime schedules"
+                )
+
+            if self.runtime_interval_hours is None:
+                raise ValueError(
+                    "runtime_interval_hours is required for runtime schedules"
+                )
+
+            if self.usage_interval_count is not None:
+                raise ValueError(
+                    "usage_interval_count is not valid for runtime schedules"
+                )
+
+            if (
+                self.recurrence_enabled
+                or self.recurrence_interval is not None
+                or self.recurrence_unit is not None
+            ):
+                raise ValueError(
+                    "Calendar recurrence settings are not valid for runtime schedules"
+                )
+
+        elif self.schedule_mode == "usage":
+            if self.signal_variable_id is None:
+                raise ValueError(
+                    "A cycle signal variable is required for usage schedules"
+                )
+
+            if self.usage_interval_count is None:
+                raise ValueError(
+                    "usage_interval_count is required for usage schedules"
+                )
+
+            if self.runtime_interval_hours is not None:
+                raise ValueError(
+                    "runtime_interval_hours is not valid for usage schedules"
+                )
+
+            if (
+                self.recurrence_enabled
+                or self.recurrence_interval is not None
+                or self.recurrence_unit is not None
+            ):
+                raise ValueError(
+                    "Calendar recurrence settings are not valid for usage schedules"
+                )
+
         return self
 
 #Updates an existing schedule, modifying an existing schedule.
@@ -201,14 +297,29 @@ class MaintenanceScheduleUpdate(ORMModel):
     priority: Literal["low", "medium", "high", "critical"] | None = None
     assigned_technician: str | None = Field(default=None, max_length=200)
     description: str | None = Field(default=None, max_length=10_000)
+
     schedule_start_date: date | None = None
     first_due_date: date | None = None
+
+    # Supports calendar, runtime-based, and usage/cycle-based maintenance schedules.
+    schedule_mode: Literal["calendar", "runtime", "usage"] | None = None
+
+    # Identifies the asset variable used for runtime or usage-based scheduling.
+    signal_variable_id: int | None = Field(default=None, gt=0)
+
+    # Defines the maintenance interval in operating hours.
+    runtime_interval_hours: float | None = Field(default=None, gt=0)
+
+    # Defines the maintenance interval based on machine usage or cycles.
+    usage_interval_count: int | None = Field(default=None, gt=0)
+
     recurrence_enabled: bool | None = None
     recurrence_interval: int | None = Field(default=None, ge=1, le=3650)
     recurrence_unit: Literal["days", "weeks", "months", "years"] | None = None
-    instruction_document_ids: list[int] | None = Field(default=None, max_length=100)
-    status: Literal["active", "paused", "cancelled", "awaiting_approval", "completed"] | None = None
 
+    instruction_document_ids: list[int] | None = Field(default=None, max_length=100)
+
+    status: Literal["active", "paused", "cancelled", "awaiting_approval", "completed"] | None = None
     @field_validator("title", "assigned_technician")
     @classmethod
     def clean_optional_schedule_text(cls, value: str | None) -> str | None:
@@ -237,7 +348,26 @@ class MaintenanceScheduleRead(ORMModel):
     description: str | None
     instruction_document_ids: list[int]
     instruction_documents: list[dict[str, Any]]
+
     schedule_start_date: date
+
+    # Identifies the maintenance scheduling method: calendar, runtime, or usage.
+    schedule_mode: str
+
+    # Stores the asset variable used for runtime or usage-based scheduling.
+    signal_variable_id: int | None
+
+    # Maintenance interval based on machine operating hours.
+    runtime_interval_hours: float | None
+
+    # Maintenance interval based on machine usage or cycles.
+    usage_interval_count: int | None
+
+    # Shows the current progress toward the next maintenance due point.
+    current_progress: float
+
+    # Defines the unit of progress, such as hours or cycles.
+    progress_unit: str
     current_period_start_date: date
     first_due_date: date
     current_due_date: date | None

@@ -26,7 +26,8 @@ class Variable(Base):
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     key: Mapped[str] = mapped_column(String(100), nullable=False)
     data_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    signal_role: Mapped[str | None] = mapped_column(String(20))
+    # signal_role is optional; NULL is allowed when no role is assigned.
+    signal_role: Mapped[str | None] = mapped_column(String(20), nullable=True)
     unit: Mapped[str | None] = mapped_column(String(50))
     description: Mapped[str | None] = mapped_column(Text)
 

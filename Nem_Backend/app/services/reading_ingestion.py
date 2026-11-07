@@ -13,6 +13,7 @@ from app.services.monitoring_engine import (
     evaluate_reading_rules,
     update_rule_signal_states,
 )
+from app.services.maintenance_progress import update_maintenance_progress
 
 #checking the data type
 def validate_value(data_type: str, value: object) -> None:
@@ -80,6 +81,11 @@ def ingest_reading(
         session,
         asset_id=reading.asset_id,
         variable_id=reading.variable_id,
+        stale_after_seconds=stale_after_seconds,
+    )
+    update_maintenance_progress(
+        session,
+        [reading],
         stale_after_seconds=stale_after_seconds,
     )
     if commit:
