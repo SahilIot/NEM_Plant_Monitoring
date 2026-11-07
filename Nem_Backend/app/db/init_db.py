@@ -725,32 +725,121 @@ def _initialize_schema(engine: Engine) -> None:
     upgrade_shared_labels(engine)
 
     if "nem_maintenance_schedules" in table_names:
-        schedule_columns = {column["name"]
-            for column in inspect(engine).get_columns("nem_maintenance_schedules")
+        schedule_columns = {
+            column["name"]
+            for column in inspect(engine).get_columns(
+                "nem_maintenance_schedules"
+            )
         }
+
         if "instruction_document_ids" not in schedule_columns:
             with engine.begin() as connection:
-                connection.execute(text("ALTER TABLE nem_maintenance_schedules "
-                    "ADD COLUMN instruction_document_ids JSON NOT NULL DEFAULT '[]'"
-                ))
+                connection.execute(
+                    text(
+                        "ALTER TABLE nem_maintenance_schedules "
+                        "ADD COLUMN instruction_document_ids JSON NOT NULL DEFAULT '[]'"
+                    )
+                )
+
         if "current_period_start_date" not in schedule_columns:
             with engine.begin() as connection:
-                connection.execute(text( "ALTER TABLE nem_maintenance_schedules "
+                connection.execute(
+                    text(
+                        "ALTER TABLE nem_maintenance_schedules "
                         "ADD COLUMN current_period_start_date DATE"
                     )
                 )
-                connection.execute(text(
+
+                connection.execute(
+                    text(
                         "UPDATE nem_maintenance_schedules "
                         "SET current_period_start_date = schedule_start_date "
                         "WHERE current_period_start_date IS NULL"
                     )
                 )
+
                 if engine.dialect.name == "postgresql":
-                    connection.execute(text(
+                    connection.execute(
+                        text(
                             "ALTER TABLE nem_maintenance_schedules "
                             "ALTER COLUMN current_period_start_date SET NOT NULL"
                         )
                     )
+
+        
+        # Add runtime- and usage-based maintenance scheduling fields.
+        schedule_column_definitions = {
+            "schedule_mode": "VARCHAR(20) NOT NULL DEFAULT 'calendar'",
+            "signal_variable_id": (
+                "INTEGER REFERENCES variables(id) ON DELETE RESTRICT"
+            ),
+            "runtime_interval_hours": "FLOAT",
+            "usage_interval_count": "INTEGER",
+            "current_progress": "FLOAT NOT NULL DEFAULT 0",
+            "last_signal_value": "BOOLEAN",
+            "last_signal_at": "TIMESTAMP",
+        }
+
+        with engine.begin() as connection:
+            for name, definition in schedule_column_definitions.items():
+                if name not in schedule_columns:
+                    connection.execute(
+                        text(
+                            "ALTER TABLE nem_maintenance_schedules "
+                            f"ADD COLUMN {name} {definition}"
+                        )
+                    )
+
+            # Create the signal variable lookup index.
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS "
+                    "ix_nem_maintenance_schedules_signal_variable_id "
+                    "ON nem_maintenance_schedules (signal_variable_id)"
+                )
+            )
+
+            # Add scheduling constraints only when they do not already exist.
+            if engine.dialect.name == "postgresql":
+                schedule_constraints = {
+                    "ck_maintenance_schedule_mode": (
+                        "CHECK (schedule_mode IN ('calendar', 'runtime', 'usage'))"
+                    ),
+                    "ck_maintenance_schedule_runtime_interval": (
+                        "CHECK (runtime_interval_hours IS NULL "
+                        "OR runtime_interval_hours > 0)"
+                    ),
+                    "ck_maintenance_schedule_usage_interval": (
+                        "CHECK (usage_interval_count IS NULL "
+                        "OR usage_interval_count > 0)"
+                    ),
+                    "ck_maintenance_schedule_progress": (
+                        "CHECK (current_progress >= 0)"
+                    ),
+                }
+
+                existing_constraints = {
+                    row[0]
+                    for row in connection.execute(
+                        text("""
+                            SELECT conname
+                            FROM pg_constraint
+                            WHERE conrelid =
+                                'nem_maintenance_schedules'::regclass
+                        """)
+                    ).fetchall()
+                }
+
+                for constraint_name, definition in schedule_constraints.items():
+                    if constraint_name not in existing_constraints:
+                        connection.execute(
+                            text(
+                                "ALTER TABLE nem_maintenance_schedules "
+                                f"ADD CONSTRAINT {constraint_name} {definition} "
+                                "NOT VALID"
+                            )
+                        )
+                
     if "nem_maintenance_records" in table_names:
         record_columns = {
             column["name"]

@@ -527,7 +527,10 @@ export default function DocumentsPage() {
               return (
                 <li className="docs-row" key={item.id}>
                   <div className="docs-cell docs-main">
-                    <span className={`docs-icon ${extension}`} aria-hidden="true">{isInstruction ? <ClipboardList size={17} /> : <FileText size={17} />}</span>
+                    {/* Display the appropriate icon and keep document information in a separate content container. */}
+                    <span className={`docs-icon ${extension}`} aria-hidden="true">
+                      {isInstruction ? <ClipboardList size={17} /> : <FileText size={17} />}
+                    </span>
                     <div style={{ minWidth: 0 }}>
                       {isInstruction ? (
                         <button type="button" className="docs-title docs-title-btn" onClick={() => setReading(item)}>

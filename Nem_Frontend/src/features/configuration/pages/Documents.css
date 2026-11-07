@@ -415,9 +415,22 @@ a.docs-title:hover {
   font-size: 13px;
 }
 
-/* Upload form */
+/* Center the upload page and prevent the form from stretching across the screen. */
 .docs-form-page {
-  max-width: 900px;
+  width: calc(100% - 32px);
+  max-width: 780px;
+  margin: 28px auto 40px;
+  box-sizing: border-box;
+}
+
+/* Keep the upload form inside a clean, centered card. */
+.docs-form-card {
+  width: 100%;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  background: var(--surface);
+  box-sizing: border-box;
 }
 
 .docs-form-card {
@@ -849,4 +862,457 @@ a.docs-title:hover {
   margin-top: 4px;
   color: var(--alert);
   font-size: 12px;
+}
+
+
+/* =========================================================
+   PROFESSIONAL DOCUMENTS PAGE UI
+   These overrides improve layout without changing functionality.
+   Theme colors continue to come from the application's CSS variables.
+   ========================================================= */
+
+/* Give the page more usable width on larger screens. */
+.docs-page {
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding-bottom: 32px;
+  box-sizing: border-box;
+}
+
+/* Align the page title and action buttons consistently. */
+.docs-head {
+  align-items: center;
+  margin: 12px 0 22px;
+  gap: 20px;
+}
+
+.docs-head h1 {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.4px;
+}
+
+.docs-head p {
+  max-width: 650px;
+  margin-top: 7px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* Keep primary actions visually consistent and prevent text wrapping. */
+.docs-head-actions {
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.docs-head-actions button {
+  min-height: 40px;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+  border-radius: 7px;
+}
+
+/* Improve category tab spacing and make tabs easier to scan. */
+.docs-tabs {
+  gap: 8px;
+  padding: 3px 1px 11px;
+  margin-bottom: 12px;
+}
+
+.docs-tab {
+  min-height: 36px;
+  height: auto;
+  padding: 0 14px;
+  border-radius: 20px;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.docs-tab-count {
+  min-width: 20px;
+  padding: 2px 7px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+/* Use a balanced grid instead of allowing the search box to dominate. */
+.docs-toolbar {
+  display: grid;
+  grid-template-columns:
+    minmax(260px, 1fr)
+    repeat(4, minmax(135px, 170px))
+    auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.docs-search {
+  width: 100%;
+  min-width: 0;
+}
+
+.docs-search input {
+  height: 40px;
+  border-radius: 7px;
+  box-sizing: border-box;
+}
+
+.docs-toolbar select {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: 40px;
+  padding: 0 28px 0 10px;
+  border-radius: 7px;
+  box-sizing: border-box;
+}
+
+.docs-toolbar-labels {
+  margin-left: 0;
+  justify-self: end;
+}
+
+/* Give the document listing a cleaner card appearance. */
+.docs-list {
+  border-radius: 11px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 5%);
+}
+
+/* Keep all seven desktop columns flexible.
+   minmax(0, ...) prevents long content from forcing columns wider. */
+.docs-row,
+.docs-list-head {
+  grid-template-columns:
+    minmax(0, 2.2fr)
+    minmax(0, 0.95fr)
+    minmax(0, 0.9fr)
+    minmax(0, 1fr)
+    minmax(0, 1.1fr)
+    minmax(0, 1.1fr)
+    132px;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.docs-list-head {
+  min-height: 42px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  font-size: 10px;
+}
+
+.docs-row {
+  min-height: 76px;
+  transition: background 0.18s ease;
+}
+
+.docs-cell {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+/* Improve title and description hierarchy. */
+.docs-main {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.docs-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+}
+
+.docs-title {
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.docs-desc {
+  margin-top: 5px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.docs-chips {
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.docs-pill {
+  padding: 4px 9px;
+  border-radius: 14px;
+  font-size: 11px;
+}
+
+.docs-kind-tag {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+/* Keep status labels readable without overflowing their cells. */
+.docs-status {
+  max-width: 100%;
+  padding: 5px 9px;
+  border-radius: 14px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* Make file details easier to read. */
+.docs-files {
+  gap: 6px;
+}
+
+.docs-file {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.docs-badge {
+  padding: 3px 7px;
+  border-radius: 5px;
+}
+
+/* Keep action icons aligned and consistently sized. */
+.docs-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.docs-icon-btn {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  border-radius: 7px;
+  transition:
+    color 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease;
+}
+
+.docs-icon-btn:hover:not(:disabled) {
+  background: var(--action-soft);
+}
+
+.docs-icon-btn.danger:hover:not(:disabled) {
+  background: var(--alert-soft);
+}
+
+.docs-icon-btn:focus-visible,
+.docs-tab:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+
+/* Improve the item count and empty state. */
+.docs-count {
+  margin: 12px 2px 0;
+  font-size: 12px;
+}
+
+.docs-empty {
+  min-height: 220px;
+  justify-content: center;
+  border-radius: 12px;
+  padding: 36px 20px;
+}
+
+.docs-empty h2 {
+  font-size: 18px;
+}
+
+.docs-empty p {
+  line-height: 1.6;
+}
+
+/* Tablet: hide the Uploaded column and use a six-column layout. */
+@media (max-width: 1180px) {
+  .docs-toolbar {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .docs-search {
+    grid-column: 1 / -1;
+  }
+
+  .docs-toolbar-labels {
+    justify-self: start;
+  }
+
+  .docs-row,
+  .docs-list-head {
+    grid-template-columns:
+      minmax(0, 2fr)
+      minmax(0, 0.9fr)
+      minmax(0, 0.9fr)
+      minmax(0, 1fr)
+      minmax(0, 1fr)
+      126px;
+    gap: 10px;
+  }
+
+  .docs-col-uploaded {
+    display: none;
+  }
+}
+
+/* Mobile/tablet cards: show labels instead of table headers. */
+@media (max-width: 900px) {
+  .docs-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .docs-head-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .docs-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .docs-search {
+    grid-column: 1 / -1;
+  }
+
+  .docs-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding: 15px;
+  }
+
+  .docs-row .docs-main,
+  .docs-row .docs-actions {
+    grid-column: 1 / -1;
+  }
+
+  .docs-actions {
+    justify-content: flex-start;
+  }
+
+  .docs-col-uploaded {
+    display: block;
+  }
+}
+
+/* Small mobile screens: stack filters and document details vertically. */
+@media (max-width: 560px) {
+  .docs-page {
+    padding-bottom: 20px;
+  }
+
+  .docs-head h1 {
+    font-size: 23px;
+  }
+
+  .docs-head-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .docs-head-actions button {
+    width: 100%;
+  }
+
+  .docs-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .docs-search {
+    grid-column: auto;
+  }
+
+  .docs-toolbar-labels {
+    justify-self: start;
+  }
+
+  .docs-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .docs-row .docs-main,
+  .docs-row .docs-actions {
+    grid-column: auto;
+  }
+
+  .docs-actions {
+    flex-wrap: wrap;
+  }
+
+  .docs-form-card {
+    padding: 14px;
+  }
+}
+
+/* Respect reduced-motion accessibility preferences. */
+@media (prefers-reduced-motion: reduce) {
+  .docs-tab,
+  .docs-row,
+  .docs-icon-btn {
+    transition: none;
+  }
+}
+
+/* Keep the instruction page centered with a balanced responsive width. */
+.docs-form-page {
+  width: calc(100% - 48px);
+  max-width: 1000px;
+  margin: 28px auto 40px;
+  box-sizing: border-box;
+}
+
+/* Align the heading with the form card. */
+.docs-form-page .docs-head {
+  width: 100%;
+  margin-bottom: 20px;
+}
+
+/* Give the form a comfortable width without stretching across the screen. */
+.docs-form-page .docs-form-card {
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+/* Keep the form fields responsive. */
+.docs-form-page .docs-form-grid {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Tablet layout. */
+@media (max-width: 900px) {
+  .docs-form-page {
+    width: calc(100% - 36px);
+  }
+}
+
+/* Mobile layout. */
+@media (max-width: 600px) {
+  .docs-form-page {
+    width: calc(100% - 24px);
+    margin: 18px auto 28px;
+  }
+
+  .docs-form-page .docs-form-card {
+    padding: 16px;
+  }
 }

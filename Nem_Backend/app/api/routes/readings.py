@@ -11,6 +11,7 @@ from app.schemas.reading import ReadingBatch, ReadingCreate, ReadingRead
 from app.services.access_scope import access_scope
 from app.services.monitoring_engine import evaluate_reading_rules
 from app.services.reading_ingestion import (ingest_reading as persist_reading,make_reading,validate_reading,)
+from app.services.maintenance_progress import update_maintenance_progress
 
 router = APIRouter(prefix="/readings", tags=["readings"])
 MAX_BATCH_SIZE = 100
@@ -67,6 +68,11 @@ def ingest_batch(payload: ReadingBatch, request: Request, session: Session = Dep
             variable_id=variable_id,
             stale_after_seconds=request.app.state.settings.monitoring_default_stale_after_seconds,
         )
+        update_maintenance_progress(
+        session,
+        readings,
+        stale_after_seconds=request.app.state.settings.monitoring_default_stale_after_seconds,
+    )
     session.commit()
     for reading in readings:
         session.refresh(reading)

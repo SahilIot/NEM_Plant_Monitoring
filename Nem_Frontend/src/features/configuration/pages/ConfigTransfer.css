@@ -112,3 +112,217 @@
 .xfer-dup-choices .xfer-cat.warn.on { border-color: var(--warn); box-shadow: inset 3px 0 0 var(--warn); }
 .xfer-dup-choices .xfer-cat:focus-within { outline: 2px solid var(--action); outline-offset: 1px; }
 .xfer-dup .xfer-dup-summary { margin: 0; font-size: 13px; color: var(--ink); }
+
+/* Center the page and use the available screen width. */
+.xfer-page {
+  width: calc(100% - 48px);
+  max-width: 1320px;
+  margin: 24px auto 40px;
+  box-sizing: border-box;
+}
+
+/* Improve spacing below the page heading. */
+.xfer-page .xfer-head {
+  margin-bottom: 24px;
+}
+
+.xfer-page .xfer-head .page-title {
+  margin-bottom: 8px;
+  font-size: clamp(25px, 2vw, 32px);
+}
+
+.xfer-page .xfer-head p {
+  max-width: 850px;
+  line-height: 1.65;
+}
+
+/* Balanced two-column layout for export options and preview. */
+.xfer-page .xfer-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(340px, 0.9fr);
+  gap: 22px;
+  align-items: start;
+  width: 100%;
+}
+
+.xfer-page .xfer-layout > div {
+  min-width: 0;
+}
+
+/* Consistent card spacing and appearance. */
+.xfer-page .xfer-card {
+  min-width: 0;
+  padding: 22px;
+  margin-bottom: 18px;
+  border-radius: var(--r-panel, 12px);
+  box-sizing: border-box;
+}
+
+.xfer-page .xfer-card h2 {
+  margin-top: 0;
+  margin-bottom: 14px;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.xfer-page .xfer-card p {
+  line-height: 1.65;
+  font-size: 14px;
+}
+
+/* Export category options. */
+.xfer-page .xfer-cats {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.xfer-page .xfer-cat {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 15px;
+  min-width: 0;
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+
+.xfer-page .xfer-cat > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.xfer-page .xfer-cat .title {
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 650;
+}
+
+.xfer-page .xfer-cat .desc {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.xfer-page .xfer-cat .count {
+  flex-shrink: 0;
+  font-size: 12px;
+  text-align: right;
+}
+
+/* Asset selection list. */
+.xfer-page .xfer-assets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.xfer-page .xfer-assets label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 3px 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Keep the preview card aligned with the first export card. */
+.xfer-page .xfer-side {
+  width: 100%;
+  margin-top: 0;
+  position: sticky;
+  top: 20px;
+}
+
+.xfer-page .xfer-side dl {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 18px 0 22px;
+}
+
+.xfer-page .xfer-side dl > div {
+  min-width: 0;
+}
+
+.xfer-page .xfer-side dt {
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.xfer-page .xfer-side dd {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+/* Preview action buttons. */
+.xfer-page .xfer-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.xfer-page .xfer-actions button {
+  min-height: 40px;
+}
+
+/* Tablet layout. */
+@media (max-width: 900px) {
+  .xfer-page {
+    width: calc(100% - 36px);
+  }
+
+  .xfer-page .xfer-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 0.85fr);
+    gap: 16px;
+  }
+
+  .xfer-page .xfer-card {
+    padding: 18px;
+  }
+}
+
+/* Mobile layout: stack preview below export options. */
+@media (max-width: 680px) {
+  .xfer-page {
+    width: calc(100% - 24px);
+    margin: 18px auto 28px;
+  }
+
+  .xfer-page .xfer-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .xfer-page .xfer-side {
+    position: static;
+  }
+
+  .xfer-page .xfer-card {
+    padding: 16px;
+  }
+
+  .xfer-page .xfer-cat {
+    flex-wrap: wrap;
+  }
+
+  .xfer-page .xfer-cat .count {
+    margin-left: 28px;
+    text-align: left;
+  }
+
+  .xfer-page .xfer-actions {
+    justify-content: stretch;
+  }
+
+  .xfer-page .xfer-actions button {
+    flex: 1 1 100%;
+  }
+}
