@@ -362,6 +362,151 @@
   line-height: 1.6;
 }
 
+/* Schedule rows - aligned with maintenance history */
+.asset-page .maintenance-panel .maintenance-schedule-list {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.asset-page .maintenance-panel .maintenance-schedule-card {
+  display: grid;
+  min-height: 78px;
+  grid-template-columns:
+    4px
+    minmax(150px, 1.2fr)
+    minmax(170px, 1fr)
+    minmax(220px, 1.25fr)
+    auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px 10px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.asset-page .maintenance-panel .maintenance-schedule-card:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+}
+
+.maintenance-panel .maintenance-schedule-indicator {
+  width: 4px;
+  height: 38px;
+  border-radius: 2px;
+  background: var(--off);
+}
+
+.maintenance-panel .maintenance-schedule-card.active .maintenance-schedule-indicator {
+  background: var(--ok);
+}
+
+.maintenance-panel .maintenance-schedule-card.paused .maintenance-schedule-indicator {
+  background: var(--warn-lamp);
+}
+
+.maintenance-panel .maintenance-schedule-card.cancelled .maintenance-schedule-indicator {
+  background: var(--off);
+}
+
+.maintenance-panel .maintenance-schedule-main,
+.maintenance-panel .maintenance-schedule-status,
+.maintenance-panel .maintenance-schedule-meta,
+.maintenance-panel .maintenance-schedule-meta > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.maintenance-panel .maintenance-schedule-main {
+  gap: 4px;
+}
+
+.maintenance-panel .maintenance-schedule-main > strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.maintenance-panel .maintenance-schedule-main > small,
+.maintenance-panel .maintenance-schedule-status > small,
+.maintenance-panel .maintenance-schedule-meta small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.maintenance-panel .maintenance-schedule-status {
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.maintenance-panel .maintenance-schedule-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.maintenance-panel .maintenance-schedule-meta {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 22px;
+}
+
+.maintenance-panel .maintenance-schedule-meta > span {
+  gap: 4px;
+}
+
+.maintenance-panel .maintenance-schedule-meta strong {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.maintenance-panel .maintenance-schedule-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+@media (max-width: 850px) {
+  .asset-page .maintenance-panel .maintenance-schedule-card {
+    grid-template-columns: 4px minmax(0, 1fr) minmax(0, 1fr) auto;
+  }
+
+  .maintenance-panel .maintenance-schedule-meta {
+    grid-column: 2 / 4;
+  }
+}
+
+@media (max-width: 520px) {
+  .asset-page .maintenance-panel .maintenance-schedule-card {
+    grid-template-columns: 4px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .maintenance-panel .maintenance-schedule-status,
+  .maintenance-panel .maintenance-schedule-meta,
+  .maintenance-panel .maintenance-schedule-actions {
+    grid-column: 2;
+  }
+
+  .maintenance-panel .maintenance-schedule-meta {
+    justify-content: flex-start;
+  }
+}
+
 .asset-page .maintenance-panel .maintenance-next-approval {
   display: flex;
   flex-wrap: wrap;
@@ -1628,3 +1773,77 @@ html[data-theme="dark"] .maintenance-detail-symbol svg {
   stroke: #2563eb;
   opacity: 1;
 }
+
+/* Maintenance Logbook sub-tabs */
+.asset-page .maintenance-panel .maintenance-logbook-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 18px;
+  padding-bottom: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.asset-page .maintenance-panel .maintenance-logbook-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 9px 15px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 5px 5px 0 0;
+  color: var(--muted);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.asset-page .maintenance-panel .maintenance-logbook-tab:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+
+.asset-page .maintenance-panel .maintenance-logbook-tab.active {
+  color: var(--ink);
+  border-bottom-color: var(--action);
+  background: var(--surface-2);
+}
+
+.asset-page .maintenance-panel .maintenance-logbook-tab span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 11px;
+}
+
+@media (max-width: 520px) {
+  .asset-page .maintenance-panel .maintenance-logbook-tabs {
+    width: 100%;
+  }
+
+  .asset-page .maintenance-panel .maintenance-logbook-tab {
+    flex: 1;
+    padding: 9px 7px;
+    font-size: 12px;
+  }
+}
+
+.schedule-run-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 12px; }
+.schedule-run-title { margin: 18px 0 10px; font-size: 1.1rem; }
+.schedule-run-head .schedule-run-title { margin-top: 0; }
+.schedule-start-btn { display: inline-flex; align-items: center; gap: 8px; }
+.schedule-steps { list-style: none; margin: 0 0 8px; padding: 0; }
+.schedule-steps li { position: relative; display: flex; gap: 12px; padding-bottom: 18px; }
+.schedule-steps li:not(:last-child)::before { content: ""; position: absolute; left: 10px; top: 22px; bottom: 0; width: 2px; background: rgba(148, 163, 184, 0.5); }
+.schedule-step-dot { flex: none; width: 22px; height: 22px; border: 2px solid rgba(148, 163, 184, 0.8); border-radius: 50%; }
+.schedule-steps em { font-style: italic; opacity: 0.7; margin-left: 4px; }
+.schedule-docs-empty { display: grid; place-items: center; gap: 6px; padding: 32px 16px; text-align: center; border: 1px dashed rgba(148, 163, 184, 0.5); border-radius: 8px; opacity: 0.9; }

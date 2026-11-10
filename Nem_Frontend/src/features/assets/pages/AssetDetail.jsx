@@ -583,7 +583,7 @@ export default function AssetDetail() {
   const canManageRules = isAdministrator || isSupervisor;
   const canChangeRuleLifecycle = isAdministrator;
   const canManageLogbook = canManageRules;
-  const { id } = useParams();
+  const { id, scheduleId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -595,10 +595,12 @@ export default function AssetDetail() {
   const asset = assets.find((a) => a.id === assetId);
 
   const [tab, setTab] = useState(
-    ["status", "logbook", "events"].includes(routeState.activeTab)
+  scheduleId
+    ? "logbook"
+    : ["status", "logbook", "events"].includes(routeState.activeTab)
       ? routeState.activeTab
       : "status"
-  );
+);
   const [list, setList] = useState(
     ["activated", "not_activated"].includes(routeState.assetRuleList)
       ? routeState.assetRuleList
@@ -1065,10 +1067,12 @@ export default function AssetDetail() {
   useEffect(() => {
     const restoredState = location.state || {};
     setTab(
-      ["status", "logbook", "events"].includes(restoredState.activeTab)
-        ? restoredState.activeTab
-        : "status"
-    );
+  scheduleId
+    ? "logbook"
+    : ["status", "logbook", "events"].includes(restoredState.activeTab)
+      ? restoredState.activeTab
+      : "status"
+);
     setList(
       ["activated", "not_activated"].includes(restoredState.assetRuleList)
         ? restoredState.assetRuleList
@@ -1101,7 +1105,7 @@ export default function AssetDetail() {
     return () => {
       seq.current += 1;
     };
-  }, [assetId, loadVariables, loadLogs]);
+  }, [assetId, scheduleId, loadVariables, loadLogs]);
 
   useEffect(() => {
     loadLive();
@@ -1208,13 +1212,13 @@ export default function AssetDetail() {
     const flash = consumeNavigationFlash(location);
     const restoredState = flash?.state || navigationState;
 
-    if (
-      ["status", "logbook", "events"].includes(
-        restoredState?.activeTab
-      )
-    ) {
-      setTab(restoredState.activeTab);
-    }
+    if (scheduleId) {
+  setTab("logbook");
+} else if (
+  ["status", "logbook", "events"].includes(restoredState?.activeTab)
+) {
+  setTab(restoredState.activeTab);
+}
     if (
       ["activated", "not_activated"].includes(
         restoredState?.assetRuleList
@@ -2946,6 +2950,7 @@ const filteredEvents = [...events]
     <MaintenancePanel
       key={assetId}
       assetId={assetId}
+      scheduleId={scheduleId}
       onChanged={refreshMaintenanceData}
       onActionNotification={notifyAction}
       navigationState={assetNavigationState}
