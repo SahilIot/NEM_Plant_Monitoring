@@ -1,4 +1,9 @@
+# Manage maintenance scheduling and due-date processing,
+# including recurring date calculations , maintenance status determination,
+# detection of valid and orphaned maintenance alerts, automatic creation and resolution of due alerts, email notifications, and maintenance due event generation while preventing duplicate alerts.
+
 from calendar import monthrange
+
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import exists, select

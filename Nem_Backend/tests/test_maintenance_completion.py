@@ -1,10 +1,13 @@
+# Verify runtime/usage maintenance completion:
+# alert resolution, progress reset, signal baseline reset, occurrence clearing,
+# preservation of active/paused status, and completion event recording.
+
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 
 from app.api.routes import maintenance as maintenance_routes
-from app.models import Alert
 from app.models import Alert, MaintenanceRecord, MaintenanceSchedule
 
 

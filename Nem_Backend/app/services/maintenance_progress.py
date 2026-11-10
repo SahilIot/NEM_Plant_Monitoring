@@ -1,4 +1,6 @@
-from __future__ import annotations
+# Implement runtime- and usage-based maintenance progress tracking from machine Boolean signals,
+# including running-hour accumulation, cycle counting through False-to-True transitions,
+# stale and out-of-order reading protection, signal baseline management, maintenance threshold detection, duplicate alert and occurrence prevention, automatic maintenance record creation, email notifications, and maintenance event generation within the existing database transaction.from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -126,7 +128,7 @@ def update_maintenance_progress(
             if threshold is None or schedule.current_progress < threshold:
                 continue
 
-            
+
             # The alert constraint requires a non-null maintenance due date.
             occurrence_date = current_at.date()
 

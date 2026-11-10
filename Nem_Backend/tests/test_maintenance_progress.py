@@ -1,4 +1,8 @@
-﻿from datetime import datetime, timedelta, timezone
+﻿# Unit-test runtime and usage maintenance progress tracking,
+# including running-time accumulation, Boolean cycle counting, stale-reading protection,
+# automatic alert and maintenance occurrence creation, duplicate prevention, and pause/resume handling.
+
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
