@@ -1,4 +1,5 @@
 #Readings API router.Focusing on receiving PLC readings,saving them to postgreSQL,retrieving the lastest or historical readings for the frontend
+
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -63,21 +64,25 @@ def ingest_batch(payload: ReadingBatch, request: Request, session: Session = Dep
     for asset_id, variable_id in {
         (reading.asset_id, reading.variable_id) for reading in readings
     }:
-        evaluate_reading_rules(session,
+        evaluate_reading_rules(
+            session,
             asset_id=asset_id,
             variable_id=variable_id,
             stale_after_seconds=request.app.state.settings.monitoring_default_stale_after_seconds,
         )
-        update_maintenance_progress(
+
+    update_maintenance_progress(
         session,
         readings,
         stale_after_seconds=request.app.state.settings.monitoring_default_stale_after_seconds,
     )
+
     session.commit()
+
     for reading in readings:
         session.refresh(reading)
-    return readings
 
+    return readings
 #Get the latest readings for one asset
 @router.get("/assets/{asset_id}/latest")
 def latest_asset_readings(
@@ -145,7 +150,7 @@ def list_variable_readings(
         raise HTTPException(status_code=422, detail="start_time must not be later than end_time")
     query = select(Reading).where(Reading.variable_id == variable_id)
     count_query = select(func.count()).select_from(Reading).where(Reading.variable_id == variable_id)
-    
+
     if start is not None:
         query, count_query = query.where(Reading.recorded_at >= start), count_query.where(Reading.recorded_at >= start)
 

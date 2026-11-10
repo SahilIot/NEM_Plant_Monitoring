@@ -212,30 +212,39 @@ class MaintenanceScheduleCreate(ORMModel):
                 )
 
             if self.first_due_date < self.schedule_start_date:
-                raise ValueError("first_due_date must not precede schedule_start_date")
+                raise ValueError(
+                    "first_due_date must not precede schedule_start_date"
+                )
 
             if self.signal_variable_id is not None:
                 raise ValueError(
                     "signal_variable_id is only used for runtime or usage schedules"
                 )
 
-            if self.runtime_interval_hours is not None or self.usage_interval_count is not None:
+            if (
+                self.runtime_interval_hours is not None
+                or self.usage_interval_count is not None
+            ):
                 raise ValueError(
                     "Runtime and usage intervals are not valid for calendar schedules"
                 )
 
             if self.recurrence_enabled and (
-                self.recurrence_interval is None or self.recurrence_unit is None
+                self.recurrence_interval is None
+                or self.recurrence_unit is None
             ):
                 raise ValueError(
                     "recurrence_interval and recurrence_unit are required for recurring calendar schedules"
                 )
 
             if not self.recurrence_enabled and (
-                self.recurrence_interval is not None or self.recurrence_unit is not None
+                self.recurrence_interval is not None
+                or self.recurrence_unit is not None
             ):
-                raise ValueError("recurrence settings require recurrence_enabled=true")
-        
+                raise ValueError(
+                    "recurrence settings require recurrence_enabled=true"
+                )
+
         elif self.schedule_mode == "runtime":
             if self.signal_variable_id is None:
                 raise ValueError(
