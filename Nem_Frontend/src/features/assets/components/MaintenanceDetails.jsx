@@ -70,6 +70,13 @@ export default function MaintenanceDetails({ record, now = Date.now() }) {
               <span>Assigned technician</span>
               <strong>{record.assigned_technician || record.performed_by || "—"}</strong>
             </div>
+            {/* Keep the assigned technician separate from the person who registered the completed work. */}
+            {record.performed_by && (
+              <div className="maintenance-detail-field">
+                <span>Technician responsible</span>
+                <strong>{record.performed_by}</strong>
+              </div>
+            )}
             <div className="maintenance-detail-field">
               <span>Due date</span>
               <strong>

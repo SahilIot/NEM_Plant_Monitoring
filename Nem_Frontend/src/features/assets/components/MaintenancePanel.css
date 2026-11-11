@@ -55,6 +55,9 @@
   grid-template-columns: minmax(150px, 0.7fr) minmax(0, 1.3fr);
 }
 .maintenance-material-list { display: grid; gap: 14px; }
+/* Show registered completion details beneath each maintenance history entry. */
+.schedule-history-copy { display: grid; gap: 4px; }
+.schedule-history-copy small { color: var(--muted); overflow-wrap: anywhere; }
 .maintenance-material-item {
   padding: 14px;
   border: 1px solid var(--line);
@@ -2254,5 +2257,129 @@ html[data-theme="dark"] .maintenance-detail-symbol svg {
 
   .maintenance-schedule-page-heading .maintenance-schedule-back {
     align-self: flex-start;
+  }
+}
+
+
+/*Maintenance Completion Registration Form*/
+
+.maintenance-form {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.maintenance-form > .muted {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.maintenance-form-grid {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px 20px;
+  min-width: 0;
+}
+
+/* Keep every label and its input vertically aligned. */
+.maintenance-form-grid > label {
+  display: flex;
+  min-width: 0;
+  width: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+/* Full-width fields such as technician and textareas. */
+.maintenance-form-grid > .maintenance-form-wide {
+  grid-column: 1 / -1;
+}
+
+/* Consistent input and textarea sizing. */
+.maintenance-form-grid input,
+.maintenance-form-grid textarea {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 9px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-ctl);
+  outline: none;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.maintenance-form-grid textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
+.maintenance-form-grid input:focus,
+.maintenance-form-grid textarea:focus {
+  border-color: var(--action);
+  box-shadow: 0 0 0 3px var(--action-soft);
+}
+
+.maintenance-form-grid input[readonly] {
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: default;
+}
+
+.maintenance-form-grid input::placeholder,
+.maintenance-form-grid textarea::placeholder {
+  color: var(--muted);
+}
+
+/* Completion dialog buttons. */
+.maintenance-form .modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.maintenance-form .modal-actions button {
+  min-height: 38px;
+}
+
+/* Mobile responsive layout. */
+@media (max-width: 640px) {
+  .maintenance-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .maintenance-form-grid > .maintenance-form-wide {
+    grid-column: auto;
+  }
+
+  .maintenance-form .modal-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .maintenance-form .modal-actions button {
+    width: 100%;
   }
 }

@@ -9,6 +9,7 @@ import pytest
 
 from app.api.routes import maintenance as maintenance_routes
 from app.models import Alert, MaintenanceRecord, MaintenanceSchedule
+from app.schemas.maintenance import MaintenanceCompletion
 
 
 class FakeSession:
@@ -49,11 +50,12 @@ class FakeSession:
 
 
 @pytest.mark.parametrize(
-    ("schedule_mode", "initial_status", "expected_status"),
+    ("schedule_mode", "initial_status", "expected_status", "registration"),
     [
-        ("runtime", "active", "active"),
-        ("usage", "active", "active"),
-        ("runtime", "paused", "paused"),
+        ("runtime", "active", "active", None),
+        ("usage", "active", "active", None),
+        ("runtime", "paused", "paused", None),
+        ("usage", "active", "active", "registration"),
     ],
 )
 def test_runtime_usage_completion_resets_maintenance_progress(
@@ -61,6 +63,7 @@ def test_runtime_usage_completion_resets_maintenance_progress(
     schedule_mode,
     initial_status,
     expected_status,
+    registration,
 ):
     completed_at = datetime(2026, 11, 7, 14, 0, tzinfo=timezone.utc)
 
@@ -155,12 +158,28 @@ def test_runtime_usage_completion_resets_maintenance_progress(
         record.id,
         session,
         user,
+        MaintenanceCompletion(
+            actual_completed_at=completed_at,
+            performed_by="Registered technician",
+            notes="Replaced the worn seal.",
+            completion_notes="Tested and returned to service.",
+            parts_used="Seal kit",
+            checklist=[{"item": "Leak check", "completed": True}],
+        )
+        if registration
+        else None,
     )
 
     # Maintenance record must be completed.
     assert result.status == "completed"
     assert result.actual_completed_at == completed_at
     assert result.performed_at == completed_at
+    if registration:
+        assert result.performed_by == "Registered technician"
+        assert result.notes == "Replaced the worn seal."
+        assert result.completion_notes == "Tested and returned to service."
+        assert result.parts_used == "Seal kit"
+        assert result.checklist == [{"item": "Leak check", "completed": True}]
 
     # Associated alert must be resolved.
     assert alert.status == "resolved"
@@ -200,3 +219,13 @@ def test_runtime_usage_completion_resets_maintenance_progress(
 
     assert session.committed is True
     assert session.refreshed is True
+
+
+def test_completion_registration_schema_preserves_empty_legacy_request():
+    # Existing completion clients send an empty JSON object and remain supported.
+    assert not MaintenanceCompletion.model_validate({}).model_fields_set
+
+
+def test_completion_registration_schema_requires_all_core_details():
+    with pytest.raises(ValueError, match="Registration requires"):
+        MaintenanceCompletion.model_validate({"performed_by": "Technician"})

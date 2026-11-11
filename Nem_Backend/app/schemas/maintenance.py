@@ -157,6 +157,54 @@ class MaintenanceUpdate(ORMModel):
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
 
+# Optional request body keeps legacy completion callers working while validating
+# complete registration details whenever a caller submits registration data.
+class MaintenanceCompletion(ORMModel):
+    model_config = ConfigDict(extra="forbid")
+
+    actual_completed_at: datetime | None = None
+    performed_by: str | None = Field(default=None, max_length=200)
+    notes: str | None = Field(default=None, max_length=10_000)
+    completion_notes: str | None = Field(default=None, max_length=10_000)
+    parts_used: str | None = Field(default=None, max_length=10_000)
+    checklist: list[dict[str, object]] | None = None
+
+    @field_validator("actual_completed_at")
+    @classmethod
+    def normalize_completion_timestamp(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    @field_validator("performed_by", "notes", "completion_notes")
+    @classmethod
+    def strip_registration_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Text fields cannot be empty")
+        return stripped
+
+    @model_validator(mode="after")
+    def require_registration_details_together(self):
+        if self.model_fields_set:
+            required = {
+                "actual_completed_at": self.actual_completed_at,
+                "performed_by": self.performed_by,
+                "notes": self.notes,
+                "completion_notes": self.completion_notes,
+            }
+            missing = [field for field, value in required.items() if value is None]
+            if missing:
+                raise ValueError(
+                    "Registration requires actual_completed_at, performed_by, notes, "
+                    "and completion_notes"
+                )
+        return self
+
 #Create a maintenance schedule,including recurrence settings
 #The core of recurring maintenance
 class MaintenanceScheduleCreate(ORMModel):
