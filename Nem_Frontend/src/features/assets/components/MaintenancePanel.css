@@ -55,9 +55,6 @@
   grid-template-columns: minmax(150px, 0.7fr) minmax(0, 1.3fr);
 }
 .maintenance-material-list { display: grid; gap: 14px; }
-/* Show registered completion details beneath each maintenance history entry. */
-.schedule-history-copy { display: grid; gap: 4px; }
-.schedule-history-copy small { color: var(--muted); overflow-wrap: anywhere; }
 .maintenance-material-item {
   padding: 14px;
   border: 1px solid var(--line);
@@ -1929,6 +1926,16 @@ html[data-theme="dark"] .maintenance-detail-symbol svg {
   min-width: 0;
 }
 
+.maintenance-schedule-details-view .schedule-run-head > button {
+  flex: 0 0 auto;
+  min-height: 40px;
+}
+
+.maintenance-schedule-details-view .schedule-run-head .muted {
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+
 .maintenance-schedule-details-view .schedule-start-btn {
   margin-top: 10px;
 }
@@ -2012,21 +2019,122 @@ html[data-theme="dark"] .maintenance-detail-symbol svg {
 
 /* Maintenance history */
 .maintenance-schedule-details-view .schedule-history {
-  padding: 12px 16px;
+  display: grid;
+  gap: 12px;
+  padding: 0;
   margin: 0 0 20px;
-  border: 1px solid var(--border-color, var(--line, #e5e7eb));
-  border-radius: 9px;
-  background: var(--surface, #fff);
   list-style: none;
 }
 
-.maintenance-schedule-details-view .schedule-history li {
-  flex-wrap: wrap;
-  border-bottom: 1px solid var(--border-color, var(--line, #e5e7eb));
+.maintenance-schedule-details-view .schedule-history-card {
+  min-width: 0;
+  padding: 15px 16px;
+  border: 1px solid var(--border-color, var(--line, #e5e7eb));
+  border-radius: 10px;
+  background: var(--surface, #fff);
 }
 
-.maintenance-schedule-details-view .schedule-history li:last-child {
-  border-bottom: 0;
+.maintenance-schedule-details-view .schedule-history-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.maintenance-schedule-details-view .schedule-history-card-header > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.maintenance-schedule-details-view .schedule-history-card-header small,
+.maintenance-schedule-details-view .schedule-history-fields dt {
+  color: var(--text-secondary, var(--muted, #6b7280));
+}
+
+.maintenance-schedule-details-view .schedule-history-status {
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+
+.maintenance-schedule-details-view .schedule-history-status--completed {
+  color: var(--ok, #16804a);
+}
+
+.maintenance-schedule-details-view .schedule-history-status--in-progress {
+  color: var(--action, #2563eb);
+}
+
+.maintenance-schedule-details-view .schedule-history-status--planned {
+  color: var(--warn, #a16207);
+}
+
+.maintenance-schedule-details-view .schedule-history-status--cancelled {
+  color: var(--text-secondary, var(--muted, #6b7280));
+}
+
+.maintenance-schedule-details-view .schedule-history-fields {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.35fr) minmax(0, 1fr);
+  gap: 7px 12px;
+  margin: 13px 0 0;
+  font-size: 13px;
+}
+
+.maintenance-schedule-details-view .schedule-history-fields dt,
+.maintenance-schedule-details-view .schedule-history-fields dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.maintenance-schedule-details-view .schedule-history-checklist {
+  display: grid;
+  gap: 7px;
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px solid var(--border-color, var(--line, #e5e7eb));
+  font-size: 13px;
+}
+
+.maintenance-schedule-details-view .schedule-history-checklist ul {
+  display: grid;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.maintenance-schedule-details-view .schedule-history-checklist li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+
+.maintenance-schedule-details-view .schedule-history-checklist-result {
+  color: var(--warn, #a16207);
+  font-weight: 650;
+}
+
+.maintenance-schedule-details-view .schedule-history-checklist-result.is-complete {
+  color: var(--ok, #16804a);
+}
+
+.maintenance-schedule-details-view .schedule-history-empty,
+.maintenance-schedule-details-view .schedule-history-state {
+  padding: 18px;
+  margin: 0 0 20px;
+  border: 1px dashed var(--border-color, var(--line, #d1d5db));
+  border-radius: 10px;
+  background: var(--surface-secondary, var(--surface-2, #f8fafc));
+  color: var(--text-secondary, var(--muted, #6b7280));
+  text-align: center;
 }
 
 /* Schedule details: label/value two-column layout */
@@ -2118,6 +2226,19 @@ html[data-theme="dark"] .maintenance-detail-symbol svg {
 
   .maintenance-schedule-details-view .schedule-run-head > button {
     width: 100%;
+  }
+
+  .maintenance-schedule-details-view .schedule-history-card-header {
+    flex-direction: column;
+  }
+
+  .maintenance-schedule-details-view .schedule-history-fields {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
+  .maintenance-schedule-details-view .schedule-history-fields dd {
+    margin-bottom: 8px;
   }
 
   .maintenance-schedule-details-view .maintenance-details {
