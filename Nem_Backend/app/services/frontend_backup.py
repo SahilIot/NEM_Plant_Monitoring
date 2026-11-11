@@ -139,8 +139,10 @@ DOCUMENT_UPLOAD_DIR = Path(__file__).resolve().parents[2] / "uploads" / "instruc
 
 class BackupError(Exception):
     # The backup is unreadable, incomplete or inconsistent. Nothing has been changed.
+    pass
 
- def _ordered_tables(names: set[str] | None = None) -> list:
+# Backup creation and restore validation both use this module-level table ordering.
+def _ordered_tables(names: set[str] | None = None) -> list:
     # Parents before children, computed from the foreign keys declared on the models.
     return [
         table for table in Base.metadata.sorted_tables
@@ -1245,12 +1247,13 @@ def restore_backup(session: Session, engine: Engine, settings: Settings, filenam
                 raise BackupError(f"{first['rows']} row(s) in {first['table']} still refer to data that the restore replaces "
                     f"({first['rule']}). Remove or migrate them first."
                 )
-            if _needs_confirmation(impact, legacy):
-                problem = _check_confirmation(settings, confirmation_token, filename, backup_sha256,
-                    _impact_fingerprint(backup_sha256, legacy, impact), user_id,
-                )
-                if problem:
-                    raise HTTPException(status_code=409, detail=problem)
+            # Bind every restore to a reviewed preview, even when no external impact was found.
+            problem = _check_confirmation(
+                settings, confirmation_token, filename, backup_sha256,
+                _impact_fingerprint(backup_sha256, legacy, impact), user_id,
+            )
+            if problem:
+                raise HTTPException(status_code=409, detail=problem)
 
             for table in reversed(tables):
                 connection.execute(delete(table))

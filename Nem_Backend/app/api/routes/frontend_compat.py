@@ -237,7 +237,7 @@ class BackupCreate(BaseModel):
     name: str | None = Field(default=None, max_length=200)
     note: str | None = None
 
-#Restore request: the confirmation token comes from the restore preview and is required only when the preview says so
+#Restore request: the confirmation token comes from the restore preview and is required for every restore
 class BackupRestoreRequest(BaseModel):
     confirmation_token: str | None = Field(default=None, max_length=4096)
 
