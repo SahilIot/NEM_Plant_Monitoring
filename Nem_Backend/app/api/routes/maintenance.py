@@ -21,6 +21,7 @@ from app.models import (
     Variable,
 )
 from app.schemas.maintenance import (
+    MaintenanceCompletion,
     MaintenanceCreate,
     MaintenanceRead,
     MaintenanceScheduleConfirm,
@@ -1568,6 +1569,7 @@ def complete_maintenance_record(
     record_id: int,
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    payload: MaintenanceCompletion | None = None,
 ) -> MaintenanceRecord:
     record = session.get(MaintenanceRecord, record_id)
 
@@ -1616,6 +1618,17 @@ def complete_maintenance_record(
             status_code=409,
             detail="Completed or cancelled maintenance cannot be completed",
         )
+
+    # Persist submitted registration fields before running the existing completion workflow.
+    if payload is not None and payload.model_fields_set:
+        record.actual_completed_at = payload.actual_completed_at
+        record.performed_by = payload.performed_by
+        record.notes = payload.notes
+        record.completion_notes = payload.completion_notes
+        if "parts_used" in payload.model_fields_set:
+            record.parts_used = payload.parts_used
+        if "checklist" in payload.model_fields_set:
+            record.checklist = payload.checklist
 
     is_usage_based = (
         schedule is not None

@@ -12,6 +12,7 @@ import {
   useConfirmation,
 } from "../../../components/common/UI.jsx";
 import MaintenanceDetails from "./MaintenanceDetails.jsx";
+import MaintenanceRegistrationDialog from "./MaintenanceRegistrationDialog.jsx";
 import { DotsIcon } from "../../../components/common/Icons.jsx";
 import "./MaintenancePanel.css";
 
@@ -52,6 +53,7 @@ export default function CurrentMaintenanceCards({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [selectedRecord, setSelectedRecord] = useState(null);
+  const [registrationRecord, setRegistrationRecord] = useState(null);
   const [clockNow, setClockNow] = useState(Date.now());
   const [editingRecordId, setEditingRecordId] = useState(null);
   const [actionMenuRecordId, setActionMenuRecordId] = useState(null);
@@ -330,17 +332,26 @@ const openEdit = (record) => {
         record.planned_due_date <= todayDateInput())
     ) return;
     if (completingRecordId !== null) return;
+    // Collect registration details before invoking the existing completion API.
+    setSelectedRecord(null);
+    setRegistrationRecord(record);
+  };
+
+  const submitMaintenanceRegistration = async (payload) => {
+    const record = registrationRecord;
+    if (!record || completingRecordId !== null) return;
     setCompletingRecordId(record.id);
     setError("");
     try {
-      await api.post(`/maintenance/${record.id}/complete`);
-      setSelectedRecord(null);
+      // Reuse the existing completion endpoint after the shared registration form is submitted.
+      await api.post(`/maintenance/${record.id}/complete`, payload);
+      setRegistrationRecord(null);
       await Promise.all([
         loadCurrentMaintenance(),
         Promise.resolve(onChanged?.()),
       ]);
     } catch (completeError) {
-      setError(completeError.message || "Could not complete maintenance.");
+      setError(completeError.message || "Could not register maintenance completion.");
     } finally {
       setCompletingRecordId(null);
     }
@@ -594,6 +605,18 @@ const openEdit = (record) => {
           </div>
           {error && <p className="notice error" role="alert">{error}</p>}
         </Modal>
+      )}
+      {registrationRecord && (
+        <MaintenanceRegistrationDialog
+          record={registrationRecord}
+          defaultTechnician={user?.username}
+          busy={completingRecordId !== null}
+          error={error}
+          onClose={() => {
+            if (completingRecordId === null) setRegistrationRecord(null);
+          }}
+          onSubmit={submitMaintenanceRegistration}
+        />
       )}
     </>
   );

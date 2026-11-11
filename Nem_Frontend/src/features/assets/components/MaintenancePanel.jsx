@@ -24,6 +24,7 @@ import {
 import { DotsIcon } from "../../../components/common/Icons.jsx";
 import { auditUser, formatAuditTime, formatTime } from "../../../utils/format.js";
 import MaintenanceDetails from "./MaintenanceDetails.jsx";
+import MaintenanceRegistrationDialog from "./MaintenanceRegistrationDialog.jsx";
 import {
   LEGACY_RULE_CHOICES,
   legacyRulePath,
@@ -645,10 +646,16 @@ export default function MaintenancePanel({
     }
   };
 
-  const changeMaintenanceStatus = async (record) => {
+  const changeMaintenanceStatus = async (record, completionPayload = null) => {
     if (!canManageMaintenance || busy) return;
     const isStarting = record.status === "planned";
     if (!isStarting && record.status !== "in_progress") return;
+    if (!isStarting && !completionPayload) {
+      // Route completion actions through registration without changing the existing start path.
+      setDialog({ kind: "register", record });
+      setError("");
+      return;
+    }
     if (isStarting && startRequestRef.current) return;
     if (isStarting) startRequestRef.current = true;
     let startSucceeded = false;
@@ -657,7 +664,8 @@ export default function MaintenancePanel({
     setNotice("");
     try {
       const updatedRecord = await api.post(
-        `/maintenance/${record.id}/${isStarting ? "start" : "complete"}`
+        `/maintenance/${record.id}/${isStarting ? "start" : "complete"}`,
+        completionPayload || {}
       );
       if (isStarting) {
         startSucceeded = true;
@@ -1419,10 +1427,17 @@ export default function MaintenancePanel({
                   key={record.id}
                   style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "6px 0" }}
                 >
-                  <span>
+                  {/* Show the submitted registration alongside existing completion history. */}
+                  <span className="schedule-history-copy">
                     <strong>{String(record.status || "planned").replaceAll("_", " ")}</strong>
                     {" · "}
                     {record.planned_start_at ? formatTime(record.planned_start_at) : "No planned start"}
+                    {record.actual_completed_at && (
+                      <small>Completed: {formatTime(record.actual_completed_at)}</small>
+                    )}
+                    {record.performed_by && <small>Technician: {record.performed_by}</small>}
+                    {record.notes && <small>Work performed: {record.notes}</small>}
+                    {record.completion_notes && <small>Remarks: {record.completion_notes}</small>}
                   </span>
                   <span>{actualDuration(record, clockNow)}</span>
                 </li>
@@ -2062,6 +2077,7 @@ export default function MaintenancePanel({
               {error}
             </p>
           )}
+
           <MaintenanceDetails record={dialog.record} now={clockNow} />
           <div className="modal-actions">
             {dialog.record.status === "planned" && (
@@ -2117,6 +2133,20 @@ export default function MaintenancePanel({
             </button>
           </div>
         </Modal>
+      )}
+
+      {/* Keep completion details separate from the existing start and edit workflows. */}
+      {dialog?.kind === "register" && (
+        <MaintenanceRegistrationDialog
+          record={dialog.record}
+          defaultTechnician={user?.username}
+          busy={busy}
+          error={error}
+          onClose={() => {
+            if (!busy) setDialog(null);
+          }}
+          onSubmit={(payload) => changeMaintenanceStatus(dialog.record, payload)}
+        />
       )}
 
       {(dialog?.kind === "create" || dialog?.kind === "edit") && (
