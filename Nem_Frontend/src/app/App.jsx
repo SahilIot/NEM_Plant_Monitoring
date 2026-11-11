@@ -83,6 +83,11 @@ export default function App() {
         {/* Assets */}
         <Route path="/assets" element={<AssetsIndex />} />
         <Route path="/assets/:id" element={<AssetDetail />} />
+        {/* Reuse the asset maintenance panel on a dedicated schedule-details page. */}
+        <Route
+          path="/assets/:id/maintenance/schedules/:scheduleId/details"
+          element={<AssetDetail />}
+        />
         <Route
           path="/assets/:id/rules/new/:kind"
           element={<RuleCreatePage />}
