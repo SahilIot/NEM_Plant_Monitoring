@@ -4,6 +4,7 @@
 from datetime import datetime, timezone
 from html import escape
 import json
+import logging
 import mimetypes
 from pathlib import Path
 from uuid import uuid4
@@ -89,6 +90,7 @@ from app.services.rule_visibility import (
 from app.services.labels import apply_label_filter, assign_labels
 
 router = APIRouter(tags=["frontend compatibility"])
+logger = logging.getLogger(__name__)
 
 UPLOAD_DIR = Path(__file__).resolve().parents[3] / "uploads" / "instruction_documents"
 
@@ -1412,6 +1414,121 @@ def frontend_assign_predefined_rules(
         })
     session.commit()
     return {"created": created, "already_assigned": already_assigned}
+
+# Unassign a collection atomically while applying the same safety checks as individual rule deletion.
+@router.delete(
+    "/assets/{asset_id}/rule-collections/{collection_id}",
+    dependencies=[Depends(require_roles("Administrator"))],
+)
+def frontend_unassign_rule_collection(
+    asset_id: int,
+    collection_id: int,
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    asset = session.scalar(
+        select(Asset)
+        .where(Asset.id == asset_id)
+        .with_for_update()
+    )
+    if asset is None or not access_scope(session).allows(asset_id):
+        raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+
+    collection = session.scalar(
+        select(RuleCollection)
+        .where(RuleCollection.id == collection_id)
+        .with_for_update()
+    )
+    if collection is None:
+        raise HTTPException(status_code=404, detail="Rule collection was not found")
+
+    templates = session.scalars(
+        select(MonitoringRuleTemplate)
+        .where(MonitoringRuleTemplate.collection_id == collection_id)
+        .order_by(MonitoringRuleTemplate.id)
+    ).all()
+    template_ids = [template.id for template in templates]
+    if not template_ids:
+        return {"collection_id": collection_id, "removed": 0}
+
+    rules = session.scalars(
+        select(MonitoringRule)
+        .where(
+            MonitoringRule.target_asset_id == asset_id,
+            MonitoringRule.source_template_id.in_(template_ids),
+        )
+        .order_by(MonitoringRule.id)
+        .with_for_update()
+    ).all()
+    if not rules:
+        return {"collection_id": collection_id, "removed": 0}
+    # Match individual rule deletion: active rules must be disabled before removal.
+    if any(rule.is_enabled for rule in rules):
+        raise HTTPException(
+            status_code=409,
+            detail="Deactivate the collection's assigned rules before unassigning it.",
+        )
+
+    rule_ids = [rule.id for rule in rules]
+    alert_ids = session.scalars(
+        select(Alert.id)
+        .where(Alert.rule_id.in_(rule_ids))
+        .with_for_update()
+    ).all()
+    # Preserve maintenance history by refusing to remove alerts referenced by records.
+    if alert_ids and session.scalar(
+        select(MaintenanceRecord.id)
+        .where(MaintenanceRecord.alert_id.in_(alert_ids))
+        .limit(1)
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A collection rule has maintenance records linked to its alerts. "
+                "Remove those links before unassigning the collection."
+            ),
+        )
+
+    deleted_rules = [{"id": rule.id, "name": rule.name} for rule in rules]
+    try:
+        event_references = [MonitoringEvent.rule_id.in_(rule_ids)]
+        if alert_ids:
+            event_references.append(MonitoringEvent.alert_id.in_(alert_ids))
+        session.execute(delete(MonitoringEvent).where(or_(*event_references)))
+        if alert_ids:
+            session.execute(delete(Alert).where(Alert.id.in_(alert_ids)))
+        session.execute(delete(RuleState).where(RuleState.rule_id.in_(rule_ids)))
+        session.execute(
+            delete(RuleCounterState).where(RuleCounterState.rule_id.in_(rule_ids))
+        )
+        session.execute(delete(MonitoringRule).where(MonitoringRule.id.in_(rule_ids)))
+        for rule in deleted_rules:
+            emit_event(
+                session,
+                event_type="rule_permanently_deleted",
+                message=f"Monitoring rule '{rule['name']}' was unassigned with its collection.",
+                occurred_at=datetime.now(timezone.utc),
+                asset_id=asset_id,
+                metadata={
+                    "deleted_rule_id": rule["id"],
+                    "deleted_rule_name": rule["name"],
+                    "collection_id": collection_id,
+                },
+            )
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(
+            "Unassigning rule collection id=%s from asset id=%s failed; rolled back",
+            collection_id,
+            asset_id,
+        )
+        raise
+
+    return {
+        "collection_id": collection_id,
+        "removed": len(rule_ids),
+        "rule_ids": rule_ids,
+    }
 
 #This endpoint copies selected asset-specific rules to another asset.
 @router.post("/assets/{asset_id}/rules/copy", status_code=201)
