@@ -308,6 +308,146 @@
   }
 }
 
+/* Match the filters and member-rule metadata shown in Assign Monitoring Rules. */
+.rca-toolbar {
+  flex-wrap: wrap;
+}
+
+.rca-toolbar > select {
+  min-height: 38px;
+  padding: 7px 10px;
+  color: var(--text, #1f2937);
+  background: var(--input, var(--surface, #fff));
+  border: 1px solid var(--border, var(--line, #d6dde7));
+  border-radius: 8px;
+}
+
+.rca-label-filter {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.rca-label-filter .labels-filter {
+  gap: 5px;
+}
+
+.rca-label-filter .labels-filter-toggle,
+.rca-label-filter .labels-filter-clear {
+  min-height: 38px;
+}
+
+.rca-label-filter .labels-chips {
+  margin-top: 0;
+}
+
+.rca-toolbar > span {
+  margin-left: auto;
+}
+
+.rca-status-partially-assigned,
+.rca-status-unavailable {
+  color: var(--warn, #b7791f);
+}
+
+.rca-status-assigned {
+  color: var(--ok, #16804a);
+}
+
+.rca-members {
+  gap: 0;
+}
+
+.rca-member {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border, var(--line, #e5e7eb));
+}
+
+.rca-member:last-child {
+  border-bottom: 0;
+}
+
+.rca-member-copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.rca-member-copy > strong {
+  color: var(--text, #1f2937);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.rca-member-copy > small {
+  color: var(--muted, #64748b);
+  line-height: 1.45;
+}
+
+.rca-member-copy .rca-condition {
+  color: var(--text, #334155);
+}
+
+.rca-member-copy select {
+  width: min(100%, 360px);
+}
+
+.rca-member-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 2px 0;
+}
+
+.rca-member-label {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 2px 8px;
+  color: var(--text, #334155);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, var(--line, #d6dde7));
+  border-radius: 999px;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.rca-member-severity {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: var(--warn, #b7791f);
+  background: color-mix(in srgb, var(--warn, #b7791f) 12%, transparent);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.rca-severity-alert {
+  color: var(--alert, #b42332);
+  background: color-mix(in srgb, var(--alert, #b42332) 12%, transparent);
+}
+
+@media (max-width: 640px) {
+  .rca-toolbar > span {
+    margin-left: 0;
+  }
+
+  .rca-label-filter {
+    width: 100%;
+  }
+
+  .rca-member {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .rca-member-severity {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
 
 /*Rule Collection Assignment - Dark Theme*/
 
@@ -512,4 +652,93 @@ html.dark .rca-unassign,
 html.dark .rca-unassign:hover,
 .dark .rca-unassign:hover {
   background: #351d24;
+}
+
+/* Preserve distinct status and severity cues when the modal uses explicit dark-theme overrides. */
+:root[data-theme="dark"] .rca-status-assigned,
+html.dark .rca-status-assigned,
+.dark .rca-status-assigned {
+  color: #44d19c;
+}
+
+:root[data-theme="dark"] .rca-status-partially-assigned,
+:root[data-theme="dark"] .rca-status-unavailable,
+html.dark .rca-status-partially-assigned,
+html.dark .rca-status-unavailable,
+.dark .rca-status-partially-assigned,
+.dark .rca-status-unavailable {
+  color: #f5b84b;
+}
+
+
+/* Rule Collection Assignment - Severity Filter */
+
+.rca-toolbar select,
+.rca-toolbar .rca-severity-filter {
+  min-width: 120px;
+  min-height: 40px;
+  padding: 0 30px 0 12px;
+  color: var(--text, #1f2937);
+  background-color: var(--input, var(--surface, #ffffff));
+  border: 1px solid var(--border, #d6dde7);
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.rca-toolbar select:focus,
+.rca-toolbar .rca-severity-filter:focus {
+  border-color: var(--action, #2563eb);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.rca-toolbar select option,
+.rca-toolbar .rca-severity-filter option {
+  color: var(--text, #1f2937);
+  background: var(--surface, #ffffff);
+}
+
+/* Dark Theme */
+:root[data-theme="dark"] .rca-toolbar select,
+html[data-theme="dark"] .rca-toolbar select,
+body[data-theme="dark"] .rca-toolbar select,
+html.dark .rca-toolbar select,
+body.dark .rca-toolbar select,
+.dark .rca-toolbar select,
+.dark-mode .rca-toolbar select,
+.theme-dark .rca-toolbar select,
+[data-bs-theme="dark"] .rca-toolbar select {
+  color: #e2e8f0;
+  background-color: #111820;
+  border-color: #384656;
+  color-scheme: dark;
+}
+
+/* Dark Theme Dropdown Options */
+:root[data-theme="dark"] .rca-toolbar select option,
+html.dark .rca-toolbar select option,
+.dark .rca-toolbar select option,
+.dark-mode .rca-toolbar select option,
+.theme-dark .rca-toolbar select option,
+[data-bs-theme="dark"] .rca-toolbar select option {
+  color: #e2e8f0;
+  background-color: #171e26;
+}
+
+/* Disabled dropdown should remain readable */
+.rca-toolbar select:disabled,
+.rca-toolbar .rca-severity-filter:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+}
+
+:root[data-theme="dark"] .rca-toolbar select:disabled,
+html.dark .rca-toolbar select:disabled,
+.dark .rca-toolbar select:disabled {
+  color: #a3b1c2;
+  background-color: #202a35;
+  border-color: #303c49;
+  -webkit-text-fill-color: #a3b1c2;
 }
