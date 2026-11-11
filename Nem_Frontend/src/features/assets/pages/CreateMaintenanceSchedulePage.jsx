@@ -1101,6 +1101,7 @@ export default function CreateMaintenanceSchedulePage() {
                           value={form.signal_variable_id}
                           onChange={updateField}
                           required
+                          disabled={scheduleConfigurationLocked}
                         >
                           <option value="">
                             {variablesLoading

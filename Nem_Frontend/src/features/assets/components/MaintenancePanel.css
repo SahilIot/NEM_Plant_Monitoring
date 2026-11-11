@@ -1847,3 +1847,295 @@ html[data-theme="dark"] .maintenance-detail-symbol svg {
 .schedule-step-dot { flex: none; width: 22px; height: 22px; border: 2px solid rgba(148, 163, 184, 0.8); border-radius: 50%; }
 .schedule-steps em { font-style: italic; opacity: 0.7; margin-left: 4px; }
 .schedule-docs-empty { display: grid; place-items: center; gap: 6px; padding: 32px 16px; text-align: center; border: 1px dashed rgba(148, 163, 184, 0.5); border-radius: 8px; opacity: 0.9; }
+
+/*Maintenance Schedule Details Modal */
+
+.maintenance-schedule-details-view {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  color: var(--text-primary, var(--ink, #1f2937));
+}
+
+/* Resume schedule notice */
+.maintenance-schedule-details-view .schedule-resume-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 9px;
+}
+
+/* Summary cards */
+.schedule-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.schedule-summary-grid > div {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border-color, var(--line, #e5e7eb));
+  border-radius: 9px;
+  background: var(--surface-secondary, var(--surface-2, #f8fafc));
+}
+
+.schedule-summary-grid small {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--text-secondary, var(--muted, #6b7280));
+  font-size: 12px;
+}
+
+.schedule-summary-grid strong {
+  display: block;
+  color: var(--text-primary, var(--ink, #1f2937));
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+/* Section headings */
+.maintenance-schedule-details-view .schedule-run-title {
+  margin: 22px 0 12px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--border-color, var(--line, #e5e7eb));
+  color: var(--text-primary, var(--ink, #1f2937));
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* Start and register maintenance */
+.maintenance-schedule-details-view .schedule-run-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border-color, var(--line, #e5e7eb));
+  border-radius: 10px;
+  background: var(--surface-secondary, var(--surface-2, #f8fafc));
+}
+
+.maintenance-schedule-details-view .schedule-run-head > div {
+  min-width: 0;
+}
+
+.maintenance-schedule-details-view .schedule-start-btn {
+  margin-top: 10px;
+}
+
+/* Instructions */
+.maintenance-schedule-details-view .schedule-steps {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  margin: 12px 0 20px;
+  list-style: none;
+}
+
+.maintenance-schedule-details-view .schedule-steps li {
+  display: flex;
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid var(--border-color, var(--line, #e5e7eb));
+  border-radius: 9px;
+  background: var(--surface, #fff);
+}
+
+.maintenance-schedule-details-view .schedule-steps li > div {
+  min-width: 0;
+}
+
+.maintenance-schedule-details-view .schedule-step-dot {
+  flex-shrink: 0;
+  margin-top: 5px;
+}
+
+.maintenance-schedule-details-view .maintenance-instruction-text {
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+
+/* Empty documents state */
+.maintenance-schedule-details-view .schedule-docs-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 16px;
+  margin-bottom: 20px;
+  border: 1px dashed var(--border-color, var(--line, #d1d5db));
+  border-radius: 10px;
+  background: var(--surface-secondary, var(--surface-2, #f8fafc));
+  text-align: center;
+}
+
+.maintenance-schedule-details-view .schedule-docs-empty strong {
+  color: var(--text-primary, var(--ink, #1f2937));
+}
+
+.maintenance-schedule-details-view .schedule-docs-empty span {
+  color: var(--text-secondary, var(--muted, #6b7280));
+  font-size: 13px;
+}
+
+/* Document cards */
+.maintenance-schedule-details-view .maintenance-material-item {
+  min-width: 0;
+  padding: 15px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border-color, var(--line, #e5e7eb));
+  border-radius: 9px;
+  background: var(--surface, #fff);
+}
+
+.maintenance-schedule-details-view .maintenance-material-item h3 {
+  margin: 0 0 6px;
+  color: var(--text-primary, var(--ink, #1f2937));
+}
+
+.maintenance-schedule-details-view .maintenance-material-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Maintenance history */
+.maintenance-schedule-details-view .schedule-history {
+  padding: 12px 16px;
+  margin: 0 0 20px;
+  border: 1px solid var(--border-color, var(--line, #e5e7eb));
+  border-radius: 9px;
+  background: var(--surface, #fff);
+  list-style: none;
+}
+
+.maintenance-schedule-details-view .schedule-history li {
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border-color, var(--line, #e5e7eb));
+}
+
+.maintenance-schedule-details-view .schedule-history li:last-child {
+  border-bottom: 0;
+}
+
+/* Schedule details: label/value two-column layout */
+.maintenance-schedule-details-view .maintenance-details {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(0, 1.5fr);
+  gap: 0;
+  margin: 0 0 20px;
+  overflow: hidden;
+  border: 1px solid var(--border-color, var(--line, #e5e7eb));
+  border-radius: 10px;
+  background: var(--surface, #fff);
+}
+
+.maintenance-schedule-details-view .maintenance-details dt,
+.maintenance-schedule-details-view .maintenance-details dd {
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 11px 14px;
+  margin: 0;
+  border-bottom: 1px solid var(--border-color, var(--line, #e5e7eb));
+  overflow-wrap: anywhere;
+}
+
+.maintenance-schedule-details-view .maintenance-details dt {
+  background: var(--surface-secondary, var(--surface-2, #f8fafc));
+  color: var(--text-secondary, var(--muted, #6b7280));
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.maintenance-schedule-details-view .maintenance-details dd {
+  color: var(--text-primary, var(--ink, #1f2937));
+  font-size: 13px;
+}
+
+.maintenance-schedule-details-view .maintenance-details dt:nth-last-of-type(1),
+.maintenance-schedule-details-view .maintenance-details dd:last-child {
+  border-bottom: 0;
+}
+
+/* Modal footer */
+.maintenance-schedule-details-view .modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 15px;
+  border-top: 1px solid var(--border-color, var(--line, #e5e7eb));
+}
+
+/* Dark mode */
+.dark .maintenance-schedule-details-view,
+[data-theme="dark"] .maintenance-schedule-details-view {
+  color: var(--text-primary, #f1f5f9);
+}
+
+.dark .maintenance-schedule-details-view .schedule-summary-grid > div,
+.dark .maintenance-schedule-details-view .schedule-run-head,
+.dark .maintenance-schedule-details-view .schedule-steps li,
+.dark .maintenance-schedule-details-view .schedule-docs-empty,
+.dark .maintenance-schedule-details-view .maintenance-material-item,
+.dark .maintenance-schedule-details-view .schedule-history,
+.dark .maintenance-schedule-details-view .maintenance-details,
+[data-theme="dark"] .maintenance-schedule-details-view .schedule-summary-grid > div,
+[data-theme="dark"] .maintenance-schedule-details-view .schedule-run-head,
+[data-theme="dark"] .maintenance-schedule-details-view .schedule-steps li,
+[data-theme="dark"] .maintenance-schedule-details-view .schedule-docs-empty,
+[data-theme="dark"] .maintenance-schedule-details-view .maintenance-material-item,
+[data-theme="dark"] .maintenance-schedule-details-view .schedule-history,
+[data-theme="dark"] .maintenance-schedule-details-view .maintenance-details {
+  background: var(--surface, #1f2937);
+  border-color: var(--border-color, #374151);
+}
+
+.dark .maintenance-schedule-details-view .maintenance-details dt,
+[data-theme="dark"] .maintenance-schedule-details-view .maintenance-details dt {
+  background: var(--surface-secondary, #252a35);
+}
+
+/* Responsive */
+@media (max-width: 650px) {
+  .schedule-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .maintenance-schedule-details-view .schedule-run-head {
+    flex-direction: column;
+  }
+
+  .maintenance-schedule-details-view .schedule-run-head > button {
+    width: 100%;
+  }
+
+  .maintenance-schedule-details-view .maintenance-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .maintenance-schedule-details-view .maintenance-details dt {
+    padding-bottom: 4px;
+    border-bottom: 0;
+  }
+
+  .maintenance-schedule-details-view .maintenance-details dd {
+    padding-top: 4px;
+  }
+
+  .maintenance-schedule-details-view .schedule-resume-notice {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .maintenance-schedule-details-view .schedule-resume-notice button {
+    width: 100%;
+  }
+}

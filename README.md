@@ -571,7 +571,8 @@ Other endpoints (Administrators only): `GET /backups`, `GET /backups/storage`, `
 (details), `GET /backups/{id}/download`, `POST /backups/upload`, `DELETE /backups/{id}`. Old `.json`
 backups (format version 1) can still be restored, but they do not contain schedules, label links,
 attachment files and similar data; the limitations are shown in the preview and need an explicit
-confirmation before a legacy restore runs.
+confirmation before a legacy restore runs. Every restore requires a signed confirmation token from
+the preview, bound to the selected backup, user, and reviewed impact.
 
 Application datetimes are handled as UTC. The SQLAlchemy `UTCDateTime` type
 stores UTC-naive values in the database and returns aware UTC datetimes to the

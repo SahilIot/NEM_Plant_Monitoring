@@ -1028,63 +1028,94 @@ export default function MaintenancePanel({
           </span>
         </div>
 
-        <div
-          className="maintenance-schedule-actions"
-          style={{ display: "flex", gap: 8, alignItems: "center" }}
-        >
+        
+<div className="maintenance-schedule-actions">
+  <button
+    type="button"
+    ref={actionMenuRecordId === `schedule-${schedule.id}` ? actionMenuTriggerRef : null}
+    className="icon-outline sm maintenance-actions-trigger"
+    title={`Schedule actions for ${schedule.title}`}
+    aria-label={`Schedule actions for ${schedule.title}`}
+    aria-haspopup="menu"
+    aria-expanded={actionMenuRecordId === `schedule-${schedule.id}`}
+    disabled={busy}
+    onClick={() =>
+      setActionMenuRecordId((current) =>
+        current === `schedule-${schedule.id}`
+          ? null
+          : `schedule-${schedule.id}`
+      )
+    }
+  >
+    <DotsIcon size={17} />
+  </button>
+
+  {actionMenuRecordId === `schedule-${schedule.id}` && (
+    <FloatingMenu
+      align="right"
+      role="menu"
+      data-maintenance-action-menu=""
+    >
+      <button
+        type="button"
+        className="maintenance-action-menu-item"
+        role="menuitem"
+        onClick={() => {
+          setActionMenuRecordId(null);
+          setDialog({ kind: "schedule-details", record: schedule });
+        }}
+      >
+        <Eye size={16} aria-hidden="true" />
+        <span>View schedule</span>
+      </button>
+
+      {canManageMaintenance && (
+        <>
           <button
             type="button"
-            className="icon-outline sm"
-            title={`View schedule details for ${schedule.title}`}
-            aria-label={`View schedule details for ${schedule.title}`}
-            onClick={() => setDialog({ kind: "schedule-details", record: schedule })}
+            className="maintenance-action-menu-item maintenance-action-menu-item--edit"
+            role="menuitem"
+            onClick={() => {
+              setActionMenuRecordId(null);
+              openScheduleEdit(schedule);
+            }}
+            disabled={busy}
           >
-            <Eye size={16} aria-hidden="true" />
+            <Pencil size={16} aria-hidden="true" />
+            <span>Edit schedule</span>
           </button>
-          {canManageMaintenance && (
-            <>
-              <button
-                type="button"
-                className="icon-outline sm"
-                title={`Edit schedule ${schedule.title}`}
-                aria-label={`Edit schedule ${schedule.title}`}
-                onClick={() => openScheduleEdit(schedule)}
-                disabled={busy}
-              >
-                <Pencil size={16} aria-hidden="true" />
-              </button>
-              {["active", "paused"].includes(schedule.status || "active") && (
-                <button
-                  type="button"
-                  className="icon-outline sm"
-                  title={
-                    schedule.status === "paused"
-                      ? `Resume schedule ${schedule.title}`
-                      : `Pause schedule ${schedule.title}`
-                  }
-                  aria-label={
-                    schedule.status === "paused"
-                      ? `Resume schedule ${schedule.title}`
-                      : `Pause schedule ${schedule.title}`
-                  }
-                  onClick={() =>
-                    changeScheduleStatus(
-                      schedule,
-                      schedule.status === "paused" ? "active" : "paused"
-                    )
-                  }
-                  disabled={busy}
-                >
-                  {schedule.status === "paused" ? (
-                    <Play size={16} aria-hidden="true" />
-                  ) : (
-                    <Pause size={16} aria-hidden="true" />
-                  )}
-                </button>
+
+          {["active", "paused"].includes(schedule.status || "active") && (
+            <button
+              type="button"
+              className="maintenance-action-menu-item"
+              role="menuitem"
+              onClick={() => {
+                setActionMenuRecordId(null);
+                changeScheduleStatus(
+                  schedule,
+                  schedule.status === "paused" ? "active" : "paused"
+                );
+              }}
+              disabled={busy}
+            >
+              {schedule.status === "paused" ? (
+                <Play size={16} aria-hidden="true" />
+              ) : (
+                <Pause size={16} aria-hidden="true" />
               )}
-            </>
+              <span>
+                {schedule.status === "paused"
+                  ? "Resume schedule"
+                  : "Pause schedule"}
+              </span>
+            </button>
           )}
-        </div>
+        </>
+      )}
+    </FloatingMenu>
+  )}
+</div>
       </article>
     );
   };
@@ -1134,6 +1165,7 @@ export default function MaintenancePanel({
         }}
         wide
       >
+        <div className="maintenance-schedule-details-view">
         {error && (
           <p className="notice error" role="alert">
             {error}
@@ -1142,7 +1174,7 @@ export default function MaintenancePanel({
 
         {schedule.status === "paused" && (
           <p
-            className="notice"
+            className="notice schedule-resume-notice"
             role="status"
             style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
           >
@@ -1160,14 +1192,7 @@ export default function MaintenancePanel({
           </p>
         )}
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-            gap: 12,
-            margin: "0 0 16px",
-          }}
-        >
+        <div className="schedule-summary-grid">
           <div>
             <small style={{ display: "block" }}>Status</small>
             <strong>{String(schedule.status || "active").replaceAll("_", " ")}</strong>
@@ -1406,6 +1431,7 @@ export default function MaintenancePanel({
             Close
           </button>
         </div>
+      </div>
       </Modal>
     );
   };
