@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import CopyRulesModal from "../components/CopyRulesModal.jsx";
 import PredefinedRulesModal from "../../rules/components/PredefinedRulesModal.jsx";
+import RuleCollectionAssignmentModal from "../../rules/components/RuleCollectionAssignmentModal.jsx";
 import { SHARED_RULE_WARNING } from "../../configuration/pages/RuleVisibility.jsx";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
@@ -668,6 +669,8 @@ export default function AssetDetail() {
   const [modal, setModal] = useState(null);
   const [monitoringRuleSelection, setMonitoringRuleSelection] = useState(null);
   const [showPredefinedRules, setShowPredefinedRules] = useState(false);
+  // Keep the new collection workflow independent of the existing predefined-rule modal.
+  const [showRuleCollections, setShowRuleCollections] = useState(false);
   const [logs, setLogs] = useState([]);
   const [selectedMaintenanceLogIds, setSelectedMaintenanceLogIds] = useState([]);
   const [bulkDeletingMaintenanceLogs, setBulkDeletingMaintenanceLogs] = useState(false);
@@ -3632,7 +3635,7 @@ const filteredEvents = [...events]
         title={isSupervisor ? "Only Administrators can create monitoring rules." : undefined}
         onClick={() => setModal("ruleTypeOptions")}
       >
-        <strong>Create a Rule</strong>
+        <strong>Create A Rule</strong>
         <small>Create an interval, time, or usage-based rule.</small>
       </button>
 
@@ -3646,6 +3649,19 @@ const filteredEvents = [...events]
       >
         <strong>Assign Predefined Monitoring Rules</strong>
         <small>Assign predefined rules to this asset.</small>
+      </button>
+
+      {/* Keep collection assignment alongside the existing asset-targeted rule assignment workflow. */}
+      <button
+        type="button"
+        className="rule-type-option"
+        onClick={() => {
+          setModal(null);
+          setShowRuleCollections(true);
+        }}
+      >
+        <strong>Assign Rule Collections</strong>
+        <small>Assign the reusable rules in one or more collections to this asset.</small>
       </button>
 
       <button
@@ -3664,7 +3680,7 @@ const filteredEvents = [...events]
 
 {modal === "ruleTypeOptions" && (
   <Modal
-    title="Create a Rule"
+    title="Create A Rule"
     onClose={() => setModal(null)}
   >
     <div className="rule-type-options">
@@ -4186,6 +4202,34 @@ const filteredEvents = [...events]
                   ? ". They are Not Activated: review the thresholds, then activate them."
                   : " and activated.") +
                 (existing ? ` ${existing} rule(s) were already assigned.` : "")
+            );
+          }}
+        />
+      )}
+
+      {/* Collection assignment reuses the same asset target, template mapping, and role workflow. */}
+      {showRuleCollections && (
+        <RuleCollectionAssignmentModal
+          assetId={assetId}
+          onClose={() => setShowRuleCollections(false)}
+          onAssigned={async (result) => {
+            setShowRuleCollections(false);
+            setList(isSupervisor ? "not_activated" : "activated");
+            await refreshAll();
+            const created = result.created?.length || 0;
+            const existing = result.already_assigned?.length || 0;
+            setActionNotice(
+              `${created} rule(s) assigned from ${result.collectionCount} collection(s)` +
+                (isSupervisor
+                  ? ". They are Not Activated: review the thresholds, then activate them."
+                  : ".") +
+                (existing ? ` ${existing} rule(s) were already assigned.` : "")
+            );
+          }}
+          onUnassigned={async (collection, result) => {
+            await refreshAll();
+            setActionNotice(
+              `${result.removed} rule(s) from "${collection.name}" were unassigned.`
             );
           }}
         />
