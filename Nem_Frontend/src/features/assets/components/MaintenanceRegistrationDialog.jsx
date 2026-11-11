@@ -27,6 +27,7 @@ function registrationValues(record, defaultTechnician) {
 // Shared by the schedule details and current-maintenance views to keep completion validation consistent.
 export default function MaintenanceRegistrationDialog({
   record,
+  scheduleTitle,
   defaultTechnician,
   busy = false,
   error = "",
@@ -111,13 +112,19 @@ export default function MaintenanceRegistrationDialog({
         </p>
         <div className="maintenance-form-grid">
           <label>
-            Maintenance record
+            Maintenance schedule / record
             <input
               type="text"
-              value={record.title || record.summary || "Maintenance"}
+              value={`${scheduleTitle || record.title || record.summary || "Maintenance"} · Record #${record.id}`}
               readOnly
             />
           </label>
+          {record.planned_due_date && (
+            <label>
+              Scheduled due date
+              <input type="text" value={record.planned_due_date} readOnly />
+            </label>
+          )}
           <label>
             Actual completion date and time
             <input

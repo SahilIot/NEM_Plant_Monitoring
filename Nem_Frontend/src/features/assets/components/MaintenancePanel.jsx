@@ -183,6 +183,7 @@ export default function MaintenancePanel({
   const navigate = useNavigate();
   const location = useLocation();
   const [records, setRecords] = useState([]);
+  const [recordsError, setRecordsError] = useState("");
   const [schedules, setSchedules] = useState([]);
   const [schedulesLoaded, setSchedulesLoaded] = useState(false);
   const [activeMaintenanceTab, setActiveMaintenanceTab] = useState("schedules");
@@ -196,6 +197,7 @@ export default function MaintenancePanel({
   const [actionMenuRecordId, setActionMenuRecordId] = useState(null);
   const actionMenuTriggerRef = useRef(null);
   const startRequestRef = useRef(false);
+  const scheduleDeleteGuard = useRef(false);
   const [legacyRuleOptionsOpen, setLegacyRuleOptionsOpen] = useState(false);
   const [values, setValues] = useState(() => formValues(null));
   const [scheduleValues, setScheduleValues] = useState({
@@ -216,11 +218,14 @@ export default function MaintenancePanel({
 
   const loadRecords = useCallback(async () => {
     setLoading(true);
+    setRecordsError("");
     setError("");
     try {
-      const result = await api.getAll(`/maintenance?asset_id=${assetId}&limit=200`);
+      // Reuse the paginated record endpoint; its asset filter keeps history scoped before schedule filtering.
+      const result = await api.getAll(`/maintenance?asset_id=${assetId}`);
       setRecords(Array.isArray(result) ? result : []);
     } catch (requestError) {
+      setRecordsError(requestError.message || "Could not load maintenance history.");
       setError(requestError.message || "Could not load maintenance records.");
     } finally {
       setLoading(false);
@@ -278,6 +283,54 @@ export default function MaintenancePanel({
       await runPermanentDeleteRecord(record);
     } finally {
       deleteGuard.current = false;
+    }
+  };
+
+  // Confirm and delete only through the existing Administrator-protected schedule endpoint.
+  const deleteSchedule = async (schedule) => {
+    if (!isAdministrator || busy || scheduleDeleteGuard.current) return;
+    scheduleDeleteGuard.current = true;
+    try {
+      const confirmed = await confirm(
+        `Delete maintenance schedule "${schedule.title}"?\n\nSchedules with linked occurrences or history cannot be deleted; cancel the schedule to preserve its records.`,
+        {
+          title: "Delete schedule?",
+          confirmLabel: "Delete schedule",
+          cancelLabel: "Cancel",
+          destructive: true,
+        }
+      );
+      if (!confirmed) return;
+
+      setBusy(true);
+      setError("");
+      setNotice("");
+      try {
+        await api.del(`/maintenance/schedules/${schedule.id}/permanent`);
+        setSchedules((previous) =>
+          previous.filter((item) => item.id !== schedule.id)
+        );
+        if (
+          dialog?.kind === "schedule-details" &&
+          dialog.record?.id === schedule.id
+        ) {
+          setDialog(null);
+        }
+        setActionMenuRecordId(null);
+        setNotice(`Maintenance schedule "${schedule.title}" was deleted.`);
+        onActionNotification?.(
+          `Maintenance schedule "${schedule.title}" was deleted.`,
+          "success",
+          assetId
+        );
+        await Promise.all([loadSchedules(), loadRecords(), onChanged?.()]);
+      } catch (requestError) {
+        setError(requestError.message || "Could not delete the maintenance schedule.");
+      } finally {
+        setBusy(false);
+      }
+    } finally {
+      scheduleDeleteGuard.current = false;
     }
   };
 
@@ -647,9 +700,25 @@ export default function MaintenancePanel({
   };
 
   const changeMaintenanceStatus = async (record, completionPayload = null) => {
-    if (!canManageMaintenance || busy) return;
+    if (!record || !canManageMaintenance || busy) return;
     const isStarting = record.status === "planned";
     if (!isStarting && record.status !== "in_progress") return;
+    if (!isStarting && record.schedule_id != null) {
+      const linkedSchedule = schedules.find(
+        (item) => item.id === record.schedule_id
+      );
+      if (
+        linkedSchedule &&
+        (linkedSchedule.current_occurrence_id !== record.id ||
+          (linkedSchedule.schedule_mode !== "runtime" &&
+            linkedSchedule.schedule_mode !== "usage" &&
+            String(linkedSchedule.current_due_date || "") !==
+              String(record.planned_due_date || "")))
+      ) {
+        setError("Only the current scheduled maintenance occurrence can be registered.");
+        return;
+      }
+    }
     if (!isStarting && !completionPayload) {
       // Route completion actions through registration without changing the existing start path.
       setDialog({ kind: "register", record });
@@ -670,6 +739,9 @@ export default function MaintenancePanel({
       if (isStarting) {
         startSucceeded = true;
         onActionNotification?.("Maintenance started.", "success", assetId);
+      } else {
+        // Confirm registration to the user after the existing completion API succeeds.
+        onActionNotification?.("Maintenance registered successfully.", "success", assetId);
       }
       if (!isStarting && updatedRecord.schedule_id) {
         const result = await api.getAll(`/maintenance/schedules?asset_id=${assetId}`);
@@ -690,7 +762,7 @@ export default function MaintenancePanel({
       setRecords((previous) =>
         previous.map((item) => (item.id === updatedRecord.id ? updatedRecord : item))
       );
-      if (!isStarting) setNotice("Maintenance finished.");
+      if (!isStarting) setNotice("Maintenance registered successfully.");
       await loadRecords();
       await onChanged?.();
       if (!isStarting) await loadSchedules();
@@ -1143,6 +1215,22 @@ export default function MaintenancePanel({
           )}
         </>
       )}
+      {isAdministrator && (
+        <button
+          type="button"
+          className="maintenance-action-menu-item maintenance-action-menu-item--delete"
+          role="menuitem"
+          onClick={() => {
+            setActionMenuRecordId(null);
+            deleteSchedule(schedule);
+          }}
+          disabled={busy}
+          title="Delete schedule"
+        >
+          <Trash2 size={16} aria-hidden="true" />
+          <span>Delete schedule</span>
+        </button>
+      )}
     </FloatingMenu>
   )}
 </div>
@@ -1159,8 +1247,22 @@ export default function MaintenancePanel({
     const dueState = schedule.due_status || (
       schedule.status === "active" ? dueLabel(schedule.current_due_date) : "not_scheduled"
     );
-    const scheduleRecords = records.filter((record) => record.schedule_id === schedule.id);
+    // Keep history limited to this asset and schedule even though the list API is asset-scoped.
+    const scheduleRecords = records.filter(
+      (record) =>
+        record.asset_id === Number(assetId) &&
+        record.schedule_id === schedule.id
+    );
     const runningRecord = scheduleRecords.find((record) => record.status === "in_progress");
+    const completableRecord = scheduleRecords.find(
+      (record) =>
+        record.status === "in_progress" &&
+        record.id === schedule.current_occurrence_id &&
+        ((schedule.schedule_mode === "runtime" ||
+          schedule.schedule_mode === "usage") ||
+          String(schedule.current_due_date || "") ===
+            String(record.planned_due_date || ""))
+    );
     const nextRecord = scheduleRecords
       .filter((record) => record.status === "planned")
       .sort((a, b) =>
@@ -1186,6 +1288,8 @@ export default function MaintenancePanel({
       ? "You do not have permission to manage maintenance."
       : !runningRecord
         ? "Start the maintenance first, then register it when the work is done."
+        : !completableRecord
+          ? "Only the current scheduled occurrence can be registered."
         : "";
 
     const viewScheduleFile = (doc, file) => {
@@ -1315,7 +1419,7 @@ export default function MaintenancePanel({
           <button
             type="button"
             className="btn-primary"
-            onClick={() => changeMaintenanceStatus(runningRecord)}
+            onClick={() => changeMaintenanceStatus(completableRecord)}
             disabled={busy || Boolean(registerBlockedReason)}
             title={registerBlockedReason || "Finish and register this maintenance"}
           >
@@ -1413,33 +1517,115 @@ export default function MaintenancePanel({
         )}
 
         <h3 className="schedule-run-title">Maintenance history</h3>
-        {scheduleRecords.length === 0 ? (
-          <p className="muted">Nothing has been done for this schedule yet.</p>
+        {/* Do not present an empty state until the asset-scoped records request succeeds. */}
+        {loading ? (
+          <div className="schedule-history-state" role="status">
+            <LoadingIndicator compact message="Loading maintenance history" />
+          </div>
+        ) : recordsError ? (
+          <p className="notice error" role="alert">
+            Could not load maintenance history: {recordsError}
+          </p>
+        ) : scheduleRecords.length === 0 ? (
+          <p className="schedule-history-empty">
+            No maintenance history is available for this schedule yet.
+          </p>
         ) : (
           <ul className="schedule-history">
+            {/* Order all schedule occurrences newest first and show completion data when present. */}
             {[...scheduleRecords]
-              .sort((a, b) =>
-                String(b.planned_start_at || "").localeCompare(String(a.planned_start_at || ""))
-              )
-              .slice(0, 5)
+              .sort((a, b) => {
+                const dateA =
+                  a.actual_completed_at || a.actual_started_at ||
+                  a.planned_start_at || a.performed_at || a.created_at || "";
+                const dateB =
+                  b.actual_completed_at || b.actual_started_at ||
+                  b.planned_start_at || b.performed_at || b.created_at || "";
+                return String(dateB).localeCompare(String(dateA));
+              })
               .map((record) => (
-                <li
-                  key={record.id}
-                  style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "6px 0" }}
-                >
-                  {/* Show the submitted registration alongside existing completion history. */}
-                  <span className="schedule-history-copy">
-                    <strong>{String(record.status || "planned").replaceAll("_", " ")}</strong>
-                    {" · "}
-                    {record.planned_start_at ? formatTime(record.planned_start_at) : "No planned start"}
-                    {record.actual_completed_at && (
-                      <small>Completed: {formatTime(record.actual_completed_at)}</small>
+                <li key={record.id} className="schedule-history-card">
+                  <div className="schedule-history-card-header">
+                    <div>
+                      <strong>{record.title || record.summary || schedule.title}</strong>
+                      <small>
+                        {formatTime(
+                          record.actual_completed_at ||
+                            record.actual_started_at ||
+                            record.planned_start_at ||
+                            record.performed_at
+                        )}
+                      </small>
+                    </div>
+                    <span
+                      className={`schedule-history-status schedule-history-status--${String(
+                        record.status || "planned"
+                      ).replaceAll("_", "-")}`}
+                    >
+                      {String(record.status || "planned").replaceAll("_", " ")}
+                    </span>
+                  </div>
+                  <dl className="schedule-history-fields">
+                    {record.actual_started_at && (
+                      <>
+                        <dt>Actual start</dt>
+                        <dd>{formatTime(record.actual_started_at)}</dd>
+                      </>
                     )}
-                    {record.performed_by && <small>Technician: {record.performed_by}</small>}
-                    {record.notes && <small>Work performed: {record.notes}</small>}
-                    {record.completion_notes && <small>Remarks: {record.completion_notes}</small>}
-                  </span>
-                  <span>{actualDuration(record, clockNow)}</span>
+                    {record.actual_completed_at && (
+                      <>
+                        <dt>Actual completion</dt>
+                        <dd>{formatTime(record.actual_completed_at)}</dd>
+                      </>
+                    )}
+                    {(record.performed_by || record.assigned_technician) && (
+                      <>
+                        <dt>Technician</dt>
+                        <dd>{record.performed_by || record.assigned_technician}</dd>
+                      </>
+                    )}
+                    {record.notes && (
+                      <>
+                        <dt>Work performed</dt>
+                        <dd>{record.notes}</dd>
+                      </>
+                    )}
+                    {record.completion_notes && (
+                      <>
+                        <dt>Completion remarks</dt>
+                        <dd>{record.completion_notes}</dd>
+                      </>
+                    )}
+                    {record.parts_used && (
+                      <>
+                        <dt>Parts replaced</dt>
+                        <dd>{record.parts_used}</dd>
+                      </>
+                    )}
+                    <dt>Actual duration</dt>
+                    <dd>{actualDuration(record, clockNow)}</dd>
+                  </dl>
+                  {Array.isArray(record.checklist) && record.checklist.length > 0 && (
+                    <div className="schedule-history-checklist">
+                      <strong>Checklist / inspection</strong>
+                      <ul>
+                        {record.checklist.map((item, index) => (
+                          <li key={`${record.id}-${item.item}-${index}`}>
+                            <span
+                              className={
+                                item.completed
+                                  ? "schedule-history-checklist-result is-complete"
+                                  : "schedule-history-checklist-result"
+                              }
+                            >
+                              {item.completed ? "Complete" : "Incomplete"}
+                            </span>
+                            {item.item}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </li>
               ))}
           </ul>
@@ -2139,6 +2325,9 @@ export default function MaintenancePanel({
       {dialog?.kind === "register" && (
         <MaintenanceRegistrationDialog
           record={dialog.record}
+          scheduleTitle={
+            schedules.find((item) => item.id === dialog.record.schedule_id)?.title
+          }
           defaultTechnician={user?.username}
           busy={busy}
           error={error}

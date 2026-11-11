@@ -230,6 +230,104 @@ def test_calendar_schedule_creates_initial_occurrence(
     )
     assert schedule_route_mocks[0]["due_date"] == first_due
 
+
+def test_schedule_deletion_preserves_linked_occurrence_history(
+    db_session,
+    schedule_route_mocks,
+    monkeypatch,
+):
+    today = date.today()
+    asset = create_asset(db_session)
+    schedule = maintenance_routes._create_maintenance_schedule(
+        db_session,
+        MaintenanceScheduleCreate(
+            asset_id=asset.id,
+            title="Schedule with history",
+            maintenance_type="inspection",
+            schedule_mode="calendar",
+            schedule_start_date=today,
+            first_due_date=today + timedelta(days=1),
+        ),
+    )
+    db_session.flush()
+    linked_record_id = schedule.current_occurrence_id
+    monkeypatch.setattr(
+        maintenance_routes,
+        "access_scope",
+        lambda session: SimpleNamespace(allows=lambda asset_id: True),
+    )
+
+    # Refusing deletion must leave both the schedule and its occurrence intact.
+    with pytest.raises(HTTPException) as exc_info:
+        maintenance_routes.permanently_delete_maintenance_schedule(
+            schedule.id,
+            db_session,
+            SimpleNamespace(id=1, role="Administrator"),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert db_session.get(MaintenanceSchedule, schedule.id) is not None
+    assert db_session.get(MaintenanceRecord, linked_record_id) is not None
+
+
+@pytest.mark.parametrize("role", ["Supervisor", "Operator"])
+def test_schedule_deletion_role_guard_rejects_non_administrators(role):
+    # Exercise direct DELETE requests through the same authentication dependency as production.
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.routes.auth import get_current_user
+
+    test_app = FastAPI()
+    test_app.include_router(maintenance_routes.router)
+    test_app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(role=role)
+    test_app.dependency_overrides[maintenance_routes.get_db] = lambda: None
+
+    response = TestClient(test_app).delete("/maintenance/schedules/1/permanent")
+
+    assert response.status_code == 403
+
+
+def test_administrator_can_delete_schedule_without_occurrences(
+    db_session,
+    schedule_route_mocks,
+    monkeypatch,
+):
+    asset = create_asset(db_session)
+    variable = create_signal_variable(
+        db_session,
+        asset_id=asset.id,
+        signal_role="running",
+    )
+    schedule = maintenance_routes._create_maintenance_schedule(
+        db_session,
+        MaintenanceScheduleCreate(
+            asset_id=asset.id,
+            title="Schedule without occurrences",
+            maintenance_type="preventive",
+            schedule_mode="runtime",
+            signal_variable_id=variable.id,
+            runtime_interval_hours=100,
+        ),
+    )
+    db_session.flush()
+    monkeypatch.setattr(
+        maintenance_routes,
+        "access_scope",
+        lambda session: SimpleNamespace(allows=lambda asset_id: True),
+    )
+    monkeypatch.setattr(maintenance_routes, "emit_event", lambda *args, **kwargs: None)
+
+    # An occurrence-free schedule can use the existing permanent-delete workflow.
+    maintenance_routes.permanently_delete_maintenance_schedule(
+        schedule.id,
+        db_session,
+        SimpleNamespace(id=1, role="Administrator"),
+    )
+
+    assert db_session.get(MaintenanceSchedule, schedule.id) is None
+
+
 # RUNTIME SCHEDULE CREATION
 def test_runtime_schedule_is_created_without_initial_occurrence(
     db_session,

@@ -785,6 +785,21 @@ def permanently_delete_maintenance_schedule(
     )
     if schedule is None or not access_scope(session).allows(schedule.asset_id):
         raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
+    # Refuse schedule deletion while any occurrence exists so linked and completed history is never erased.
+    linked_record_id = session.scalar(
+        select(MaintenanceRecord.id)
+        .where(MaintenanceRecord.schedule_id == schedule_id)
+        .with_for_update()
+        .limit(1)
+    )
+    if linked_record_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This schedule has linked maintenance records or occurrences and cannot be deleted. "
+                "Cancel the schedule to stop future maintenance while preserving its history."
+            ),
+        )
     _delete_schedule_tree(session, schedule, user)
 
 # User can change selected fields without sending the entire schedule again.
