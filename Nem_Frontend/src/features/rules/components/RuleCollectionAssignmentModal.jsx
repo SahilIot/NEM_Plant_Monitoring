@@ -1,8 +1,23 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, Check, Layers, Search, Trash2, X } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  Check,
+  CircleAlert,
+  Layers,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { LoadingIndicator, useConfirmation } from "../../../components/common/UI.jsx";
+import LabelsField from "../../../components/common/LabelsField.jsx";
+import {
+  collectionAssignmentStatus,
+  matchesRuleFilters,
+  ruleConditionSummary,
+} from "../rulePresentation.js";
 import "./RuleCollectionAssignmentModal.css";
 
 export default function RuleCollectionAssignmentModal({
@@ -22,6 +37,8 @@ export default function RuleCollectionAssignmentModal({
   const [selected, setSelected] = useState(() => new Set());
   const [variableMappings, setVariableMappings] = useState({});
   const [search, setSearch] = useState("");
+  const [severity, setSeverity] = useState("all");
+  const [labelIds, setLabelIds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [reviewing, setReviewing] = useState(false);
@@ -75,7 +92,7 @@ export default function RuleCollectionAssignmentModal({
     [assetRules]
   );
 
-  // Keep the full selected collection set independent from the current search filter.
+  // Calculate collection status from assigned, eligible, and unavailable member rules.
   const collectionDetails = useMemo(
     () =>
       collections
@@ -89,37 +106,48 @@ export default function RuleCollectionAssignmentModal({
           const eligible = members.filter(
             (item) => !assignedByTemplate.has(item.id) && !item.unavailable_reason
           );
+          const unavailableCount = members.filter(
+            (item) => !assignedByTemplate.has(item.id) && item.unavailable_reason
+          ).length;
           return {
             ...collection,
             members,
             assignedCount,
             eligible,
-            unavailableCount: members.filter(
-              (item) => !assignedByTemplate.has(item.id) && item.unavailable_reason
-            ).length,
+            unavailableCount,
+            status: collectionAssignmentStatus(
+              members.length,
+              assignedCount,
+              eligible.length
+            ),
           };
         })
         .filter((collection) => collection.members.length > 0),
     [collections, templateById, assignedByTemplate]
   );
 
-  // Restrict search to displayed rows while preserving selected collection data.
+  // Apply the same all-selected-labels and severity matching rules as Assign Monitoring Rules.
   const visibleCollections = useMemo(() => {
     const query = search.trim().toLowerCase();
     return collectionDetails
-      .filter(
-        (collection) =>
+      .map((collection) => {
+        const matchingMembers = collection.members.filter((rule) => {
+          return matchesRuleFilters(rule, severity, labelIds);
+        });
+        const matchesSearch =
           !query ||
           `${collection.name} ${collection.description || ""} ${collection.members
-            .map((item) => item.name)
+            .map((item) => `${item.name || ""} ${item.description || ""} ${item.rule_type || ""}`)
             .join(" ")}`
             .toLowerCase()
-            .includes(query)
-      )
+            .includes(query);
+        return { ...collection, matchingMembers, matchesSearch };
+      })
+      .filter((collection) => collection.matchesSearch && collection.matchingMembers.length > 0)
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [collectionDetails, search]);
+  }, [collectionDetails, search, severity, labelIds]);
 
-  // Deduplicate selected templates and keep payload contents stable while search filtering changes.
+  // Keep assignment contents independent of search and member filters; selecting a collection assigns its eligible rules.
   const selectedTemplates = useMemo(() => {
     const ids = new Set();
     collectionDetails
@@ -259,6 +287,22 @@ export default function RuleCollectionAssignmentModal({
               aria-label="Search collections"
             />
           </div>
+          <select
+            value={severity}
+            onChange={(event) => setSeverity(event.target.value)}
+            aria-label="Filter by severity"
+          >
+            <option value="all">All severities</option>
+            <option value="warning">Warning</option>
+            <option value="alert">Alert</option>
+          </select>
+          <div className="rca-label-filter">
+            <LabelsField
+              mode="filter"
+              value={labelIds}
+              onChange={setLabelIds}
+            />
+          </div>
           <span>{selected.size} selected</span>
         </div>
 
@@ -270,14 +314,13 @@ export default function RuleCollectionAssignmentModal({
           ) : visibleCollections.length === 0 ? (
             <p className="rca-empty">
               {collections.length
-                ? "No rule collections with visible rules match this search."
+                ? "No rule collections with visible rules match the current search and filters."
                 : "No rule collections are available."}
             </p>
           ) : (
+            // Show complete member metadata while keeping selection at the collection level.
             visibleCollections.map((collection) => {
               const assigned = collection.assignedCount > 0;
-              const allAssigned =
-                collection.assignedCount === collection.members.length;
               const disabled =
                 saving ||
                 !canAssign ||
@@ -306,13 +349,11 @@ export default function RuleCollectionAssignmentModal({
                     </span>
                   </label>
                   <span
-                    className={`rca-status${allAssigned ? " is-assigned" : ""}`}
+                    className={`rca-status rca-status-${collection.status
+                      .toLowerCase()
+                      .replaceAll(" ", "-")}`}
                   >
-                    {allAssigned
-                      ? "Assigned"
-                      : assigned
-                        ? "Partially assigned"
-                        : "Available"}
+                    {collection.status}
                   </span>
                   {isAdministrator && assigned && (
                     <button
@@ -329,40 +370,73 @@ export default function RuleCollectionAssignmentModal({
                     <div className="rca-members">
                       {collection.members.map((template) => {
                         const existing = assignedByTemplate.get(template.id);
+                        const severityValue = (template.severity || "warning").toLowerCase();
+                        const labelNames = (template.labels || [])
+                          .map((label) => (
+                            typeof label === "string" ? label : label?.name
+                          ))
+                          .filter(Boolean);
                         return (
                           <div className="rca-member" key={template.id}>
-                            <Activity size={15} aria-hidden="true" />
-                            <span>{template.name}</span>
-                            {existing ? (
-                              <small className="rca-member-state">
-                                Assigned · {existing.state || existing.lifecycle_status}
+                            <Activity size={16} aria-hidden="true" />
+                            <div className="rca-member-copy">
+                              <strong>{template.name}</strong>
+                              <small>
+                                {template.description ||
+                                  (template.rule_type || "Monitoring rule").replaceAll("_", " ")}
                               </small>
-                            ) : template.unavailable_reason ? (
-                              <small className="rca-member-error">
-                                {template.unavailable_reason}
+                              <small className="rca-condition">
+                                Condition / thresholds: {ruleConditionSummary(template)}
                               </small>
-                            ) : template.variable_mapping_required ? (
-                              <select
-                                aria-label={`Variable mapping for ${template.name}`}
-                                value={variableMappings[template.id] || ""}
-                                disabled={saving}
-                                onChange={(event) =>
-                                  setVariableMappings((previous) => ({
-                                    ...previous,
-                                    [template.id]: event.target.value,
-                                  }))
-                                }
-                              >
-                                <option value="">Choose variable</option>
-                                {(template.compatible_variables || []).map((variable) => (
-                                  <option value={variable.id} key={variable.id}>
-                                    {variable.name} · {variable.key} ({variable.data_type})
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
-                              <small>Ready to assign</small>
-                            )}
+                              {labelNames.length > 0 && (
+                                <div className="rca-member-labels">
+                                  {labelNames.map((name, index) => (
+                                    <span
+                                      className="rca-member-label"
+                                      key={`${template.id}-${name}-${index}`}
+                                    >
+                                      {name}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {existing ? (
+                                <small className="rca-member-state">
+                                  Assigned · {existing.state || existing.lifecycle_status}
+                                </small>
+                              ) : template.unavailable_reason ? (
+                                <small className="rca-member-error">
+                                  {template.unavailable_reason}
+                                </small>
+                              ) : template.variable_mapping_required ? (
+                                <select
+                                  aria-label={`Variable mapping for ${template.name}`}
+                                  value={variableMappings[template.id] || ""}
+                                  disabled={saving}
+                                  onChange={(event) =>
+                                    setVariableMappings((previous) => ({
+                                      ...previous,
+                                      [template.id]: event.target.value,
+                                    }))
+                                  }
+                                >
+                                  <option value="">Choose variable</option>
+                                  {(template.compatible_variables || []).map((variable) => (
+                                    <option value={variable.id} key={variable.id}>
+                                      {variable.name} · {variable.key} ({variable.data_type})
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <small>Ready to assign</small>
+                              )}
+                            </div>
+                            <span className={`rca-member-severity rca-severity-${severityValue}`}>
+                              {severityValue === "alert"
+                                ? <CircleAlert size={14} />
+                                : <AlertTriangle size={14} />}
+                              {template.severity || "warning"}
+                            </span>
                           </div>
                         );
                       })}
@@ -376,7 +450,7 @@ export default function RuleCollectionAssignmentModal({
 
         <footer className="rca-footer">
           <span>
-            Supervisors’ assignments are saved Not Activated for review. Operators cannot assign collections.
+            Filters show collections with matching member rules. Selecting a collection assigns all eligible rules in it. Supervisors’ assignments are saved Not Activated for review.
           </span>
           <div>
             {reviewing && (
