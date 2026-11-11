@@ -2956,7 +2956,8 @@ const filteredEvents = [...events]
       navigationState={assetNavigationState}
     />
 
-   
+    {/* Keep the asset logbook below the panel, but leave the routed schedule detail page focused. */}
+    {!scheduleId && (
 <div className="panel maintenance-log-notes-panel">
   <div className="panel-head maintenance-log-notes-head">
     <div>
@@ -3216,6 +3217,7 @@ const filteredEvents = [...events]
     </div>
   )}
 </div>
+    )}
   </>
 )}
 

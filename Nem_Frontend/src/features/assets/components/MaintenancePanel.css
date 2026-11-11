@@ -2139,3 +2139,120 @@ html[data-theme="dark"] .maintenance-detail-symbol svg {
     width: 100%;
   }
 }
+
+/* Give the routed schedule view room to present its existing sections as a page. */
+.maintenance-schedule-page {
+  width: min(1120px, calc(100% - 32px));
+  margin: 20px auto 32px;
+}
+
+.maintenance-schedule-page .maintenance-schedule-details-view {
+  padding: 22px;
+  border: 1px solid var(--line, #dce3ec);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+  box-shadow: var(--shadow-card, 0 4px 16px rgba(15, 23, 42, 0.06));
+}
+
+.maintenance-schedule-page-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 18px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--line, #dce3ec);
+}
+
+.maintenance-schedule-page-heading-copy {
+  min-width: 0;
+}
+
+.maintenance-schedule-page-heading h1 {
+  margin: 14px 0 10px;
+  color: var(--ink, #172033);
+  font-size: clamp(22px, 3vw, 30px);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.maintenance-schedule-page-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.schedule-page-status,
+.schedule-page-due {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 10px;
+  border: 1px solid var(--line, #dce3ec);
+  border-radius: 999px;
+  background: var(--surface-2, #f1f5f9);
+  color: var(--ink-2, #475569);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-transform: capitalize;
+}
+
+.schedule-page-status--active,
+.schedule-page-status--completed,
+.schedule-page-due--upcoming,
+.schedule-page-due--completed {
+  border-color: var(--ok, #25845a);
+  background: var(--ok-soft, #e8f5ee);
+  color: var(--ok, #176b44);
+}
+
+.schedule-page-status--paused,
+.schedule-page-due--due-today,
+.schedule-page-due--awaiting-approval {
+  border-color: var(--warn, #b7791f);
+  background: var(--warn-soft, #fff5df);
+  color: var(--warn, #805400);
+}
+
+.schedule-page-status--cancelled,
+.schedule-page-due--overdue {
+  border-color: var(--alert, #b93838);
+  background: var(--alert-soft, #fff0ef);
+  color: var(--alert, #9d2929);
+}
+
+.maintenance-schedule-page .maintenance-schedule-details-view .schedule-summary-grid {
+  margin-bottom: 22px;
+}
+
+.maintenance-schedule-page-missing {
+  padding: 20px;
+  border: 1px solid var(--line, #dce3ec);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+}
+
+@media (max-width: 650px) {
+  .maintenance-schedule-page {
+    width: calc(100% - 20px);
+    margin: 10px auto 20px;
+  }
+
+  .maintenance-schedule-page .maintenance-schedule-details-view {
+    padding: 15px;
+  }
+
+  .maintenance-schedule-page-heading {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .maintenance-schedule-page-heading > .btn-outline {
+    align-self: flex-end;
+  }
+
+  .maintenance-schedule-page-heading .maintenance-schedule-back {
+    align-self: flex-start;
+  }
+}

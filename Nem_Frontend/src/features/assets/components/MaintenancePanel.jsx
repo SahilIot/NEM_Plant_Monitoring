@@ -168,6 +168,7 @@ function validateForm(values, requirePlannedDates) {
 
 export default function MaintenancePanel({
   assetId,
+  scheduleId,
   onChanged,
   onActionNotification,
   navigationState,
@@ -408,6 +409,27 @@ export default function MaintenancePanel({
         maintenanceRecord: records.find((record) => record.schedule_id === schedule.id),
       },
     });
+  };
+
+  // Open the existing schedule content as a route so the full details are not constrained by a modal.
+  const openScheduleDetails = (schedule) => {
+    navigate(`/assets/${assetId}/maintenance/schedules/${schedule.id}/details`, {
+      state: {
+        from: captureNavigationOrigin(location, {
+          ...(navigationState || location.state),
+          activeTab: "logbook",
+        }),
+      },
+    });
+  };
+
+  // Return route-based details to the asset schedule list while preserving the modal close behavior.
+  const closeScheduleDetails = () => {
+    if (busy) return;
+    setDialog(null);
+    if (scheduleId) {
+      navigate(`/assets/${assetId}`, { state: { activeTab: "logbook" } });
+    }
   };
 
   const save = async (event) => {
@@ -972,11 +994,11 @@ export default function MaintenancePanel({
           role="button"
           tabIndex={0}
           style={{ cursor: "pointer" }}
-          onClick={() => setDialog({ kind: "schedule-details", record: schedule })}
+          onClick={() => openScheduleDetails(schedule)}
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
-              setDialog({ kind: "schedule-details", record: schedule });
+              openScheduleDetails(schedule);
             }
           }}
         >
@@ -1062,7 +1084,7 @@ export default function MaintenancePanel({
         role="menuitem"
         onClick={() => {
           setActionMenuRecordId(null);
-          setDialog({ kind: "schedule-details", record: schedule });
+          openScheduleDetails(schedule);
         }}
       >
         <Eye size={16} aria-hidden="true" />
@@ -1122,7 +1144,13 @@ export default function MaintenancePanel({
 
   // Schedule view: start the work, follow the instructions, open linked documents.
   const renderScheduleDetails = () => {
-    const schedule = schedules.find((item) => item.id === dialog.record.id) || dialog.record;
+    const schedule = scheduleId
+      ? schedules.find((item) => String(item.id) === String(scheduleId))
+      : schedules.find((item) => item.id === dialog?.record?.id) || dialog?.record;
+    if (!schedule) return null;
+    const dueState = schedule.due_status || (
+      schedule.status === "active" ? dueLabel(schedule.current_due_date) : "not_scheduled"
+    );
     const scheduleRecords = records.filter((record) => record.schedule_id === schedule.id);
     const runningRecord = scheduleRecords.find((record) => record.status === "in_progress");
     const nextRecord = scheduleRecords
@@ -1157,15 +1185,31 @@ export default function MaintenancePanel({
       openMaterialFile(doc, file, "view");
     };
 
-    return (
-      <Modal
-        title="Maintenance schedule"
-        onClose={() => {
-          if (!busy) setDialog(null);
-        }}
-        wide
-      >
-        <div className="maintenance-schedule-details-view">
+    const detailsContent = (
+      <div className="maintenance-schedule-details-view">
+        {scheduleId && (
+          <header className="maintenance-schedule-page-heading">
+            <div className="maintenance-schedule-page-heading-copy">
+              <button
+                type="button"
+                className="btn-outline maintenance-schedule-back"
+                onClick={closeScheduleDetails}
+                disabled={busy}
+              >
+                Back to maintenance schedules
+              </button>
+              <h1>{schedule.title || "Maintenance schedule"}</h1>
+              <div className="maintenance-schedule-page-status">
+                <span className={`schedule-page-status schedule-page-status--${String(schedule.status || "active").replaceAll("_", "-")}`}>
+                  {String(schedule.status || "active").replaceAll("_", " ")}
+                </span>
+                <span className={`schedule-page-due schedule-page-due--${String(dueState).replaceAll("_", "-")}`}>
+                  {String(dueState || "not scheduled").replaceAll("_", " ")}
+                </span>
+              </div>
+            </div>
+          </header>
+        )}
         {error && (
           <p className="notice error" role="alert">
             {error}
@@ -1217,6 +1261,19 @@ export default function MaintenancePanel({
           <div>
             <small style={{ display: "block" }}>Technician</small>
             <strong>{schedule.assigned_technician || "—"}</strong>
+          </div>
+          {/* Surface the requested approval and completion milestones in the overview as well as the full details list. */}
+          <div>
+            <small style={{ display: "block" }}>Approval</small>
+            <strong>{String(schedule.approval_status || "—").replaceAll("_", " ")}</strong>
+          </div>
+          <div>
+            <small style={{ display: "block" }}>Proposed next due</small>
+            <strong>{displayDate(schedule.proposed_due_date)}</strong>
+          </div>
+          <div>
+            <small style={{ display: "block" }}>Last completed</small>
+            <strong>{schedule.last_completed_at ? formatTime(schedule.last_completed_at) : "—"}</strong>
           </div>
         </div>
 
@@ -1425,19 +1482,44 @@ export default function MaintenancePanel({
           <button
             type="button"
             className="btn-outline"
-            onClick={() => setDialog(null)}
+            onClick={closeScheduleDetails}
             disabled={busy}
           >
             Close
           </button>
         </div>
       </div>
-      </Modal>
     );
+    return scheduleId
+      ? detailsContent
+      : (
+        <Modal title="Maintenance schedule" onClose={closeScheduleDetails} wide>
+          {detailsContent}
+        </Modal>
+      );
   };
 
   return (
     <>
+      {/* Show the routed schedule page in place of the list while keeping existing action dialogs mounted. */}
+      {scheduleId ? (
+        <main className="maintenance-schedule-page">
+          {!schedulesLoaded || loading ? (
+            <LoadingIndicator compact message="Loading maintenance schedule details" />
+          ) : schedules.find((item) => String(item.id) === String(scheduleId)) ? (
+            renderScheduleDetails()
+          ) : (
+            <div className="maintenance-schedule-page-missing">
+              <p className="notice error" role="alert">
+                {error || "This maintenance schedule could not be found."}
+              </p>
+              <button type="button" className="btn-outline" onClick={closeScheduleDetails}>
+                Back to maintenance schedules
+              </button>
+            </div>
+          )}
+        </main>
+      ) : (
       <section className="panel maintenance-panel">
         <div className="panel-head maintenance-heading">
           <div>
@@ -1589,6 +1671,7 @@ export default function MaintenancePanel({
           </>
         )}
       </section>
+      )}
 
       {(dialog?.kind === "schedule-create" || dialog?.kind === "schedule-edit") && (
         <Modal
