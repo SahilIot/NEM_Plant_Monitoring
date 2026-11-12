@@ -20,7 +20,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 from app.db.session import UTCDateTime
 from app.models.audit_mixin import AuditNamesMixin
-from app.models.labels import Label, rule_labels, rule_template_labels
+from app.models.labels import (
+    Label,
+    rule_labels,
+    rule_template_labels,
+    rule_template_request_labels,
+)
 
 
 class MonitoringRuleTemplate(AuditNamesMixin, Base):
@@ -160,7 +165,16 @@ class MonitoringRuleTemplateRequest(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+    # Labels attached to a Supervisor's reusable rule suggestion.
+    label_records: Mapped[list[Label]] = relationship(
+        secondary=rule_template_request_labels,
+        lazy="selectin",
+    )
 
+    @property
+    def labels(self) -> list[str]:
+        return [label.name for label in self.label_records]
+    
 class MonitoringRule(AuditNamesMixin, Base):
     """Asset-specific monitoring rule."""
 

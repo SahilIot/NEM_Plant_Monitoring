@@ -13,6 +13,17 @@ export const MONITORING_RULE_CHOICES = [
     ruleType: "runtime_duration",
     defaultName: "Motor Running Time",
   },
+  {
+    // Temperature monitoring reuses the existing numeric-threshold rule engine so the
+    // application can support asset temperature alarms without introducing a parallel
+    // database model or a separate evaluation pipeline. The alias remains UI-only; the
+    // persisted rule still uses the shared parameter_threshold type.
+    id: "temperature_monitoring",
+    label: "Temperature Based",
+    description: "Track a numeric temperature signal and alert when it crosses the configured warning or alert thresholds.",
+    ruleType: "parameter_threshold",
+    defaultName: "Temperature Based",
+  },
 ];
 
 export const LEGACY_RULE_CHOICES = [
@@ -34,11 +45,21 @@ export const LEGACY_RULE_CHOICES = [
 ];
 
 export function monitoringRuleFormSelection(choiceId) {
+  const normalizedChoiceId =
+    choiceId === "temperature" || choiceId === "temperature_monitoring"
+      ? "temperature_monitoring"
+      : choiceId;
+
   const choice =
-    MONITORING_RULE_CHOICES.find((item) => item.id === choiceId) ||
+    MONITORING_RULE_CHOICES.find((item) => item.id === normalizedChoiceId) ||
     (choiceId === "boolean_count_threshold"
       ? MONITORING_RULE_CHOICES.find(
           (item) => item.ruleType === "boolean_count_threshold"
+        )
+      : undefined) ||
+    (choiceId === "parameter_threshold"
+      ? MONITORING_RULE_CHOICES.find(
+          (item) => item.ruleType === "parameter_threshold"
         )
       : undefined);
   if (!choice) {
@@ -88,6 +109,28 @@ export function buildAssetMonitoringRule(
     is_enabled: true,
     rule_type: values.rule_type,
   };
+// Identify whether the selected rule is a Temperature Monitoring rule
+// using its configuration, name, description, variable name, or temperature unit.
+// This helps apply temperature-specific handling even when the rule is not
+// explicitly marked as a temperature rule.
+  const selectedVariableId = Number(values.variable_id);
+  const selectedVariable = variables.find(
+    (variable) => Number(variable.id) === selectedVariableId
+  );
+  const normalizedVariableName = String(selectedVariable?.name || "");
+  const normalizedRuleName = String(values.name || "").toLowerCase();
+  const normalizedDescription = String(values.description || "").toLowerCase();
+  const isTemperatureRule =
+    values.rule_type === "parameter_threshold" &&
+    (
+      Boolean(values.parameters?.temperature_rule) ||
+      /temperature|temp/.test(normalizedRuleName) ||
+      /temperature|temp/.test(normalizedDescription) ||
+      /temperature|temp/.test(normalizedVariableName) ||
+      selectedVariable?.unit === "°C" ||
+      selectedVariable?.unit === "°F" ||
+      selectedVariable?.unit === "K"
+    );
   if (!rule.name) {
     throw new Error("Enter a rule name.");
   }
@@ -156,19 +199,23 @@ export function buildAssetMonitoringRule(
     return rule;
   }
 
-const variableId = Number(values.variable_id);
-const threshold = Number(values.threshold);
+  const variableId = Number(values.variable_id);
+  const threshold = Number(values.threshold);
 
-if (!variableIsActiveForAsset(variableId, ["number", "integer"])) {
-  throw new Error("Select an active numeric variable on this asset.");
-}
+  if (!variableIsActiveForAsset(variableId, ["number", "integer"])) {
+    throw new Error("Select an active numeric variable on this asset.");
+  }
 
-if (!Number.isFinite(threshold)) {
-  throw new Error("Enter a valid numeric threshold.");
-}
+  if (!Number.isFinite(threshold)) {
+    throw new Error("Enter a valid numeric threshold.");
+  }
 
-rule.variable_id = variableId;
-rule.operator = values.operator;
-rule.threshold = threshold;
-return rule;
+  rule.variable_id = variableId;
+  rule.operator = values.operator;
+  rule.threshold = threshold;
+  rule.parameters = {
+    ...(selectedVariable?.unit ? { unit: selectedVariable.unit } : { unit: "°C" }),
+    ...(isTemperatureRule ? { temperature_rule: true } : {}),
+  };
+  return rule;
 }

@@ -31,6 +31,29 @@ def validate_runtime_thresholds(parameters: dict[str, Any] | None) -> None:
     ):
         raise ValueError("Runtime thresholds must be positive and strictly increasing")
 
+# Validate temperature-specific rule parameters before saving or evaluating a rule.
+# Ensures the temperature unit is supported, both thresholds are finite positive
+# numbers, and the alert threshold is higher than the warning threshold.
+def validate_temperature_parameters(parameters: dict[str, Any] | None) -> None:
+    if not parameters or not parameters.get("temperature_rule"):
+        return
+    unit = parameters.get("unit")
+    if unit is None:
+        raise ValueError("Temperature rules require a supported temperature unit such as °C or °F")
+    lower_unit = str(unit).lower().replace("°", "").replace("º", "").replace(" ", "")
+    if not any(token in lower_unit for token in ("c", "f", "k")):
+        raise ValueError("Temperature rules require a supported temperature unit such as °C or °F")
+
+    warning_threshold = parameters.get("warning_threshold")
+    alert_threshold = parameters.get("alert_threshold")
+    if warning_threshold is None or alert_threshold is None:
+        raise ValueError("Temperature rules require both warning and alert thresholds")
+    for name, value in (("warning_threshold", warning_threshold), ("alert_threshold", alert_threshold)):
+        if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)) or not math.isfinite(float(value)) or float(value) <= 0:
+            raise ValueError(f"Temperature {name} must be a finite positive number")
+    if float(warning_threshold) >= float(alert_threshold):
+        raise ValueError("Temperature alert threshold must be higher than the warning threshold")
+
 
 #This schems defines what information a user must supply when creating a rule
 class RuleCreate(ORMModel):
@@ -81,7 +104,22 @@ class RuleCreate(ORMModel):
         if self.rule_type == "parameter_threshold":
             if self.variable_id is None or self.operator is None:
                 raise ValueError("Parameter threshold rules require a variable and operator")
-            expected_value = (self.parameters or {}).get("expected_value")
+            # For temperature rules, use the warning and alert thresholds to initialize
+            # the main threshold when it is not already configured, then validate the
+            # parameter validation.
+            parameters = self.parameters or {}
+            expected_value = parameters.get("expected_value")
+            temperature_rule = parameters.get("temperature_rule") is True
+            if temperature_rule:
+                warning_threshold = parameters.get("warning_threshold")
+                alert_threshold = parameters.get("alert_threshold")
+                if self.threshold is None:
+                    if warning_threshold is None or alert_threshold is None:
+                        raise ValueError("Temperature rules require a numeric threshold or explicit warning and alert thresholds")
+                    self.threshold = Decimal(str(warning_threshold))
+                validate_temperature_parameters(parameters)
+            else:
+                validate_temperature_parameters(parameters)
             if isinstance(expected_value, bool):
                 if self.operator not in {"==", "!=", "eq", "ne"} or self.threshold is not None:
                     raise ValueError("Boolean parameter thresholds require an equality operator and Boolean expected_value")
@@ -234,6 +272,11 @@ class RuleTemplateCreate(ORMModel):
     def validate_template_definition(self):
         required_types = self.required_variable_types
         if self.rule_type == "parameter_threshold":
+            # Initialize the main threshold from the warning threshold for temperature rules when missing, then validate all temperature-specific parameters.
+            if (self.parameters or {}).get("temperature_rule") is True:
+                if self.threshold is None and (self.parameters or {}).get("warning_threshold") is not None:
+                    self.threshold = Decimal(str((self.parameters or {}).get("warning_threshold")))
+            validate_temperature_parameters(self.parameters)
             if required_types is None:
                 self.required_variable_types = ["number", "integer"]
             elif required_types == ["boolean"]:
@@ -423,23 +466,26 @@ class RuleUpdate(ORMModel):
     @field_validator("parameters")
     @classmethod
     def validate_duration_parameters(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
-        if value is not None and "duration_seconds" in value:
-            duration = value["duration_seconds"]
-            if not isinstance(duration, int) or isinstance(duration, bool) or duration <= 0:
-                raise ValueError("parameters.duration_seconds must be a positive integer")
-            expected_state = value.get("expected_value")
-            if expected_state is not None and (not isinstance(expected_state, (str, bool, int, float))):
-                raise ValueError("parameters.expected_value must be a scalar")
-            threshold = value.get("threshold")
-            if threshold is not None and (
-                isinstance(threshold, bool)
-                or not isinstance(threshold, (int, float))
-            ):
-                raise ValueError("parameters.threshold must be numeric")
-            if isinstance(threshold, float) and not math.isfinite(threshold):
-                raise ValueError("parameters.threshold must be finite")
-            if isinstance(expected_state, float) and not math.isfinite(expected_state):
-                raise ValueError("parameters.expected_value must be finite")
+        if value is not None:
+            if value.get("temperature_rule"):
+                validate_temperature_parameters(value)
+            if "duration_seconds" in value:
+                duration = value["duration_seconds"]
+                if not isinstance(duration, int) or isinstance(duration, bool) or duration <= 0:
+                    raise ValueError("parameters.duration_seconds must be a positive integer")
+                expected_state = value.get("expected_value")
+                if expected_state is not None and (not isinstance(expected_state, (str, bool, int, float))):
+                    raise ValueError("parameters.expected_value must be a scalar")
+                threshold = value.get("threshold")
+                if threshold is not None and (
+                    isinstance(threshold, bool)
+                    or not isinstance(threshold, (int, float))
+                ):
+                    raise ValueError("parameters.threshold must be numeric")
+                if isinstance(threshold, float) and not math.isfinite(threshold):
+                    raise ValueError("parameters.threshold must be finite")
+                if isinstance(expected_state, float) and not math.isfinite(expected_state):
+                    raise ValueError("parameters.expected_value must be finite")
         return value
 
     @field_validator("name")
