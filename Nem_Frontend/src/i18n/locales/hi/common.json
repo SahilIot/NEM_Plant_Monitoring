@@ -1,0 +1,46 @@
+{
+  "language": {
+    "label": "भाषा",
+    "english": "English",
+    "hindi": "हिन्दी"
+  },
+  "nav": {
+    "overview": "अवलोकन",
+    "assets": "एसेट्स",
+    "plc": "पीएलसी / ओपीसी यूए",
+    "configuration": "कॉन्फ़िगरेशन",
+    "settings": "सेटिंग्स",
+    "collapse": "संकुचित करें",
+    "expand": "विस्तारित करें",
+    "userAccess": "उपयोगकर्ता एक्सेस",
+    "signOut": "साइन आउट",
+    "signingOut": "साइन आउट हो रहा है…",
+    "showAssetPanel": "एसेट पैनल दिखाएँ",
+    "hideAssetPanel": "एसेट पैनल छुपाएँ",
+    "connecting": "कनेक्ट हो रहा है",
+    "backendConnected": "बैकएंड कनेक्टेड",
+    "databaseUnavailable": "डेटाबेस उपलब्ध नहीं है",
+    "apiUnreachable": "एपीआई पहुँच योग्य नहीं है",
+    "liveUpdatesDisconnected": "लाइव अपडेट डिस्कनेक्टेड",
+    "checkedAt": "जाँच की गई {{time}}",
+    "appTitle": "एनईएम प्लांट मॉनिटर"
+  },
+  "auth": {
+    "checkingSession": "सत्र जाँच हो रहा है…",
+    "confirmSignOut": "क्या आप वाकई एप्लिकेशन से साइन आउट करना चाहते हैं?",
+    "signInTitle": "एनईएम प्लांट मॉनिटर में साइन इन करें",
+    "signInSubtitle": "जारी रखने के लिए अपने स्थानीय एनईएम खाते का उपयोग करें।",
+    "username": "उपयोगकर्ता नाम",
+    "password": "पासवर्ड",
+    "signIn": "साइन इन",
+    "signingIn": "साइन इन हो रहा है…",
+    "signInFailed": "साइन-इन विफल रहा।",
+    "notFoundTitle": "पेज नहीं मिला",
+    "notFoundMessage": "अनुरोधित पेज मौजूद नहीं है।",
+    "returnHome": "अवलोकन पर वापस जाएँ"
+  },
+  "status": {
+    "retry": "पुनः प्रयास करें",
+    "couldNotLoadAssets": "एसेट लोड नहीं हो सके: {{error}}"
+  }
+}

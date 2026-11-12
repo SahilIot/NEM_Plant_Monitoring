@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "./AuthContext.jsx";
 import { resolveNavigationOrigin } from "../../utils/navigation.js";
 
@@ -7,12 +8,13 @@ export default function LoginPage() {
   const { user, loading, login } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  if (loading) return <main className="auth-page"><p role="status">Checking session…</p></main>;
+  if (loading) return <main className="auth-page"><p role="status">{t("auth.checkingSession")}</p></main>;
   if (user) return <Navigate to="/" replace />;
 
   const submit = async (event) => {
@@ -32,7 +34,7 @@ export default function LoginPage() {
         { replace: true, state: target.state }
       );
     } catch (loginError) {
-      setError(loginError.message || "Sign-in failed.");
+      setError(loginError.message || t("auth.signInFailed"));
     } finally {
       setBusy(false);
     }
@@ -41,11 +43,11 @@ export default function LoginPage() {
   return (
     <main className="auth-page">
       <section className="panel auth-card">
-        <h1 className="page-title">Sign in to NEM Plant Monitor</h1>
-        <p className="muted">Use your local NEM account to continue.</p>
+        <h1 className="page-title">{t("auth.signInTitle")}</h1>
+        <p className="muted">{t("auth.signInSubtitle")}</p>
         <form onSubmit={submit}>
           <label className="field">
-            Username
+            {t("auth.username")}
             <input
               autoComplete="username"
               value={username}
@@ -56,7 +58,7 @@ export default function LoginPage() {
             />
           </label>
           <label className="field">
-            Password
+            {t("auth.password")}
             <input
               type="password"
               autoComplete="current-password"
@@ -69,7 +71,7 @@ export default function LoginPage() {
           </label>
           {error && <p className="notice error" role="alert">{error}</p>}
           <button type="submit" className="btn-primary" disabled={busy}>
-            {busy ? "Signing in…" : "Sign in"}
+            {busy ? t("auth.signingIn") : t("auth.signIn")}
           </button>
         </form>
       </section>
