@@ -1,0 +1,46 @@
+{
+  "language": {
+    "label": "Language",
+    "english": "English",
+    "hindi": "हिन्दी"
+  },
+  "nav": {
+    "overview": "Overview",
+    "assets": "Assets",
+    "plc": "PLC / OPC UA",
+    "configuration": "Configuration",
+    "settings": "Settings",
+    "collapse": "Collapse",
+    "expand": "Expand",
+    "userAccess": "User access",
+    "signOut": "Sign out",
+    "signingOut": "Signing out…",
+    "showAssetPanel": "Show asset panel",
+    "hideAssetPanel": "Hide asset panel",
+    "connecting": "Connecting",
+    "backendConnected": "Backend connected",
+    "databaseUnavailable": "Database unavailable",
+    "apiUnreachable": "API unreachable",
+    "liveUpdatesDisconnected": "Live updates disconnected",
+    "checkedAt": "Checked {{time}}",
+    "appTitle": "NEM Plant Monitor"
+  },
+  "auth": {
+    "checkingSession": "Checking session…",
+    "confirmSignOut": "Are you sure you want to sign out of the application?",
+    "signInTitle": "Sign in to NEM Plant Monitor",
+    "signInSubtitle": "Use your local NEM account to continue.",
+    "username": "Username",
+    "password": "Password",
+    "signIn": "Sign in",
+    "signingIn": "Signing in…",
+    "signInFailed": "Sign-in failed.",
+    "notFoundTitle": "Page not found",
+    "notFoundMessage": "The requested page does not exist.",
+    "returnHome": "Return to overview"
+  },
+  "status": {
+    "retry": "Retry",
+    "couldNotLoadAssets": "Could not load assets: {{error}}"
+  }
+}

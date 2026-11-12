@@ -1,6 +1,7 @@
 
 import React from "react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 
 import Layout from "../components/common/Layout.jsx";
 
@@ -37,12 +38,14 @@ import {
 import ExportConfigurationPage from "../features/configuration/pages/ExportConfigurationPage.jsx";
 
 function NotFoundPage() {
+  const { t } = useTranslation();
+
   return (
     <main className="panel">
-      <h1 className="page-title">Page not found</h1>
-      <p className="muted">The requested page does not exist.</p>
+      <h1 className="page-title">{t("auth.notFoundTitle")}</h1>
+      <p className="muted">{t("auth.notFoundMessage")}</p>
       <Link className="btn-outline" to="/">
-        Return to overview
+        {t("auth.returnHome")}
       </Link>
     </main>
   );
@@ -51,11 +54,12 @@ function NotFoundPage() {
 export default function App() {
   const { user, loading } = useAuth();
   const location = useLocation();
+  const { t } = useTranslation();
 
   if (loading) {
     return (
       <main className="auth-page">
-        <LoadingIndicator message="Checking session" />
+        <LoadingIndicator message={t("auth.checkingSession")} />
       </main>
     );
   }

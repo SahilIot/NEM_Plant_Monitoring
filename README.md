@@ -20,7 +20,8 @@ maintenance work and recurring calendar schedules.
   assets, and view asset status and operational history.
 - **Variables and readings:** Define per-asset variables with `number`,
   `integer`, `string`, or `boolean` types; optionally associate a variable with
-  an OPC UA NodeId. Readings can be submitted individually or in batches and
+  an OPC UA NodeId. Boolean variables can also carry a **signal role**
+  (`running` or `cycle`) that marks them as a machine running or cycle signal. Readings can be submitted individually or in batches and
   queried by asset or variable.
 - **OPC UA monitoring:** Test a connection, discover nodes, perform a
   read-only one-shot read, and continuously subscribe to configured NodeIds.
@@ -38,10 +39,13 @@ maintenance work and recurring calendar schedules.
 - **Alerts and events:** Maintain active/resolved alerts and event history;
   acknowledge and complete eligible alerts. Alert acknowledgement does not by
   itself clear a rule condition.
-- **Maintenance:** Create work records and recurring calendar schedules,
-  manage planned/in-progress/completed/cancelled work, review proposed next
-  dates, and view maintenance history. Due or overdue schedules can create
-  warning alerts.
+- **Maintenance:** Create work records and three kinds of recurring schedules
+  (**calendar**, **runtime-based** and **usage-based**), manage
+  planned/in-progress/completed/cancelled work, review proposed next dates
+  (calendar schedules), register completion details, and view maintenance
+  history. Due or overdue calendar schedules, and runtime/usage schedules that
+  reach their interval, create warning alerts. See
+  [Runtime- and usage-based maintenance](#runtime--and-usage-based-maintenance).
 - **Local accounts:** Authenticate with username/password, manage
   Administrator, Supervisor, and Operator accounts, and revoke sessions.
   Sessions expire after eight hours. Passwords are hashed; browser sessions
@@ -49,7 +53,9 @@ maintenance work and recurring calendar schedules.
 - **Dashboard configuration:** Manage the Monitoring Rule Library and Rule
   Collection Library, instructions and documents (with optional attachments),
   configuration import/export, profile and email settings, usage information,
-  and database backup/restore.
+  and database backup/restore. A Rule Collection can be assigned to an asset
+  in one step, and an Administrator can safely unassign it again (see
+  [Assigning a collection](#assigning-and-unassigning-a-collection-on-an-asset)).
 - **Email notifications:** Eligible alert transitions can enqueue email jobs
   for assigned supervisors. A separate worker delivers and retries jobs using
   configured SMTP settings. Actual delivery depends on recipient assignments,
@@ -58,9 +64,87 @@ maintenance work and recurring calendar schedules.
   connection changes. Dashboard views use these messages together with REST
   refreshes/polling; the UI updates without a full-page reload.
 
-No automatic running-hour/cycle-based maintenance scheduling, SMS delivery,
-analytics integration, or PLC control/write workflow is implemented in the
-current code.
+No SMS delivery, analytics integration, or PLC control/write workflow is
+implemented in the current code. Runtime- and usage-based maintenance only
+*reads* Boolean signals; it never writes to the PLC.
+
+## Multi-Language Support (Internationalization)
+
+The frontend now supports a local, browser-based language switcher for English
+and Hindi without introducing any backend or database changes. The change is
+implemented entirely on the client side and preserves the existing dashboard,
+asset management, PLC, settings and auth flows.
+
+### Architecture and dependencies
+
+The implementation uses `i18next` and `react-i18next` with local JSON language
+files stored under the frontend source tree. Translation resources are loaded
+once at application start and kept in a central `src/i18n/index.js` module so
+new languages and keys can be added without rewriting existing components.
+
+- Supported languages: English (`en`) and Hindi (`hi`)
+- Default language: English
+- Fallback language: English
+- Dependency licenses: MIT for `i18next` and `react-i18next`
+- External service requirement: none. No API key, paid translation service, or
+  runtime translation provider is used.
+
+### Translation files and persistence
+
+The translation resources live in:
+
+```text
+Nem_Frontend/
+  src/
+    i18n/
+      index.js
+      locales/
+        en/common.json
+        hi/common.json
+```
+
+The user's selected language is stored in browser `localStorage` using the key
+`nem-language`. If a browser has no saved preference, the app defaults to
+English. Language state is preserved during refreshes, route navigation and
+login/logout cycles because the preference is kept in the browser rather than in
+backend user records.
+
+### How the switcher works
+
+A compact language selector is rendered in the existing top navigation area. It
+uses the same theme styling and responsive layout rules as the rest of the
+header, so it preserves the industrial UI and dark/light mode. Switching the
+language immediately updates `i18next` state without a full page reload.
+
+### Adding another language
+
+1. Add a new locale folder under `src/i18n/locales/<code>/`.
+2. Copy `common.json` and replace the strings with the new language.
+3. Register the language in `src/i18n/index.js` by updating
+   `supportedLanguages` and `languageMetadata`.
+4. Keep translation keys stable and reuse existing IDs so that components keep
+   working across languages.
+
+### Adding translation keys
+
+Use nested, feature-oriented keys such as `nav.overview` or `auth.signInTitle`.
+Components should read from the shared translation catalog instead of embedding
+raw English text. This keeps strings centralized and simplifies future extension.
+
+### Testing translations
+
+To validate the localization flow:
+
+1. Start the frontend and confirm the default is English.
+2. Switch to Hindi and verify the interface updates immediately.
+3. Refresh the page and confirm the saved language remains active.
+4. Switch back to English and confirm the fallback logic still works.
+5. Check dark mode and light mode, then verify the selector remains readable and
+   responsive.
+
+The frontend build should remain successful after the change. No backend API
+contract changes are introduced, and no machine data or PLC semantics are
+modified.
 
 ## Project layout
 
@@ -78,6 +162,7 @@ NEM_Plant_Monitoring/
         assets.py                   Asset hierarchy CRUD and move
         variables.py                Asset-owned variables
         readings.py                 Single/batch ingestion, latest and history queries
+        config_transfer.py          Administrator-only configuration export / preview / import
         rules.py                    Asset-specific rule creation, listing and update
         rule_visibility.py          Admin-controlled shared-rule visibility, history, assignments
         monitoring.py               Evaluation, status, alerts, events
@@ -94,7 +179,7 @@ NEM_Plant_Monitoring/
         migrations/shared_labels.py Versioned shared-labels migration
       models/                       asset, variable, reading, rule, rule_visibility, maintenance,
                                     machine_monitoring, notification, auth, labels, frontend_data,
-                                    audit (+ audit_mixin)
+                                    config_import, audit (+ audit_mixin)
       schemas/                      Pydantic request/response models per area
       services/
         reading_ingestion.py        Validated single/batch reading ingestion
@@ -104,11 +189,15 @@ NEM_Plant_Monitoring/
         access_scope.py             Asset-assignment scoping for REST and WebSocket
         rule_visibility.py          Shared-rule visibility, edit permission, change history
         maintenance_schedule.py     Calendar recurrence and due-date logic
+        maintenance_progress.py     Runtime/usage progress from Boolean signals, due alerts, occurrences
+        config_transfer.py          Configuration package build, validation and import
         email_notifications.py      Email outbox and SMTP delivery
         live_updates.py             Committed-change WebSocket hub
         auth_security.py            Password hashing, sessions
         labels.py                   Shared label catalog service
         frontend_backup.py          Dashboard backup/restore snapshots
+    tests/                          pytest suite (maintenance progress, completion, schedules,
+                                    reading API, backup confirmation, collection unassign)
     scripts/create_admin.py         Interactive first-Administrator setup
     seed.py                         Idempotent simulated demo data
     requirements.txt
@@ -122,11 +211,14 @@ NEM_Plant_Monitoring/
       components/common/            Layout, Brand, GroupedMenu, LabelsField, Icons, UI controls
       features/
         dashboard/pages/            Home (Overview)
-        assets/                     components/ (tree, supervisors, maintenance panel, copy rules),
+        assets/                     components/ (tree, supervisors, maintenance panel, current
+                                    maintenance cards, maintenance details, completion
+                                    registration dialog, copy rules),
                                     pages/ (asset index/detail, rule and maintenance creation),
                                     rules/monitoringRuleFlow.js
         plc/                        pages/Plc.jsx, styles/Plc.css
-        rules/                      components/PredefinedRulesModal, pages/AlertRules, RuleCreatePage
+        rules/                      components/PredefinedRulesModal, RuleCollectionAssignmentModal,
+                                    pages/AlertRules, RuleCreatePage, rulePresentation.js
         configuration/pages/        RuleLibrary, CollectionLibrary, visibility dialog,
                                     DocumentsPage / DocumentCreatePage / DocumentViewerPage /
                                     CreateInstructionPage (utils/documents.js helpers),
@@ -371,6 +463,24 @@ Deleting a collection deletes the rules inside it (the confirmation says so);
 rules already assigned to assets are not changed. Moving an existing library
 rule into a collection is not offered, because it would change ownership.
 
+#### Assigning  a collection on an asset
+
+The asset's rule-collection dialog assigns a collection's rules to the asset
+(a Supervisor's assignment is stored *Not Activated* for review; an
+Administrator's is activated). An Administrator can unassign a collection with
+`DELETE /api/v1/assets/{asset_id}/rule-collections/{collection_id}`. The call
+runs in one transaction and is refused with HTTP 409 when:
+
+- any of the collection's rules on that asset is still enabled (deactivate them
+  first), or
+- an alert of those rules is referenced by a maintenance record (maintenance
+  history is preserved).
+
+On success the asset-specific rules, with their states, counters, alerts and
+events, are removed and a `rule_permanently_deleted` event is written for each
+rule. The collection itself and other assets are not changed. Supervisors and
+Operators receive 403.
+
 ### Instructions & Documents
 
 `/configuration/documents` combines two independent capabilities, both stored
@@ -447,10 +557,63 @@ Maintenance due alerts are associated with the relevant schedule and due date.
 
 Maintenance records track planned, in-progress, completed, and cancelled
 work. Calendar recurrence units are days, weeks, months, or years. Completing
-a recurring occurrence may propose a next due date for review; confirming or
-declining that proposal does not add running-hour/cycle-based scheduling.
+a recurring calendar occurrence may propose a next due date for review;
+confirming or declining that proposal applies to calendar schedules only.
 Operators may start or complete only the active scheduled occurrence due
-today or overdue, subject to backend checks.
+today or overdue (calendar) or the active occurrence of a runtime/usage
+schedule, subject to backend checks.
+
+### Runtime- and usage-based maintenance
+
+A maintenance schedule has one of three modes:
+
+| Mode | Due when | Signal required | Interval field |
+|---|---|---|---|
+| `calendar` | The calendar due date arrives (optional recurrence in days, weeks, months or years). | None | `first_due_date`, `recurrence_*` |
+| `runtime` | Accumulated running time reaches the interval. | Active Boolean variable with signal role `running` | `runtime_interval_hours` |
+| `usage` | Counted cycles reach the interval. | Active Boolean variable with signal role `cycle` | `usage_interval_count` |
+
+How progress is calculated (`services/maintenance_progress.py`, called from
+reading ingestion in the same transaction):
+
+- **Runtime:** the time between two consecutive samples is added to progress only
+  when the *previous* sample was `true` and still fresh (within the stale-after
+  window). Progress is stored in hours.
+- **Usage:** only a confirmed `false` to `true` transition adds one cycle. A stale
+  gap cannot establish a reliable transition.
+- Out-of-order or duplicate timestamps are ignored, and the signal baseline
+  always moves forward.
+- Progress does not accumulate while an occurrence is waiting for work.
+- When the threshold is reached, exactly one warning alert and one planned
+  occurrence are created. Duplicates are never created, and inconsistent data
+  (several live records or alerts) is left for manual review.
+- Maintenance progress is independent of monitoring-rule counters; neither resets
+  the other.
+
+Lifecycle and rules:
+
+- Creating a runtime/usage schedule does not create an initial occurrence. The
+  signal variable must belong to the same asset, be active, Boolean and have the
+  matching signal role (otherwise the API answers 422).
+- Runtime/usage schedules support the statuses `active`, `paused` and
+  `cancelled`. Pausing clears the signal baseline so paused time is never counted
+  after resume; a cancelled schedule cannot be reactivated.
+- Changing the signal or the interval resets progress and the baseline.
+- Calendar dates and recurrence cannot be edited on runtime/usage schedules, and
+  runtime/usage fields cannot be added to calendar schedules. Confirming or
+  declining a proposed next date does not apply to them.
+- Completing the occurrence resolves its due alert, resets progress to zero,
+  clears the baseline and the current-occurrence pointer, and starts the next
+  cycle.
+- Operators may start or complete only the *active* occurrence of an active,
+  non-pending runtime/usage schedule.
+
+### Completion registration
+
+`POST /maintenance/{id}/complete` accepts an optional body. An empty body keeps
+legacy callers working. When registration data is sent, these fields are required
+together: `actual_completed_at`, `performed_by`, `notes` and `completion_notes`.
+`parts_used` and `checklist` are optional, and unknown fields are rejected.
 
 Asset detail contains **Current status**, **Maintenance logbook**, and
 **Event log** tabs. The Overview page shows alert status and action controls.
@@ -497,7 +660,8 @@ API routers are mounted under `/api/v1`:
 | Rules | `/rules`, rule status, template assignment/copy, lifecycle operations |
 | Shared rules | `/rule-templates`, `/rule-templates/{id}/visibility` (Administrator), `/rule-templates/{id}/history`, `/rule-templates/{id}/assignments`, `/rule-visibility/supervisors`, `/rule-template-requests` (suggestions) |
 | Monitoring | `/monitoring/status`, `/monitoring/evaluate`, alerts and events |
-| Maintenance | `/maintenance`, `/maintenance/schedules`, start/complete/cancel and next-date actions |
+| Maintenance | `/maintenance`, `/maintenance/schedules` (calendar, runtime and usage modes), start/complete (optional registration body)/cancel and next-date actions |
+| Rule collections | `POST /assets/{asset_id}/rules/assign`, `DELETE /assets/{asset_id}/rule-collections/{collection_id}` (Administrator, unassign) |
 | PLC / OPC UA | `/plc/status`, `/plc/test`, `/plc/discover`, `/plc/read` |
 | Notifications | Asset supervisor assignment and email delivery summary |
 | Dashboard/configuration | Summary, `/collections`, `/documents` (instructions and files), settings, `/config-transfer/*` (export, export/summary, preview, import), usage, backups |
@@ -592,11 +756,34 @@ npm test
 npm run build
 ```
 
-No backend automated test suite or frontend test cases were found in the
-current repository snapshot; the frontend `npm test` script runs Node's test
-runner. A successful build validates compilation, not PLC, database, SMTP,
-authorization, or operational behavior. Test those integrations in a
-controlled environment before deployment.
+### Backend tests
+
+`Nem_Backend/tests/` contains a pytest suite (`pytest` is in `requirements.txt`):
+
+| Test file | Covers |
+|---|---|
+| `test_maintenance_progress.py` | Runtime accumulation, cycle edges, stale gaps, single alert/occurrence, pause/resume (fake session) |
+| `test_maintenance_completion.py` | Completion resets progress; completion registration schema |
+| `test_rule_collection_assignment.py` | Collection unassign role guard and safety checks |
+| `test_frontend_backup_confirmation.py` | Backup restore confirmation token |
+| `test_maintenance_progress_postgres.py` | Runtime/usage progress and next cycle on PostgreSQL |
+| `test_maintenance_schedule_creation_postgres.py` | Schedule creation, deletion, signal validation, proposal recalculation, cancellation |
+| `test_reading_api_maintenance.py` | Reading API (single and batch) triggering maintenance, authentication and roles |
+
+```powershell
+cd C:\path\to\NEM_Plant_Monitoring\Nem_Backend
+.\.venv\Scripts\python.exe -m pytest
+```
+
+The `*_postgres.py` tests and `test_reading_api_maintenance.py` need
+`TEST_DATABASE_URL` pointing to a dedicated PostgreSQL database named
+`plc_monitoring_runtime_test`. They refuse to run against any other database or
+against the application database, and they roll back their changes afterwards.
+
+The frontend has one test file (`rulePresentation.test.js`) run by `npm test`
+(Node's test runner). A successful build validates compilation, not PLC,
+database, SMTP, authorization, or operational behavior. Test those integrations
+in a controlled environment before deployment.
 
 ## Further documentation
 

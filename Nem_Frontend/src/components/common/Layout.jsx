@@ -1,6 +1,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, matchPath } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { LogOut, Users } from "lucide-react";
 import { api } from "../../services/api.js";
 import { subscribeLiveUpdates } from "../../services/liveUpdates.js";
@@ -9,6 +10,11 @@ import Brand from "./Brand.jsx";
 import AssetTree from "../../features/assets/components/AssetTree.jsx";
 import { useAuth } from "../../features/auth/AuthContext.jsx";
 import { useConfirmation } from "./UI.jsx";
+import {
+  languageMetadata,
+  setPreferredLanguage,
+  supportedLanguages,
+} from "../../i18n/index.js";
 import {
   HomeIcon,
   TreeIcon,
@@ -134,9 +140,35 @@ function computeHealth(assets, alerts) {
   return health;
 }
 
+function LanguageSwitcher() {
+  const { i18n, t } = useTranslation();
+
+  const handleChange = (event) => {
+    const nextLanguage = event.target.value;
+
+    // Save the user's preferred language and update the application language immediately.
+    setPreferredLanguage(nextLanguage);
+    i18n.changeLanguage(nextLanguage);
+  };
+
+  return (
+    <label className="language-switcher" aria-label={t("language.label")}>
+      <span className="sr-only">{t("language.label")}</span>
+      <select value={i18n.resolvedLanguage || "en"} onChange={handleChange}>
+        {supportedLanguages.map((language) => (
+          <option key={language} value={language}>
+            {languageMetadata[language]?.nativeName || languageMetadata[language]?.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export default function Layout() {
   const { pathname } = useLocation();
   const { user, logout } = useAuth();
+  const { t, i18n } = useTranslation();
   const confirm = useConfirmation();
 
   const [rawAssets, setRawAssets] = useState([]);
@@ -169,10 +201,10 @@ export default function Layout() {
   const confirmSignOut = async () => {
     if (signingOut) return;
     const accepted = await confirm(
-      "Are you sure you want to sign out of the application?",
+      t("auth.confirmSignOut"),
       {
-        title: "Sign out",
-        confirmLabel: "Sign out",
+        title: t("nav.signOut"),
+        confirmLabel: t("nav.signOut"),
       }
     );
     if (!accepted) return;
@@ -263,7 +295,7 @@ export default function Layout() {
       const status = ruleList.reason?.status || alertList.reason?.status;
       setLink({
         online: false,
-        reason: status === 503 ? "Database unavailable" : "API unreachable",
+        reason: status === 503 ? t("nav.databaseUnavailable") : t("nav.apiUnreachable"),
         at: new Date(),
       });
     }
@@ -305,7 +337,7 @@ export default function Layout() {
       if (update.type === "disconnected") {
         setLink({
           online: false,
-          reason: "Live updates disconnected",
+          reason: t("nav.liveUpdatesDisconnected"),
           at: new Date(),
         });
         return;
@@ -404,9 +436,9 @@ export default function Layout() {
 
   const linkText =
     link.online === null
-      ? "Connecting"
+      ? t("nav.connecting")
       : link.online
-        ? "Backend connected"
+        ? t("nav.backendConnected")
         : link.reason;
   const navigationExpanded = compactViewport
     ? compactRailOpen
@@ -418,14 +450,15 @@ export default function Layout() {
         <Brand />
         <div className="app-title">{APP_TITLE}</div>
         <div className="spacer" />
+        <LanguageSwitcher />
         <span className="auth-user-label">{user.username} · {user.role}</span>
         {user.role === "Administrator" && (
           <Link
             to="/settings/users"
             className="auth-user-link"
-            title="Manage users and machine access"
+            title={t("nav.userAccess")}
           >
-            <Users size={17} /> User access
+            <Users size={17} /> {t("nav.userAccess")}
           </Link>
         )}
         <button
@@ -434,7 +467,7 @@ export default function Layout() {
           type="button"
           disabled={signingOut}
         >
-          <LogOut size={16} /> {signingOut ? "Signing out…" : "Sign out"}
+          <LogOut size={16} /> {signingOut ? t("nav.signingOut") : t("nav.signOut")}
         </button>
 
         <div
@@ -445,8 +478,8 @@ export default function Layout() {
           role="status"
           title={
             link.at
-              ? `Checked ${link.at.toLocaleTimeString()}`
-              : "Checking backend"
+              ? t("nav.checkedAt", { time: link.at.toLocaleTimeString() })
+              : t("nav.connecting")
           }
         >
           <i />
@@ -469,11 +502,11 @@ export default function Layout() {
           aria-label="Main"
         >
           <div className="rail-main">
-            {navItem("/", HomeIcon, "Overview", true)}
-            {navItem("/assets", TreeIcon, "Assets")}
-            {navItem("/plc", PlugIcon, "PLC / OPC UA")}
-            {navItem("/configuration", ShapesIcon, "Configuration")}
-            {navItem("/settings", GearIcon, "Settings")}
+            {navItem("/", HomeIcon, t("nav.overview"), true)}
+            {navItem("/assets", TreeIcon, t("nav.assets"))}
+            {navItem("/plc", PlugIcon, t("nav.plc"))}
+            {navItem("/configuration", ShapesIcon, t("nav.configuration"))}
+            {navItem("/settings", GearIcon, t("nav.settings"))}
           </div>
 
           <button
@@ -485,12 +518,12 @@ export default function Layout() {
                 setRailOpen((open) => !open);
               }
             }}
-            title={navigationExpanded ? "Collapse navigation" : "Expand navigation"}
-            aria-label={navigationExpanded ? "Collapse navigation" : "Expand navigation"}
+            title={navigationExpanded ? t("nav.collapse") : t("nav.expand")}
+            aria-label={navigationExpanded ? t("nav.collapse") : t("nav.expand")}
             aria-expanded={navigationExpanded}
           >
             <DoubleChevron size={18} />
-            <span className="rail-label">Collapse</span>
+            <span className="rail-label">{t("nav.collapse")}</span>
           </button>
         </nav>
 
@@ -513,8 +546,8 @@ export default function Layout() {
               <button
                 className="icon-btn"
                 onClick={() => setTreeOpen((open) => !open)}
-                title={treeOpen ? "Hide asset panel" : "Show asset panel"}
-                aria-label={treeOpen ? "Hide asset panel" : "Show asset panel"}
+                title={treeOpen ? t("nav.hideAssetPanel") : t("nav.showAssetPanel")}
+                aria-label={treeOpen ? t("nav.hideAssetPanel") : t("nav.showAssetPanel")}
                 aria-expanded={treeOpen}
               >
                 <PanelIcon size={20} />
@@ -534,13 +567,13 @@ export default function Layout() {
             <main className="content">
               {assetError && (
                 <div className="banner error" role="alert">
-                  <p>Could not load assets: {assetError}</p>
+                  <p>{t("status.couldNotLoadAssets", { error: assetError })}</p>
                   <button
                     type="button"
                     className="btn-outline"
                     onClick={() => reload().catch(() => {})}
                   >
-                    Retry
+                    {t("status.retry")}
                   </button>
                 </div>
               )}

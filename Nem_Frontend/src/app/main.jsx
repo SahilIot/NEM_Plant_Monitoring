@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App.jsx";
 import { AuthProvider } from "../features/auth/AuthContext.jsx";
 import { ConfirmationProvider } from "../components/common/UI.jsx";
+import "../i18n/index.js";
 import "../styles/global.css";
 
 
