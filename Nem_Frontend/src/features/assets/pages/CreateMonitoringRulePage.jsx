@@ -42,7 +42,7 @@ const RULE_FIELDS = [
     label: "Rule type",
     type: "select",
     options: [
-      ["parameter_threshold", "Numeric value threshold (e.g. temperature)"],
+      ["parameter_threshold", "Temperature Based (numeric threshold)"],
       ["boolean_count_threshold", "Cycle Clock (Boolean ON/OFF count)"],
       ["runtime_duration", "Motor Running Time"],
     ],
@@ -271,12 +271,20 @@ export default function CreateMonitoringRulePage() {
     try {
       const existingRuleType =
       location.state?.editingRule?.rule_type;
+      const isTemperatureRule =
+        existingRuleType === "parameter_threshold" &&
+        /(temperature|temp)/i.test(
+          `${location.state?.editingRule?.name || ""} ${location.state?.editingRule?.description || ""}`
+        );
+
       const selectedChoiceId = isEdit
       ? (
         existingRuleType === "boolean_count_threshold"
         ? "motor_rotation"
         : existingRuleType === "runtime_duration"
         ? "running_time"
+        : isTemperatureRule
+        ? "temperature_monitoring"
         : existingRuleType
       )
       : choiceId;

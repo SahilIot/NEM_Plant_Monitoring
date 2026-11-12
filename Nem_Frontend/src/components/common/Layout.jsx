@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, matchPath } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { LogOut, Users } from "lucide-react";
+import { Languages, LogOut, Users } from "lucide-react";
 import { api } from "../../services/api.js";
 import { subscribeLiveUpdates } from "../../services/liveUpdates.js";
 import { APP_TITLE } from "../../utils/config.js";
@@ -146,18 +146,26 @@ function LanguageSwitcher() {
   const handleChange = (event) => {
     const nextLanguage = event.target.value;
 
-    // Save the user's preferred language and update the application language immediately.
+    // Save the preferred language and immediately update the application.
     setPreferredLanguage(nextLanguage);
     i18n.changeLanguage(nextLanguage);
   };
 
   return (
     <label className="language-switcher" aria-label={t("language.label")}>
+      <Languages size={18} aria-hidden="true" />
+
       <span className="sr-only">{t("language.label")}</span>
-      <select value={i18n.resolvedLanguage || "en"} onChange={handleChange}>
+
+      <select
+        value={i18n.resolvedLanguage || "en"}
+        onChange={handleChange}
+        aria-label={t("language.label")}
+      >
         {supportedLanguages.map((language) => (
           <option key={language} value={language}>
-            {languageMetadata[language]?.nativeName || languageMetadata[language]?.label}
+            {languageMetadata[language]?.nativeName ||
+              languageMetadata[language]?.label}
           </option>
         ))}
       </select>

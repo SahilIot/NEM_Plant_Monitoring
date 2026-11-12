@@ -20,6 +20,25 @@ rule_template_labels = Table(
     Column("label_id", ForeignKey("labels.id", ondelete="CASCADE"), primary_key=True),
 )
 
+# Association table linking monitoring rule template requests with labels using a many-to-many relationship.
+rule_template_request_labels = Table(
+    "monitoring_rule_template_request_labels",
+    Base.metadata,
+    Column(
+        "request_id",
+        ForeignKey(
+            "nem_monitoring_rule_template_requests.id",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    ),
+    Column(
+        "label_id",
+        ForeignKey("labels.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
 # connects labels to rule collections.
 rule_collection_labels = Table(
     "rule_collection_labels",
@@ -39,6 +58,7 @@ instruction_document_labels = Table(
 for association in (
     rule_labels,
     rule_template_labels,
+    rule_template_request_labels,
     rule_collection_labels,
     instruction_document_labels,
 ):

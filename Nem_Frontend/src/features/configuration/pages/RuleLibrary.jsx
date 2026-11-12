@@ -47,6 +47,7 @@ import "./CopyRuleModal.css";
 
 const RULE_TYPES = [
   ["interval_based", "Interval based"],
+  ["temperature_monitoring", "Temperature Based"],
   ["parameter_threshold", "Parameter threshold"],
 ];
 
@@ -69,6 +70,32 @@ export const FIELDS = [
   { key: "description", label: "Description", type: "textarea" },
   { key: "labels", label: "Labels", type: "labels" },
   { key: "rule_type", label: "Rule type", type: "select", required: true, default: "interval_based", options: RULE_TYPES },
+  {
+    key: "temperature_unit",
+    label: "Temperature unit",
+    type: "select",
+    default: "°C",
+    options: [["°C", "°C"], ["°F", "°F"]],
+    showWhen: { key: "rule_type", equals: "temperature_monitoring" },
+    requiredWhen: { key: "rule_type", equals: "temperature_monitoring" },
+    hint: "Temperature rules reuse the standard numeric threshold engine while preserving the selected engineering unit.",
+  },
+  {
+    key: "temperature_warning_threshold",
+    label: "Warning temperature threshold",
+    type: "number",
+    placeholder: "e.g. 70",
+    showWhen: { key: "rule_type", equals: "temperature_monitoring" },
+    requiredWhen: { key: "rule_type", equals: "temperature_monitoring" },
+  },
+  {
+    key: "temperature_alert_threshold",
+    label: "Alert temperature threshold",
+    type: "number",
+    placeholder: "e.g. 85",
+    showWhen: { key: "rule_type", equals: "temperature_monitoring" },
+    requiredWhen: { key: "rule_type", equals: "temperature_monitoring" },
+  },
   {
     key: "variable_type",
     label: "Variable type",
@@ -139,6 +166,10 @@ function formatInterval(seconds) {
 
 export function templateSummary(template) {
   const parameters = template.parameters || {};
+  if (template.rule_type === "parameter_threshold" && parameters.temperature_rule === true) {
+    const unit = parameters.unit || "°C";
+    return `Temperature · warning at ${parameters.warning_threshold ?? "—"} ${unit} · alert at ${parameters.alert_threshold ?? "—"} ${unit}`;
+  }
   if (
     template.rule_type === "parameter_threshold" &&
     template.required_variable_types?.includes("boolean") &&
@@ -190,17 +221,21 @@ const needsRuntimeThresholdConfiguration = (template) =>
   template.parameters?.expected_value === true &&
   template.parameters?.evaluation_mode !== "state";
 
-export const displayType = (rule) =>
-  rule.rule_type === "duration" &&
-  rule.parameters?.condition === "interval_elapsed"
-    ? "Interval based"
-    : rule.rule_type === "runtime_duration"
+export const displayType = (rule) => {
+  if (rule.rule_type === "parameter_threshold" && rule.parameters?.temperature_rule === true) {
+    return "Temperature Based";
+  }
+  return rule.rule_type === "duration" &&
+    rule.parameters?.condition === "interval_elapsed"
       ? "Interval based"
-    : rule.rule_type === "boolean_count_threshold"
-      ? "Parameter threshold"
-    : RULE_TYPES.find(([value]) => value === rule.rule_type)?.[1] ||
-      rule.rule_type?.replaceAll("_", " ") ||
-      "Monitoring rule";
+      : rule.rule_type === "runtime_duration"
+        ? "Interval based"
+      : rule.rule_type === "boolean_count_threshold"
+        ? "Parameter threshold"
+      : RULE_TYPES.find(([value]) => value === rule.rule_type)?.[1] ||
+        rule.rule_type?.replaceAll("_", " ") ||
+        "Monitoring rule";
+};
 
 // Monitoring category, derived only from the rule types the system implements.
 export const ruleKind = (rule) => {
@@ -209,6 +244,9 @@ export const ruleKind = (rule) => {
   if (rule.rule_type === "boolean_count_threshold") return "Cycle count";
   if (rule.rule_type === "duration") return "Time interval";
   if (rule.rule_type === "parameter_threshold") {
+    if (parameters.temperature_rule === true) {
+      return "Threshold";
+    }
     if (rule.required_variable_types?.includes("boolean")) {
       return parameters.evaluation_mode === "state" ? "Boolean condition" : "Runtime-based";
     }
@@ -249,6 +287,8 @@ export function initialTemplate(template) {
   const variableType = required.length === 2 && required.includes("number") && required.includes("integer")
     ? "number"
     : required[0] || "number";
+  const isTemperatureMonitoring =
+    template.rule_type === "parameter_threshold" && params.temperature_rule === true;
   const isInterval =
     template.rule_type === "duration" &&
     params.condition === "interval_elapsed";
@@ -272,17 +312,22 @@ export function initialTemplate(template) {
     params.evaluation_mode !== "state";
   return {
     ...template,
-    rule_type: isInterval || isRuntime
-      ? "interval_based"
-      : isCycleCount
-        ? "parameter_threshold"
-        : template.rule_type,
+    rule_type: isTemperatureMonitoring
+      ? "temperature_monitoring"
+      : isInterval || isRuntime
+        ? "interval_based"
+        : isCycleCount
+          ? "parameter_threshold"
+          : template.rule_type,
     variable_type: variableType,
     boolean_behavior: isCycleCount
       ? "cycle_count"
       : isBooleanRunningTemplate
         ? "running_time"
         : "state",
+    temperature_unit: params.unit || "°C",
+    temperature_warning_threshold: params.warning_threshold ?? "",
+    temperature_alert_threshold: params.alert_threshold ?? "",
     runtime_warning_hours: isRuntime
       ? Number(params.warning_thresholds_seconds?.[0] || 0) / 3600
       : isBooleanRunningTemplate
@@ -308,7 +353,7 @@ export function initialTemplate(template) {
       ? params.alert_threshold ?? ""
       : "",
     expected_boolean: String(params.expected_value ?? true),
-    threshold: template.threshold ?? "",
+    threshold: template.threshold ?? params.warning_threshold ?? "",
     operator: template.operator || (variableType === "boolean" ? "==" : ">="),
     interval_unit: intervalUnit,
     is_enabled: String(template.is_enabled),
@@ -371,12 +416,15 @@ export function templatePayload(values) {
     values.rule_type === "parameter_threshold" &&
     values.variable_type === "boolean" &&
     values.boolean_behavior === "cycle_count";
+  const isTemperatureMonitoring = values.rule_type === "temperature_monitoring";
   const isInterval = values.rule_type === "interval_based" || isBooleanRunning;
   const type = isBooleanCycleCount
     ? "boolean_count_threshold"
-    : isInterval
-      ? "runtime_duration"
-      : values.rule_type;
+    : isTemperatureMonitoring
+      ? "parameter_threshold"
+      : isInterval
+        ? "runtime_duration"
+        : values.rule_type;
   let required_variable_types = null;
   let parameters = null;
   let operator = null;
@@ -400,20 +448,51 @@ export function templatePayload(values) {
       alert_threshold_seconds: alert,
     };
   } else if (type === "parameter_threshold") {
-    required_variable_types = values.variable_type === "boolean"
-      ? ["boolean"]
-      : values.variable_type === "integer"
-        ? ["integer"]
-        : ["number", "integer"];
-    variable_key = values.variable_key || null;
-    operator = values.operator;
-    if (values.variable_type === "boolean") {
+    // Temperature calls continue to use the shared parameter-threshold engine, but the
+    // reusable-rule payload carries explicit unit and threshold metadata so the rule can be
+    // created, edited, copied, assigned and evaluated without a parallel rule system.
+    if (isTemperatureMonitoring) {
+      // Temperature rules stay on the shared parameter-threshold engine, but they need to
+      // carry the warning/alert thresholds in the rule parameters while also satisfying the
+      // backend's single-threshold validation for this generic numeric rule type.
+      const warning = Number(values.temperature_warning_threshold);
+      const alert = Number(values.temperature_alert_threshold);
+      const unit = String(values.temperature_unit || "°C").trim() || "°C";
+      if (
+        !Number.isFinite(warning) ||
+        !Number.isFinite(alert) ||
+        warning <= 0 ||
+        alert <= 0 ||
+        warning >= alert
+      ) {
+        throw new Error("Temperature warning and alert thresholds must be positive and the alert must be higher than the warning.");
+      }
+      required_variable_types = ["number", "integer"];
+      variable_key = values.variable_key || null;
+      threshold = warning;
+      operator = ">=";
       parameters = {
-        expected_value: values.expected_boolean === "true",
-        evaluation_mode: "state",
+        temperature_rule: true,
+        unit,
+        warning_threshold: warning,
+        alert_threshold: alert,
       };
     } else {
-      threshold = values.threshold;
+      required_variable_types = values.variable_type === "boolean"
+        ? ["boolean"]
+        : values.variable_type === "integer"
+          ? ["integer"]
+          : ["number", "integer"];
+      variable_key = values.variable_key || null;
+      operator = values.operator;
+      if (values.variable_type === "boolean") {
+        parameters = {
+          expected_value: values.expected_boolean === "true",
+          evaluation_mode: "state",
+        };
+      } else {
+        threshold = values.threshold;
+      }
     }
   } else if (type === "boolean_count_threshold") {
     const warning1 = Number(values.cycle_warning_threshold_1);

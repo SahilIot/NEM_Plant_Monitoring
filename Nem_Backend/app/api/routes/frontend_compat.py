@@ -799,6 +799,7 @@ def _rule_template_request_row(
         "evaluation_interval_seconds": item.evaluation_interval_seconds,
         "stale_after_seconds": item.stale_after_seconds,
         "collection_id": item.collection_id,
+        "labels": item.labels,
         "requested_by": item.requested_by,
         "status": item.status,
         "reviewed_by": item.reviewed_by,
@@ -863,12 +864,18 @@ def submit_rule_template_request(
     else:
         _validate_template_collection(session, payload.collection_id)
         item = MonitoringRuleTemplateRequest(
-            **payload.model_dump(),
+            # Converts the payload into a dictionary while excluding labels, since labels are handled separately.
+            **payload.model_dump(exclude={"labels"}),
             requested_by=user.id,
             status="pending",
             suggestion_type="monitoring_rule",
         )
     session.add(item)
+    # Flushes pending database changes so the item is ready for label assignment, then assigns the payload labels to the item.
+    if not isinstance(payload, MaintenanceSuggestionPayload):
+        session.flush()
+        assign_labels(session, item, payload.labels)
+
     session.commit()
     session.refresh(item)
 
@@ -972,6 +979,9 @@ def approve_rule_template_request(
     )
 
     session.add(template)
+    # Saves pending template changes to the database before assigning the item's labels to the template.
+    session.flush()
+    assign_labels(session, template, item.labels)
     item.status = "approved"
     item.reviewed_by = user.id
     item.reviewed_at = datetime.now(timezone.utc)

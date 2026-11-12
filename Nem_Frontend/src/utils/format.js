@@ -107,5 +107,6 @@ export function conditionText(rule, variableName) {
   }
   if (rule.rule_type !== "parameter_threshold" || rule.threshold == null) return "";
   const symbol = OPERATOR_SYMBOL[rule.operator] || rule.operator || "";
-  return `${variableName || "Value"} ${symbol} ${rule.threshold}`;
+  const unit = rule.parameters?.unit ? ` ${rule.parameters.unit}` : "";
+  return `${variableName || "Value"} ${symbol} ${rule.threshold}${unit}`;
 }

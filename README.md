@@ -429,6 +429,34 @@ normal), and they cannot raise, change or clear alerts. The database accepts
 both (so existing rows load), `RuleCreate` accepts `generic` but not
 `boolean_condition`, and the UI offers neither.
 
+### Temperature Parameter Monitoring
+
+Temperature monitoring is implemented as an additive `parameter_threshold`
+configuration inside the existing Monitoring Rule Library workflow. It is
+created, edited, copied, assigned, and managed through the same reusable-rule
+flow used for the rest of the monitoring library rather than through a separate
+Temperature page or database table.
+
+Use the library's `New rule` action, select `Temperature Monitoring`, and then
+configure the same template metadata as other reusable rules:
+
+- `Temperature variable`: the preferred variable key or signal name the rule is
+  intended to monitor.
+- `Temperature unit`: `°C` or `°F`.
+- `Warning temperature threshold`: the lower warning trigger.
+- `Alert temperature threshold`: the higher escalation trigger.
+- `Severity`, `status`, labels, and assignment metadata follow the regular rule
+  library behavior.
+
+The template payload stores the unit and threshold metadata in the shared
+parameter-threshold object, while the backend still validates the rule as a
+normal numeric monitoring rule. The alert threshold must be higher than the
+warning threshold, and only active numeric variables should be used.
+
+This preserves the existing monitoring engine, permissions, and rule visibility
+while supporting temperature alarms with the same create/edit/copy/assignment
+workflow as other reusable monitoring rules.
+
 ### Shared rule visibility
 
 Each shared rule has exactly one of two visibilities: **Admin Only** or

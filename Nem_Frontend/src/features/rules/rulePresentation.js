@@ -32,6 +32,10 @@ export function ruleConditionSummary(rule) {
   ) {
     return `Running time · warnings at ${formatRuleDuration(parameters.warning_thresholds_seconds[0])} / ${formatRuleDuration(parameters.warning_thresholds_seconds[1])} · alert at ${formatRuleDuration(parameters.alert_threshold_seconds)}`;
   }
+  if (rule.rule_type === "parameter_threshold" && parameters.temperature_rule === true) {
+    const unit = parameters.unit || "°C";
+    return `Temperature · warning at ${parameters.warning_threshold ?? "—"} ${unit} / alert at ${parameters.alert_threshold ?? "—"} ${unit}`;
+  }
   if (
     rule.rule_type === "parameter_threshold" &&
     typeof parameters.expected_value === "boolean"
