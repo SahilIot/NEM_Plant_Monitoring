@@ -192,14 +192,17 @@ export default function CreateMaintenanceSchedulePage() {
 
   // Load active Boolean PLC variables for runtime and usage maintenance schedules.
   useEffect(() => {
+    const assetIdForVariables = isSuggestion ? suggestionAssetId : id;
     if (
-      isSuggestion ||
       isStandaloneEdit ||
-      !id ||
-      !Number.isFinite(Number(id))
+      !assetIdForVariables ||
+      !Number.isFinite(Number(assetIdForVariables))
     ) {
+      setAssetVariables([]);
+      setVariablesLoading(false);
+      setVariablesError("");
       return undefined;
-    }
+}
 
     let cancelled = false;
 
@@ -208,7 +211,9 @@ export default function CreateMaintenanceSchedulePage() {
       setVariablesError("");
 
       try {
-        const items = await api.getAll(`/assets/${id}/variables`);
+        const items = await api.getAll(
+          `/assets/${assetIdForVariables}/variables`
+        );
 
         if (cancelled) return;
 
@@ -241,7 +246,7 @@ export default function CreateMaintenanceSchedulePage() {
     return () => {
       cancelled = true;
     };
-  }, [id, isSuggestion, isStandaloneEdit]);
+  }, [id, suggestionAssetId, isSuggestion, isStandaloneEdit]);
 
   // Load existing schedule or maintenance record when editing.
   useEffect(() => {
@@ -506,7 +511,6 @@ export default function CreateMaintenanceSchedulePage() {
     // Determine whether the current operation uses calendar-based scheduling.
     // Suggestions and standalone maintenance records retain the calendar workflow.
     const isCalendarSchedule =
-      isSuggestion ||
       isStandaloneEdit ||
       form.schedule_mode === "calendar";
 
@@ -846,7 +850,16 @@ export default function CreateMaintenanceSchedulePage() {
 
                     <select
                       value={suggestionAssetId}
-                      onChange={(event) => setSuggestionAssetId(event.target.value)}
+                      onChange={(event) => {
+                        setSuggestionAssetId(event.target.value);
+                        setAssetVariables([]);
+                        setVariablesError("");
+                        
+                        setForm((previous) => ({
+                          ...previous,
+                          signal_variable_id: "",
+                        }));
+                      }}
                       required
                     >
                       <option value="">Select an asset</option>
@@ -1029,8 +1042,7 @@ export default function CreateMaintenanceSchedulePage() {
 
               {/* Allow Administrators to choose the maintenance scheduling method. */}
               {!isStandaloneEdit &&
-                !isSuggestion &&
-                !isSupervisor && (
+              (!isSupervisor || isSuggestion) && (
                   <section className="create-schedule-section">
                     <h2>Maintenance schedule mode</h2>
 
@@ -1072,9 +1084,8 @@ export default function CreateMaintenanceSchedulePage() {
 
               {/* Configure PLC signals and maintenance intervals for runtime and usage schedules. */}
               {!isStandaloneEdit &&
-                !isSuggestion &&
-                !isSupervisor &&
-                form.schedule_mode !== "calendar" && (
+              (!isSupervisor || isSuggestion) &&
+              form.schedule_mode !== "calendar" && (
                   <section className="create-schedule-section">
                     <h2>
                       {form.schedule_mode === "runtime"
@@ -1204,7 +1215,6 @@ export default function CreateMaintenanceSchedulePage() {
 
               {/* Configure planned start and first due dates for calendar-based schedules. */}
               {(isStandaloneEdit ||
-                isSuggestion ||
                 form.schedule_mode === "calendar") && (
                 <section className="create-schedule-section">
                   <h2>Dates</h2>
