@@ -22,6 +22,7 @@ import {
   Modal,
 } from "../../../components/common/UI.jsx";
 import { CheckIcon } from "../../../components/common/Icons.jsx";
+import { useTranslation } from "react-i18next";
 import { captureNavigationOrigin } from "../../../utils/navigation.js";
 
 const num = (value) =>
@@ -57,6 +58,7 @@ function Tile({ tone, label, value, to, hint }) {
 }
 
 export default function Home() {
+  const { t } = useTranslation();
   const {
     assets = [],
     alerts = [],
@@ -93,10 +95,10 @@ export default function Home() {
       setError(
         err instanceof Error
           ? err.message
-          : "Unable to load the dashboard."
+          : t("dashboard.couldNotLoadOverview")
       );
     }
-  }, []);
+  }, [t]);
 
   const loadEvaluatedAlerts = useCallback(async () => {
     try {
@@ -123,10 +125,10 @@ export default function Home() {
       setEvaluatedAlertsError("");
     } catch (err) {
       setEvaluatedAlertsError(
-        err.message || "Unable to load evaluated alerts."
+        err.message || t("dashboard.evaluatedAlertsLoadError")
       );
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     let midnightTimer;
@@ -200,12 +202,12 @@ export default function Home() {
       setLiveStatusError("");
     } catch (err) {
       setLiveStatusError(
-        err.message || "Unable to refresh live cycle monitoring."
+        err.message || t("dashboard.liveStatusRefreshError")
       );
     } finally {
       liveStatusRequest.current = false;
     }
-  }, []);
+  }, [t]);
 
   const refreshLiveScheduler = useMemo(
     () => createLiveUpdateScheduler(refreshLiveStatus),
@@ -254,7 +256,7 @@ export default function Home() {
         return;
       }
       if (update.type === "disconnected") {
-        setLiveStatusError("Live updates disconnected. Reconnecting...");
+        setLiveStatusError(t("dashboard.statusDisconnected"));
         return;
       }
       const changedTables = new Set(update.changed_tables || []);
@@ -351,8 +353,8 @@ export default function Home() {
     } catch (err) {
       setAckError(
         err.message || (action === "complete"
-          ? "Unable to complete this alert."
-          : "Unable to acknowledge this alert.")
+          ? t("alerts.missingAlertState")
+          : t("alerts.missingAcknowledgeState"))
       );
     } finally {
       setBusyId(null);
@@ -366,7 +368,7 @@ export default function Home() {
     return (
       <div className="banner error" role="alert">
         <div>
-          <strong>Could not load the overview</strong>
+          <strong>{t("dashboard.couldNotLoadOverview")}</strong>
           <p>{error}</p>
         </div>
         <button
@@ -374,14 +376,14 @@ export default function Home() {
           className="btn-outline"
           onClick={loadSummary}
         >
-          Retry
+          {t("common.retry")}
         </button>
       </div>
     );
   }
 
   if (!summary) {
-    return <LoadingIndicator className="loading" message="Loading overview" />;
+    return <LoadingIndicator className="loading" message={t("dashboard.loadingOverview")} />;
   }
 
   const rulesAlert = num(summary.rules_alert);
@@ -416,10 +418,10 @@ export default function Home() {
     total > 0 ? Math.round((monitored / total) * 100) : 0;
 
   const ruleStats = [
-    ["Activated", "activated"],
-    ["Suspended", "suspended"],
-    ["Deactivated", "deactivated"],
-    ["Completed", "completed"],
+    [t("rules.lifecycle.activated"), "activated"],
+    [t("rules.lifecycle.suspended"), "suspended"],
+    [t("rules.lifecycle.deactivated"), "deactivated"],
+    [t("rules.lifecycle.completed"), "completed"],
   ];
   const firstMonitoredAsset = assets.find(
     (asset) =>
@@ -435,45 +437,45 @@ export default function Home() {
 
   return (
     <div className="home">
-      <h1 className="page-title">Plant overview</h1>
+      <h1 className="page-title">{t("dashboard.overviewTitle")}</h1>
 
       {error && (
         <p className="notice error" role="status">
-          Showing the last known values. Refresh failed: {error}
+          {t("alerts.lastKnownValues", { error })}
         </p>
       )}
 
-      <section className="annunciator" aria-label="Current status">
+      <section className="annunciator" aria-label={t("dashboard.currentStatus")}>
         <Tile
           tone="alert"
-          label="Rules in alert"
+          label={t("dashboard.rulesInAlert")}
           value={rulesAlert}
           to="/rules/alert"
-          hint="Open rules currently in alert status"
+          hint={t("dashboard.openRulesHint")}
         />
 
         <Tile
           tone="warning"
-          label="Rules in warning"
+          label={t("dashboard.rulesInWarning")}
           value={rulesWarning}
           to="/rules/warning"
-          hint="Open rules currently in warning status"
+          hint={t("dashboard.warningRulesHint")}
         />
 
         <Tile
           tone="alert"
-          label="Assets in alert"
+          label={t("dashboard.assetsInAlert")}
           value={assetsAlert}
           to="/rules/alert"
-          hint="Assets with an active alert"
+          hint={t("dashboard.alertAssetsHint")}
         />
 
         <Tile
           tone="warning"
-          label="Assets in warning"
+          label={t("dashboard.assetsInWarning")}
           value={assetsWarning}
           to="/rules/warning"
-          hint="Assets with an active warning"
+          hint={t("dashboard.warningAssetsHint")}
         />
       </section>
 
@@ -481,20 +483,21 @@ export default function Home() {
         <div className="home-left-stack">
           <section className="panel">
             <div className="panel-head">
-              <h2>Needs attention</h2>
+              <h2>{t("dashboard.needsAttention")}</h2>
 
               <span className="muted">
                 {alerts.length === 0
-                  ? "Nothing open"
-                  : `${alerts.length} active ${
-                      alerts.length === 1 ? "alert" : "alerts"
-                    }`}
+                  ? t("dashboard.nothingOpen")
+                  : t("dashboard.activeAlertsLabel", {
+                      count: alerts.length,
+                      label: alerts.length === 1 ? t("common.alert") : t("common.alerts"),
+                    })}
               </span>
             </div>
 
             {ackError && (
               <p className="notice error" role="alert">
-                Could not update this alert: {ackError}
+                {t("alerts.unableToUpdateAlert", { error: ackError })}
               </p>
             )}
 
@@ -506,19 +509,17 @@ export default function Home() {
                   </span>
 
                   <div>
-                    <strong>All machines are within limits</strong>
+                    <strong>{t("dashboard.allClearTitle")}</strong>
                     <p className="muted">
-                      No rule is in alert or warning.
+                      {t("dashboard.allClearMessage")}
                     </p>
                   </div>
                 </div>
               ) : (
                 <EmptyState
                   art={false}
-                  title="No active alerts"
-                  lines={[
-                    "Rule states above may still be changing. Open a rule list to review.",
-                  ]}
+                  title={t("dashboard.noActiveAlerts")}
+                  lines={[t("dashboard.reviewRulesMessage")]}
                 />
               )
             ) : (
@@ -552,7 +553,7 @@ export default function Home() {
                             : undefined}
                         >
                           {assetName.get(alert.target_asset_id) ||
-                            `Asset ${alert.target_asset_id}`}
+                            t("assets.assetNumber", { id: alert.target_asset_id })}
                         </Link>
 
                         <span
@@ -560,13 +561,13 @@ export default function Home() {
                             alert.started_at
                           ).toLocaleString()}
                         >
-                          Started {timeAgo(alert.started_at)}
+                          {t("alerts.started", { time: timeAgo(alert.started_at) })}
                         </span>
 
                         {alert.trigger_value !== null &&
                           alert.trigger_value !== undefined && (
                             <span>
-                              Value {formatValue(alert.trigger_value)}
+                              {t("alerts.value", { value: formatValue(alert.trigger_value) })}
                             </span>
                           )}
                       </div>
@@ -586,12 +587,12 @@ export default function Home() {
                         }
                       >
                         {alert.acknowledged_at
-                          ? `Acknowledged${
+                          ? `${t("alerts.acknowledged")}${
                               alert.acknowledged_by
-                                ? ` by ${alert.acknowledged_by}`
+                                ? ` ${t("common.by")} ${alert.acknowledged_by}`
                                 : ""
                             }`
-                          : "Needs Attention"}
+                          : t("alerts.needsAttention")}
                       </span>
                       {alert.acknowledged_at ? (
                         <button
@@ -606,7 +607,7 @@ export default function Home() {
                             });
                           }}
                         >
-                          {busyId === alert.id ? "Saving…" : "Complete"}
+                          {busyId === alert.id ? t("alerts.saving") : t("alerts.complete")}
                         </button>
                       ) : (
                         <button
@@ -621,7 +622,7 @@ export default function Home() {
                             });
                           }}
                         >
-                          {busyId === alert.id ? "Saving…" : "Acknowledge"}
+                          {busyId === alert.id ? t("alerts.saving") : t("alerts.acknowledge")}
                         </button>
                       )}
                     </div>
@@ -636,13 +637,13 @@ export default function Home() {
         <aside className="home-right-column">
           <section className="panel">
             <div className="panel-head">
-              <h2>Monitoring coverage</h2>
+              <h2>{t("dashboard.monitoringCoverage")}</h2>
             </div>
 
             <Link to="/assets" className="coverage">
               <span className="coverage-num">
                 {monitored}
-                <small> of {total} assets</small>
+                <small> {t("common.of")} {total} {t("common.assets")}</small>
               </span>
 
               <span className="meter" aria-hidden="true">
@@ -650,7 +651,7 @@ export default function Home() {
               </span>
 
               <span className="muted">
-                have enabled rules monitoring active variables
+                {t("dashboard.coverageSummary")}
               </span>
             </Link>
           </section>
@@ -658,8 +659,8 @@ export default function Home() {
 
         <section className="panel home-evaluated-panel">
             <div className="panel-head">
-              <h2>Evaluated / completed alerts</h2>
-              <span className="muted">{visibleEvaluatedAlerts.length} today</span>
+              <h2>{t("dashboard.evaluatedAlerts")}</h2>
+              <span className="muted">{visibleEvaluatedAlerts.length} {t("common.today")}</span>
             </div>
             {evaluatedAlertsError && (
               <p className="notice error" role="alert">
@@ -669,8 +670,8 @@ export default function Home() {
             {visibleEvaluatedAlerts.length === 0 ? (
               <EmptyState
                 art={false}
-                title="No evaluated or completed alerts"
-                lines={["Today's completed and cleared alerts will appear here."]}
+                title={t("dashboard.noEvaluatedAlerts")}
+                lines={[t("dashboard.completedToday")]}
               />
             ) : (
               <ul className="alert-list evaluated-alert-list">
@@ -706,14 +707,14 @@ export default function Home() {
                               `Asset ${event.asset_id}`}
                           </Link>
                         ) : (
-                          <span>{event.asset_name || "System"}</span>
+                          <span>{event.asset_name || t("common.system")}</span>
                         )}
                         <span title={new Date(event.occurred_at).toLocaleString()}>
                           {formatTime(event.occurred_at)}
                         </span>
                         {event.metadata?.completed_by && (
                           <span>
-                            Completed by {event.metadata.completed_by}
+                            {t("dashboard.completedBy", { user: event.metadata.completed_by })}
                           </span>
                         )}
                       </div>

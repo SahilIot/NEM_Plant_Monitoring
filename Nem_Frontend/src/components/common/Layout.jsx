@@ -27,35 +27,35 @@ import {
   MoonIcon,
 } from "./Icons.jsx";
 
-const TITLES = {
-  rules: "Monitoring rules",
-  collections: "Rule collections",
-  documents: "Instructions and documents",
-  import: "Import configuration",
-  user: "User information",
-  email: "Email server",
-  analytics: "Analytics extensions",
-  usage: "Usage",
-  backup: "Backup and restore",
-};
+function crumbs(path, assets, t) {
+  const sectionTitles = {
+    rules: t("nav.titles.rules"),
+    collections: t("nav.titles.collections"),
+    documents: t("nav.titles.documents"),
+    import: t("nav.titles.import"),
+    user: t("nav.titles.user"),
+    email: t("nav.titles.email"),
+    analytics: t("nav.titles.analytics"),
+    usage: t("nav.titles.usage"),
+    backup: t("nav.titles.backup"),
+  };
 
-function crumbs(path, assets) {
-  if (path === "/") return [{ label: "Overview" }];
+  if (path === "/") return [{ label: t("nav.overview") }];
 
   let m;
   if ((m = matchPath("/rules/:kind", path))) {
     const lifecycleLabels = {
-      activated: "Activated rules",
-      suspended: "Suspended rules",
-      deactivated: "Deactivated rules",
-      completed: "Completed rules",
+      activated: t("rules.lifecycle.activated"),
+      suspended: t("rules.lifecycle.suspended"),
+      deactivated: t("rules.lifecycle.deactivated"),
+      completed: t("rules.lifecycle.completed"),
     };
     return [
-      { label: "Overview", to: "/" },
+      { label: t("nav.overview"), to: "/" },
       {
         label:
           lifecycleLabels[m.params.kind] ||
-          `Rules in ${m.params.kind} status`,
+          t("rules.lifecycle.inStatus", { status: m.params.kind }),
       },
     ];
   }
@@ -63,32 +63,32 @@ function crumbs(path, assets) {
   if ((m = matchPath("/assets/:id", path))) {
     const asset = assets.find((x) => x.id === Number(m.params.id));
     return [
-      { label: "Assets", to: "/assets" },
-      { label: asset ? asset.name : `Asset ${m.params.id}` },
+      { label: t("nav.assets"), to: "/assets" },
+      { label: asset ? asset.name : t("assets.assetNumber", { id: m.params.id }) },
     ];
   }
 
-  if (path === "/assets") return [{ label: "Assets" }];
-  if (path === "/plc") return [{ label: "PLC / OPC UA" }];
+  if (path === "/assets") return [{ label: t("nav.assets") }];
+  if (path === "/plc") return [{ label: t("nav.plc") }];
 
   if ((m = matchPath("/configuration/:sub", path))) {
     return [
-      { label: "Configuration", to: "/configuration" },
-      { label: TITLES[m.params.sub] || m.params.sub },
+      { label: t("nav.configuration"), to: "/configuration" },
+      { label: sectionTitles[m.params.sub] || m.params.sub },
     ];
   }
 
   if ((m = matchPath("/settings/:sub", path))) {
     return [
-      { label: "Settings", to: "/settings" },
-      { label: TITLES[m.params.sub] || m.params.sub },
+      { label: t("nav.settings"), to: "/settings" },
+      { label: sectionTitles[m.params.sub] || m.params.sub },
     ];
   }
 
-  if (path.startsWith("/configuration")) return [{ label: "Configuration" }];
-  if (path.startsWith("/settings")) return [{ label: "Settings" }];
+  if (path.startsWith("/configuration")) return [{ label: t("nav.configuration") }];
+  if (path.startsWith("/settings")) return [{ label: t("nav.settings") }];
 
-  return [{ label: "Overview" }];
+  return [{ label: t("nav.overview") }];
 }
 
 const RANK = { off: 0, ok: 1, warning: 2, alert: 3 };
@@ -417,12 +417,12 @@ export default function Layout() {
     matchPath("/assets/:id", pathname)?.params.id
   );
 
-  const breadcrumbs = crumbs(pathname, assets);
+  const breadcrumbs = crumbs(pathname, assets, t);
   const pageTitle = breadcrumbs[breadcrumbs.length - 1].label;
 
   useEffect(() => {
-    document.title = `${pageTitle} - NEM Plant Monitor`;
-  }, [pageTitle]);
+    document.title = `${pageTitle} - ${t("nav.appTitle")}`;
+  }, [pageTitle, t]);
 
   const navItem = (to, Icon, label, end) => (
     <NavLink
@@ -496,8 +496,8 @@ export default function Layout() {
 
         <button
           className="icon-btn"
-          title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-          aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          title={theme === "dark" ? t("theme.switchToLight") : t("theme.switchToDark")}
+          aria-label={theme === "dark" ? t("theme.switchToLight") : t("theme.switchToDark")}
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
           {theme === "dark" ? <SunIcon size={19} /> : <MoonIcon size={19} />}
@@ -507,7 +507,7 @@ export default function Layout() {
       <div className="body">
         <nav
           className={"rail" + (navigationExpanded ? " open" : "")}
-          aria-label="Main"
+          aria-label={t("nav.navigation")}
         >
           <div className="rail-main">
             {navItem("/", HomeIcon, t("nav.overview"), true)}
