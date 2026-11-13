@@ -302,7 +302,7 @@ export default function ImportConfigurationPanel() {
   const skippedCount = preview ? preview.totals.duplicates + preview.totals.unresolved : 0;
 
   return (
-    <div className="xfer-page">
+    <div>
       <ol className="xfer-steps" aria-label="Import steps">
         {["Select file", "Review and validate", "Confirm and import"].map((label, index) => {
           const number = index + 1;

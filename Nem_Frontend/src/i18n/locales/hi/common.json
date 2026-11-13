@@ -4,6 +4,21 @@
     "english": "English",
     "hindi": "हिन्दी"
   },
+  "common": {
+    "overview": "अवलोकन",
+    "assets": "एसेट्स",
+    "configuration": "कॉन्फ़िगरेशन",
+    "settings": "सेटिंग्स",
+    "loading": "लोड हो रहा है",
+    "retry": "पुनः प्रयास करें",
+    "today": "आज",
+    "of": "में से",
+    "active": "सक्रिय",
+    "alert": "अलर्ट",
+    "alerts": "अलर्ट्स",
+    "system": "सिस्टम",
+    "by": "द्वारा"
+  },
   "nav": {
     "overview": "अवलोकन",
     "assets": "एसेट्स",
@@ -23,7 +38,35 @@
     "apiUnreachable": "एपीआई पहुँच योग्य नहीं है",
     "liveUpdatesDisconnected": "लाइव अपडेट डिस्कनेक्टेड",
     "checkedAt": "जाँच की गई {{time}}",
-    "appTitle": "एनईएम प्लांट मॉनिटर"
+    "appTitle": "एनईएम प्लांट मॉनिटर",
+    "navigation": "मुख्य नेविगेशन",
+    "titles": {
+      "rules": "मॉनिटरिंग नियम",
+      "collections": "रूल कलेक्शन",
+      "documents": "निर्देश और दस्तावेज़",
+      "import": "कॉन्फ़िगरेशन आयात",
+      "user": "उपयोगकर्ता जानकारी",
+      "email": "ईमेल सर्वर",
+      "analytics": "एनालिटिक्स एक्सटेंशन",
+      "usage": "उपयोग",
+      "backup": "बैकअप और रिकवरी"
+    }
+  },
+  "theme": {
+    "switchToLight": "लाइट मोड पर स्विच करें",
+    "switchToDark": "डार्क मोड पर स्विच करें"
+  },
+  "rules": {
+    "lifecycle": {
+      "activated": "सक्रियित नियम",
+      "suspended": "निलंबित नियम",
+      "deactivated": "निष्क्रिय नियम",
+      "completed": "पूर्ण किए गए नियम",
+      "inStatus": "{{status}} स्थिति में नियम"
+    }
+  },
+  "assets": {
+    "assetNumber": "एसेट {{id}}"
   },
   "auth": {
     "checkingSession": "सत्र जाँच हो रहा है…",
@@ -39,8 +82,55 @@
     "notFoundMessage": "अनुरोधित पेज मौजूद नहीं है।",
     "returnHome": "अवलोकन पर वापस जाएँ"
   },
+  "dashboard": {
+    "overviewTitle": "प्लांट अवलोकन",
+    "couldNotLoadOverview": "अवलोकन लोड नहीं हो सका",
+    "loadingOverview": "अवलोकन लोड हो रहा है",
+    "currentStatus": "वर्तमान स्थिति",
+    "rulesInAlert": "अलर्ट में नियम",
+    "rulesInWarning": "वार्निंग में नियम",
+    "assetsInAlert": "अलर्ट में एसेट्स",
+    "assetsInWarning": "वार्निंग में एसेट्स",
+    "needsAttention": "ध्यान देने की आवश्यकता",
+    "noActiveAlerts": "कोई सक्रिय अलर्ट नहीं",
+    "allClearTitle": "सभी मशीनें सीमा के भीतर हैं",
+    "allClearMessage": "कोई नियम अलर्ट या वार्निंग में नहीं है।",
+    "monitoringCoverage": "मॉनिटरिंग कवरेज",
+    "evaluatedAlerts": "मूल्यांकित / पूर्ण अलर्ट्स",
+    "noEvaluatedAlerts": "कोई मूल्यांकित या पूर्ण अलर्ट नहीं",
+    "today": "आज",
+    "statusDisconnected": "लाइव अपडेट डिस्कनेक्टेड हैं। फिर से कनेक्ट हो रहा है…",
+    "openRulesHint": "वर्तमान में अलर्ट स्थिति में खुले नियम",
+    "warningRulesHint": "वर्तमान में वार्निंग स्थिति में खुले नियम",
+    "alertAssetsHint": "सक्रिय अलर्ट वाले एसेट्स",
+    "warningAssetsHint": "सक्रिय वार्निंग वाले एसेट्स",
+    "activeAlertsLabel": "{{count}} सक्रिय {{label}}",
+    "nothingOpen": "कुछ नहीं खुला है",
+    "reviewRulesMessage": "उपरोक्त नियम की स्थिति बदल सकती है। समीक्षा के लिए नियम सूची खोलें।",
+    "coverageSummary": "सक्रिय वेरिएबल्स की सक्रिय नियम मॉनिटरिंग रख रहे हैं",
+    "completedToday": "आज के पूर्ण और साफ किए गए अलर्ट यहाँ दिखाई देंगे।",
+    "completedBy": "{{user}} द्वारा पूर्ण",
+    "evaluatedAlertsLoadError": "मूल्यांकित अलर्ट लोड नहीं किए जा सके।",
+    "liveStatusRefreshError": "लाइव साइकिल मॉनिटरिंग को रीफ्रेश नहीं किया जा सका।"
+  },
+  "alerts": {
+    "acknowledged": "स्वीकृत",
+    "needsAttention": "ध्यान देने की आवश्यकता",
+    "complete": "पूर्ण",
+    "acknowledge": "स्वीकृत करें",
+    "saving": "सहेजा जा रहा है…",
+    "started": "शुरू {{time}}",
+    "value": "मान {{value}}",
+    "noRulesInAlert": "कोई नियम अलर्ट या वार्निंग में नहीं है।",
+    "lastKnownValues": "अंतिम ज्ञात मान दिखाए जा रहे हैं। रिफ्रेश विफल: {{error}}",
+    "unableToUpdateAlert": "इस अलर्ट को अपडेट नहीं किया जा सका: {{error}}",
+    "missingAlertState": "इस अलर्ट को पूर्ण नहीं किया जा सका।",
+    "missingAcknowledgeState": "इस अलर्ट को स्वीकार नहीं किया जा सका।"
+  },
   "status": {
     "retry": "पुनः प्रयास करें",
-    "couldNotLoadAssets": "एसेट लोड नहीं हो सके: {{error}}"
+    "couldNotLoadAssets": "एसेट लोड नहीं हो सके: {{error}}",
+    "couldNotLoadOverview": "अवलोकन लोड नहीं हो सका",
+    "loadingOverview": "अवलोकन लोड हो रहा है"
   }
 }

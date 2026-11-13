@@ -4,6 +4,21 @@
     "english": "English",
     "hindi": "हिन्दी"
   },
+  "common": {
+    "overview": "Overview",
+    "assets": "Assets",
+    "configuration": "Configuration",
+    "settings": "Settings",
+    "loading": "Loading",
+    "retry": "Retry",
+    "today": "today",
+    "of": "of",
+    "active": "active",
+    "alert": "alert",
+    "alerts": "alerts",
+    "system": "System",
+    "by": "by"
+  },
   "nav": {
     "overview": "Overview",
     "assets": "Assets",
@@ -23,7 +38,35 @@
     "apiUnreachable": "API unreachable",
     "liveUpdatesDisconnected": "Live updates disconnected",
     "checkedAt": "Checked {{time}}",
-    "appTitle": "NEM Plant Monitor"
+    "appTitle": "NEM Plant Monitor",
+    "navigation": "Main navigation",
+    "titles": {
+      "rules": "Monitoring rules",
+      "collections": "Rule collections",
+      "documents": "Instructions and documents",
+      "import": "Import configuration",
+      "user": "User information",
+      "email": "Email server",
+      "analytics": "Analytics extensions",
+      "usage": "Usage",
+      "backup": "Backup and restore"
+    }
+  },
+  "theme": {
+    "switchToLight": "Switch to light mode",
+    "switchToDark": "Switch to dark mode"
+  },
+  "rules": {
+    "lifecycle": {
+      "activated": "Activated rules",
+      "suspended": "Suspended rules",
+      "deactivated": "Deactivated rules",
+      "completed": "Completed rules",
+      "inStatus": "Rules in {{status}} status"
+    }
+  },
+  "assets": {
+    "assetNumber": "Asset {{id}}"
   },
   "auth": {
     "checkingSession": "Checking session…",
@@ -39,8 +82,55 @@
     "notFoundMessage": "The requested page does not exist.",
     "returnHome": "Return to overview"
   },
+  "dashboard": {
+    "overviewTitle": "Plant overview",
+    "couldNotLoadOverview": "Could not load the overview",
+    "loadingOverview": "Loading overview",
+    "currentStatus": "Current status",
+    "rulesInAlert": "Rules in alert",
+    "rulesInWarning": "Rules in warning",
+    "assetsInAlert": "Assets in alert",
+    "assetsInWarning": "Assets in warning",
+    "needsAttention": "Needs attention",
+    "noActiveAlerts": "No active alerts",
+    "allClearTitle": "All machines are within limits",
+    "allClearMessage": "No rule is in alert or warning.",
+    "monitoringCoverage": "Monitoring coverage",
+    "evaluatedAlerts": "Evaluated / completed alerts",
+    "noEvaluatedAlerts": "No evaluated or completed alerts",
+    "today": "today",
+    "statusDisconnected": "Live updates disconnected. Reconnecting…",
+    "openRulesHint": "Open rules currently in alert status",
+    "warningRulesHint": "Open rules currently in warning status",
+    "alertAssetsHint": "Assets with an active alert",
+    "warningAssetsHint": "Assets with an active warning",
+    "activeAlertsLabel": "{{count}} active {{label}}",
+    "nothingOpen": "Nothing open",
+    "reviewRulesMessage": "Rule states above may still be changing. Open a rule list to review.",
+    "coverageSummary": "have enabled rules monitoring active variables",
+    "completedToday": "Today's completed and cleared alerts will appear here.",
+    "completedBy": "Completed by {{user}}",
+    "evaluatedAlertsLoadError": "Unable to load evaluated alerts.",
+    "liveStatusRefreshError": "Unable to refresh live cycle monitoring."
+  },
+  "alerts": {
+    "acknowledged": "Acknowledged",
+    "needsAttention": "Needs Attention",
+    "complete": "Complete",
+    "acknowledge": "Acknowledge",
+    "saving": "Saving…",
+    "started": "Started {{time}}",
+    "value": "Value {{value}}",
+    "noRulesInAlert": "No rule is in alert or warning.",
+    "lastKnownValues": "Showing the last known values. Refresh failed: {{error}}",
+    "unableToUpdateAlert": "Could not update this alert: {{error}}",
+    "missingAlertState": "Unable to complete this alert.",
+    "missingAcknowledgeState": "Unable to acknowledge this alert."
+  },
   "status": {
     "retry": "Retry",
-    "couldNotLoadAssets": "Could not load assets: {{error}}"
+    "couldNotLoadAssets": "Could not load assets: {{error}}",
+    "couldNotLoadOverview": "Could not load the overview",
+    "loadingOverview": "Loading overview"
   }
 }
