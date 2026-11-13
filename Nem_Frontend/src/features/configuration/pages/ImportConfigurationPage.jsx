@@ -7,7 +7,6 @@ export default function ImportConfigurationPage() {
   const nav = useNavigate();
   return (
     <div className="xfer-page">
-      <div className="xfer-head">
         <button
           type="button"
           className="link-btn"
@@ -15,7 +14,7 @@ export default function ImportConfigurationPage() {
         >
           <BackIcon size={14} /> Back
         </button>
-
+      <div className="xfer-head">
         <h1 className="page-title">Import configuration</h1>
       </div>
 

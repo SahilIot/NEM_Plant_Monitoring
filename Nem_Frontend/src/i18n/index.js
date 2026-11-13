@@ -3,6 +3,8 @@ import { initReactI18next } from "react-i18next";
 
 import enCommon from "./locales/en/common.json" with { type: "json" };
 import hiCommon from "./locales/hi/common.json" with { type: "json" };
+import paCommon from "./locales/pa/common.json" with { type: "json" };
+import deCommon from "./locales/de/common.json" with { type: "json" };
 
 const DEFAULT_LANGUAGE = "en";
 export const LANGUAGE_STORAGE_KEY = "nem-language";
@@ -10,6 +12,8 @@ export const LANGUAGE_STORAGE_KEY = "nem-language";
 export const languageMetadata = {
   en: { label: "English", nativeName: "English" },
   hi: { label: "Hindi", nativeName: "हिन्दी" },
+  pa: { label: "Punjabi", nativeName: "ਪੰਜਾਬੀ" },
+  de: { label: "German", nativeName: "Deutsch" },
 };
 
 export const futureLanguageMetadata = {
@@ -19,13 +23,15 @@ export const futureLanguageMetadata = {
   es: { label: "Spanish", nativeName: "Español" },
 };
 
-export let supportedLanguages = ["en", "hi"];
+export let supportedLanguages = ["en", "hi", "pa", "de"];
 
 export const availableLanguages = { ...languageMetadata };
 
 const resources = {
   en: { translation: enCommon },
   hi: { translation: hiCommon },
+  pa: { translation: paCommon },
+  de: { translation: deCommon },
 };
 
 export function registerLanguage(languageCode, languageConfig = {}) {
