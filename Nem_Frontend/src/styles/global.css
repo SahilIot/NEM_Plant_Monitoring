@@ -1515,10 +1515,8 @@ html[data-theme="dark"] .topbar > .icon-btn:hover {
 }
 
 
-/* =========================================
-   COLLECTION DETAILS MODAL
-   Light + Dark Theme Support
-========================================= */
+/*COLLECTION DETAILS MODAL
+   Light + Dark Theme Support */
 
 .collection-details {
   display: flex;

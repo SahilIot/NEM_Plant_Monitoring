@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.api.routes import auth, frontend_compat
 
-
+# Simulates database queries and transaction handling for isolated route tests.
 class FakeSession:
     def __init__(self, linked_maintenance_record=False, alert_ids=None):
         self.linked_maintenance_record = linked_maintenance_record
@@ -55,7 +55,7 @@ class FakeSession:
     def rollback(self):
         self.rolled_back = True
 
-
+# Ensures only Administrators can unassign rule collections.
 @pytest.mark.parametrize("role", ["Supervisor", "Operator"])
 def test_non_administrators_cannot_unassign_collection(role):
     # Verify the route dependency blocks direct API requests before database access.
@@ -70,7 +70,7 @@ def test_non_administrators_cannot_unassign_collection(role):
 
     assert response.status_code == 403
 
-
+# Prevents unassignment while any assigned collection rule is enabled.
 def test_unassign_refuses_enabled_collection_rules(monkeypatch):
     # Enabled assigned rules remain intact until an Administrator deactivates them.
     session = FakeSession()
@@ -100,7 +100,7 @@ def test_unassign_refuses_enabled_collection_rules(monkeypatch):
     assert not session.executed
     assert not session.committed
 
-
+# Prevents deletion of rules linked to maintenance alerts.
 def test_unassign_preserves_rules_with_maintenance_linked_alerts(monkeypatch):
     # Maintenance-linked alerts block unassignment before any related rows are deleted.
     session = FakeSession(linked_maintenance_record=True, alert_ids=[30])
@@ -117,7 +117,7 @@ def test_unassign_preserves_rules_with_maintenance_linked_alerts(monkeypatch):
     assert not session.executed
     assert not session.committed
 
-
+# Confirms Administrators can safely remove inactive rules and commit the transaction.
 def test_administrator_can_safely_unassign_inactive_collection_rules(monkeypatch):
     # Safe unassignment removes only the target asset's inactive rules and commits once.
     session = FakeSession()

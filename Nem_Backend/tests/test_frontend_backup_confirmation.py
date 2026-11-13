@@ -7,7 +7,7 @@ from pydantic import SecretStr
 
 from app.services import frontend_backup
 
-
+# Provides fake database objects and patched dependencies for isolated restore tests.
 class FakeTransaction:
     def __init__(self):
         self.is_active = True
@@ -81,7 +81,7 @@ def setup_restore(monkeypatch, tmp_path):
     monkeypatch.setattr(frontend_backup, "_post_restore_migrations", lambda *_: [])
     return settings, engine, session, connection, impact
 
-
+# Provides the table order required by the backup and restore process.
 def test_ordered_tables_is_available_to_backup_service():
     tables = frontend_backup._ordered_tables()
 

@@ -125,6 +125,7 @@ class RuleCreate(ORMModel):
                     raise ValueError("Boolean parameter thresholds require an equality operator and Boolean expected_value")
             elif self.threshold is None:
                 raise ValueError("Numeric parameter thresholds require a numeric threshold")
+        # Validates running-time monitoring rules using a Boolean running signal.
         if self.rule_type == "runtime_duration":
             validate_runtime_thresholds(self.parameters)
             if self.parameters and "warning_thresholds_seconds" in self.parameters:
@@ -194,7 +195,9 @@ class RuleCreate(ORMModel):
                 pass
             else:
                 raise ValueError( "Duration condition must be 'equals', 'threshold', or 'interval_elapsed'")
-            
+        # Validates Boolean cycle/count monitoring rules.
+        # Uses two warning thresholds and one higher alert threshold to monitor
+        # the number of Boolean events or activations.    
         if self.rule_type == "boolean_count_threshold":
             if self.variable_id is None:
                 raise ValueError("Boolean count threshold rules require a variable_id")
@@ -294,7 +297,8 @@ class RuleTemplateCreate(ORMModel):
             if required_types is not None and required_types != ["boolean"]:
                 raise ValueError("Boolean count templates require boolean variables")
             self.required_variable_types = ["boolean"]
-
+        # Running-time templates require Boolean variables representing machine running status.
+        # This allows the same running-time monitoring rule to be reused across different assets.
         elif self.rule_type == "runtime_duration":
             if required_types is not None and required_types != ["boolean"]:
                 raise ValueError("Running-time templates require Boolean variables")
