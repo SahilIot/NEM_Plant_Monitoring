@@ -1,0 +1,138 @@
+
+{
+  "language": {
+    "label": "ਭਾਸ਼ਾ",
+    "english": "English",
+    "hindi": "ਹਿੰਦੀ",
+    "punjabi": "ਪੰਜਾਬੀ"
+  },
+  "common": {
+    "overview": "ਸੰਖੇਪ ਜਾਣਕਾਰੀ",
+    "assets": "ਮਸ਼ੀਨਾਂ ਅਤੇ ਸੰਪਤੀਆਂ",
+    "configuration": "ਕੌਂਫਿਗਰੇਸ਼ਨ",
+    "settings": "ਸੈਟਿੰਗਾਂ",
+    "loading": "ਲੋਡ ਹੋ ਰਿਹਾ ਹੈ",
+    "retry": "ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ",
+    "today": "ਅੱਜ",
+    "of": "ਵਿੱਚੋਂ",
+    "active": "ਸਰਗਰਮ",
+    "alert": "ਚੇਤਾਵਨੀ",
+    "alerts": "ਚੇਤਾਵਨੀਆਂ",
+    "system": "ਸਿਸਟਮ",
+    "by": "ਵੱਲੋਂ"
+  },
+  "nav": {
+    "overview": "ਸੰਖੇਪ ਜਾਣਕਾਰੀ",
+    "assets": "ਮਸ਼ੀਨਾਂ ਅਤੇ ਸੰਪਤੀਆਂ",
+    "plc": "ਪੀਐੱਲਸੀ/ਓਪੀਸੀ ਯੂਏ",
+    "configuration": "ਕੌਂਫਿਗਰੇਸ਼ਨ",
+    "settings": "ਸੈਟਿੰਗਾਂ",
+    "collapse": "ਸਮੇਟੋ",
+    "expand": "ਫੈਲਾਓ",
+    "userAccess": "ਯੂਜ਼ਰ ਪਹੁੰਚ",
+    "signOut": "ਲੌਗ ਆਉਟ",
+    "signingOut": "ਲੌਗ ਆਉਟ ਹੋ ਰਿਹਾ ਹੈ…",
+    "showAssetPanel": "ਮਸ਼ੀਨ ਪੈਨਲ ਦਿਖਾਓ",
+    "hideAssetPanel": "ਮਸ਼ੀਨ ਪੈਨਲ ਲੁਕਾਓ",
+    "connecting": "ਕਨੈਕਟ ਹੋ ਰਿਹਾ ਹੈ",
+    "backendConnected": "ਬੈਕਐਂਡ ਜੁੜ ਗਿਆ ਹੈ",
+    "databaseUnavailable": "ਡਾਟਾਬੇਸ ਉਪਲਬਧ ਨਹੀਂ ਹੈ",
+    "apiUnreachable": "API ਨਾਲ ਸੰਪਰਕ ਨਹੀਂ ਹੋ ਸਕਿਆ",
+    "liveUpdatesDisconnected": "ਲਾਈਵ ਅੱਪਡੇਟ ਡਿਸਕਨੈਕਟ ਹੋ ਗਏ ਹਨ",
+    "checkedAt": "{{time}} ਵਜੇ ਜਾਂਚ ਕੀਤੀ ਗਈ",
+    "appTitle": "NEM ਪਲਾਂਟ ਮਾਨੀਟਰ",
+    "navigation": "ਮੁੱਖ ਨੈਵੀਗੇਸ਼ਨ",
+    "titles": {
+      "rules": "ਨਿਗਰਾਨੀ ਨਿਯਮ",
+      "collections": "ਨਿਯਮ ਸੰਗ੍ਰਹਿ",
+      "documents": "ਹਦਾਇਤਾਂ ਅਤੇ ਦਸਤਾਵੇਜ਼",
+      "import": "ਕੌਂਫਿਗਰੇਸ਼ਨ ਇੰਪੋਰਟ ਕਰੋ",
+      "user": "ਯੂਜ਼ਰ ਜਾਣਕਾਰੀ",
+      "email": "ਈਮੇਲ ਸਰਵਰ",
+      "analytics": "ਐਨਾਲਿਟਿਕਸ ਐਕਸਟੈਂਸ਼ਨ",
+      "usage": "ਵਰਤੋਂ",
+      "backup": "ਬੈਕਅੱਪ ਅਤੇ ਰੀਸਟੋਰ"
+    }
+  },
+  "theme": {
+    "switchToLight": "ਲਾਈਟ ਮੋਡ ਵਿੱਚ ਬਦਲੋ",
+    "switchToDark": "ਡਾਰਕ ਮੋਡ ਵਿੱਚ ਬਦਲੋ"
+  },
+  "rules": {
+    "lifecycle": {
+      "activated": "ਸਰਗਰਮ ਕੀਤੇ ਨਿਯਮ",
+      "suspended": "ਅਸਥਾਈ ਤੌਰ 'ਤੇ ਰੋਕੇ ਨਿਯਮ",
+      "deactivated": "ਬੰਦ ਕੀਤੇ ਨਿਯਮ",
+      "completed": "ਪੂਰੇ ਹੋਏ ਨਿਯਮ",
+      "inStatus": "{{status}} ਸਥਿਤੀ ਵਾਲੇ ਨਿਯਮ"
+    }
+  },
+  "assets": {
+    "assetNumber": "ਮਸ਼ੀਨ {{id}}"
+  },
+  "auth": {
+    "checkingSession": "ਸੈਸ਼ਨ ਦੀ ਜਾਂਚ ਹੋ ਰਹੀ ਹੈ…",
+    "confirmSignOut": "ਕੀ ਤੁਸੀਂ ਐਪਲੀਕੇਸ਼ਨ ਤੋਂ ਲੌਗ ਆਉਟ ਕਰਨਾ ਚਾਹੁੰਦੇ ਹੋ?",
+    "signInTitle": "NEM ਪਲਾਂਟ ਮਾਨੀਟਰ ਵਿੱਚ ਲੌਗ ਇਨ ਕਰੋ",
+    "signInSubtitle": "ਜਾਰੀ ਰੱਖਣ ਲਈ ਆਪਣੇ ਸਥਾਨਕ NEM ਖਾਤੇ ਦੀ ਵਰਤੋਂ ਕਰੋ।",
+    "username": "ਯੂਜ਼ਰਨੇਮ",
+    "password": "ਪਾਸਵਰਡ",
+    "signIn": "ਲੌਗ ਇਨ",
+    "signingIn": "ਲੌਗ ਇਨ ਹੋ ਰਿਹਾ ਹੈ…",
+    "signInFailed": "ਲੌਗ ਇਨ ਅਸਫਲ ਰਿਹਾ।",
+    "notFoundTitle": "ਪੰਨਾ ਨਹੀਂ ਮਿਲਿਆ",
+    "notFoundMessage": "ਮੰਗਿਆ ਗਿਆ ਪੰਨਾ ਮੌਜੂਦ ਨਹੀਂ ਹੈ।",
+    "returnHome": "ਮੁੱਖ ਪੰਨੇ 'ਤੇ ਵਾਪਸ ਜਾਓ"
+  },
+  "dashboard": {
+    "overviewTitle": "ਪਲਾਂਟ ਦੀ ਸੰਖੇਪ ਜਾਣਕਾਰੀ",
+    "couldNotLoadOverview": "ਸੰਖੇਪ ਜਾਣਕਾਰੀ ਲੋਡ ਨਹੀਂ ਹੋ ਸਕੀ",
+    "loadingOverview": "ਸੰਖੇਪ ਜਾਣਕਾਰੀ ਲੋਡ ਹੋ ਰਹੀ ਹੈ",
+    "currentStatus": "ਮੌਜੂਦਾ ਸਥਿਤੀ",
+    "rulesInAlert": "ਚੇਤਾਵਨੀ ਵਾਲੇ ਨਿਯਮ",
+    "rulesInWarning": "ਸਾਵਧਾਨੀ ਵਾਲੇ ਨਿਯਮ",
+    "assetsInAlert": "ਚੇਤਾਵਨੀ ਵਾਲੀਆਂ ਮਸ਼ੀਨਾਂ",
+    "assetsInWarning": "ਸਾਵਧਾਨੀ ਵਾਲੀਆਂ ਮਸ਼ੀਨਾਂ",
+    "needsAttention": "ਧਿਆਨ ਦੇਣ ਦੀ ਲੋੜ ਹੈ",
+    "noActiveAlerts": "ਕੋਈ ਸਰਗਰਮ ਚੇਤਾਵਨੀ ਨਹੀਂ",
+    "allClearTitle": "ਸਾਰੀਆਂ ਮਸ਼ੀਨਾਂ ਨਿਰਧਾਰਤ ਸੀਮਾਵਾਂ ਵਿੱਚ ਹਨ",
+    "allClearMessage": "ਕੋਈ ਵੀ ਨਿਯਮ ਚੇਤਾਵਨੀ ਜਾਂ ਸਾਵਧਾਨੀ ਦੀ ਸਥਿਤੀ ਵਿੱਚ ਨਹੀਂ ਹੈ।",
+    "monitoringCoverage": "ਨਿਗਰਾਨੀ ਕਵਰੇਜ",
+    "evaluatedAlerts": "ਜਾਂਚੀਆਂ / ਪੂਰੀਆਂ ਹੋਈਆਂ ਚੇਤਾਵਨੀਆਂ",
+    "noEvaluatedAlerts": "ਕੋਈ ਜਾਂਚੀ ਜਾਂ ਪੂਰੀ ਹੋਈ ਚੇਤਾਵਨੀ ਨਹੀਂ",
+    "today": "ਅੱਜ",
+    "statusDisconnected": "ਲਾਈਵ ਅੱਪਡੇਟ ਡਿਸਕਨੈਕਟ ਹਨ। ਦੁਬਾਰਾ ਕਨੈਕਟ ਕੀਤਾ ਜਾ ਰਿਹਾ ਹੈ…",
+    "openRulesHint": "ਉਹ ਨਿਯਮ ਖੋਲ੍ਹੋ ਜੋ ਇਸ ਸਮੇਂ ਚੇਤਾਵਨੀ ਦੀ ਸਥਿਤੀ ਵਿੱਚ ਹਨ",
+    "warningRulesHint": "ਉਹ ਨਿਯਮ ਖੋਲ੍ਹੋ ਜੋ ਇਸ ਸਮੇਂ ਸਾਵਧਾਨੀ ਦੀ ਸਥਿਤੀ ਵਿੱਚ ਹਨ",
+    "alertAssetsHint": "ਸਰਗਰਮ ਚੇਤਾਵਨੀ ਵਾਲੀਆਂ ਮਸ਼ੀਨਾਂ",
+    "warningAssetsHint": "ਸਰਗਰਮ ਸਾਵਧਾਨੀ ਵਾਲੀਆਂ ਮਸ਼ੀਨਾਂ",
+    "activeAlertsLabel": "{{count}} ਸਰਗਰਮ {{label}}",
+    "nothingOpen": "ਕੁਝ ਵੀ ਬਾਕੀ ਨਹੀਂ",
+    "reviewRulesMessage": "ਉੱਪਰ ਦਿੱਤੀਆਂ ਨਿਯਮ ਸਥਿਤੀਆਂ ਬਦਲ ਸਕਦੀਆਂ ਹਨ। ਜਾਂਚ ਕਰਨ ਲਈ ਨਿਯਮਾਂ ਦੀ ਸੂਚੀ ਖੋਲ੍ਹੋ।",
+    "coverageSummary": "ਸਰਗਰਮ ਵੇਰੀਏਬਲਾਂ ਦੀ ਨਿਗਰਾਨੀ ਲਈ ਸਮਰੱਥ ਨਿਯਮ ਹਨ",
+    "completedToday": "ਅੱਜ ਪੂਰੀਆਂ ਅਤੇ ਹਟਾਈਆਂ ਗਈਆਂ ਚੇਤਾਵਨੀਆਂ ਇੱਥੇ ਦਿਖਾਈ ਦੇਣਗੀਆਂ।",
+    "completedBy": "{{user}} ਵੱਲੋਂ ਪੂਰਾ ਕੀਤਾ ਗਿਆ",
+    "evaluatedAlertsLoadError": "ਜਾਂਚੀਆਂ ਗਈਆਂ ਚੇਤਾਵਨੀਆਂ ਲੋਡ ਨਹੀਂ ਹੋ ਸਕੀਆਂ।",
+    "liveStatusRefreshError": "ਲਾਈਵ ਸਾਈਕਲ ਨਿਗਰਾਨੀ ਅੱਪਡੇਟ ਨਹੀਂ ਹੋ ਸਕੀ।"
+  },
+  "alerts": {
+    "acknowledged": "ਧਿਆਨ ਵਿੱਚ ਲਿਆ ਗਿਆ",
+    "needsAttention": "ਧਿਆਨ ਦੇਣ ਦੀ ਲੋੜ ਹੈ",
+    "complete": "ਪੂਰਾ ਕਰੋ",
+    "acknowledge": "ਧਿਆਨ ਵਿੱਚ ਲਿਆ ਗਿਆ ਦਰਜ ਕਰੋ",
+    "saving": "ਸੇਵ ਹੋ ਰਿਹਾ ਹੈ…",
+    "started": "{{time}} ਵਜੇ ਸ਼ੁਰੂ ਹੋਇਆ",
+    "value": "ਮੁੱਲ {{value}}",
+    "noRulesInAlert": "ਕੋਈ ਨਿਯਮ ਚੇਤਾਵਨੀ ਜਾਂ ਸਾਵਧਾਨੀ ਦੀ ਸਥਿਤੀ ਵਿੱਚ ਨਹੀਂ ਹੈ।",
+    "lastKnownValues": "ਆਖਰੀ ਜਾਣੇ-ਪਛਾਣੇ ਮੁੱਲ ਦਿਖਾਏ ਜਾ ਰਹੇ ਹਨ। ਰਿਫ੍ਰੈਸ਼ ਅਸਫਲ ਰਿਹਾ: {{error}}",
+    "unableToUpdateAlert": "ਇਸ ਚੇਤਾਵਨੀ ਨੂੰ ਅੱਪਡੇਟ ਨਹੀਂ ਕੀਤਾ ਜਾ ਸਕਿਆ: {{error}}",
+    "missingAlertState": "ਇਸ ਚੇਤਾਵਨੀ ਨੂੰ ਪੂਰਾ ਨਹੀਂ ਕੀਤਾ ਜਾ ਸਕਿਆ।",
+    "missingAcknowledgeState": "ਇਸ ਚੇਤਾਵਨੀ ਨੂੰ ਧਿਆਨ ਵਿੱਚ ਲਿਆ ਗਿਆ ਦਰਜ ਨਹੀਂ ਕੀਤਾ ਜਾ ਸਕਿਆ।"
+  },
+  "status": {
+    "retry": "ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ",
+    "couldNotLoadAssets": "ਮਸ਼ੀਨਾਂ ਲੋਡ ਨਹੀਂ ਹੋ ਸਕੀਆਂ: {{error}}",
+    "couldNotLoadOverview": "ਸੰਖੇਪ ਜਾਣਕਾਰੀ ਲੋਡ ਨਹੀਂ ਹੋ ਸਕੀ",
+    "loadingOverview": "ਸੰਖੇਪ ਜਾਣਕਾਰੀ ਲੋਡ ਹੋ ਰਹੀ ਹੈ"
+  }
+}

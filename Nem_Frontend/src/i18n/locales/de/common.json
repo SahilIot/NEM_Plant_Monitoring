@@ -1,0 +1,139 @@
+
+{
+  "language": {
+    "label": "Sprache",
+    "english": "Englisch",
+    "hindi": "Hindi",
+    "punjabi": "Punjabi",
+    "german": "Deutsch"
+  },
+  "common": {
+    "overview": "Übersicht",
+    "assets": "Anlagen",
+    "configuration": "Konfiguration",
+    "settings": "Einstellungen",
+    "loading": "Wird geladen",
+    "retry": "Erneut versuchen",
+    "today": "Heute",
+    "of": "von",
+    "active": "Aktiv",
+    "alert": "Alarm",
+    "alerts": "Alarme",
+    "system": "System",
+    "by": "von"
+  },
+  "nav": {
+    "overview": "Übersicht",
+    "assets": "Anlagen",
+    "plc": "PLC / OPC UA",
+    "configuration": "Konfiguration",
+    "settings": "Einstellungen",
+    "collapse": "Einklappen",
+    "expand": "Ausklappen",
+    "userAccess": "Benutzerzugriff",
+    "signOut": "Abmelden",
+    "signingOut": "Abmeldung läuft…",
+    "showAssetPanel": "Anlagenbereich anzeigen",
+    "hideAssetPanel": "Anlagenbereich ausblenden",
+    "connecting": "Verbindung wird hergestellt",
+    "backendConnected": "Backend verbunden",
+    "databaseUnavailable": "Datenbank nicht verfügbar",
+    "apiUnreachable": "API nicht erreichbar",
+    "liveUpdatesDisconnected": "Live-Updates getrennt",
+    "checkedAt": "Geprüft um {{time}}",
+    "appTitle": "NEM Anlagenmonitor",
+    "navigation": "Hauptnavigation",
+    "titles": {
+      "rules": "Überwachungsregeln",
+      "collections": "Regelsammlungen",
+      "documents": "Anleitungen und Dokumente",
+      "import": "Konfiguration importieren",
+      "user": "Benutzerinformationen",
+      "email": "E-Mail-Server",
+      "analytics": "Analyse-Erweiterungen",
+      "usage": "Nutzung",
+      "backup": "Sicherung und Wiederherstellung"
+    }
+  },
+  "theme": {
+    "switchToLight": "Zum hellen Modus wechseln",
+    "switchToDark": "Zum dunklen Modus wechseln"
+  },
+  "rules": {
+    "lifecycle": {
+      "activated": "Aktivierte Regeln",
+      "suspended": "Pausierte Regeln",
+      "deactivated": "Deaktivierte Regeln",
+      "completed": "Abgeschlossene Regeln",
+      "inStatus": "Regeln mit Status {{status}}"
+    }
+  },
+  "assets": {
+    "assetNumber": "Anlage {{id}}"
+  },
+  "auth": {
+    "checkingSession": "Sitzung wird überprüft…",
+    "confirmSignOut": "Möchten Sie sich wirklich von der Anwendung abmelden?",
+    "signInTitle": "Bei NEM Anlagenmonitor anmelden",
+    "signInSubtitle": "Verwenden Sie Ihr lokales NEM-Konto, um fortzufahren.",
+    "username": "Benutzername",
+    "password": "Passwort",
+    "signIn": "Anmelden",
+    "signingIn": "Anmeldung läuft…",
+    "signInFailed": "Anmeldung fehlgeschlagen.",
+    "notFoundTitle": "Seite nicht gefunden",
+    "notFoundMessage": "Die angeforderte Seite existiert nicht.",
+    "returnHome": "Zur Übersicht zurückkehren"
+  },
+  "dashboard": {
+    "overviewTitle": "Anlagenübersicht",
+    "couldNotLoadOverview": "Die Übersicht konnte nicht geladen werden",
+    "loadingOverview": "Übersicht wird geladen",
+    "currentStatus": "Aktueller Status",
+    "rulesInAlert": "Regeln mit Alarm",
+    "rulesInWarning": "Regeln mit Warnung",
+    "assetsInAlert": "Anlagen mit Alarm",
+    "assetsInWarning": "Anlagen mit Warnung",
+    "needsAttention": "Erfordert Aufmerksamkeit",
+    "noActiveAlerts": "Keine aktiven Alarme",
+    "allClearTitle": "Alle Maschinen befinden sich innerhalb der Grenzwerte",
+    "allClearMessage": "Keine Regel befindet sich im Alarm- oder Warnzustand.",
+    "monitoringCoverage": "Überwachungsabdeckung",
+    "evaluatedAlerts": "Ausgewertete / abgeschlossene Alarme",
+    "noEvaluatedAlerts": "Keine ausgewerteten oder abgeschlossenen Alarme",
+    "today": "heute",
+    "statusDisconnected": "Live-Updates getrennt. Verbindung wird wiederhergestellt…",
+    "openRulesHint": "Regeln öffnen, die sich derzeit im Alarmzustand befinden",
+    "warningRulesHint": "Regeln öffnen, die sich derzeit im Warnzustand befinden",
+    "alertAssetsHint": "Anlagen mit einem aktiven Alarm",
+    "warningAssetsHint": "Anlagen mit einer aktiven Warnung",
+    "activeAlertsLabel": "{{count}} aktive {{label}}",
+    "nothingOpen": "Nichts offen",
+    "reviewRulesMessage": "Die oben angezeigten Regelzustände können sich noch ändern. Öffnen Sie eine Regelliste zur Überprüfung.",
+    "coverageSummary": "haben aktivierte Regeln zur Überwachung aktiver Variablen",
+    "completedToday": "Heute abgeschlossene und behobene Alarme werden hier angezeigt.",
+    "completedBy": "Abgeschlossen von {{user}}",
+    "evaluatedAlertsLoadError": "Ausgewertete Alarme konnten nicht geladen werden.",
+    "liveStatusRefreshError": "Die Live-Zyklusüberwachung konnte nicht aktualisiert werden."
+  },
+  "alerts": {
+    "acknowledged": "Bestätigt",
+    "needsAttention": "Erfordert Aufmerksamkeit",
+    "complete": "Abschließen",
+    "acknowledge": "Bestätigen",
+    "saving": "Wird gespeichert…",
+    "started": "Gestartet um {{time}}",
+    "value": "Wert {{value}}",
+    "noRulesInAlert": "Keine Regel befindet sich im Alarm- oder Warnzustand.",
+    "lastKnownValues": "Die zuletzt bekannten Werte werden angezeigt. Aktualisierung fehlgeschlagen: {{error}}",
+    "unableToUpdateAlert": "Dieser Alarm konnte nicht aktualisiert werden: {{error}}",
+    "missingAlertState": "Dieser Alarm konnte nicht abgeschlossen werden.",
+    "missingAcknowledgeState": "Dieser Alarm konnte nicht bestätigt werden."
+  },
+  "status": {
+    "retry": "Erneut versuchen",
+    "couldNotLoadAssets": "Anlagen konnten nicht geladen werden: {{error}}",
+    "couldNotLoadOverview": "Die Übersicht konnte nicht geladen werden",
+    "loadingOverview": "Übersicht wird geladen"
+  }
+}
