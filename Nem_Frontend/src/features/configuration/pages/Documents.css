@@ -865,11 +865,9 @@ a.docs-title:hover {
 }
 
 
-/* =========================================================
-   PROFESSIONAL DOCUMENTS PAGE UI
+/*PROFESSIONAL DOCUMENTS PAGE UI
    These overrides improve layout without changing functionality.
-   Theme colors continue to come from the application's CSS variables.
-   ========================================================= */
+   Theme colors continue to come from the application's CSS variables.*/
 
 /* Give the page more usable width on larger screens. */
 .docs-page {

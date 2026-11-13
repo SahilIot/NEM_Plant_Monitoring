@@ -48,7 +48,7 @@ OPERATORS: dict[str, Callable[[Any, Any], bool]] = {
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
-
+# Validates the scheduled start time for runtime-based monitoring rules.
 def runtime_activation_at(rule: MonitoringRule) -> datetime | None:
     value = (rule.parameters or {}).get("activation_at")
     if value is None:
@@ -174,7 +174,7 @@ def _valid_value(variable: Variable, value: Any) -> bool:
         )
     )
 
-
+# Accumulates machine running time while the Boolean running signal is fresh.
 def advance_rule_runtime(
     counter: RuleCounterState,
     at: datetime,
@@ -196,7 +196,7 @@ def advance_rule_runtime(
         counter.runtime_checkpoint_at = end
         counter.updated_at = end
 
-
+# Calculates accumulated running time, including the current active period.
 def current_rule_runtime_seconds(
     counter: RuleCounterState,
     at: datetime,
@@ -220,7 +220,7 @@ def current_rule_runtime_seconds(
         total += Decimal(str((end - runtime_start).total_seconds()))
     return total
 
-
+# Tracks running-state changes and counts fresh machine cycle transitions.
 def update_rule_signal_states(
     session: Session,
     *,
@@ -546,6 +546,7 @@ def _is_new_alert_occurrence(
     )
     return last_reset is not None and last_reset > last_completion
 
+# Evaluates cycle counts against warning and alert thresholds.
 def evaluate_boolean_count_threshold(
     session: Session,
     rule: MonitoringRule,
@@ -688,6 +689,7 @@ def evaluate_boolean_count_threshold(
 
     return result
 
+# Evaluates accumulated machine running hours against configured thresholds.
 def evaluate_runtime_duration(
     session: Session,
     rule: MonitoringRule,
@@ -1489,7 +1491,7 @@ def evaluate_reading_rules(
     session.flush()
     return counts
 
-
+# Reset the running-signal baseline when runtime monitoring is toggled.
 def set_rule_enabled_state(
     session: Session,
     rule: MonitoringRule,
