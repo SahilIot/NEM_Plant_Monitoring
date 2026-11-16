@@ -413,6 +413,9 @@ class MaintenanceScheduleRead(ORMModel):
     last_signal_value: bool | None = None
     last_signal_at: datetime | None = None
     runtime_freshness_seconds: int | None = None
+    # Age of last_signal_at on the server's clock when this response was built. A display measures the
+    # freshness window from the confirmed sample, not from whenever the page happened to receive it.
+    last_signal_age_seconds: float | None = None
     current_period_start_date: date
     first_due_date: date
     current_due_date: date | None

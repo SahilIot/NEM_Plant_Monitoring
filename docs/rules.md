@@ -49,6 +49,18 @@ ill-typed, or untrusted values do not refresh trustworthy running state.
   larger positive alert threshold. Warning 1 and Warning 2 both report
   `warning`; the higher stage has its own event. The final threshold reports
   `alert`.
+- A cycle-count rule is only evaluated while its Boolean source is current. If the
+  last confirmed sample is older than the freshness limit (or the rule has never
+  received one) the status is `unknown` (Not evaluated) with error `stale_reading`
+  or `cycle_signal_unavailable`. The limit is the same one running-time rules use:
+  the rule's (or default) stale window, tightened to the runtime freshness limit
+  for readings written by the OPC UA collector, which refreshes cycle signals each
+  checkpoint while connected. Readings pushed through the API or entered manually
+  keep the rule/default stale window only. While Not evaluated the counter is not
+  reset, its last value and stage are kept, and existing alerts stay active; the
+  next fresh sample re-evaluates the thresholds immediately and restores
+  Normal, Warning or Alert without a duplicate trigger event for an alert that
+  is still active.
 
 ### Running time
 

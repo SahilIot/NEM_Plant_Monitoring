@@ -42,6 +42,7 @@ from app.db.init_db import initialize_database
 from app.db.session import create_database_engine, create_session_factory
 from app.services.email_notifications import deliver_pending
 from app.services.maintenance_schedule import emit_due_schedule_events
+from app.services.maintenance_progress import expire_stale_runtime_schedules
 from app.services.monitoring_engine import (
     acquire_scheduler_lease,
     release_scheduler_lease,
@@ -137,6 +138,14 @@ async def _monitoring_evaluation_loop(
                             runtime_gap_seconds=runtime_gap_seconds,
                             respect_rule_intervals=True,
                         )
+                        # Same freshness limit as the running-hours rules above: a runtime schedule
+                        # whose running signal went silent stops counting as running right away.
+                        if runtime_gap_seconds:
+                            expire_stale_runtime_schedules(
+                                session,
+                                now=utc_now(),
+                                freshness_seconds=runtime_gap_seconds,
+                            )
                         session.commit()
 
                 await asyncio.to_thread(evaluate_monitoring_rules)

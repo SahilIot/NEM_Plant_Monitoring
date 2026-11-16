@@ -133,8 +133,10 @@ function runtimeDisplayHours(schedule, baseline, now) {
   const stored = Number(schedule.current_progress || 0);
   if (!baseline || !isLiveRuntimeSchedule(schedule)) return stored;
   const elapsedSeconds = Math.max(0, (now - baseline.receivedAt) / 1000);
-  // Past the backend's freshness limit with no newer sample: stop extending and show the stored value.
-  if (elapsedSeconds > Number(schedule.runtime_freshness_seconds)) return stored;
+  // The freshness window runs from the last confirmed sample (its age was measured by the server when
+  // the value arrived), not from when this page received it, so a reload, a remount or a reconnect
+  // cannot restart it. Past the limit with no newer sample: stop extending and show the stored value.
+  if (elapsedSeconds + (baseline.age ?? 0) > Number(schedule.runtime_freshness_seconds)) return stored;
   const limit = Number(schedule.runtime_interval_hours || 0);
   const live = Math.max(stored + elapsedSeconds / 3600, baseline.floor ?? 0);
   return limit > 0 ? Math.min(live, Math.max(stored, limit)) : live;
@@ -160,7 +162,8 @@ function nextRuntimeBaseline(previous, schedule, receivedAt) {
     wasLive && isLiveRuntimeSchedule(schedule)
       ? runtimeDisplayHours(previous.schedule, previous, receivedAt)
       : 0;
-  return { stamp, stored, receivedAt, floor, schedule };
+  const age = Math.max(0, Number(schedule.last_signal_age_seconds) || 0);
+  return { stamp, stored, receivedAt, floor, age, schedule };
 }
 
 function actualDuration(record, now = Date.now()) {

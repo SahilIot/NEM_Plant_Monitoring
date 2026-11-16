@@ -636,7 +636,11 @@ reading ingestion in the same transaction):
   extends the stored progress from there only while the last confirmed sample says
   running and the freshness limit has not passed (never past the configured limit,
   never backwards while running). A newer backend value replaces the estimate, so
-  no time is counted twice.
+  no time is counted twice. The freshness window runs from the confirmed sample (the
+  response carries `last_signal_age_seconds`, measured on the server), so a reload
+  cannot restart it, and the evaluation loop clears the running flag of a schedule
+  whose signal has been silent longer than the limit, the same way running-hours
+  rules turn stale, so every client stops extending the value together.
   The same limit applies to runtime rules (accumulation, the live runtime
   shown by the evaluator, and disabling a rule) and to machine runtime, for
   collector and API-pushed readings alike. Sources that report less often than

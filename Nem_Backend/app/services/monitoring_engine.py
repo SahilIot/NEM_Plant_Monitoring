@@ -29,6 +29,10 @@ LOGGER = logging.getLogger("nem_backend.monitoring")
 # Rule types the database accepts but the engine cannot evaluate yet.
 UNEVALUATED_RULE_TYPES = frozenset({"generic", "boolean_condition"})
 
+# Readings written by the OPC UA collector carry this source id; they are the only ones held to the
+# short runtime freshness limit. API and manually entered readings keep the rule/default stale limit.
+OPCUA_SOURCE_ID = "opcua_subscription"
+
 OPERATORS: dict[str, Callable[[Any, Any], bool]] = {
     ">": operator.gt,
     ">=": operator.ge,
@@ -340,6 +344,19 @@ def _transition_state(
     previous_status = state.status
     previous_error = state.error_message
     transitioned = previous_status != next_status
+    active_alert_before = session.scalar(
+        select(Alert)
+        .where(
+            Alert.rule_id == rule.id,
+            Alert.target_asset_id == asset.id,
+            Alert.status == "active",
+        )
+        .order_by(Alert.id.desc())
+        .limit(1)
+    )
+    alert_severity_before = (
+        active_alert_before.severity if active_alert_before is not None else None
+    )
 
     if transitioned:
         state.last_transition_at = evaluated_at
@@ -351,16 +368,7 @@ def _transition_state(
     state.condition_started_at = condition_started_at
     state.error_message = error_message
 
-    alert = session.scalar(
-        select(Alert)
-        .where(
-            Alert.rule_id == rule.id,
-            Alert.target_asset_id == asset.id,
-            Alert.status == "active",
-        )
-        .order_by(Alert.id.desc())
-        .limit(1)
-    )
+    alert = active_alert_before
 
     if next_status in {"warning", "alert"}:
         can_create_alert = alert is not None or (
@@ -434,7 +442,13 @@ def _transition_state(
             alert.threshold = threshold
             alert.last_updated_at = evaluated_at
 
-        if transitioned and alert is not None:
+        # Coming back from Not Evaluated to the same, still-active alert is not a new trigger.
+        resumed_existing_alert = (
+            previous_status == "unknown"
+            and active_alert_before is not None
+            and alert_severity_before == next_status
+        )
+        if transitioned and alert is not None and not resumed_existing_alert:
             emit_event(
                 session,
                 event_type=(
@@ -556,12 +570,43 @@ def _is_new_alert_occurrence(
     return last_reset is not None and last_reset > last_completion
 
 # Evaluates cycle counts against warning and alert thresholds.
+def _counter_signal_limit_seconds(
+    session: Session,
+    rule: MonitoringRule,
+    asset: Asset,
+    stale_after_seconds: int,
+    runtime_gap_seconds: int | None,
+) -> int:
+    """Longest age of the last confirmed cycle sample for which the count may be called current.
+
+    This is the same limit running-hours rules use: the rule's own (or the default) stale limit, tightened
+    to the runtime freshness limit when the data comes from the OPC UA collector, which refreshes every
+    signal inside that window while connected. Readings pushed through the API or entered manually are
+    not refreshed that way, so they keep the rule/default limit.
+    """
+    limit = rule.stale_after_seconds or stale_after_seconds
+    if not runtime_gap_seconds:
+        return limit
+    source_id = session.scalar(
+        select(Reading.source_id)
+        .where(
+            Reading.asset_id == asset.id,
+            Reading.variable_id == rule.variable_id,
+        )
+        .order_by(Reading.recorded_at.desc(), Reading.id.desc())
+        .limit(1)
+    )
+    return min(limit, runtime_gap_seconds) if source_id == OPCUA_SOURCE_ID else limit
+
+
 def evaluate_boolean_count_threshold(
     session: Session,
     rule: MonitoringRule,
     asset: Asset,
     state: RuleState | None,
     evaluated_at: datetime,
+    stale_after_seconds: int = 300,
+    runtime_gap_seconds: int | None = None,
 ) -> RuleState:
     parameters = rule.parameters or {}
 
@@ -622,6 +667,52 @@ def evaluate_boolean_count_threshold(
 
     count = counter.cycle_count
 
+    previous_message = state.message if state is not None else ""
+    previous_stage = None
+
+    if "[count-stage:" in previous_message:
+        previous_stage = (previous_message.split("[count-stage:", 1)[1].split("]", 1)[0])
+
+    # The count itself is cumulative and never resets here. Whether it is *currently* being confirmed
+    # by its source is a separate question: without a fresh sample the status is Not Evaluated, while
+    # the last count, any active alert and the previous stage are kept untouched.
+    stage_marker = f" [count-stage:{previous_stage}]" if previous_stage else ""
+    if counter.last_signal_at is None:
+        return _transition_state(
+            session,
+            rule,
+            asset,
+            state,
+            next_status="unknown",
+            value=count,
+            message=(
+                "Waiting for a trustworthy Boolean cycle signal; "
+                f"last known count {count} is retained.{stage_marker}"
+            ),
+            evaluated_at=evaluated_at,
+            condition_started_at=None,
+            error_message="cycle_signal_unavailable",
+        )
+    signal_limit = _counter_signal_limit_seconds(
+        session, rule, asset, stale_after_seconds, runtime_gap_seconds
+    )
+    if evaluated_at - counter.last_signal_at > timedelta(seconds=signal_limit):
+        return _transition_state(
+            session,
+            rule,
+            asset,
+            state,
+            next_status="unknown",
+            value=count,
+            message=(
+                f"Cycle signal is stale (older than {signal_limit} seconds); "
+                f"last known count {count} is retained.{stage_marker}"
+            ),
+            evaluated_at=evaluated_at,
+            condition_started_at=None,
+            error_message="stale_reading",
+        )
+
     if count >= alert_threshold:
         stage = "alert"
         severity = "alert"
@@ -638,12 +729,6 @@ def evaluate_boolean_count_threshold(
         stage = "normal"
         severity = "normal"
         threshold = None
-
-    previous_message = state.message if state is not None else ""
-    previous_stage = None
-
-    if "[count-stage:" in previous_message:
-        previous_stage = (previous_message.split("[count-stage:", 1)[1].split("]", 1)[0])
 
     if stage == "normal":
         return _transition_state(
@@ -1137,7 +1222,15 @@ def evaluate_rule(
                 error_message="invalid_count_variable_type",
             )
 
-        return evaluate_boolean_count_threshold(session, rule, asset, state, now)
+        return evaluate_boolean_count_threshold(
+            session,
+            rule,
+            asset,
+            state,
+            now,
+            stale_after_seconds,
+            runtime_gap_seconds,
+        )
 
     if (
         rule.rule_type == "runtime_duration"

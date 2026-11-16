@@ -2,7 +2,7 @@
 # including running-hour accumulation, cycle counting through False-to-True transitions,
 # stale and out-of-order reading protection, signal baseline management, maintenance threshold detection, duplicate alert and occurrence prevention, automatic maintenance record creation, email notifications, and maintenance event generation within the existing database transaction.from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -22,6 +22,40 @@ def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def expire_stale_runtime_schedules(
+    session: Session,
+    *,
+    now: datetime,
+    freshness_seconds: int,
+) -> int:
+    """Mark runtime schedules whose running signal is no longer confirmed as not running.
+
+    Running-hours rules notice a stale signal on every evaluation pass. A schedule only changes when a
+    sample arrives, so without this a stopped or silent signal would leave it looking live until the
+    next unrelated refresh. Once the last confirmed sample is older than the runtime freshness limit the
+    running flag is cleared (progress and ``last_signal_at`` are kept, nothing is credited), which also
+    tells connected clients to stop extending the value. The next fresh sample only re-sets the baseline,
+    exactly like after a reconnect. This does not commit.
+    """
+    if freshness_seconds < 1:
+        return 0
+    cutoff = _as_utc(now) - timedelta(seconds=freshness_seconds)
+    schedules = session.scalars(
+        select(MaintenanceSchedule)
+        .where(
+            MaintenanceSchedule.schedule_mode == "runtime",
+            MaintenanceSchedule.status == "active",
+            MaintenanceSchedule.last_signal_value.is_(True),
+            MaintenanceSchedule.last_signal_at.is_not(None),
+            MaintenanceSchedule.last_signal_at < cutoff,
+        )
+        .with_for_update(skip_locked=True)
+    ).all()
+    for schedule in schedules:
+        schedule.last_signal_value = None
+    return len(schedules)
 
 
 def update_maintenance_progress(

@@ -193,6 +193,10 @@ def _validate_instruction_documents(
     return normalized_ids
 
 
+def _aware_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
 def _runtime_freshness_seconds() -> int | None:
     """Runtime freshness limit shown to clients so a display never extends a stale signal."""
     try:
@@ -313,6 +317,11 @@ def _schedule_read(
         "runtime_freshness_seconds": (
             _runtime_freshness_seconds()
             if schedule.schedule_mode == "runtime"
+            else None
+        ),
+        "last_signal_age_seconds": (
+            max(0.0, (utc_now() - _aware_utc(schedule.last_signal_at)).total_seconds())
+            if schedule.schedule_mode == "runtime" and schedule.last_signal_at is not None
             else None
         ),
     }

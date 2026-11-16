@@ -29,7 +29,7 @@ from app.models import (Alert,Asset,
 from app.schemas.opcua import OpcUaMachineMapping, OpcUaTagMapping
 from app.schemas.reading import ReadingCreate
 from app.services.monitoring_engine import (acquire_scheduler_lease,
-    emit_event,evaluate_reading_rules,utc_now,
+    emit_event,evaluate_reading_rules,utc_now,OPCUA_SOURCE_ID,
 )
 from app.services.opcua_client import (OpcUaConfigurationError, OpcUaConnectionError,
     create_configured_opcua_client, opcua_security_summary,
@@ -665,9 +665,45 @@ class OpcUaCollector:
             for mapping in self.mappings
             if mapping.running_signal is not None
         ]
+        # Explicitly mapped cycle signals (and Boolean readings) are only refreshed when an enabled
+        # cycle-count rule uses them; without that, a cycle bit that sits steady for longer than the
+        # freshness limit would make its counter look disconnected while the PLC is fine.
+        legacy_candidates = [
+            (mapping, signal, role)
+            for mapping in self.mappings
+            for signal, role in (
+                (mapping.cycle_signal, "cycle"),
+                *((reading, "reading") for reading in mapping.readings),
+            )
+            if signal is not None
+        ]
         declared_variable_ids = [signal.variable_id
             for _, signal, _ in self._declared_variable_mappings
         ]
+        if legacy_candidates:
+            with self.session_factory() as session:
+                counted_variable_ids = set(
+                    session.scalars(
+                        select(MonitoringRule.variable_id)
+                        .join(
+                            Variable,
+                            Variable.id == MonitoringRule.variable_id,
+                        )
+                        .where(
+                            MonitoringRule.rule_type == "boolean_count_threshold",
+                            MonitoringRule.is_enabled.is_(True),
+                            Variable.data_type == "boolean",
+                            Variable.id.in_(
+                                [signal.variable_id for _, signal, _ in legacy_candidates]
+                            ),
+                        )
+                    ).all()
+                )
+            signals.extend(
+                (mapping, signal, role)
+                for mapping, signal, role in legacy_candidates
+                if signal.variable_id in counted_variable_ids
+            )
         if declared_variable_ids:
             with self.session_factory() as session:
                 monitored_variable_ids = set(
@@ -889,7 +925,7 @@ class OpcUaCollector:
                 variable_id=variable_id,
                 value=notification.value,
                 recorded_at=recorded_at,
-                source_id="opcua_subscription",
+                source_id=OPCUA_SOURCE_ID,
                 metadata={
                     "protocol": "opc.tcp",
                     "node_id": notification.node_id,
