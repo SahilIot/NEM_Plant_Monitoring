@@ -178,32 +178,13 @@ class MaintenanceCompletion(ORMModel):
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
 
+    # Technician, work performed and remarks are optional; a blank value means "leave the existing detail as it is".
     @field_validator("performed_by", "notes", "completion_notes")
     @classmethod
     def strip_registration_text(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("Text fields cannot be empty")
-        return stripped
-
-    @model_validator(mode="after")
-    def require_registration_details_together(self):
-        if self.model_fields_set:
-            required = {
-                "actual_completed_at": self.actual_completed_at,
-                "performed_by": self.performed_by,
-                "notes": self.notes,
-                "completion_notes": self.completion_notes,
-            }
-            missing = [field for field, value in required.items() if value is None]
-            if missing:
-                raise ValueError(
-                    "Registration requires actual_completed_at, performed_by, notes, "
-                    "and completion_notes"
-                )
-        return self
+        return value.strip() or None
 
 #Create a maintenance schedule,including recurrence settings
 #The core of recurring maintenance

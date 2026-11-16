@@ -610,6 +610,8 @@ export default function AssetDetail() {
   const [rules, setRules] = useState([]);
   const [completedMaintenanceCount, setCompletedMaintenanceCount] = useState(0);
   const [maintenanceRefreshKey, setMaintenanceRefreshKey] = useState(0);
+  // Bumped by live updates so the Schedules list re-reads the backend's authoritative progress.
+  const [scheduleProgressKey, setScheduleProgressKey] = useState(0);
   const rulesRef = useRef(rules);
   rulesRef.current = rules;
   const [variables, setVariables] = useState([]);
@@ -1289,6 +1291,8 @@ export default function AssetDetail() {
         liveScheduler();
         loadVariables();
         loadLogs();
+        // Includes WebSocket reconnects: restore the latest schedule progress.
+        setScheduleProgressKey((current) => current + 1);
         if (tab === "events") eventsScheduler();
         return;
       }
@@ -1366,6 +1370,10 @@ export default function AssetDetail() {
         changedTables.has("nem_maintenance_schedules")
       ) {
         loadLogs();
+      }
+      if (changedTables.has("nem_maintenance_schedules")) {
+        // Runtime/usage progress is saved on the schedule row by the collector.
+        setScheduleProgressKey((current) => current + 1);
       }
       if (changedTables.has("nem_monitoring_events") && tab === "events") {
         eventsScheduler();
@@ -2954,6 +2962,7 @@ const filteredEvents = [...events]
       key={assetId}
       assetId={assetId}
       scheduleId={scheduleId}
+      progressRefreshKey={scheduleProgressKey}
       onChanged={refreshMaintenanceData}
       onActionNotification={notifyAction}
       navigationState={assetNavigationState}

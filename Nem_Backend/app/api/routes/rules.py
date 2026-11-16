@@ -15,7 +15,7 @@ from app.schemas.rule import RuleCreate, RuleRead, RuleTemplateCreate, RuleUpdat
 from app.services.rule_visibility import can_view_template, request_user
 from app.services.access_scope import access_scope, rule_asset_id
 from app.services.labels import apply_label_filter, assign_labels
-from app.services.monitoring_engine import emit_event, set_rule_enabled_state
+from app.services.monitoring_engine import emit_event, evaluate_rules, set_rule_enabled_state
 from app.services.monitoring_engine import utc_now
 
 router = APIRouter(prefix="/rules", tags=["monitoring rules"])
@@ -357,6 +357,10 @@ def list_rules(
 def get_rule(rule_id: int, session: Session = Depends(get_db)) -> MonitoringRule:
     return rule_or_404(session, rule_id)
 
+# Fields whose change can alter a rule's Normal/Warning/Alert outcome.
+EVALUATION_FIELDS = {"operator", "threshold", "parameters", "severity", "stale_after_seconds"}
+
+
 #Update a rule
 @router.patch("/{rule_id}", response_model=RuleRead)
 def update_rule(
@@ -476,6 +480,15 @@ def update_rule(
         assign_labels(session, rule, changes["labels"])
     if "is_enabled" in changes:
         set_rule_enabled_state(session, rule, changes["is_enabled"])
+    # Apply a changed threshold immediately instead of waiting for the next PLC value or evaluation cycle.
+    # A shared-rule edit already re-evaluated every rule using it in apply_template_update.
+    if template is None and rule.is_enabled and set(changes) & EVALUATION_FIELDS:
+        session.flush()
+        evaluate_rules(
+            session,
+            rule_id=rule.id,
+            stale_after_seconds=request.app.state.settings.monitoring_default_stale_after_seconds,
+        )
     session.commit()
     session.refresh(rule)
     return rule

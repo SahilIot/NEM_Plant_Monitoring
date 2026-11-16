@@ -67,7 +67,7 @@ from app.services.frontend_backup import (
     retry_recovery,
     storage_report,
 )
-from app.services.monitoring_engine import (emit_event, set_rule_enabled_state,)
+from app.services.monitoring_engine import (emit_event, evaluate_rules, set_rule_enabled_state,)
 from app.api.routes.rules import (
     configured_cycle_signal_mapping,
     configured_runtime_signal_mapping,
@@ -1135,6 +1135,14 @@ def apply_template_update(
                     "stale_after_seconds",
                 ):
                     setattr(rule, field, definition[field])
+
+        # Re-evaluate every rule that uses this shared rule right away with its new thresholds, so
+        # statuses and alerts are corrected now rather than after the next PLC value or evaluation cycle.
+        session.flush()
+        stale_after = request.app.state.settings.monitoring_default_stale_after_seconds
+        for rule in assigned_rules:
+            if rule.is_enabled:
+                evaluate_rules(session, rule_id=rule.id, stale_after_seconds=stale_after)
 
 
 #Retrieves the template and replaces its fields with the values in the request - Save the changes.

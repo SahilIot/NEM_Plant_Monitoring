@@ -184,7 +184,8 @@ const openEdit = (record) => {
               record &&
               (record.status === "in_progress" ||
                 (record.status === "planned" &&
-                  record.planned_due_date <= today))
+                  // Runtime/usage jobs have no due date: they are created when the limit is reached, so they are due now.
+                  (!record.planned_due_date || record.planned_due_date <= today)))
           )
       );
       return true;
@@ -292,7 +293,7 @@ const openEdit = (record) => {
     if (
       !canManageMaintenance &&
       !(canOperateDueMaintenance && record.schedule_id != null &&
-        record.planned_due_date <= todayDateInput())
+        (!record.planned_due_date || record.planned_due_date <= todayDateInput()))
     ) return;
     if (startingRecordId !== null || startRequestRef.current) return;
     startRequestRef.current = true;
@@ -329,7 +330,7 @@ const openEdit = (record) => {
     if (
       !canManageMaintenance &&
       !(canOperateDueMaintenance && record.schedule_id != null &&
-        record.planned_due_date <= todayDateInput())
+        (!record.planned_due_date || record.planned_due_date <= todayDateInput()))
     ) return;
     if (completingRecordId !== null) return;
     // Collect registration details before invoking the existing completion API.
@@ -411,7 +412,9 @@ const openEdit = (record) => {
                       ? "In progress"
                       : overdue
                         ? "Overdue"
-                        : "Due today"}
+                        : record.planned_due_date
+                          ? "Due today"
+                          : "Due"}
                 </span>
                 <small>
                   {displayDate(record.planned_due_date)}
@@ -431,13 +434,13 @@ const openEdit = (record) => {
                       (!canManageMaintenance &&
                         !(canOperateDueMaintenance &&
                           record.schedule_id != null &&
-                          record.planned_due_date <= todayDateInput()))
+                          (!record.planned_due_date || record.planned_due_date <= todayDateInput())))
                     }
                     title={
                       !canManageMaintenance &&
                       !(canOperateDueMaintenance &&
                         record.schedule_id != null &&
-                        record.planned_due_date <= todayDateInput())
+                        (!record.planned_due_date || record.planned_due_date <= todayDateInput()))
                         ? "Operators can start scheduled maintenance due today or overdue."
                         : undefined
                     }
@@ -556,13 +559,13 @@ const openEdit = (record) => {
                   (!canManageMaintenance &&
                     !(canOperateDueMaintenance &&
                       selectedRecord.schedule_id != null &&
-                      selectedRecord.planned_due_date <= todayDateInput()))
+                      (!selectedRecord.planned_due_date || selectedRecord.planned_due_date <= todayDateInput())))
                 }
                 title={
                   !canManageMaintenance &&
                   !(canOperateDueMaintenance &&
                     selectedRecord.schedule_id != null &&
-                    selectedRecord.planned_due_date <= todayDateInput())
+                    (!selectedRecord.planned_due_date || selectedRecord.planned_due_date <= todayDateInput()))
                     ? "Operators can complete scheduled maintenance due today or overdue."
                     : undefined
                 }

@@ -170,6 +170,7 @@ function validateForm(values, requirePlannedDates) {
 export default function MaintenancePanel({
   assetId,
   scheduleId,
+  progressRefreshKey = 0,
   onChanged,
   onActionNotification,
   navigationState,
@@ -243,6 +244,29 @@ export default function MaintenancePanel({
       setSchedulesLoaded(true);
     }
   }, [assetId]);
+
+  // Live progress refresh: re-read schedules without the loading state so values update in place.
+  const progressRequestRef = useRef(false);
+  useEffect(() => {
+    if (!progressRefreshKey || progressRequestRef.current) return undefined;
+    let cancelled = false;
+    progressRequestRef.current = true;
+    api
+      .getAll(`/maintenance/schedules?asset_id=${assetId}`)
+      .then((result) => {
+        if (!cancelled && Array.isArray(result)) setSchedules(result);
+      })
+      .catch(() => {
+        // A failed background refresh keeps the last values; the next live event retries.
+      })
+      .finally(() => {
+        progressRequestRef.current = false;
+      });
+    return () => {
+      cancelled = true;
+      progressRequestRef.current = false;
+    };
+  }, [progressRefreshKey, assetId]);
 
   // One delete at a time, including while the confirmation dialog is open.
   const deleteGuard = useRef(false);
@@ -756,7 +780,8 @@ export default function MaintenancePanel({
         } else {
           setDialog({ kind: "details", record: updatedRecord });
         }
-      } else {
+      } else if (!isStarting || dialog?.kind === "details") {
+        // A started scheduled job stays under Current status; only refresh an open details dialog.
         setDialog({ kind: "details", record: updatedRecord });
       }
       setRecords((previous) =>
@@ -766,6 +791,13 @@ export default function MaintenancePanel({
       await loadRecords();
       await onChanged?.();
       if (!isStarting) await loadSchedules();
+      if (!isStarting) {
+        // Finished work is kept in Jobs & History so it can be reviewed there.
+        setActiveMaintenanceTab("jobs");
+      } else if (updatedRecord.schedule_id != null) {
+        // A started scheduled job now lives under Current status, so take the user there.
+        navigate(`/assets/${assetId}`, { state: { activeTab: "status" } });
+      }
     } catch (requestError) {
       if (isStarting && !startSucceeded) {
         onActionNotification?.(
@@ -783,44 +815,6 @@ export default function MaintenancePanel({
       if (isStarting) startRequestRef.current = false;
       setBusy(false);
     }
-  };
-
-  // A schedule without a planned occurrence (for example after "Do not schedule") can still be
-  // started: create a job from the schedule's details, then start it.
-  const startFromSchedule = async (schedule) => {
-    if (!canManageMaintenance || busy) return;
-    setBusy(true);
-    setError("");
-    setNotice("");
-    let created;
-    try {
-      const now = new Date();
-      const payload = {
-        asset_id: Number(assetId),
-        title: schedule.title,
-        maintenance_type: schedule.maintenance_type || "preventive",
-        priority: schedule.priority || "medium",
-        status: "planned",
-        assigned_technician: schedule.assigned_technician || null,
-        notes: schedule.description || `Started from schedule "${schedule.title}".`,
-        planned_start_at: now.toISOString(),
-        planned_end_at: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
-      };
-      try {
-        created = await api.post("/maintenance", { ...payload, schedule_id: schedule.id });
-      } catch {
-        created = await api.post("/maintenance", payload); // server does not accept schedule_id
-      }
-    } catch (requestError) {
-      setError(requestError.message || "Could not create maintenance from this schedule.");
-      setBusy(false);
-      return;
-    }
-    setBusy(false);
-    if (created.schedule_id == null) {
-      setNotice("Maintenance started as a standalone job (it is not linked to this schedule).");
-    }
-    await changeMaintenanceStatus({ ...created, status: created.status || "planned" });
   };
 
   const terminalEdit =
@@ -885,7 +879,7 @@ export default function MaintenancePanel({
       !(
         record.schedule_id != null &&
         (record.status === "in_progress" ||
-          (record.status === "planned" && record.planned_due_date <= today))
+          (record.status === "planned" && (!record.planned_due_date || record.planned_due_date <= today)))
       )
   );
   // Calendar schedules first, soonest due date on top; runtime/usage schedules follow.
@@ -1283,7 +1277,9 @@ export default function MaintenancePanel({
         ? "A maintenance for this schedule is already in progress."
         : scheduleClosed
           ? `This schedule is ${schedule.status} and cannot start maintenance.`
-          : "";
+          : !nextRecord
+            ? "There is no planned maintenance to start yet."
+            : "";
     const registerBlockedReason = !canManageMaintenance
       ? "You do not have permission to manage maintenance."
       : !runningRecord
@@ -1395,7 +1391,7 @@ export default function MaintenancePanel({
             <button
               type="button"
               className="btn-outline schedule-start-btn"
-              onClick={() => (nextRecord ? changeMaintenanceStatus(nextRecord) : startFromSchedule(schedule))}
+              onClick={() => changeMaintenanceStatus(nextRecord)}
               disabled={busy || Boolean(startBlockedReason)}
               title={startBlockedReason || "Start this maintenance"}
             >
@@ -1412,7 +1408,9 @@ export default function MaintenancePanel({
             )}
             {!runningRecord && !nextRecord && canManageMaintenance && !scheduleClosed && (
               <p className="muted">
-                No planned maintenance yet. Start will create one from this schedule and begin it.
+                {schedule.schedule_mode === "runtime" || schedule.schedule_mode === "usage"
+                  ? "Maintenance can be started once the running-hour or cycle limit is reached; it is then listed under Current status."
+                  : "No maintenance is planned for this schedule yet. Confirm the next date to plan it."}
               </p>
             )}
           </div>

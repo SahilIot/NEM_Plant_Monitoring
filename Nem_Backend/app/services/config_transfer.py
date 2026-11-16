@@ -113,7 +113,13 @@ def build_export(
     collections = session.scalars(select(RuleCollection).order_by(RuleCollection.id)).all()
     schedules = session.scalars(
         select(MaintenanceSchedule)
-        .where(MaintenanceSchedule.status.in_(_EXPORTED_SCHEDULE_STATUSES))
+        .where(
+            MaintenanceSchedule.status.in_(_EXPORTED_SCHEDULE_STATUSES),
+            # The package format only describes calendar schedules (a start offset and a recurrence). Runtime and
+            # usage schedules depend on a PLC signal variable of the source machine, so exporting them as calendar
+            # entries would recreate them as schedules that are due immediately.
+            MaintenanceSchedule.schedule_mode == "calendar",
+        )
         .order_by(MaintenanceSchedule.id)
     ).all()
     if maintenance_asset_ids is not None:
@@ -173,7 +179,10 @@ def export_summary(session: Session) -> dict[str, Any]:
     contents = package["contents"]
     per_asset: dict[int, int] = {}
     schedules = session.scalars(
-        select(MaintenanceSchedule).where(MaintenanceSchedule.status.in_(_EXPORTED_SCHEDULE_STATUSES))
+        select(MaintenanceSchedule).where(
+            MaintenanceSchedule.status.in_(_EXPORTED_SCHEDULE_STATUSES),
+            MaintenanceSchedule.schedule_mode == "calendar",
+        )
     ).all()
     for schedule in schedules:
         per_asset[schedule.asset_id] = per_asset.get(schedule.asset_id, 0) + 1

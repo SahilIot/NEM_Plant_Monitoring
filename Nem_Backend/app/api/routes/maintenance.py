@@ -978,14 +978,11 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
                     ),
                 )
 
-            # Signal or interval changes require a fresh maintenance progress baseline.
-            progress_configuration_changed = (
-                target_signal_id != schedule.signal_variable_id
-                or target_runtime_interval != schedule.runtime_interval_hours
-                or target_usage_interval != schedule.usage_interval_count
-            )
-            if progress_configuration_changed:
-                schedule.current_progress = 0.0
+            # Editing never resets accumulated progress. Changing the threshold keeps the signal baseline too,
+            # so collection continues seamlessly. Only a different signal variable drops the previous signal's
+            # last value/timestamp, so readings of the new signal are not compared with the old one; the
+            # accumulated current_progress is kept.
+            if target_signal_id != schedule.signal_variable_id:
                 schedule.last_signal_value = None
                 schedule.last_signal_at = None
     
@@ -1561,6 +1558,8 @@ def start_maintenance_record(
     user: User = Depends(get_current_user),
 ) -> MaintenanceRecord:
     record = _record_or_404(session, record_id)
+    # Lock and re-read the row so two simultaneous Start requests cannot both see "planned" and both start it.
+    session.refresh(record, with_for_update=True)
     _authorize_operator_due_occurrence(
         session, record, user, action="start"
     )
@@ -1636,10 +1635,16 @@ def complete_maintenance_record(
 
     # Persist submitted registration fields before running the existing completion workflow.
     if payload is not None and payload.model_fields_set:
-        record.actual_completed_at = payload.actual_completed_at
-        record.performed_by = payload.performed_by
-        record.notes = payload.notes
-        record.completion_notes = payload.completion_notes
+        # Only details that were actually entered replace the stored ones; blank optional fields keep what the
+        # job already has (the technician column cannot be empty, so it keeps its current value).
+        if payload.actual_completed_at is not None:
+            record.actual_completed_at = payload.actual_completed_at
+        if payload.performed_by is not None:
+            record.performed_by = payload.performed_by
+        if payload.notes is not None:
+            record.notes = payload.notes
+        if payload.completion_notes is not None:
+            record.completion_notes = payload.completion_notes
         if "parts_used" in payload.model_fields_set:
             record.parts_used = payload.parts_used
         if "checklist" in payload.model_fields_set:

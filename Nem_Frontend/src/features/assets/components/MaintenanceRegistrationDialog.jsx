@@ -45,17 +45,6 @@ export default function MaintenanceRegistrationDialog({
     if (submittingRef.current) return;
     setValidationError("");
 
-    if (
-      !values.performed_by.trim() ||
-      !values.notes.trim() ||
-      !values.completion_notes.trim()
-    ) {
-      setValidationError(
-        "Enter the responsible technician, work performed, and completion remarks."
-      );
-      return;
-    }
-
     const completedAt = new Date(values.actual_completed_at);
     if (!values.actual_completed_at || Number.isNaN(completedAt.getTime())) {
       setValidationError("Enter a valid actual completion date and time.");
@@ -84,9 +73,10 @@ export default function MaintenanceRegistrationDialog({
     // Send only fields already supported by the maintenance record model.
     const payload = {
       actual_completed_at: completedAt.toISOString(),
-      performed_by: values.performed_by.trim(),
-      notes: values.notes.trim(),
-      completion_notes: values.completion_notes.trim(),
+      // Technician, work performed and remarks are optional; blank values leave the record's existing details unchanged.
+      performed_by: values.performed_by.trim() || null,
+      notes: values.notes.trim() || null,
+      completion_notes: values.completion_notes.trim() || null,
       parts_used: values.parts_used.trim() || null,
       checklist: checklist.length ? checklist : null,
     };
@@ -140,10 +130,9 @@ export default function MaintenanceRegistrationDialog({
             />
           </label>
           <label className="maintenance-form-wide">
-            Technician responsible
+            Technician responsible (optional)
             <input
               type="text"
-              required
               maxLength={200}
               value={values.performed_by}
               onChange={(event) =>
@@ -155,9 +144,8 @@ export default function MaintenanceRegistrationDialog({
             />
           </label>
           <label className="maintenance-form-wide">
-            Work performed
+            Work performed (optional)
             <textarea
-              required
               maxLength={10000}
               rows={4}
               value={values.notes}
@@ -170,9 +158,8 @@ export default function MaintenanceRegistrationDialog({
             />
           </label>
           <label className="maintenance-form-wide">
-            Completion remarks
+            Completion remarks (optional)
             <textarea
-              required
               maxLength={10000}
               rows={3}
               value={values.completion_notes}
