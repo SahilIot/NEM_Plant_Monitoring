@@ -413,8 +413,9 @@ export default function Layout() {
     pathname.startsWith("/rules") ||
     pathname.startsWith("/assets");
 
+  // Match nested pages too (add/edit maintenance, rules...) so the asset being worked on stays selected.
   const selectedId = Number(
-    matchPath("/assets/:id", pathname)?.params.id
+    matchPath({ path: "/assets/:id", end: false }, pathname)?.params.id
   );
 
   const breadcrumbs = crumbs(pathname, assets, t);

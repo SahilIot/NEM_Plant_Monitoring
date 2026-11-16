@@ -163,6 +163,23 @@ export default function CreateMaintenanceSchedulePage() {
   const [suggestionAssets, setSuggestionAssets] = useState([]);
   const [suggestionAssetId, setSuggestionAssetId] = useState("");
 
+  // Name of the asset taken from the route, shown so it is clear which asset the schedule belongs to.
+  const [routeAssetName, setRouteAssetName] = useState("");
+  useEffect(() => {
+    if (isSuggestion || !id || !Number.isFinite(Number(id))) return undefined;
+    let cancelled = false;
+    api.get(`/assets/${id}`)
+      .then((asset) => {
+        if (!cancelled) setRouteAssetName(asset?.name || "");
+      })
+      .catch(() => {
+        if (!cancelled) setRouteAssetName("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, isSuggestion]);
+
   // Load available assets when a Supervisor opens the maintenance suggestion page.
   useEffect(() => {
     if (!isSuggestion) return undefined;
@@ -795,7 +812,7 @@ export default function CreateMaintenanceSchedulePage() {
               ? "Submit a maintenance plan for Administrator review. It will not be scheduled until approved."
               : isSupervisor
                 ? "Update schedule dates and the recurrence interval. Other maintenance details are read-only."
-                : "Configure the maintenance plan, first due date and recurrence for this asset."}
+                : `Configure the maintenance plan, first due date and recurrence for ${routeAssetName ? `asset "${routeAssetName}"` : "this asset"}.`}
           </p>
         </div>
       </div>
