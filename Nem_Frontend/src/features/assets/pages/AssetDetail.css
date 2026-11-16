@@ -1213,11 +1213,12 @@
 }
 
 .event-log-section .event-log-table thead th {
-  padding: 14px clamp(10px, 1.25vw, 18px);
+  padding: 9px clamp(10px, 1.25vw, 16px);
   text-align: left;
   white-space: normal;
   overflow-wrap: anywhere;
-  font-size: 13px;
+  font-size: 12px;
+  letter-spacing: 0.01em;
   font-weight: 600;
   color: var(--ink, #1f2937);
   background: var(--surface-2, #f3f4f6);
@@ -1225,9 +1226,9 @@
 }
 
 .event-log-section .event-log-table tbody td {
-  padding: 14px clamp(10px, 1.25vw, 18px);
-  font-size: 14px;
-  line-height: 1.5;
+  padding: 8px clamp(10px, 1.25vw, 16px);
+  font-size: 13px;
+  line-height: 1.4;
   vertical-align: middle;
   color: var(--ink, #1f2937);
   border-bottom: 1px solid var(--line, #e5e7eb);
@@ -1244,6 +1245,37 @@
 
 .event-log-section .event-log-table .event-col-time {
   width: 19%;
+}
+
+.event-log-section .event-log-table tbody td.event-col-time {
+  color: var(--muted, #6b7280);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.event-log-section .event-log-table tbody tr td:first-child {
+  box-shadow: inset 3px 0 0 transparent;
+}
+
+.event-log-section .event-log-table tbody tr.event-tone-alert td:first-child {
+  box-shadow: inset 3px 0 0 var(--alert);
+}
+
+.event-log-section .event-log-table tbody tr.event-tone-warn td:first-child {
+  box-shadow: inset 3px 0 0 var(--warn-lamp, var(--warn));
+}
+
+.event-log-section .event-log-table tbody tr.event-tone-ok td:first-child {
+  box-shadow: inset 3px 0 0 var(--ok);
+}
+
+.event-log-section .event-log-table tbody tr.event-tone-info td:first-child {
+  box-shadow: inset 3px 0 0 var(--action);
+}
+
+.event-log-section .event-log-table tbody tr.event-tone-neutral td.event-col-event > div,
+.event-log-section .event-log-table tbody tr.event-tone-ok td.event-col-event > div {
+  color: var(--ink-2, var(--ink));
 }
 
 .event-log-section .event-log-table .event-col-event {
@@ -1266,7 +1298,7 @@
 }
 
 .event-log-section .event-log-table.event-log-table--selectable .event-col-time {
-  width: 18%;
+  width: 16%;
 }
 
 .event-log-section .event-log-table.event-log-table--selectable .event-col-event {
@@ -1278,7 +1310,7 @@
 }
 
 .event-log-section .event-log-table.event-log-table--selectable .event-col-rule {
-  width: 18%;
+  width: 20%;
 }
 
 .event-log-section .event-log-table .event-col-actions {
@@ -1331,6 +1363,18 @@
 .event-log-section .event-log-table .btn-secondary:focus-visible {
   outline: 2px solid var(--accent, #2563eb);
   outline-offset: 2px;
+}
+
+/* Narrow screens: the table scrolls inside its own container, so keep the
+   actions column in the normal flow instead of covering the other cells. */
+@media (max-width: 960px) {
+  .event-log-section .event-log-table {
+    min-width: 760px;
+  }
+
+  .event-log-section .event-log-table .event-col-actions {
+    position: static;
+  }
 }
 
 @media (max-width: 768px) {

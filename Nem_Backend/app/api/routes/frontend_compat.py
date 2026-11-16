@@ -9,7 +9,7 @@ import mimetypes
 from pathlib import Path
 from uuid import uuid4
 from zipfile import BadZipFile
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from cryptography.fernet import Fernet # encrypts and decrypts sensitive values, such as a saved email password
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
@@ -102,6 +102,8 @@ ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt"}
 
 # Shown whenever an operation would create or leave a collection without a monitoring rule.
 COLLECTION_NEEDS_RULE_MESSAGE = "Add at least one monitoring rule to the collection."
+COLLECTION_MAX_RULES = 5
+COLLECTION_FULL_MESSAGE = "A rule collection can contain no more than five rules"
 COLLECTION_KEEP_RULE_MESSAGE = (
     "A collection must keep at least one monitoring rule. Add another rule first, or delete the collection."
 )
@@ -112,15 +114,26 @@ class CollectionCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str | None = None
     labels: list[str] = Field(default_factory=list, max_length=10)
-    rules: list[RuleTemplateCreate] | None = Field(default=None, min_length=1, max_length=5)
-    # Required whenever rules are created together with the collection; no default.
+    # New rule definitions created together with the collection.
+    rules: list[RuleTemplateCreate] | None = Field(default=None, max_length=5)
+    # Existing standalone reusable rules (collection_id is NULL) that become members of the new collection.
+    # Inline and existing rules share one limit: between 1 and 5 in total.
+    existing_template_ids: list[Annotated[int, Field(ge=1)]] = Field(default_factory=list, max_length=5)
+    # Required whenever new rules are created together with the collection; no default. It applies to the
+    # new rules only: existing rules keep their own visibility.
     visibility_type: Literal["admin_only", "specific_supervisors"] | None = None
     visibility_supervisor_ids: list[int] = Field(default_factory=list, max_length=200)
 
     @model_validator(mode="after")
     def check_rule_visibility(self):
-        if not self.rules:
+        inline_count = len(self.rules or [])
+        total = inline_count + len(self.existing_template_ids)
+        if total == 0:
             raise ValueError(COLLECTION_NEEDS_RULE_MESSAGE)
+        if total > COLLECTION_MAX_RULES:
+            raise ValueError(COLLECTION_FULL_MESSAGE)
+        if len(set(self.existing_template_ids)) != len(self.existing_template_ids):
+            raise ValueError("Each existing rule can be selected only once")
         if self.rules:
             if self.visibility_type is None:
                 raise ValueError("Choose a visibility for the collection rules")
@@ -747,8 +760,8 @@ def _validate_template_collection(
         query = select(func.count()).select_from(MonitoringRuleTemplate).where(MonitoringRuleTemplate.collection_id == collection_id)
         if excluded_template_id is not None:
             query = query.where(MonitoringRuleTemplate.id != excluded_template_id)
-        if (session.scalar(query) or 0) >= 5:
-            raise HTTPException(status_code=422,detail="A rule collection can contain no more than five rules",)
+        if (session.scalar(query) or 0) >= COLLECTION_MAX_RULES:
+            raise HTTPException(status_code=422,detail=COLLECTION_FULL_MESSAGE,)
 
 # A rule may only leave a collection (be moved out or deleted) if at least one other rule stays in it.
 # The collection row is locked so two concurrent removals cannot both pass the check.
@@ -2260,12 +2273,44 @@ def list_collections(
         for row in rows
     ]
 
+# Locks the existing standalone rules chosen for a new collection and checks they can be claimed.
+# Rows are locked in id order (SELECT ... FOR UPDATE) so two requests claiming the same rule queue up
+# instead of both succeeding, and so overlapping requests cannot deadlock. Nothing is changed here.
+def _claim_existing_templates(session: Session, template_ids: list[int]) -> list[MonitoringRuleTemplate]:
+    if not template_ids:
+        return []
+    ids = sorted(set(template_ids))
+    rows = session.scalars(
+        select(MonitoringRuleTemplate)
+        .where(MonitoringRuleTemplate.id.in_(ids))
+        .where(visible_templates_clause(session, request_user(session)))
+        .order_by(MonitoringRuleTemplate.id)
+        .with_for_update()
+        # Re-read the locked rows so a rule claimed by a request that just committed is seen as claimed.
+        .execution_options(populate_existing=True)
+    ).all()
+    found = {row.id for row in rows}
+    missing = [item for item in ids if item not in found]
+    if missing:
+        # A rule the caller may not see is reported like a missing one (same as get_visible_template).
+        raise HTTPException(status_code=404,detail="Rule template was not found: " + ", ".join(str(item) for item in missing),)
+    claimed = [row for row in rows if row.collection_id is not None]
+    if claimed:
+        raise HTTPException(status_code=409,detail="These rules already belong to a collection and cannot be added: "
+            + ", ".join(f"{row.name} (#{row.id})" for row in claimed),)
+    return rows
+
 #Create a collecton
 @router.post("/collections", status_code=201)
 def create_collection(payload: CollectionCreate, session: Session = Depends(get_db)) -> dict[str, Any]:
-    collection = RuleCollection(name=payload.name.strip(), description=payload.description)
-    session.add(collection)
+    # Defence in depth behind the middleware: only Administrators create collections.
+    require_session_roles(session, "Administrator")
+    # One transaction: the collection, its new rules and the move of existing rules are committed together
+    # (a single commit at the end) or not at all. No helper used below commits.
     try:
+        existing = _claim_existing_templates(session, payload.existing_template_ids)
+        collection = RuleCollection(name=payload.name.strip(), description=payload.description)
+        session.add(collection)
         session.flush()
         assign_labels(session, collection, payload.labels)
         templates = []
@@ -2284,19 +2329,33 @@ def create_collection(payload: CollectionCreate, session: Session = Depends(get_
                 request_user(session),
             )
             templates.append(template)
-        session.add_all(templates)
+        for template in existing:
+            # Same change-history entry as moving a rule with PUT /rule-templates/{id}.
+            record_template_changes(session, template, {"collection_id": collection.id})
+            template.collection_id = collection.id
+        session.flush()
+        members = [*templates, *existing]
+        stored = session.scalar(
+            select(func.count()).select_from(MonitoringRuleTemplate).where(MonitoringRuleTemplate.collection_id == collection.id)
+        ) or 0
+        if stored != len(members) or not 1 <= stored <= COLLECTION_MAX_RULES:
+            raise HTTPException(status_code=409, detail="The collection's rules could not be verified, so nothing was saved.")
         session.commit()
     except IntegrityError as error:
         session.rollback()
         raise HTTPException(status_code=409, detail="A collection with this name already exists") from error
+    except Exception:
+        # Includes HTTPException: discard everything done so far (collection, new rules, moved rules).
+        session.rollback()
+        raise
     session.refresh(collection)
     return {
         "id": collection.id,
         "name": collection.name,
         "description": collection.description,
         "labels": collection.labels,
-        "rules": [{"id": item.id, "name": item.name} for item in templates],
-        "rule_count": len(templates),
+        "rules": [{"id": item.id, "name": item.name} for item in members],
+        "rule_count": len(members),
     }
 
 

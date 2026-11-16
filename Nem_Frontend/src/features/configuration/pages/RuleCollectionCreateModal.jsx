@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Plus, Trash2 } from "lucide-react";
 import { CreateModal, Modal } from "../../../components/common/UI.jsx";
 import {
@@ -8,25 +9,55 @@ import {
 } from "./RuleLibrary.jsx";
 import LabelsField from "../../../components/common/LabelsField.jsx";
 import { VISIBILITY_LABELS, useSupervisorChoices } from "./RuleVisibility.jsx";
+import AddRuleChooserModal from "./AddRuleChooserModal.jsx";
+import { MAX_COLLECTION_RULES } from "./collectionLimits.js";
+import ExistingRulesPicker from "./ExistingRulesPicker.jsx";
+import { captureNavigationOrigin } from "../../../utils/navigation.js";
+import "./AddRuleWorkflow.css";
 
-const MAX_RULES = 5;
 
 export default function RuleCollectionCreateModal({
   onClose,
   onCreate,
   onSave,
   collection = null,
+  // Set when returning from the full-page Add Rule workflow: the form is restored as it was left.
+  initialDraft = null,
+  openOtherRule = false,
 }) {
-  const [name, setName] = useState(collection?.name || "");
-  const [description, setDescription] = useState(collection?.description || "");
-  const [labels, setLabels] = useState(collection?.labels || []);
-  const [rules, setRules] = useState([]);
-  const [ruleModalOpen, setRuleModalOpen] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [name, setName] = useState(initialDraft?.name ?? collection?.name ?? "");
+  const [description, setDescription] = useState(initialDraft?.description ?? collection?.description ?? "");
+  const [labels, setLabels] = useState(initialDraft?.labels ?? collection?.labels ?? []);
+  // New rules are kept as definitions and created together with the collection.
+  const [rules, setRules] = useState(initialDraft?.rules ?? []);
+  // Existing library rules are kept as a selection and moved into the collection once it exists.
+  const [existing, setExisting] = useState(initialDraft?.existing ?? []);
+  const [chooserOpen, setChooserOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [ruleModalOpen, setRuleModalOpen] = useState(Boolean(openOtherRule));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [visibilityType, setVisibilityType] = useState("");
-  const [supervisorIds, setSupervisorIds] = useState([]);
+  const [visibilityType, setVisibilityType] = useState(initialDraft?.visibilityType ?? "");
+  const [supervisorIds, setSupervisorIds] = useState(initialDraft?.supervisorIds ?? []);
   const supervisorChoices = useSupervisorChoices(!collection);
+  const total = rules.length + existing.length;
+  const submitting = useRef(false); // blocks a second submit before `saving` has re-rendered
+
+  const buildDraft = () => ({ name, description, labels, visibilityType, supervisorIds, rules, existing });
+
+  // Create New Rule opens the full-page workflow; the whole form travels with the navigation
+  // and is restored when the user comes back.
+  const createNewRule = () => {
+    setChooserOpen(false);
+    navigate("/configuration/rules/new", {
+      state: {
+        from: captureNavigationOrigin(location, { ...(location.state || {}), collectionDraft: buildDraft() }),
+        collection: { draft: true, name: name.trim() || "New collection", ruleCount: total },
+      },
+    });
+  };
 
   const addRule = (values) => {
     setRules((current) => [...current, templatePayload(values)]);
@@ -36,23 +67,26 @@ export default function RuleCollectionCreateModal({
 
   const save = async (event) => {
     event.preventDefault();
+    if (submitting.current) return;
     if (!name.trim()) {
       setError("Collection name is required.");
       return;
     }
-    if (!collection && rules.length === 0) {
+    if (!collection && total === 0) {
       setError("Add at least one monitoring rule to the collection.");
       return;
     }
-    if (!collection && !visibilityType) {
+    // Visibility applies to new rules only; existing rules keep the visibility they already have.
+    if (!collection && rules.length > 0 && !visibilityType) {
       setError("Choose who can see the rules in this collection.");
       return;
     }
-    if (!collection && visibilityType === "specific_supervisors" && supervisorIds.length === 0) {
+    if (!collection && rules.length > 0 && visibilityType === "specific_supervisors" && supervisorIds.length === 0) {
       setError("Select at least one Supervisor.");
       return;
     }
 
+    submitting.current = true;
     setSaving(true);
     setError("");
     try {
@@ -64,23 +98,28 @@ export default function RuleCollectionCreateModal({
       if (collection) {
         await onSave(payload);
       } else {
+        // One request creates the collection, its new rules and attaches the existing rules together.
         await onCreate({
           ...payload,
-          rules,
-          visibility_type: visibilityType,
-          visibility_supervisor_ids: visibilityType === "specific_supervisors" ? supervisorIds : [],
+          ...(rules.length > 0 && {
+            rules,
+            visibility_type: visibilityType,
+            visibility_supervisor_ids: visibilityType === "specific_supervisors" ? supervisorIds : [],
+          }),
+          ...(existing.length > 0 && { existing_template_ids: existing.map((rule) => rule.id) }),
         });
       }
     } catch (requestError) {
       setError(requestError.message || "Could not create the rule collection.");
     } finally {
+      submitting.current = false;
       setSaving(false);
     }
   };
 
   return (
     <>
-      {!ruleModalOpen && (
+      {!ruleModalOpen && !chooserOpen && !pickerOpen && (
       <Modal
         title={collection ? "Edit collection" : "Create rule collection"}
         onClose={saving ? undefined : onClose}
@@ -123,7 +162,11 @@ export default function RuleCollectionCreateModal({
             />
           </div>
 
-          {!collection && (
+          {!collection && rules.length === 0 && existing.length > 0 && (
+            <p className="muted hint">Rule visibility is not needed here: the existing rules keep their own visibility.</p>
+          )}
+
+          {!collection && rules.length > 0 && (
             <div className="field">
               <label htmlFor="collection-visibility">
                 Rule visibility <span className="req">*</span>
@@ -140,7 +183,7 @@ export default function RuleCollectionCreateModal({
                   <option key={value} value={value}>{label}</option>
                 ))}
               </select>
-              <span className="hint">Applies to every rule created with this collection.</span>
+              <span className="hint">Applies to the new rules created with this collection. Existing rules keep their own visibility.</span>
               {visibilityType === "specific_supervisors" && (
                 <div className="rule-visibility-supervisors">
                   {(supervisorChoices || []).length === 0 ? (
@@ -171,23 +214,37 @@ export default function RuleCollectionCreateModal({
 
           {!collection && <section aria-label="Collection rules">
             <div className="panel-head">
-              <h4>Monitoring rules ({rules.length}/{MAX_RULES})</h4>
+              <h4>Monitoring rules ({total}/{MAX_COLLECTION_RULES})</h4>
               <button
                 type="button"
                 className="btn-outline"
-                onClick={() => setRuleModalOpen(true)}
-                disabled={saving || rules.length >= MAX_RULES}
+                onClick={() => setChooserOpen(true)}
+                disabled={saving || total >= MAX_COLLECTION_RULES}
               >
                 <Plus size={16} /> Add rule
               </button>
             </div>
-            {rules.length === 0 ? (
+            {total === 0 ? (
               <p className="muted">No rules added yet.</p>
             ) : (
               <ol>
+                {existing.map((rule) => (
+                  <li key={`existing-${rule.id}`}>
+                    <span>{rule.name} <span className="add-rule-badge">Existing rule</span></span>
+                    <button
+                      type="button"
+                      className="btn-outline"
+                      aria-label={`Remove ${rule.name}`}
+                      onClick={() => setExisting((current) => current.filter((item) => item.id !== rule.id))}
+                      disabled={saving}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </li>
+                ))}
                 {rules.map((rule, index) => (
                   <li key={`${rule.name}-${index}`}>
-                    <span>{rule.name}</span>
+                    <span>{rule.name} <span className="add-rule-badge">New rule</span></span>
                     <button
                       type="button"
                       className="btn-outline"
@@ -220,6 +277,35 @@ export default function RuleCollectionCreateModal({
           </div>
         </form>
       </Modal>
+      )}
+
+      {chooserOpen && (
+        <AddRuleChooserModal
+          collection={{ name: name.trim() || "New collection", ruleCount: total }}
+          onClose={() => setChooserOpen(false)}
+          onSelectExisting={() => { setChooserOpen(false); setPickerOpen(true); }}
+          onCreateNew={createNewRule}
+        />
+      )}
+
+      {pickerOpen && (
+        <ExistingRulesPicker
+          deferred
+          collection={{ id: null, name: name.trim() || "New collection", ruleCount: total }}
+          stagedRules={existing}
+          onClose={() => setPickerOpen(false)}
+          onSelect={(chosen) => {
+            // Only the id and name are needed until the collection is saved.
+            setExisting((current) => [
+              ...current,
+              ...chosen
+                .filter((item) => !current.some((entry) => entry.id === item.id))
+                .map(({ id, name }) => ({ id, name })),
+            ]);
+            setPickerOpen(false);
+            setError("");
+          }}
+        />
       )}
 
       {ruleModalOpen && (

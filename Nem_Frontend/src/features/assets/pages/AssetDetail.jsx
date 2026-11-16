@@ -159,6 +159,15 @@ function eventActionLabel(eventType) {
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
+function eventTone(eventType) {
+  const type = String(eventType || "").toLowerCase();
+  if (/resolved|completed|returned|normal|cleared/.test(type)) return "ok";
+  if (/acknowledged/.test(type)) return "info";
+  if (/alert/.test(type)) return "alert";
+  if (/warning|stale|disconnect|unavailable|not_evaluated/.test(type)) return "warn";
+  return "neutral";
+}
+
 function eventAuditSummary(event) {
   const metadata = event?.metadata || {};
   const parts = [];
@@ -3427,7 +3436,7 @@ const filteredEvents = [...events]
                 : "—";
 
               return (
-                <tr key={event.id}>
+                <tr key={event.id} className={`event-tone-${eventTone(event.event_type)}`}>
                   {isAdministrator && (
                     <td className="logbook-select-col">
                       <input

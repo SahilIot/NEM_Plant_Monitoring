@@ -107,9 +107,9 @@ export default function AssetTree({ assets = [], selectedId, onRefresh }) {
       <div key={asset.id}>
         <div
           className={
-            "tree-row" + (selectedId === asset.id ? " selected" : "")
+            "tree-row" + (depth > 0 ? " tree-row--child" : "") + (selectedId === asset.id ? " selected" : "")
           }
-          style={{ paddingLeft: 10 + depth * 18 }}
+          style={{ paddingLeft: 10 + depth * 18, "--tree-depth": depth }}
           role="button"
           tabIndex={0}
           onClick={go}

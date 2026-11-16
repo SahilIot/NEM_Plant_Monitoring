@@ -1,0 +1,80 @@
+/* Add Rule workflow inside a Rule Collection: chooser and existing-rules picker. */
+.add-rule-intro { margin: 0 0 12px; }
+
+.add-rule-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+
+.add-rule-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.add-rule-option:hover { border-color: var(--action); background: var(--surface-2); }
+.add-rule-option:active { border-color: var(--action); background: var(--action-soft); }
+.add-rule-option:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
+
+.add-rule-option-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-ctl);
+  background: var(--action-soft);
+  color: var(--action);
+}
+.add-rule-option-text { display: grid; gap: 4px; min-width: 0; }
+.add-rule-option-text strong { font-size: 15px; }
+.add-rule-option-text span { color: var(--muted); font-size: 13px; line-height: 1.4; }
+
+.add-rule-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.add-rule-tools .rule-library-search { flex: 1 1 220px; }
+
+.add-rule-list { display: grid; gap: 6px; max-height: 46vh; overflow-y: auto; padding-right: 2px; }
+
+.add-rule-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  background: var(--surface-2);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.add-rule-row:hover { border-color: var(--line-strong); }
+.add-rule-row.is-selected { border-color: var(--action); background: var(--action-soft); }
+.add-rule-row.is-blocked { opacity: 0.55; cursor: not-allowed; }
+.add-rule-row.is-member { opacity: 0.8; cursor: default; }
+.add-rule-row input[type="checkbox"] { flex: none; margin-top: 3px; accent-color: var(--action); }
+.add-rule-row .main { min-width: 0; }
+.add-rule-row strong { display: block; color: var(--ink); font-size: 13.5px; }
+.add-rule-row small { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.add-rule-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+.add-rule-empty { margin: 8px 2px; }
+.add-rule-note { margin: 8px 0 0; font-size: 12px; }
+.add-rule-count { margin-right: auto; color: var(--muted); font-size: 13px; align-self: center; }
+
+@media (max-width: 560px) {
+  .add-rule-options { grid-template-columns: minmax(0, 1fr); }
+}

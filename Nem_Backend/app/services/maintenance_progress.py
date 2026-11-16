@@ -109,9 +109,7 @@ def update_maintenance_progress(
             if variable is None or not variable.is_active:
                 continue
 
-            expected_role = (
-                "running" if schedule.schedule_mode == "runtime" else "cycle"
-            )
+            expected_role = ("running" if schedule.schedule_mode == "runtime" else "cycle")
             if variable.data_type != "boolean" or variable.signal_role != expected_role:
                 continue
 
@@ -126,13 +124,11 @@ def update_maintenance_progress(
             if previous_at is not None and current_at <= previous_at:
                 continue
 
-            elapsed_seconds = (
-                (current_at - previous_at).total_seconds()
+            elapsed_seconds = ((current_at - previous_at).total_seconds()
                 if previous_at is not None
                 else None
             )
-            fresh_previous_sample = (
-                elapsed_seconds is not None
+            fresh_previous_sample = (elapsed_seconds is not None
                 and 0 < elapsed_seconds <= stale_after_seconds
             )
 
@@ -147,7 +143,6 @@ def update_maintenance_progress(
                     and 0 < elapsed_seconds <= runtime_gap
                 ):
                     schedule.current_progress += elapsed_seconds / 3600.0
-
                 threshold = schedule.runtime_interval_hours
 
             else:
@@ -159,7 +154,6 @@ def update_maintenance_progress(
                     and fresh_previous_sample
                 ):
                     schedule.current_progress += 1.0
-
                 threshold = schedule.usage_interval_count
 
             # Always move the signal baseline forward.
@@ -168,7 +162,6 @@ def update_maintenance_progress(
 
             if threshold is None or schedule.current_progress < threshold:
                 continue
-
 
             # The alert constraint requires a non-null maintenance due date.
             occurrence_date = current_at.date()
@@ -309,7 +302,6 @@ def update_maintenance_progress(
                     "signal_variable_id": schedule.signal_variable_id,
                 },
             )
-
             created_occurrences += 1
 
     return created_occurrences

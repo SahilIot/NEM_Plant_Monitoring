@@ -20,6 +20,8 @@ import CreateInstructionPage from "../features/configuration/pages/CreateInstruc
 import DocumentViewerPage from "../features/configuration/pages/DocumentViewerPage.jsx";
 import DocumentsPage from "../features/configuration/pages/DocumentsPage.jsx";
 import RuleLibrary from "../features/configuration/pages/RuleLibrary.jsx";
+import RuleTypeSelectPage from "../features/configuration/pages/RuleTypeSelectPage.jsx";
+import LibraryRuleCreatePage from "../features/configuration/pages/LibraryRuleCreatePage.jsx";
 import CollectionLibrary from "../features/configuration/pages/CollectionLibrary.jsx";
 
 import Plc from "../features/plc/pages/Plc.jsx";
@@ -102,6 +104,14 @@ export default function App() {
         <Route
           path="/configuration/rules"
           element={<RuleLibrary />}
+        />
+        <Route
+          path="/configuration/rules/new"
+          element={<RuleTypeSelectPage />}
+        />
+        <Route
+          path="/configuration/rules/new/:kind"
+          element={<LibraryRuleCreatePage />}
         />
         <Route
           path="/configuration/collections"

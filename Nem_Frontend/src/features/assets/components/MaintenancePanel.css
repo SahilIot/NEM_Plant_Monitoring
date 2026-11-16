@@ -474,6 +474,61 @@
   font-weight: 600;
 }
 
+.maintenance-panel .maintenance-mode-chip {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.maintenance-panel .maintenance-mode-chip.runtime {
+  color: var(--action);
+  border-color: color-mix(in srgb, var(--action) 45%, var(--line));
+  background: var(--action-soft);
+}
+
+.maintenance-panel .maintenance-progress {
+  display: block;
+  width: 100%;
+  min-width: 90px;
+  height: 4px;
+  margin-top: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.maintenance-panel .maintenance-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--action);
+}
+
+.maintenance-panel .maintenance-progress.near > span {
+  background: var(--warn-lamp);
+}
+
+.maintenance-panel .maintenance-progress.due > span {
+  background: var(--alert);
+}
+
+.maintenance-panel .maintenance-due-text.overdue {
+  color: var(--alert);
+  font-weight: 600;
+}
+
+.maintenance-panel .maintenance-due-text.today {
+  color: var(--warn);
+  font-weight: 600;
+}
+
 .maintenance-panel .maintenance-schedule-actions {
   display: flex;
   align-items: center;

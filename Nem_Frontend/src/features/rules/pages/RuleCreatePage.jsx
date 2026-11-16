@@ -16,6 +16,7 @@ import {
   rememberNavigationOrigin,
   returnToNavigationOrigin,
 } from "../../../utils/navigation.js";
+import { RuleFormSection, UnitInput } from "../components/RuleFormParts.jsx";
 import "./RuleCreatePage.css";
 
 const TITLES = {
@@ -221,39 +222,35 @@ export default function RuleCreatePage() {
     (isUsage && cycleVariableOptions.length === 0) ||
     (!isUsage && runtimeVariableOptions.length === 0);
 
+  const pageDescription = isUsage
+    ? "Each complete OFF-to-ON cycle increments the counter and is checked against the warning and alert thresholds."
+    : isScheduled
+      ? "At the scheduled time, runtime tracking begins, counts only while the selected Boolean signal is ON, and continues until the rule is deactivated."
+      : "Running time accumulates while the selected Boolean signal is ON and is checked against the thresholds.";
+  const thresholdUnit = isUsage ? "cycles" : "hours";
+
   return (
     <div className={`rule-create-page rule-create-page-${kind}`}>
       <div className="rule-create-container">
-       <button
-         type="button"
-         className="btn-outline rule-back-btn"
-         onClick={goBack}
-       >
-         ← Back to Asset
-       </button>
+        <button
+          type="button"
+          className="btn-outline rule-back-btn"
+          onClick={goBack}
+        >
+          ← Back to Asset
+        </button>
 
-       <div className="page-head rule-page-head">
-         <span className="rule-create-kicker">MONITORING RULE</span>
-         <h1 className="page-title rule-page-title">{TITLES[kind]}</h1>
-         <p className="muted rule-page-subtitle">
-           <span>Asset</span>
-           <strong>{asset?.name || `#${assetId}`}</strong>
-         </p>
-       </div>
+        <div className="page-head rule-page-head">
+          <span className="rule-create-kicker">MONITORING RULE</span>
+          <h1 className="page-title rule-page-title">{TITLES[kind]}</h1>
+          <p className="rule-page-description">{pageDescription}</p>
+          <p className="muted rule-page-subtitle">
+            <span>Asset</span>
+            <strong>{asset?.name || `#${assetId}`}</strong>
+          </p>
+        </div>
 
-       <section className="rule-create-card">
-         <div className="rule-create-card-header">
-           <span className="rule-create-section-label">RULE CONFIGURATION</span>
-           <h2>Set up your monitoring rule</h2>
-           <p>
-              {isUsage
-                ? "Each complete OFF-to-ON cycle increments the counter and is checked against the warning and alert thresholds."
-                : isScheduled
-                  ? "At the scheduled time, runtime tracking begins, counts only while the selected Boolean signal is ON, and continues until the rule is deactivated."
-                  : "Running time accumulates while the selected Boolean signal is ON and is checked against the thresholds."}
-            </p>
-          </div>
-
+        <section className="rule-create-card">
           <div className="rule-create-form">
             {error && <p role="alert" className="error-message">{error}</p>}
             <form onSubmit={handleSubmit}>
@@ -262,196 +259,245 @@ export default function RuleCreatePage() {
                   You do not have permission to create monitoring rules.
                 </p>
               )}
-              <div className="form-group">
-                <label htmlFor="rule-name">Rule name *</label>
-                <input
-                  id="rule-name"
-                  name="name"
-                  value={values.name}
-                  onChange={updateField}
-                  placeholder={isUsage ? "e.g. Rotation count limit" : "e.g. Machine running time"}
-                  required
-                  disabled={saving || !canManageRules}
-                />
-              </div>
 
-              <div className="form-group form-group-description">
-                <label htmlFor="rule-description">Description <span className="optional-label">Optional</span></label>
-                <textarea
-                  id="rule-description"
-                  name="description"
-                  rows={3}
-                  value={values.description}
-                  onChange={updateField}
-                  placeholder="Add context for operators who will review this rule."
-                  disabled={saving || !canManageRules}
-                />
-              </div>
+              <RuleFormSection
+                title="Basic information"
+                description="Name the rule and add context for the operators who will review it."
+              >
+                <div className="form-group form-group-wide">
+                  <label htmlFor="rule-name">Rule name *</label>
+                  <input
+                    id="rule-name"
+                    name="name"
+                    value={values.name}
+                    onChange={updateField}
+                    placeholder={isUsage ? "e.g. Rotation count limit" : "e.g. Machine running time"}
+                    required
+                    disabled={saving || !canManageRules}
+                  />
+                </div>
 
-              <div className="form-group">
-                <label htmlFor="rule-labels">Labels <span className="optional-label">Optional</span></label>
-                <LabelsField
-                  id="rule-labels"
-                  value={values.labels}
-                  onChange={(labels) =>
-                    setValues((current) => ({ ...current, labels }))
-                  }
-                  disabled={saving || !canManageRules}
-                />
-              </div>
+                <div className="form-group form-group-description">
+                  <label htmlFor="rule-description">Description <span className="optional-label">Optional</span></label>
+                  <textarea
+                    id="rule-description"
+                    name="description"
+                    rows={3}
+                    value={values.description}
+                    onChange={updateField}
+                    placeholder="Add context for operators who will review this rule."
+                    disabled={saving || !canManageRules}
+                  />
+                </div>
+
+                <div className="form-group form-group-wide">
+                  <label htmlFor="rule-labels">Labels <span className="optional-label">Optional</span></label>
+                  <LabelsField
+                    id="rule-labels"
+                    value={values.labels}
+                    onChange={(labels) =>
+                      setValues((current) => ({ ...current, labels }))
+                    }
+                    disabled={saving || !canManageRules}
+                  />
+                </div>
+              </RuleFormSection>
 
               {isUsage ? (
                 <>
-                  <div className="form-group">
-                    <label htmlFor="cycle-variable">Boolean cycle signal *</label>
-                    <select
-                      id="cycle-variable"
-                      name="cycle_variable_id"
-                      value={values.cycle_variable_id}
-                      onChange={updateField}
-                      required
-                      disabled={saving || !canManageRules || !cycleVariableOptions.length}
-                    >
-                      <option value="">Select the cycle on/off variable</option>
-                      {cycleVariableOptions.map((variable) => (
-                        <option key={variable.id} value={String(variable.id)}>
-                          {variable.name}
-                        </option>
-                      ))}
-                    </select>
-                    {!cycleVariableOptions.length && (
-                      <small>
-                        No cycle signal is configured. In the asset's Variables panel, edit the Boolean variable and set its purpose to Cycle signal.
-                      </small>
-                    )}
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="warning-1">First warning at cycle count *</label>
-                    <input
-                      id="warning-1"
-                      name="warning_threshold_1"
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={values.warning_threshold_1}
-                      onChange={updateField}
-                      required
-                      disabled={saving || !canManageRules}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="warning-2">Higher warning at cycle count *</label>
-                    <input
-                      id="warning-2"
-                      name="warning_threshold_2"
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={values.warning_threshold_2}
-                      onChange={updateField}
-                      required
-                      disabled={saving || !canManageRules}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="cycle-alert">Alert at cycle count *</label>
-                    <input
-                      id="cycle-alert"
-                      name="alert_threshold"
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={values.alert_threshold}
-                      onChange={updateField}
-                      required
-                      disabled={saving || !canManageRules}
-                    />
-                  </div>
+                  <RuleFormSection
+                    title="Cycle signal"
+                    description="The Boolean signal that switches OFF then ON once per machine cycle. Each complete OFF-to-ON transition adds one to the cycle counter."
+                  >
+                    <div className="form-group form-group-wide">
+                      <label htmlFor="cycle-variable">Boolean cycle signal *</label>
+                      <select
+                        id="cycle-variable"
+                        name="cycle_variable_id"
+                        value={values.cycle_variable_id}
+                        onChange={updateField}
+                        required
+                        disabled={saving || !canManageRules || !cycleVariableOptions.length}
+                      >
+                        <option value="">Select the cycle on/off variable</option>
+                        {cycleVariableOptions.map((variable) => (
+                          <option key={variable.id} value={String(variable.id)}>
+                            {variable.name}
+                          </option>
+                        ))}
+                      </select>
+                      {!cycleVariableOptions.length && (
+                        <small className="rule-field-warning">
+                          No cycle signal is configured. In the asset's Variables panel, edit the Boolean variable and set its purpose to Cycle signal.
+                        </small>
+                      )}
+                    </div>
+                  </RuleFormSection>
+
+                  <RuleFormSection
+                    title="Cycle-count thresholds"
+                    description="Cycle counts must be whole numbers in increasing order: first warning, then higher warning, then alert."
+                  >
+                    <div className="form-group form-group-threshold">
+                      <label htmlFor="warning-1">First warning at cycle count *</label>
+                      <UnitInput unit={thresholdUnit}>
+                        <input
+                          id="warning-1"
+                          name="warning_threshold_1"
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={values.warning_threshold_1}
+                          onChange={updateField}
+                          required
+                          disabled={saving || !canManageRules}
+                        />
+                      </UnitInput>
+                      <small>Raises the first warning when the counter reaches this value.</small>
+                    </div>
+                    <div className="form-group form-group-threshold">
+                      <label htmlFor="warning-2">Higher warning at cycle count *</label>
+                      <UnitInput unit={thresholdUnit}>
+                        <input
+                          id="warning-2"
+                          name="warning_threshold_2"
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={values.warning_threshold_2}
+                          onChange={updateField}
+                          required
+                          disabled={saving || !canManageRules}
+                        />
+                      </UnitInput>
+                      <small>Must be greater than the first warning.</small>
+                    </div>
+                    <div className="form-group form-group-threshold">
+                      <label htmlFor="cycle-alert">Alert at cycle count *</label>
+                      <UnitInput unit={thresholdUnit}>
+                        <input
+                          id="cycle-alert"
+                          name="alert_threshold"
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={values.alert_threshold}
+                          onChange={updateField}
+                          required
+                          disabled={saving || !canManageRules}
+                        />
+                      </UnitInput>
+                      <small>Must be greater than the higher warning.</small>
+                    </div>
+                  </RuleFormSection>
                 </>
               ) : (
                 <>
-                  <div className="form-group">
-  <label htmlFor="variable-id">Boolean running signal *</label>
-
-  <select
-    id="variable-id"
-    name="runtime_variable_id"
-    value={values.runtime_variable_id}
-    onChange={updateField}
-    required
-    disabled={saving || !canManageRules || !runtimeVariableOptions.length}
-  >
-    <option value="">Select the machine running signal</option>
-
-    {runtimeVariableOptions.map((variable) => (
-      <option key={variable.id} value={String(variable.id)}>
-        {variable.name}
-      </option>
-    ))}
-  </select>
-
-  {!runtimeVariableOptions.length && (
-    <small>
-      No running signal is configured. In the asset's Variables panel, set a Boolean variable's purpose to Machine running state.
-    </small>
-  )}
-</div>
-                  {isScheduled && (
-                    <div className="form-group">
-                      <label htmlFor="activation-at">Activate on *</label>
-                      <input
-                        id="activation-at"
-                        name="activation_at"
-                        type="datetime-local"
-                        value={values.activation_at}
+                  <RuleFormSection
+                    title="Running signal"
+                    description="The Boolean signal that is ON while the machine is running. Running time accumulates only while it is ON."
+                  >
+                    <div className="form-group form-group-wide">
+                      <label htmlFor="variable-id">Boolean running signal *</label>
+                      <select
+                        id="variable-id"
+                        name="runtime_variable_id"
+                        value={values.runtime_variable_id}
                         onChange={updateField}
                         required
-                        disabled={saving || !canManageRules}
-                      />
+                        disabled={saving || !canManageRules || !runtimeVariableOptions.length}
+                      >
+                        <option value="">Select the machine running signal</option>
+                        {runtimeVariableOptions.map((variable) => (
+                          <option key={variable.id} value={String(variable.id)}>
+                            {variable.name}
+                          </option>
+                        ))}
+                      </select>
+                      {!runtimeVariableOptions.length && (
+                        <small className="rule-field-warning">
+                          No running signal is configured. In the asset's Variables panel, set a Boolean variable's purpose to Machine running state.
+                        </small>
+                      )}
                     </div>
+                  </RuleFormSection>
+
+                  {isScheduled && (
+                    <RuleFormSection
+                      title="Schedule"
+                      description="Runtime tracking begins at the selected date and time and continues until the rule is deactivated."
+                    >
+                      <div className="form-group">
+                        <label htmlFor="activation-at">Activate on *</label>
+                        <input
+                          id="activation-at"
+                          name="activation_at"
+                          type="datetime-local"
+                          value={values.activation_at}
+                          onChange={updateField}
+                          required
+                          disabled={saving || !canManageRules}
+                        />
+                      </div>
+                    </RuleFormSection>
                   )}
-                  <div className="form-group">
-                    <label htmlFor="runtime-warning">Warning after running (hours) *</label>
-                    <input
-                      id="runtime-warning"
-                      name="runtime_warning_hours"
-                      type="number"
-                      min="0.000001"
-                      step="any"
-                      value={values.runtime_warning_hours}
-                      onChange={updateField}
-                      required
-                      disabled={saving || !canManageRules}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="runtime-warning-2">Higher warning after running (hours) *</label>
-                    <input
-                      id="runtime-warning-2"
-                      name="runtime_warning_2_hours"
-                      type="number"
-                      min="0.000001"
-                      step="any"
-                      value={values.runtime_warning_2_hours}
-                      onChange={updateField}
-                      required
-                      disabled={saving || !canManageRules}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="runtime-alert">Alert after running (hours) *</label>
-                    <input
-                      id="runtime-alert"
-                      name="runtime_alert_hours"
-                      type="number"
-                      min="0.000001"
-                      step="any"
-                      value={values.runtime_alert_hours}
-                      onChange={updateField}
-                      required
-                      disabled={saving || !canManageRules}
-                    />
-                  </div>
+
+                  <RuleFormSection
+                    title="Running-time thresholds"
+                    description="Running time is entered in hours and must be positive and strictly increasing: first warning, then higher warning, then alert."
+                  >
+                    <div className="form-group form-group-threshold">
+                      <label htmlFor="runtime-warning">Warning after running (hours) *</label>
+                      <UnitInput unit={thresholdUnit}>
+                        <input
+                          id="runtime-warning"
+                          name="runtime_warning_hours"
+                          type="number"
+                          min="0.000001"
+                          step="any"
+                          value={values.runtime_warning_hours}
+                          onChange={updateField}
+                          required
+                          disabled={saving || !canManageRules}
+                        />
+                      </UnitInput>
+                      <small>Raises the first warning after this much accumulated running time.</small>
+                    </div>
+                    <div className="form-group form-group-threshold">
+                      <label htmlFor="runtime-warning-2">Higher warning after running (hours) *</label>
+                      <UnitInput unit={thresholdUnit}>
+                        <input
+                          id="runtime-warning-2"
+                          name="runtime_warning_2_hours"
+                          type="number"
+                          min="0.000001"
+                          step="any"
+                          value={values.runtime_warning_2_hours}
+                          onChange={updateField}
+                          required
+                          disabled={saving || !canManageRules}
+                        />
+                      </UnitInput>
+                      <small>Must be greater than the first warning.</small>
+                    </div>
+                    <div className="form-group form-group-threshold">
+                      <label htmlFor="runtime-alert">Alert after running (hours) *</label>
+                      <UnitInput unit={thresholdUnit}>
+                        <input
+                          id="runtime-alert"
+                          name="runtime_alert_hours"
+                          type="number"
+                          min="0.000001"
+                          step="any"
+                          value={values.runtime_alert_hours}
+                          onChange={updateField}
+                          required
+                          disabled={saving || !canManageRules}
+                        />
+                      </UnitInput>
+                      <small>Must be greater than the higher warning.</small>
+                    </div>
+                  </RuleFormSection>
                 </>
               )}
 

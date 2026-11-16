@@ -137,6 +137,8 @@ code { font-size: 0.9em; padding: 1px 5px; border-radius: 3px; background: var(-
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); border: 0; }
 
 h1, .page-title { font-family: var(--font-num); font-size: 30px; line-height: 1.15; font-weight: 600; letter-spacing: 0.01em; margin: 4px 0 18px; }
+.home .page-title, .asset-head .page-title { font-size: 24px; line-height: 1.2; margin-top: 2px; }
+.home .page-title { margin-bottom: 12px; }
 h2 { font-size: 17px; font-weight: 600; margin: 0; }
 h3 { margin: 0; }
 .muted { color: var(--muted); }
@@ -277,8 +279,10 @@ h3 { margin: 0; }
 .btn-group button:hover { background: var(--surface-2); color: var(--ink); }
 .btn-group button.on { background: var(--action-soft); color: var(--action); }
 .tree-body { flex: 1; overflow: auto; padding: 6px 0; }
-.tree-row { display: flex; align-items: center; gap: 8px; min-height: 38px; padding-right: 12px; cursor: pointer; border-left: 3px solid transparent; }
+.tree-row { position: relative; display: flex; align-items: center; gap: 8px; min-height: 34px; padding-right: 12px; cursor: pointer; border-left: 3px solid transparent; }
 .tree-row:hover { background: var(--surface-2); }
+.tree-row::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(10px + (var(--tree-depth, 0) - 1) * 18px + 9px); width: 1px; background: var(--line); display: none; }
+.tree-row--child::before { display: block; }
 .tree-row.selected { background: var(--action-soft); border-left-color: var(--action); font-weight: 600; }
 .tree-toggle { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--muted); border-radius: 3px; }
 .tree-toggle:hover { background: var(--line); color: var(--ink); }
@@ -367,13 +371,13 @@ button:disabled { opacity: 0.55; cursor: default; }
 .badge.role { background: var(--action-soft); color: var(--action); }
 
 
-.annunciator { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; max-width: 1440px; margin-bottom: 18px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-panel); overflow: hidden; }
-.tile { position: relative; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; text-align: left; padding: 20px 20px 16px; border: none; border-right: 1px solid var(--line); background: var(--surface); color: var(--ink); min-height: 128px; }
+.annunciator { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; max-width: 1440px; margin-bottom: 14px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-panel); overflow: hidden; }
+.tile { position: relative; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; text-align: left; padding: 12px 16px 10px; border: none; border-right: 1px solid var(--line); background: var(--surface); color: var(--ink); min-height: 88px; }
 .tile:last-child { border-right: none; }
-.tile::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 5px; background: var(--line); }
+.tile::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--line); }
 .tile:hover { background: var(--surface-2); }
 .tile-label { color: var(--ink-2); font-weight: 500; }
-.tile-value { margin-top: auto; font-family: var(--font-num); font-size: 58px; line-height: 0.95; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tile-value { margin-top: auto; font-family: var(--font-num); font-size: 38px; line-height: 1; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
 .tile.lit.alert { background: var(--alert-soft); }
 .tile.lit.alert::before { background: var(--alert); }
 .tile.lit.alert .tile-value { color: var(--alert); }
@@ -1196,10 +1200,10 @@ html[data-theme="light"] .copy-rules-modal textarea {
   }
 
   .tile {
-    min-height: 96px;
+    min-height: 72px;
     border-right: none;
     border-bottom: 1px solid var(--line);
-    padding: 14px 16px;
+    padding: 10px 16px;
   }
 
   .tile:nth-child(2) {
@@ -1211,7 +1215,7 @@ html[data-theme="light"] .copy-rules-modal textarea {
   }
 
   .tile-value {
-    font-size: 44px;
+    font-size: 32px;
   }
 
   .panel,
@@ -1768,4 +1772,13 @@ html[data-theme="dark"] .topbar > .icon-btn:hover {
   .collection-rule-item:hover {
     transform: none;
   }
+}
+
+/* Tablet widths: stack the asset tree above the content and keep the top bar on one line. */
+@media (min-width: 801px) and (max-width: 960px) {
+  .content-row { flex-direction: column; overflow: auto; }
+  .tree { width: auto; margin: 0 16px 12px; max-height: 40vh; flex-shrink: 0; }
+  .content { padding: 4px 16px 32px; overflow: visible; }
+  .app-title { display: none; }
+  .topbar { gap: 8px; padding-inline: 12px; }
 }

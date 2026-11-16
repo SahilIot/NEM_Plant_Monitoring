@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Eye, Layers, Pencil, Plus, PlusCircle, RefreshCw, Search, Trash2 } from "lucide-react";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
@@ -8,10 +8,13 @@ import { EmptyState, LoadingIndicator, Modal, useConfirmation } from "../../../c
 import LabelsField from "../../../components/common/LabelsField.jsx";
 import RuleCollectionCreateModal from "./RuleCollectionCreateModal.jsx";
 import ReusableRuleModal from "./ReusableRuleModal.jsx";
+import AddRuleChooserModal from "./AddRuleChooserModal.jsx";
+import ExistingRulesPicker from "./ExistingRulesPicker.jsx";
+import { MAX_COLLECTION_RULES } from "./collectionLimits.js";
+import { captureNavigationOrigin, consumeNavigationFlash } from "../../../utils/navigation.js";
 import { RuleViewModal, displayType, ruleKind, templateSummary } from "./RuleLibrary.jsx";
 import "./RuleLibrary.css";
 
-const MAX_RULES = 5; // enforced by the backend as well
 
 const labelName = (label) => (typeof label === "string" ? label : label?.name);
 
@@ -21,6 +24,7 @@ export default function CollectionLibrary() {
   const canManage = user?.role === "Administrator"; // same rule as before: collections are managed by Administrators
   const confirm = useConfirmation();
   const nav = useNavigate();
+  const location = useLocation();
 
   const [collections, setCollections] = useState(null);
   const [templates, setTemplates] = useState([]);
@@ -37,6 +41,9 @@ export default function CollectionLibrary() {
   const [viewingRule, setViewingRule] = useState(null);
   const [editingRule, setEditingRule] = useState(null);
   const [addingTo, setAddingTo] = useState(null);
+  const [choosing, setChoosing] = useState(null); // Add rule: choose between existing and new
+  const [picking, setPicking] = useState(null); // Add rule: select existing rules
+  const [createDraft, setCreateDraft] = useState(null); // Create collection form restored after the Add Rule page
   const [busyId, setBusyId] = useState(null);
   const generation = useRef(0);
   const labelQuery = labelIds.map((id) => `label_ids=${encodeURIComponent(id)}`).join("&");
@@ -58,6 +65,38 @@ export default function CollectionLibrary() {
   }, [labelQuery]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Coming back from the full-page Add Rule workflow: show its result, or open the rule modal
+  // when "Other rule types" was chosen there.
+  useEffect(() => {
+    const flash = consumeNavigationFlash(location);
+    if (flash?.text) setMessage({ text: flash.text, error: false });
+    const state = { ...(location.state || {}) };
+    let changed = false;
+    if (state.createdNotice) {
+      setMessage({ text: state.createdNotice, error: false });
+      delete state.createdNotice;
+      changed = true;
+    }
+    const draft = flash?.state?.collectionDraft || state.collectionDraft;
+    if (draft && canManage) {
+      setCreateDraft({ draft, openOtherRule: Boolean(state.openOtherRule) });
+      setEditingCollection(null);
+      setCreating(true);
+    }
+    if (state.collectionDraft || state.openOtherRule) {
+      delete state.collectionDraft;
+      delete state.openOtherRule;
+      changed = true;
+    }
+    if (state.openAddRule) {
+      if (canManage) setAddingTo(state.openAddRule);
+      delete state.openAddRule;
+      changed = true;
+    }
+    if (changed) nav(`${location.pathname}${location.search}${location.hash}`, { replace: true, state });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key]);
 
   const rulesByCollection = useMemo(() => {
     const map = new Map();
@@ -156,7 +195,7 @@ export default function CollectionLibrary() {
         <div>
           <h1 className="page-title">Rule Collection Library</h1>
           <p className="muted">
-            Collections group related monitoring rules for a type of machine. Each collection holds up to {MAX_RULES} rules of its own.
+            Collections group related monitoring rules for a type of machine. Each collection holds up to {MAX_COLLECTION_RULES} rules of its own.
           </p>
         </div>
         <div className="rule-library-heading-actions">
@@ -229,7 +268,7 @@ export default function CollectionLibrary() {
           <div className="rl-cols">
             {visible.map((collection) => {
               const kinds = kindsOf(collection);
-              const full = (collection.rule_count || 0) >= MAX_RULES;
+              const full = (collection.rule_count || 0) >= MAX_COLLECTION_RULES;
               return (
                 <article className="rl-card" key={collection.id}>
                   <h2>{collection.name}</h2>
@@ -245,13 +284,13 @@ export default function CollectionLibrary() {
                       : kinds.map(([kind, count]) => <span className="rl-chip" key={kind}>{kind} · {count}</span>)}
                   </div>
                   <div className="rl-card-foot">
-                    <span className="rl-desc">{collection.rule_count || 0} of {MAX_RULES} rules</span>
+                    <span className="rl-desc">{collection.rule_count || 0} of {MAX_COLLECTION_RULES} rules</span>
                     <div className="rule-library-actions rl-actions">
                       <button type="button" className="btn-outline" title="View collection contents" aria-label={`View ${collection.name}`} onClick={() => setViewingId(collection.id)}><Eye size={15} /></button>
                       <button type="button" className="btn-outline" disabled={!canManage || full}
-                        title={!canManage ? "Administrator access required." : full ? `A collection holds at most ${MAX_RULES} rules.` : "Add a rule to this collection"}
+                        title={!canManage ? "Administrator access required." : full ? `A collection holds at most ${MAX_COLLECTION_RULES} rules.` : "Add a rule to this collection"}
                         aria-label={`Add rule to ${collection.name}`}
-                        onClick={() => setAddingTo({ id: collection.id, name: collection.name, ruleCount: collection.rule_count || 0 })}><PlusCircle size={15} /></button>
+                        onClick={() => setChoosing({ id: collection.id, name: collection.name, ruleCount: collection.rule_count || 0 })}><PlusCircle size={15} /></button>
                       <button type="button" className="btn-outline" disabled={!canManage} title="Edit collection details" aria-label={`Edit ${collection.name}`}
                         onClick={() => { setEditingCollection(collection); setCreating(true); }}><Pencil size={15} /></button>
                       <button type="button" className="btn-outline danger" disabled={!canManage || busyId === collection.id}
@@ -277,7 +316,7 @@ export default function CollectionLibrary() {
               {viewing.labels.map((label) => <span className="label-chip" key={labelName(label)}>{labelName(label)}</span>)}
             </span>
           )}
-          <h4 style={{ margin: "12px 0 6px" }}>Rules in this collection ({rulesOf(viewing).length} of {MAX_RULES})</h4>
+          <h4 style={{ margin: "12px 0 6px" }}>Rules in this collection ({rulesOf(viewing).length} of {MAX_COLLECTION_RULES})</h4>
           {rulesOf(viewing).length === 0 ? (
             <p className="muted">This collection has no rules you can see yet.</p>
           ) : (
@@ -304,8 +343,8 @@ export default function CollectionLibrary() {
             <button type="button" className="btn-outline" onClick={() => nav("/configuration/rules")}>Open rule library</button>
             {canManage && (
               <>
-                <button type="button" className="btn-outline" disabled={(viewing.rule_count || 0) >= MAX_RULES}
-                  onClick={() => { setAddingTo({ id: viewing.id, name: viewing.name, ruleCount: viewing.rule_count || 0 }); setViewingId(null); }}>Add rule</button>
+                <button type="button" className="btn-outline" disabled={(viewing.rule_count || 0) >= MAX_COLLECTION_RULES}
+                  onClick={() => { setChoosing({ id: viewing.id, name: viewing.name, ruleCount: viewing.rule_count || 0 }); setViewingId(null); }}>Add rule</button>
                 <button type="button" className="btn-outline" onClick={() => { setEditingCollection(viewing); setCreating(true); setViewingId(null); }}>Edit details</button>
               </>
             )}
@@ -318,18 +357,60 @@ export default function CollectionLibrary() {
 
       {creating && (
         <RuleCollectionCreateModal
+          key={createDraft ? "restored-draft" : "form"}
           collection={editingCollection}
-          onClose={() => { setCreating(false); setEditingCollection(null); }}
+          initialDraft={createDraft?.draft || null}
+          openOtherRule={Boolean(createDraft?.openOtherRule)}
+          onClose={() => { setCreating(false); setEditingCollection(null); setCreateDraft(null); }}
           onCreate={async (payload) => {
-            await api.post("/collections", payload);
+            // The collection, its new rules and the existing rules it uses are saved by the backend in
+            // one transaction. If this throws, nothing was created and the form stays open.
+            const created = await api.post("/collections", payload);
             setCreating(false);
-            await refresh("Collection and monitoring rules created.");
+            setCreateDraft(null);
+            const count = created?.rule_count ?? 0;
+            await refresh(`Collection “${created?.name || payload.name}” created with ${count} rule${count === 1 ? "" : "s"}.`);
+            // Open the new collection so its rules are visible straight away.
+            if (created?.id != null) setViewingId(created.id);
           }}
           onSave={async (payload) => {
             await api.patch(`/collections/${editingCollection.id}`, payload);
             setCreating(false);
             setEditingCollection(null);
             await refresh("Collection updated.");
+          }}
+        />
+      )}
+
+      {choosing && (
+        <AddRuleChooserModal
+          collection={choosing}
+          onClose={() => setChoosing(null)}
+          onSelectExisting={() => { setPicking(choosing); setChoosing(null); }}
+          onCreateNew={() => {
+            const target = choosing;
+            setChoosing(null);
+            nav("/configuration/rules/new", {
+              state: { from: captureNavigationOrigin(location, location.state), collection: target },
+            });
+          }}
+        />
+      )}
+
+      {picking && (
+        <ExistingRulesPicker
+          collection={picking}
+          onClose={() => setPicking(null)}
+          onDone={async ({ added, failed }) => {
+            const target = picking;
+            setPicking(null);
+            await refresh();
+            const addedText = added.length
+              ? `${added.length} rule${added.length === 1 ? "" : "s"} added to “${target.name}”.`
+              : "";
+            setMessage(failed.length
+              ? { text: `${addedText} Could not add: ${failed.join(" ")}`.trim(), error: true }
+              : { text: addedText, error: false });
           }}
         />
       )}

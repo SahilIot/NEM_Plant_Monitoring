@@ -1150,6 +1150,14 @@ export default function MaintenancePanel({
       : Number(schedule.current_progress || 0);
     const progressUnit =
       schedule.progress_unit || (isRuntime ? "hours" : isUsage ? "cycles" : "days");
+    const progressPercent =
+      threshold > 0 && Number.isFinite(progress)
+        ? Math.min(100, Math.max(0, (progress / threshold) * 100))
+        : 0;
+    const progressTone =
+      progressPercent >= 100 ? "due" : progressPercent >= 90 ? "near" : "ok";
+    const calendarDueText =
+      schedule.status === "active" ? dueLabel(schedule.current_due_date) : "";
 
     return (
       <article
@@ -1173,12 +1181,14 @@ export default function MaintenancePanel({
         >
           <strong>{schedule.title}</strong>
           <small>
-            {mode === "runtime"
-              ? "Runtime-based maintenance"
-              : mode === "usage"
-                ? "Usage-based maintenance"
-                : "Calendar-based maintenance"}
-            {" · "}
+            <span className={`maintenance-mode-chip ${mode}`}>
+              {mode === "runtime"
+                ? "Runtime"
+                : mode === "usage"
+                  ? "Usage"
+                  : "Calendar"}
+            </span>
+            {" "}
             {schedule.maintenance_type || "Maintenance"}
             {" · "}
             {schedule.priority || "medium"} priority
@@ -1191,7 +1201,15 @@ export default function MaintenancePanel({
           >
             {String(schedule.status || "active").replaceAll("_", " ")}
           </span>
-          <small>
+          <small
+            className={
+              calendarDueText.startsWith("Overdue")
+                ? "maintenance-due-text overdue"
+                : calendarDueText === "Due today"
+                  ? "maintenance-due-text today"
+                  : undefined
+            }
+          >
             {isRuntime || isUsage
               ? `PLC Variable: #${schedule.signal_variable_id}`
               : `Next due: ${displayDate(schedule.current_due_date)}${
@@ -1214,6 +1232,18 @@ export default function MaintenancePanel({
                   ? `Every ${schedule.recurrence_interval} ${schedule.recurrence_unit}`
                   : "Disabled"}
             </strong>
+            {(isRuntime || isUsage) && threshold > 0 && (
+              <span
+                className={`maintenance-progress ${progressTone}`}
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(progressPercent)}
+                aria-label={`${schedule.title} progress`}
+              >
+                <span style={{ width: `${progressPercent}%` }} />
+              </span>
+            )}
           </span>
           <span>
             <small>Technician</small>

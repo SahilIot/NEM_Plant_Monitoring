@@ -1148,9 +1148,18 @@ const reviewRequest = async (request, action) => {
     }
     onClick={() => {
       if (!isAdministrator) return;
-      setSuggesting(false);
-      setEditing(null);
-      setModalOpen(true);
+      // New rules start on the full-page rule-type selection. The existing modal is
+      // still reachable from there ("Other rule types") and for editing/suggestions.
+      navigate("/configuration/rules/new", {
+        state: {
+          from: captureNavigationOrigin(location, {
+            ...location.state,
+            ruleLibrarySearch: search,
+            ruleLibraryStatus: status,
+            ruleLibraryRequestStatus: requestStatus,
+          }),
+        },
+      });
     }}
   >
     <Plus size={17} />

@@ -1,6 +1,7 @@
 
 import React, { useState } from "react";
 import { api } from "../../../services/api.js";
+import { MAX_COLLECTION_RULES } from "./collectionLimits.js";
 import { CreateModal, useConfirmation } from "../../../components/common/UI.jsx";
 import {
   SHARED_RULE_WARNING,
@@ -92,7 +93,7 @@ export default function ReusableRuleModal({
       intro={
         isEditing
           ? `Update reusable rule in "${collection.name}".`
-          : `Add a reusable rule to "${collection.name}" (${collection.ruleCount || 0} of 5 rules). It can then be assigned to assets.`
+          : `Add a reusable rule to "${collection.name}" (${collection.ruleCount || 0} of ${MAX_COLLECTION_RULES} rules). It can then be assigned to assets.`
       }
       fields={isEditing && !isAdministrator ? FIELDS : [...FIELDS, ...visibilityFields(supervisorChoices)]}
       initialValues={

@@ -1,7 +1,7 @@
 .rule-create-page {
   width: 100%;
   min-height: 100%;
-  padding: 22px 24px 36px;
+  padding: 16px 24px 32px;
   color: var(--ink);
   background: transparent;
   font-family: var(--font);
@@ -11,26 +11,35 @@
   width: 100%;
   max-width: 920px;
   margin: 0 auto;
+  container-name: rulecreate;
+  container-type: inline-size;
 }
 
 .rule-create-page .rule-back-btn {
-  margin-bottom: 18px;
+  margin-bottom: 12px;
 }
 
 .rule-create-page .rule-page-head {
   display: block;
-  margin: 0 0 20px !important;
+  margin: 0 0 14px !important;
 }
 
 .rule-create-page .rule-page-title {
   margin: 0 0 6px;
   color: var(--ink);
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 600;
 }
 
-.rule-create-kicker,
-.rule-create-section-label {
+.rule-create-page .rule-page-description {
+  max-width: 75ch;
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.rule-create-kicker {
   display: block;
   margin-bottom: 6px;
   color: var(--muted);
@@ -65,19 +74,6 @@
   box-shadow: var(--shadow);
 }
 
-.rule-create-card-header {
-  padding: 19px 22px;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface-2);
-}
-
-.rule-create-card-header h2 {
-  margin: 0 0 5px;
-  color: var(--ink);
-  font-size: 17px;
-  font-weight: 600;
-}
-
 .rule-create-page .optional-label {
   margin-left: 4px;
   color: var(--muted);
@@ -85,24 +81,85 @@
   font-weight: 400;
 }
 
-.rule-create-card-header p {
-  max-width: 75ch;
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.55;
-}
-
 .rule-create-form {
-  padding: 22px;
+  padding: 6px 20px 18px;
   background: var(--surface);
 }
 
 .rule-create-form form {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
   width: 100%;
+}
+
+.rule-create-page .rule-section {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 14px 0 16px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rule-create-page .rule-section-title {
+  float: left;
+  width: 100%;
+  margin: 0 0 4px;
+  padding: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.rule-create-page .rule-section-title + * {
+  clear: both;
+}
+
+.rule-create-page .rule-section-description {
+  grid-column: 1 / -1;
+  margin: -4px 0 2px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.rule-create-page .rule-section .form-group-threshold {
+  display: grid;
+  grid-row: span 3;
+  grid-template-rows: subgrid;
+  row-gap: 6px;
+}
+
+.rule-create-page .form-group-wide,
+.rule-create-page .form-group-description {
+  grid-column: 1 / -1;
+}
+
+.rule-create-page .rule-input-unit {
+  position: relative;
+  display: block;
+}
+
+.rule-create-page .rule-input-unit input {
+  padding-right: 58px;
+}
+
+.rule-create-page .rule-input-unit-label {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.rule-create-page .form-group small.rule-field-warning {
+  color: var(--warn);
 }
 
 .rule-create-page .form-group {
@@ -140,7 +197,7 @@
 }
 
 .rule-create-page .form-group textarea {
-  min-height: 88px;
+  min-height: 72px;
   resize: vertical;
 }
 
@@ -170,14 +227,8 @@
   line-height: 1.5;
 }
 
-.rule-create-page .rule-create-form .form-group:has(textarea),
-.rule-create-page .rule-create-form .error-message,
-.rule-create-page .rule-create-form .form-actions {
-  grid-column: 1 / -1;
-}
-
 .rule-create-page .error-message {
-  margin: 0;
+  margin: 14px 0 0;
   padding: 11px 13px;
   border: 1px solid var(--alert);
   border-radius: var(--r-ctl);
@@ -191,9 +242,7 @@
   display: flex;
   justify-content: flex-end;
   gap: 9px;
-  padding-top: 16px;
-  margin-top: 2px;
-  border-top: 1px solid var(--line);
+  padding-top: 14px;
 }
 
 .rule-create-page .form-actions button {
@@ -244,36 +293,37 @@
   color-scheme: dark;
 }
 
+@container rulecreate (max-width: 640px) {
+  .rule-create-page .rule-section {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rule-create-page .rule-section .form-group-threshold {
+    display: flex;
+    grid-row: auto;
+  }
+}
+
 @media (max-width: 700px) {
   .rule-create-page {
     padding: 16px 12px 24px;
   }
 
-  .rule-create-page .rule-page-title {
-    font-size: 24px;
-  }
-
-  .rule-create-card-header,
   .rule-create-form {
-    padding: 16px;
-  }
-
-  .rule-create-form form {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 15px;
-  }
-
-  .rule-create-page .rule-create-form .form-group:has(textarea),
-  .rule-create-page .rule-create-form .error-message,
-  .rule-create-page .rule-create-form .form-actions {
-    grid-column: 1;
+    padding: 4px 14px 14px;
   }
 
   .rule-create-page .form-actions {
+    flex-wrap: wrap;
     justify-content: stretch;
   }
 
   .rule-create-page .form-actions button {
-    flex: 1;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .rule-create-page .form-actions .btn-primary {
+    flex-basis: 200px;
   }
 }
