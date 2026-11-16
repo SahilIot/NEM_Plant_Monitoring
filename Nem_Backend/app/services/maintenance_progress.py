@@ -18,7 +18,7 @@ from app.services.monitoring_engine import emit_event
 
 
 def _as_utc(value: datetime) -> datetime:
-    """Normalize timestamps before comparing readings."""
+    # Normalize timestamps before comparing readings
     if value.tzinfo is None or value.utcoffset() is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
