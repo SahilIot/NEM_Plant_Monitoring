@@ -312,7 +312,16 @@ non-administrators never name assets.
 6. SQLAlchemy commit hooks in `services/live_updates.py` publish a coalesced
    database-change message; collector connection changes publish OPC UA status.
    The React views respond by refreshing affected data. Some views also use
-   periodic REST refreshes; this is not a push-only application.
+   periodic REST refreshes; this is not a push-only application. Runtime/usage
+   maintenance progress is saved by the collector's periodic running-signal
+   refresh, which publishes `nem_maintenance_schedules`; the asset page reloads
+   its Schedules list from that event and after a reconnect. Rule edits
+   re-evaluate rules immediately (`evaluate_rules`) so rule-state and alert
+   changes are published at once. A WebSocket client's access is re-read from the
+   database when an update touches `auth_sessions`, `auth_users`,
+   `nem_asset_supervisors` or `assets`, on heartbeats and resyncs, and at least
+   every 5 seconds; session expiry is checked on every message from the cached
+   expiry time.
 
 ## OPC UA integration
 

@@ -1,6 +1,7 @@
 #Main entry point of the FastAPI backend
 #app/main.py - Db,OPC UA collector , Maintenance scheduler , API routes -> React frontend
 import logging
+import time
 import asyncio #runs background tasks and manages async operations
 from contextlib import asynccontextmanager #defines what happens when the app starts and shuts down
 from pathlib import Path
@@ -53,6 +54,10 @@ from app.services.live_updates import LiveUpdateHub, serve_live_updates
 LOGGER = logging.getLogger("nem_backend")
 MAX_REQUEST_BODY_BYTES = 25 * 1024 * 1024  
 MAX_CONFIG_TRANSFER_BODY_BYTES = 5 * 1024 * 1024
+# WebSocket access re-check policy (see live_updates_websocket).
+ACCESS_RECHECK_SECONDS = 5.0
+_ACCESS_RECHECK_UPDATE_TYPES = {"heartbeat", "connected", "reconnected"}
+_ACCESS_TABLES = {"auth_sessions", "auth_users", "nem_asset_supervisors", "assets"}
 
 
 #function run repeatedly in the background to check whether maintenance schedules are due
@@ -110,6 +115,7 @@ async def _monitoring_evaluation_loop(
     *,
     interval_seconds: int,
     stale_after_seconds: int,
+    runtime_gap_seconds: int | None = None,
 ) -> None:
     try:
         while True:
@@ -128,6 +134,7 @@ async def _monitoring_evaluation_loop(
                             session,
                             evaluated_at=utc_now(),
                             stale_after_seconds=stale_after_seconds,
+                            runtime_gap_seconds=runtime_gap_seconds,
                             respect_rule_intervals=True,
                         )
                         session.commit()
@@ -186,6 +193,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     owner_id=f"monitoring-{uuid4()}",
                     interval_seconds=(selected_settings.monitoring_evaluation_interval_seconds),
                     stale_after_seconds=(selected_settings.monitoring_default_stale_after_seconds),
+                    runtime_gap_seconds=selected_settings.runtime_freshness_seconds,
                 ),
                 name="monitoring-evaluation",
             )
@@ -257,24 +265,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return JSONResponse(status_code=401,content={"detail": "Authentication required"},headers={"WWW-Authenticate": "Bearer"},)
 
         token_hash = hash_session_token(token.strip())
-        with session_factory() as db:
-            auth_session = db.scalar(select(AuthSession).where(AuthSession.token_hash == token_hash))
-            now = utc_now()
-            user = auth_session.user if auth_session is not None else None
-            if (
-                auth_session is None
-                or auth_session.expires_at <= now
-                or user is None
-                or not user.is_active
-            ):
-                if auth_session is not None and auth_session.expires_at <= now:
-                    db.delete(auth_session)
-                    db.commit()
-                return JSONResponse(status_code=401,content={"detail": "Session is invalid or expired"},headers={"WWW-Authenticate": "Bearer"},)
+        def read_session() -> tuple[int, str] | None:
+            # Synchronous database work: run in a worker thread so it never blocks the event loop.
+            with session_factory() as db:
+                auth_session = db.scalar(select(AuthSession).where(AuthSession.token_hash == token_hash))
+                now = utc_now()
+                user = auth_session.user if auth_session is not None else None
+                if (
+                    auth_session is None
+                    or auth_session.expires_at <= now
+                    or user is None
+                    or not user.is_active
+                ):
+                    if auth_session is not None and auth_session.expires_at <= now:
+                        db.delete(auth_session)
+                        db.commit()
+                    return None
+                return user.id, user.role
 
-            role = user.role
-            request.state.auth_user_id = user.id
-            request.state.auth_token_hash = token_hash
+        identity = await asyncio.to_thread(read_session)
+        if identity is None:
+            return JSONResponse(status_code=401,content={"detail": "Session is invalid or expired"},headers={"WWW-Authenticate": "Bearer"},)
+        user_id, role = identity
+        request.state.auth_user_id = user_id
+        request.state.auth_token_hash = token_hash
 
         method = request.method.upper()
         # The Supervisor visibility-request workflow was removed; answer 404 for every role.
@@ -472,8 +486,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ):
                 await websocket.close(code=1008, reason="Session is invalid or expired")
                 return
-        async def reauthorize_socket() -> tuple[bool, set[int] | None]:
-            def read_current_access() -> tuple[bool, set[int] | None]:
+        # Access is re-read from the database, not trusted indefinitely: immediately when this update
+        # (or a heartbeat) could change it, and otherwise at most every ACCESS_RECHECK_SECONDS.
+        # Session expiry is enforced on every message from the cached expiry time, with no query.
+        cached_access: dict[str, object] = {}
+
+        async def reauthorize_socket(update: dict) -> tuple[bool, set[int] | None]:
+            expires_at = cached_access.get("expires_at")
+            if expires_at is not None and expires_at <= utc_now():
+                return False, None
+            if (
+                cached_access
+                and update.get("type") not in _ACCESS_RECHECK_UPDATE_TYPES
+                and not update.get("resync_required")
+                and not _ACCESS_TABLES.intersection(update.get("changed_tables", ()))
+                and time.monotonic() - cached_access["checked_at"] < ACCESS_RECHECK_SECONDS
+            ):
+                return True, cached_access["asset_ids"]
+
+            def read_current_access() -> tuple[bool, set[int] | None, object]:
                 with session_factory() as db:
                     current_session = db.scalar(select(AuthSession).where(AuthSession.token_hash == hash_session_token(token)))
                     current_user = (current_session.user if current_session is not None else None)
@@ -483,15 +514,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         or current_user is None
                         or not current_user.is_active
                     ):
-                        return False, None
+                        return False, None, None
                     # Recomputed for every message so assignment, hierarchy and role
                     # changes take effect immediately. None = unrestricted (Administrator);
                     # any other user receives updates for their assigned assets only
                     # (an empty set means nothing is forwarded).
                     scope = scope_for_user(db, current_user)
-                    return True, (None if scope.unrestricted else set(scope.asset_ids))
+                    return (
+                        True,
+                        (None if scope.unrestricted else set(scope.asset_ids)),
+                        current_session.expires_at,
+                    )
 
-            return await asyncio.to_thread(read_current_access)
+            authorized, asset_ids, session_expires_at = await asyncio.to_thread(read_current_access)
+            if not authorized:
+                cached_access.clear()
+                return False, None
+            cached_access.update(
+                checked_at=time.monotonic(),
+                asset_ids=asset_ids,
+                expires_at=session_expires_at,
+            )
+            return True, asset_ids
 
         # authorized_asset_ids is refreshed by reauthorize_socket before any message is sent.
         await serve_live_updates(

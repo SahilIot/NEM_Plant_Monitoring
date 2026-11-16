@@ -406,6 +406,13 @@ class MaintenanceScheduleRead(ORMModel):
 
     # Defines the unit of progress, such as hours or cycles.
     progress_unit: str
+
+    # Last confirmed signal sample (runtime/usage schedules). current_progress already includes the
+    # running time credited up to last_signal_at, so a display may extend it from that instant while the
+    # signal is true and no older than runtime_freshness_seconds, without counting any time twice.
+    last_signal_value: bool | None = None
+    last_signal_at: datetime | None = None
+    runtime_freshness_seconds: int | None = None
     current_period_start_date: date
     first_due_date: date
     current_due_date: date | None

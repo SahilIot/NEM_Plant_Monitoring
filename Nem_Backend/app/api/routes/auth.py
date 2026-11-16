@@ -27,7 +27,6 @@ from app.services.auth_security import (
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 SESSION_HOURS = 8
-ROLES = ("Administrator", "Supervisor", "Operator")
 _DUMMY_PASSWORD_HASH = ("pbkdf2_sha256$600000$00000000000000000000000000000000$"
     "0000000000000000000000000000000000000000000000000000000000000000"
 )
@@ -142,8 +141,10 @@ def _user_read(user: User) -> dict:
         "email_address": user.email_address,
     }
 
-#Identifying the loggin-in user  
-async def get_current_user(request: Request, db: Db) -> User:
+#Identifying the loggin-in user
+# Plain `def` on purpose: it performs a synchronous database lookup, so FastAPI runs it in its
+# thread pool instead of blocking the event loop on every authenticated request.
+def get_current_user(request: Request, db: Db) -> User:
     user_id = getattr(request.state, "auth_user_id", None)
     if user_id is None:
         raise HTTPException(status_code=401,detail="Authentication required",headers={"WWW-Authenticate": "Bearer"},)
@@ -193,7 +194,7 @@ def login(payload: LoginRequest, db: Db) -> LoginResponse:
 
 #Current user endpoint
 @router.get("/me")
-async def me(user: Annotated[User, Depends(get_current_user)], db: Db) -> dict:
+def me(user: Annotated[User, Depends(get_current_user)]) -> dict:
     return _user_read(user)
 
 #Update the password

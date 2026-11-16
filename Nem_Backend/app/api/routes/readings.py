@@ -21,7 +21,8 @@ MAX_BATCH_SIZE = 100
 @router.post("", response_model=ReadingRead, status_code=status.HTTP_201_CREATED)
 def ingest_reading(payload: ReadingCreate, request: Request, session: Session = Depends(get_db)) -> Reading:
     return persist_reading(session,payload,
-        stale_after_seconds=request.app.state.settings.monitoring_default_stale_after_seconds,)
+        stale_after_seconds=request.app.state.settings.monitoring_default_stale_after_seconds,
+        runtime_gap_seconds=request.app.state.settings.runtime_freshness_seconds,)
 
 #Get the latest reading for each asset-variable pair
 @router.get("/latest", response_model=list[ReadingRead])
@@ -69,12 +70,14 @@ def ingest_batch(payload: ReadingBatch, request: Request, session: Session = Dep
             asset_id=asset_id,
             variable_id=variable_id,
             stale_after_seconds=request.app.state.settings.monitoring_default_stale_after_seconds,
+            runtime_gap_seconds=request.app.state.settings.runtime_freshness_seconds,
         )
 
     update_maintenance_progress(
         session,
         readings,
         stale_after_seconds=request.app.state.settings.monitoring_default_stale_after_seconds,
+        runtime_gap_seconds=request.app.state.settings.runtime_freshness_seconds,
     )
 
     session.commit()

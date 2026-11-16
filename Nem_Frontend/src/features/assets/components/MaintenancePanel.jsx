@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   CalendarDays,
@@ -92,6 +92,75 @@ function formValues(record) {
 
 function nullableDate(value) {
   return value ? new Date(value).toISOString() : null;
+}
+
+// Runtime progress and limits are stored as hours (3600 s each). Show them as elapsed HH:MM:SS; hours keep
+// growing past 24 and are never wrapped. Rounded to the nearest second so float noise (1.1 h = 3960.0000000000005 s)
+// cannot show as 01:05:59.
+function formatRuntimeHours(hours) {
+  const value = Number(hours);
+  if (!Number.isFinite(value) || value < 0) return "00:00:00";
+  const total = Math.round(value * 3600);
+  const pad = (number) => String(number).padStart(2, "0");
+  return `${pad(Math.floor(total / 3600))}:${pad(Math.floor((total % 3600) / 60))}:${pad(total % 60)}`;
+}
+
+// A runtime schedule is "live" only when its last confirmed sample says the machine is running, the schedule is
+// active and not waiting for maintenance (the backend pauses progress then).
+function isLiveRuntimeSchedule(schedule) {
+  return (
+    schedule.schedule_mode === "runtime" &&
+    schedule.status === "active" &&
+    schedule.current_occurrence_id == null &&
+    schedule.last_signal_value === true &&
+    Boolean(schedule.last_signal_at) &&
+    Number(schedule.runtime_freshness_seconds) > 0
+  );
+}
+
+// Live runtime display. Sample timestamps come from the PLC / OPC UA server's clock, which can differ from the
+// browser's by seconds, so they are used ONLY to detect that a newer sample arrived, never compared with the
+// browser clock. (Comparing them made the display wait whenever the browser clock was behind: it showed the stored
+// value, then ticked a few seconds, then jumped at the next 10 s checkpoint.) Instead each new backend value
+// becomes a baseline stamped with the browser time at which it was received, and the display is
+// stored progress + browser seconds elapsed since then, so it advances exactly one second per second.
+//
+// baseline = { stamp, stored, receivedAt, floor }
+//   stored   backend current_progress (hours), authoritative; includes time credited up to the sample
+//   floor    value on screen when this baseline replaced the previous one, so a newer checkpoint never moves
+//            the display backwards while the machine keeps running
+function runtimeDisplayHours(schedule, baseline, now) {
+  const stored = Number(schedule.current_progress || 0);
+  if (!baseline || !isLiveRuntimeSchedule(schedule)) return stored;
+  const elapsedSeconds = Math.max(0, (now - baseline.receivedAt) / 1000);
+  // Past the backend's freshness limit with no newer sample: stop extending and show the stored value.
+  if (elapsedSeconds > Number(schedule.runtime_freshness_seconds)) return stored;
+  const limit = Number(schedule.runtime_interval_hours || 0);
+  const live = Math.max(stored + elapsedSeconds / 3600, baseline.floor ?? 0);
+  return limit > 0 ? Math.min(live, Math.max(stored, limit)) : live;
+}
+
+// Returns the baseline to use for a schedule: the previous one while the backend value is unchanged, otherwise a new
+// one stamped `receivedAt`. Pure; the caller keeps the previous baselines between renders.
+function nextRuntimeBaseline(previous, schedule, receivedAt) {
+  const stored = Number(schedule.current_progress || 0);
+  const stamp = String(schedule.last_signal_at ?? "");
+  // A changed running flag, status or open job is also a new baseline, so a stop is never bridged by the floor.
+  const unchanged =
+    previous &&
+    previous.schedule &&
+    previous.stamp === stamp &&
+    previous.stored === stored &&
+    previous.schedule.last_signal_value === schedule.last_signal_value &&
+    previous.schedule.status === schedule.status &&
+    previous.schedule.current_occurrence_id === schedule.current_occurrence_id;
+  if (unchanged) return previous;
+  const wasLive = previous && isLiveRuntimeSchedule(previous.schedule);
+  const floor =
+    wasLive && isLiveRuntimeSchedule(schedule)
+      ? runtimeDisplayHours(previous.schedule, previous, receivedAt)
+      : 0;
+  return { stamp, stored, receivedAt, floor, schedule };
 }
 
 function actualDuration(record, now = Date.now()) {
@@ -363,12 +432,33 @@ export default function MaintenancePanel({
     loadSchedules();
   }, [loadRecords, loadSchedules]);
 
+  // Baselines for the live runtime display (see runtimeDisplayHours). Kept in a ref so an unchanged backend value
+  // keeps its receipt time across re-renders and refreshes.
+  const runtimeBaselinesRef = useRef(new Map());
+  const runtimeBaselines = useMemo(() => {
+    const receivedAt = Date.now();
+    const next = new Map();
+    for (const schedule of schedules) {
+      if (schedule.schedule_mode !== "runtime") continue;
+      next.set(
+        schedule.id,
+        nextRuntimeBaseline(runtimeBaselinesRef.current.get(schedule.id), schedule, receivedAt)
+      );
+    }
+    runtimeBaselinesRef.current = next;
+    return next;
+  }, [schedules]);
+
+  // One shared one-second clock for in-progress jobs and for live runtime schedules. The effect depends on
+  // booleans, not on the arrays, so the interval is not recreated on every data refresh.
+  const hasInProgressRecord = records.some((record) => record.status === "in_progress");
+  const hasLiveRuntimeSchedule = schedules.some(isLiveRuntimeSchedule);
   useEffect(() => {
-    const timerIsRunning = records.some((record) => record.status === "in_progress");
-    if (!timerIsRunning) return undefined;
+    if (!hasInProgressRecord && !hasLiveRuntimeSchedule) return undefined;
+    setClockNow(Date.now());
     const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [records]);
+  }, [hasInProgressRecord, hasLiveRuntimeSchedule]);
 
   useEffect(() => {
     const previewUrl = materialViewer?.previewUrl;
@@ -1052,7 +1142,9 @@ export default function MaintenancePanel({
       : isUsage
         ? Number(schedule.usage_interval_count || 0)
         : 0;
-    const progress = Number(schedule.current_progress || 0);
+    const progress = isRuntime
+      ? runtimeDisplayHours(schedule, runtimeBaselines.get(schedule.id), clockNow)
+      : Number(schedule.current_progress || 0);
     const progressUnit =
       schedule.progress_unit || (isRuntime ? "hours" : isUsage ? "cycles" : "days");
 
@@ -1111,8 +1203,10 @@ export default function MaintenancePanel({
           <span>
             <small>{isRuntime || isUsage ? "Progress" : "Recurrence"}</small>
             <strong>
-              {isRuntime || isUsage
-                ? `${progress.toFixed(1)} / ${threshold} ${progressUnit}`
+              {isRuntime
+                ? `${formatRuntimeHours(progress)} / ${formatRuntimeHours(threshold)}`
+                : isUsage
+                  ? `${progress.toFixed(1)} / ${threshold} ${progressUnit}`
                 : schedule.recurrence_enabled
                   ? `Every ${schedule.recurrence_interval} ${schedule.recurrence_unit}`
                   : "Disabled"}

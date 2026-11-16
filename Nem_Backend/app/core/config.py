@@ -93,6 +93,19 @@ class Settings(BaseSettings):
         return self
 
     @property
+    def runtime_freshness_seconds(self) -> int:
+        """Longest gap between two confirmed samples that may be counted as running time.
+
+        The collector re-reads running signals every ``opcua_runtime_checkpoint_seconds``, so a healthy
+        signal is never this old. It is deliberately much shorter than the general stale limit (default
+        300 s) so a PLC outage or a run of bad-quality reads is never added to runtime.
+        """
+        return min(
+            self.monitoring_default_stale_after_seconds,
+            max(30, 3 * self.opcua_runtime_checkpoint_seconds),
+        )
+
+    @property
     def allowed_origins(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 

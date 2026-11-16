@@ -539,8 +539,9 @@ Endpoints: `GET/POST /documents`, `POST /documents/with-files`,
 
 `GET /api/v1/config-transfer/export` returns a versioned JSON package
 (`application: nem-plant-monitoring`, `format_version: 1.0`) with Monitoring
-Rules, Monitoring Rule Collections and Maintenance Rules (recurring definitions
-only). It contains no database ids, runtime counters, alerts, events, completed
+Rules, Monitoring Rule Collections and Maintenance Rules (recurring calendar
+definitions only; runtime/usage schedules are not exported because they depend on
+destination PLC variables). It contains no database ids, runtime counters, alerts, events, completed
 maintenance, documents or credentials; Supervisors are referenced by username
 and assets by name/type/parent name. `POST /config-transfer/preview` validates a
 package and writes nothing; `POST /config-transfer/import` re-validates and
@@ -578,7 +579,11 @@ previous and new value, in a history shown in the Rule Library **View** dialog.
 
 Rule evaluation creates or updates an active alert for an ongoing condition;
 it does not create a new alert on every evaluator pass. When the condition
-returns to normal, its active alert can resolve. A user can acknowledge an
+returns to normal, its active alert can resolve. Saving an edited rule (or a
+shared rule used by several assets) re-evaluates it immediately with its new
+thresholds, so a Warning whose counter is now below the threshold returns to
+Normal and leaves Overview → Needs Attention without waiting for another PLC
+value; the alert row is kept as history. A user can acknowledge an
 active alert, which records who acknowledged it but does not clear the
 condition. Completing an acknowledged rule alert completes/disables its rule.
 Maintenance due alerts are associated with the relevant schedule and due date.
@@ -590,6 +595,16 @@ confirming or declining that proposal applies to calendar schedules only.
 Operators may start or complete only the active scheduled occurrence due
 today or overdue (calendar) or the active occurrence of a runtime/usage
 schedule, subject to backend checks.
+
+Starting and finishing scheduled work: **Start** (in the logbook's Schedules tab
+or on a Current status card) only starts the schedule's own planned occurrence;
+it never creates an extra job. It is disabled, with a reason, when no planned
+occurrence exists (not due yet, awaiting approval, or a runtime/usage limit not
+reached) or one is already in progress. A started scheduled job stays under
+**Current status**; the logbook's **Jobs & History** tab lists only work that is
+not due or in progress, so completed jobs appear there. Starting is guarded in
+the UI against repeated clicks and in the API (the record row is locked), so a
+second simultaneous request answers 409 and only one start event is recorded.
 
 ### Runtime- and usage-based maintenance
 
@@ -605,8 +620,27 @@ How progress is calculated (`services/maintenance_progress.py`, called from
 reading ingestion in the same transaction):
 
 - **Runtime:** the time between two consecutive samples is added to progress only
-  when the *previous* sample was `true` and still fresh (within the stale-after
-  window). Progress is stored in hours.
+  when the *previous* sample was `true` and the two samples are at most the
+  *runtime freshness limit* apart (`min(stale-after, max(30 s, 3 x
+  OPCUA_RUNTIME_CHECKPOINT_SECONDS))`, 30 s by default). A PLC outage or a run of
+  bad-quality reads is therefore never added to runtime. The collector also forgets
+  the last running sample of runtime schedules and runtime rules whenever a
+  connection starts or stops, so the first sample after a reconnect only re-sets the
+  baseline. Progress is stored in hours and shown as `HH:MM:SS / HH:MM:SS` (hours
+  keep counting past 24) on runtime schedule cards; usage schedules keep showing
+  cycles. Between backend updates the card advances once per second, like the
+  Current status running-time counter: schedule responses carry `last_signal_value`,
+  `last_signal_at` and `runtime_freshness_seconds`. The browser times each changed
+  backend value by its own arrival time (the PLC sample timestamp is only a change
+  marker, so a PLC/browser clock difference cannot freeze or jump the card) and
+  extends the stored progress from there only while the last confirmed sample says
+  running and the freshness limit has not passed (never past the configured limit,
+  never backwards while running). A newer backend value replaces the estimate, so
+  no time is counted twice.
+  The same limit applies to runtime rules (accumulation, the live runtime
+  shown by the evaluator, and disabling a rule) and to machine runtime, for
+  collector and API-pushed readings alike. Sources that report less often than
+  this limit need a larger `OPCUA_RUNTIME_CHECKPOINT_SECONDS`.
 - **Usage:** only a confirmed `false` to `true` transition adds one cycle. A stale
   gap cannot establish a reliable transition.
 - Out-of-order or duplicate timestamps are ignored, and the signal baseline
@@ -626,7 +660,18 @@ Lifecycle and rules:
 - Runtime/usage schedules support the statuses `active`, `paused` and
   `cancelled`. Pausing clears the signal baseline so paused time is never counted
   after resume; a cancelled schedule cannot be reactivated.
-- Changing the signal or the interval resets progress and the baseline.
+- Editing never resets progress. Changing the interval (threshold) keeps both
+  the accumulated progress and the signal baseline. Changing the signal variable
+  keeps the progress but clears the previous signal's last value and timestamp so
+  the new signal is not compared with the old one. Progress returns to zero only
+  when an occurrence is completed.
+- Progress is shown live: the collector re-reads running signals every
+  `OPCUA_RUNTIME_CHECKPOINT_SECONDS` (default 10) and each saved change publishes
+  a `nem_maintenance_schedules` event. The asset page re-reads the Schedules list
+  from that event (and after a WebSocket reconnect), so values update without a
+  page refresh. The frontend never counts time or cycles itself.
+- A runtime/usage occurrence has no due date; it counts as due as soon as it
+  exists, so it appears under **Current status** like a due calendar occurrence.
 - Calendar dates and recurrence cannot be edited on runtime/usage schedules, and
   runtime/usage fields cannot be added to calendar schedules. Confirming or
   declining a proposed next date does not apply to them.
@@ -640,8 +685,10 @@ Lifecycle and rules:
 
 `POST /maintenance/{id}/complete` accepts an optional body. An empty body keeps
 legacy callers working. When registration data is sent, these fields are required
-together: `actual_completed_at`, `performed_by`, `notes` and `completion_notes`.
-`parts_used` and `checklist` are optional, and unknown fields are rejected.
+together: only `actual_completed_at` is needed; `performed_by` (technician),
+`notes` (work performed), `completion_notes` (remarks), `parts_used` and `checklist`
+are optional. A blank optional field leaves the record's existing value unchanged,
+and unknown fields are rejected.
 
 Asset detail contains **Current status**, **Maintenance logbook**, and
 **Event log** tabs. The Overview page shows alert status and action controls.

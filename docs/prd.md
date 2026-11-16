@@ -61,7 +61,7 @@ assignments they see no assets. Administrators are unrestricted.
 | FR-09 | Show operational status and affected-data refreshes in the React dashboard. | Implemented through a combination of WebSocket notifications and REST refresh/polling |
 | FR-10 | Manage local accounts, roles, profile/email settings, collections, instructions and documents (instructions may be created without an attachment), and database backups through existing workflows. | Implemented to varying degrees; deployment configuration and access scope require verification |
 | FR-11 | Use OPC UA to write PLC values or control/stop machinery. | Explicitly not implemented |
-| FR-12 | Schedule maintenance from machine running-hour or cycle thresholds. | Not implemented |
+| FR-12 | Schedule maintenance from machine running-hour or cycle thresholds. | Implemented (live progress, edits preserve progress; not live-tested) |
 | FR-13 | Assign reusable shared labels to rules, rule collections, and instruction documents; filter listings by one or more labels. | Implemented; PostgreSQL migration and deployment verification required |
 | FR-14 | Administrator-controlled visibility of shared rules (Admin Only or Specific Supervisors, chosen explicitly at creation; no all-Supervisors option) with grant and revoke; Supervisors see only authorized rules, enforced by the backend. | Implemented; no request workflow exists |
 | FR-15 | Record who created and last changed rules and maintenance, and keep field-level history of shared-rule edits and visibility changes. | Implemented |
@@ -106,8 +106,10 @@ assignments they see no assets. Administrators are unrestricted.
 1. Create an individual work record or a recurring calendar schedule.
 2. Review current/due work in Current status and history in the Maintenance
    logbook.
-3. Start, complete, or cancel permitted records; capture actual dates,
-   technician, notes, parts, checklist, or completion notes as provided.
+3. Start, complete, or cancel permitted records. Starting a scheduled
+   occurrence moves it to (or keeps it in) Current status; completed work moves
+   to the logbook's Jobs & History. Completion needs only the actual date;
+   technician, work performed, remarks, parts and checklist are optional.
 4. On recurring completion, review the proposed next due date and confirm or
    decline it. Declining a proposal does not cancel the recurring schedule.
 
@@ -153,7 +155,8 @@ assignments they see no assets. Administrators are unrestricted.
   no entry exceeds 10 labels, and multi-label filters return only entries
   containing every selected label.
 - Recurrence uses calendar intervals and requires review of proposed dates
-  when the schedule is in an approval state.
+  when the schedule is in an approval state. Runtime/usage schedules are driven
+  by PLC signals and are never reset by editing their configuration.
 - No workflow writes to the PLC or claims safety-interlock behavior.
 
 The repository does not include an approved user acceptance test plan or a

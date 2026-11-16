@@ -199,6 +199,12 @@ removed may still carry the source `request`.
   stale data, evaluation failure, machine stopped, lifecycle changes, and
   maintenance actions. The asset Event log applies its own display filtering;
   not every database event is shown in that view.
+- Editing a rule (or a shared rule, for every asset using it) re-evaluates it at
+  once with the latest stored value and the new thresholds through the normal
+  evaluator: Warning/Alert may change severity or return to Normal, an existing
+  alert is updated or resolved (never duplicated, history kept), and the changes
+  are published to the Overview through the live-update hub. Disabled rules are
+  not re-evaluated.
 - Maintenance due-date alerts are warning alerts tied to a schedule and due
   date. A leased evaluator checks once a minute, creates/updates the alert, and
   marks the date alerted. Completing the associated occurrence resolves the
@@ -227,8 +233,18 @@ removed may still carry the source `request`.
   be created.
 - Schedule due state is `upcoming`, `due_today`, `overdue`, `completed`,
   `not_scheduled`, or `awaiting_approval` as applicable. Due dates are
-  calendar dates; machine running-hour/cycle-based maintenance is not
-  implemented.
+  calendar dates. Runtime (`running` signal, hours) and usage (`cycle` signal,
+  cycles) schedules are due when accumulated progress reaches the interval; they
+  create no occurrence up front and their occurrence has no due date, so it is due
+  immediately. Progress counts only fresh samples (runtime: previous sample true
+  and at most the runtime freshness limit, 30 s by default, before the new one, never across
+  a PLC outage or bad-quality reads, and a runtime rule's live runtime is never projected beyond that
+  limit after its last confirmed sample; usage: confirmed false→true within the stale window), is never changed by
+  editing the schedule, and resets only when an occurrence is completed.
+- Start acts only on the schedule's own planned occurrence (no ad-hoc job is
+  created), is row-locked against duplicate requests, and a started scheduled job
+  stays in Current status until completed. Completion requires only the actual
+  completion time; other registration fields are optional.
 - Operators may start/complete only the active current scheduled occurrence
   due today or overdue. They cannot act on an unscheduled occurrence, an older
   occurrence, a pending-approval schedule, or an occurrence not in the

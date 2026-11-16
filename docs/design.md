@@ -119,6 +119,10 @@ requiring changes to the existing dark theme or page layout.
 
 - The asset tree is a separate panel beside the content. The rail and tree have
   their own expand/collapse behavior; preserve this navigation model.
+- The sidebar keeps the asset being worked on selected on nested pages such as
+  Add/Edit maintenance (selection comes from the route's asset id, not hover).
+- Scheduled maintenance that is due or in progress is shown under Current status;
+  the logbook's Jobs & History lists the rest (including completed work).
 - Current status, the maintenance logbook, and event history are separate asset
   tabs. Maintenance schedule management is not the monitoring rule editor.
 - Some asset and configuration actions are role-gated in both the UI and API.

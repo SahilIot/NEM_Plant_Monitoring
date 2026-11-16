@@ -11,7 +11,6 @@ leaves no partial configuration. Existing records are never overwritten.
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
 from typing import Any, Literal
 
 from fastapi import HTTPException

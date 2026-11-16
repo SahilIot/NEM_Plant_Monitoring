@@ -229,9 +229,13 @@ def update_rule_signal_states(
     value: Any,
     at: datetime,
     stale_after_seconds: int,
+    runtime_gap_seconds: int | None = None,
 ) -> None:
     if not isinstance(value, bool):
         return
+    # Runtime may only be credited across a short gap between confirmed samples; cycle counting keeps
+    # the general stale limit. None means "no stricter limit" (readings pushed through the API).
+    runtime_gap = runtime_gap_seconds or stale_after_seconds
 
     rules = session.scalars(
         select(MonitoringRule)
@@ -287,12 +291,17 @@ def update_rule_signal_states(
             except ValueError:
                 LOGGER.warning( "Skipping signal update for rule %s with invalid activation time",rule.id,)
                 continue
-            advance_rule_runtime(
-                counter,
-                at,
-                stale_after_seconds,
-                activation_at,
-            )
+            # A gap longer than the runtime limit (outage, bad-quality reads) is never counted.
+            if (
+                counter.last_signal_at is not None
+                and at - counter.last_signal_at <= timedelta(seconds=runtime_gap)
+            ):
+                advance_rule_runtime(
+                    counter,
+                    at,
+                    runtime_gap,
+                    activation_at,
+                )
             counter.is_running = value
             counter.runtime_checkpoint_at = at if value else None
 
@@ -697,6 +706,7 @@ def evaluate_runtime_duration(
     state: RuleState | None,
     evaluated_at: datetime,
     stale_after_seconds: int,
+    runtime_gap_seconds: int | None = None,
 ) -> RuleState:
     parameters = rule.parameters or {}
     try:
@@ -793,6 +803,10 @@ def evaluate_runtime_duration(
         )
 
     stale_after = rule.stale_after_seconds or stale_after_seconds
+    if runtime_gap_seconds:
+        # Same freshness limit as runtime accumulation: time after the last confirmed sample is never projected
+        # beyond it, so a stale or bad-quality signal stops the displayed runtime within seconds, not minutes.
+        stale_after = min(stale_after, runtime_gap_seconds)
     running_seconds = current_rule_runtime_seconds(counter, evaluated_at, stale_after, activation_at)
     if evaluated_at - counter.last_signal_at > timedelta(seconds=stale_after):
         return _transition_state(
@@ -1019,6 +1033,7 @@ def evaluate_rule(
     *,
     evaluated_at: datetime | None = None,
     stale_after_seconds: int = 300,
+    runtime_gap_seconds: int | None = None,
 ) -> RuleState | None:
     now = evaluated_at or utc_now()
     asset, variable = get_rule_asset(session, rule)
@@ -1148,6 +1163,7 @@ def evaluate_rule(
             state,
             now,
             stale_after_seconds,
+            runtime_gap_seconds,
         )
 
     reading = session.scalar(
@@ -1309,6 +1325,7 @@ def evaluate_rules(
     *,
     evaluated_at: datetime | None = None,
     stale_after_seconds: int = 300,
+    runtime_gap_seconds: int | None = None,
     asset_id: int | None = None,
     rule_id: int | None = None,
     respect_rule_intervals: bool = False,
@@ -1363,6 +1380,7 @@ def evaluate_rules(
             rule,
             evaluated_at=now,
             stale_after_seconds=stale_after_seconds,
+            runtime_gap_seconds=runtime_gap_seconds,
         )
 
         if state is not None:
@@ -1452,6 +1470,7 @@ def evaluate_reading_rules(
     variable_id: int,
     evaluated_at: datetime | None = None,
     stale_after_seconds: int = 300,
+    runtime_gap_seconds: int | None = None,
 ) -> dict[str, int]:
     rules = session.scalars(
         select(MonitoringRule)
@@ -1482,6 +1501,7 @@ def evaluate_reading_rules(
             rule,
             evaluated_at=evaluated_at,
             stale_after_seconds=stale_after_seconds,
+            runtime_gap_seconds=runtime_gap_seconds,
         )
 
         if state is not None:
@@ -1518,10 +1538,11 @@ def set_rule_enabled_state(
             .with_for_update()
         )
         if counter is not None:
-            if not enabled:
+            if not enabled and counter.last_signal_at is not None:
+                # Count only up to the last confirmed sample, never the unconfirmed time since it.
                 advance_rule_runtime(
                     counter,
-                    now,
+                    counter.last_signal_at,
                     rule.stale_after_seconds or 300,
                 )
             counter.is_running = None

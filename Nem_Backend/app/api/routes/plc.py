@@ -19,6 +19,8 @@ from asyncua import ua
 
 _discovery_jobs={}
 _discovery_lock=asyncio.Lock()
+_discovery_tasks: set[asyncio.Task] = set()
+_MAX_FINISHED_DISCOVERY_JOBS = 5
 
 from app.services.opcua_client import (OpcUaConfigurationError,OpcUaConnectionError,
     read_opcua_node, 
@@ -99,6 +101,11 @@ async def start_opcua_discovery(
         if running:
             raise HTTPException(status_code=409,detail="A discovery job is already running.",)
 
+        # Keep only the most recent finished jobs so results cannot accumulate without limit.
+        finished = [key for key, job in _discovery_jobs.items() if job["status"] != "running"]
+        for key in finished[:-_MAX_FINISHED_DISCOVERY_JOBS]:
+            del _discovery_jobs[key]
+
         _discovery_jobs[job_id] = {
             "status": "running",
             "visited_nodes": 0,
@@ -173,7 +180,10 @@ async def start_opcua_discovery(
                     "status": "failed",
                     "error": f"{type(exc).__name__}: {exc!r}",
                 })
-    asyncio.create_task(scan())
+    # The event loop keeps only a weak reference to tasks; hold one so the scan is not collected mid-run.
+    task = asyncio.create_task(scan())
+    _discovery_tasks.add(task)
+    task.add_done_callback(_discovery_tasks.discard)
     return {
         "job_id": job_id,
         "status": "running",
@@ -245,6 +255,7 @@ async def read_plc_value(
         session,
         reading_payload,
         stale_after_seconds=request.app.state.settings.monitoring_default_stale_after_seconds,
+        runtime_gap_seconds=request.app.state.settings.runtime_freshness_seconds,
     )
     return {
         "node_id": payload.node_id,

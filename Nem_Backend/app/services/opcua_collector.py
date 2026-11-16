@@ -20,7 +20,9 @@ from asyncua.ua.uaerrors import UaStringParsingError
 from app.core.config import Settings
 from app.models import (Alert,Asset,
     MachineMonitoringState,
+    MaintenanceSchedule,
     MonitoringRule,
+    RuleCounterState,
     SchedulerLease,
     Variable,
 )
@@ -113,10 +115,11 @@ def advance_runtime(
     stale_after_seconds: int,
     signal_at: datetime | None = None,
 ) -> None:
-    """Accumulate runtime only up to the point the running signal stays trustworthy.
-    Time is never counted past ``signal_at + stale_after_seconds``; once that
-    deadline has passed the state becomes unknown (None) and accumulated
-    runtime is preserved.
+    """Accumulate runtime only over time covered by confirmed running samples.
+    ``stale_after_seconds`` is the longest gap between two confirmed samples that may be
+    counted. When the gap is longer (PLC outage, bad-quality or missing reads) nothing after the
+    last confirmed sample is counted and the state becomes unknown (None); accumulated runtime
+    is preserved.
     """
     if state.is_running is not True:
         state.runtime_checkpoint_at = None
@@ -131,12 +134,12 @@ def advance_runtime(
         state.runtime_checkpoint_at = None
         state.updated_at = at
         return
-    deadline = last_signal_at + timedelta(seconds=stale_after_seconds)
-    end = min(at, deadline)
+    gap_is_trusted = at - last_signal_at <= timedelta(seconds=stale_after_seconds)
+    end = at if gap_is_trusted else min(at, last_signal_at)
     if checkpoint is not None and end > checkpoint:
         state.accumulated_running_seconds = Decimal(state.accumulated_running_seconds
         ) + Decimal(str((end - checkpoint).total_seconds()))
-    if at > deadline:
+    if not gap_is_trusted:
         state.is_running = None
         state.runtime_checkpoint_at = None
     else:
@@ -398,7 +401,40 @@ class OpcUaCollector:
             ).all()
             for state in states:
                 state.runtime_checkpoint_at = None
+            self._clear_runtime_baselines(session, asset_ids)
             session.commit()
+
+    @staticmethod
+    def _clear_runtime_baselines(session: Session, asset_ids: list[int]) -> None:
+        """Forget the last running sample of rules and maintenance schedules on these assets.
+
+        Called on every connection start and stop. Time between the last confirmed sample before an
+        outage and the first one after it is unknown, so it must never be credited as running time:
+        the next sample only re-establishes the baseline.
+        """
+        counters = session.scalars(
+            select(RuleCounterState)
+            .where(
+                RuleCounterState.asset_id.in_(asset_ids),
+                RuleCounterState.is_running.is_not(None),
+            )
+            .with_for_update()
+        ).all()
+        for counter in counters:
+            counter.is_running = None
+            counter.runtime_checkpoint_at = None
+        schedules = session.scalars(
+            select(MaintenanceSchedule)
+            .where(
+                MaintenanceSchedule.asset_id.in_(asset_ids),
+                MaintenanceSchedule.schedule_mode == "runtime",
+                MaintenanceSchedule.last_signal_at.is_not(None),
+            )
+            .with_for_update()
+        ).all()
+        for schedule in schedules:
+            schedule.last_signal_value = None
+            schedule.last_signal_at = None
 
     async def stop(self) -> None:
         self._stop_event.set()
@@ -897,6 +933,7 @@ class OpcUaCollector:
                     stale_after_seconds=(
                         self.settings.monitoring_default_stale_after_seconds
                     ),
+                    runtime_gap_seconds=self.settings.runtime_freshness_seconds,
                     commit=False,
                 )
                 state.cycle_limit = mapping.cycle_limit
@@ -921,6 +958,7 @@ class OpcUaCollector:
                             stale_after_seconds=(
                                 self.settings.monitoring_default_stale_after_seconds
                             ),
+                            runtime_gap_seconds=self.settings.runtime_freshness_seconds,
                         )
                 elif role == "running":
                     state.last_running_signal_at = recorded_at
@@ -929,7 +967,7 @@ class OpcUaCollector:
                         state,
                         notification.value,
                         recorded_at,
-                        stale_after,
+                        self.settings.runtime_freshness_seconds,
                         signal_at,
                     )
                 session.commit()
@@ -996,9 +1034,7 @@ class OpcUaCollector:
                     MachineMonitoringState.is_running.is_(True)
                 )
             ).all()
-            stale_after = timedelta(
-                seconds=self.settings.monitoring_default_stale_after_seconds
-            )
+            stale_after = timedelta(seconds=self.settings.runtime_freshness_seconds)
             for state in states:
                 signal_at = state.last_running_signal_at
                 if signal_at is None or at - signal_at > stale_after:
@@ -1022,12 +1058,28 @@ class OpcUaCollector:
                 )
             ).all()
             for state in states:
-                advance_runtime(
-                    state,
-                    at,
-                    self.settings.monitoring_default_stale_after_seconds,
-                )
+                self._credit_confirmed_runtime(state, at)
             session.commit()
+
+    def _credit_confirmed_runtime(self, state: MachineMonitoringState, at: datetime) -> None:
+        """Count runtime only up to the last confirmed running sample, never up to ``at``.
+
+        Time after that sample is unconfirmed (bad-quality or missing reads, a dropped connection) and is
+        counted only when a later good sample arrives soon enough. If no sample has been confirmed for
+        longer than the freshness limit the running state becomes unknown.
+        """
+        freshness = self.settings.runtime_freshness_seconds
+        confirmed_at = state.last_running_signal_at
+        if confirmed_at is None:
+            state.is_running = None
+            state.runtime_checkpoint_at = None
+            state.updated_at = at
+            return
+        advance_runtime(state, confirmed_at, freshness)
+        if at - confirmed_at > timedelta(seconds=freshness):
+            state.is_running = None
+            state.runtime_checkpoint_at = None
+            state.updated_at = at
 
     def _disconnect_runtime(self, at: datetime) -> None:
         asset_ids = [mapping.asset_id for mapping in self.mappings]
@@ -1042,12 +1094,10 @@ class OpcUaCollector:
                 )
             ).all()
             for state in states:
-                advance_runtime(
-                    state,
-                    at,
-                    self.settings.monitoring_default_stale_after_seconds,
-                )
+                # A confirmed disconnection ends counting at the last confirmed sample, not at detection time.
+                self._credit_confirmed_runtime(state, at)
                 state.runtime_checkpoint_at = None
+            self._clear_runtime_baselines(session, asset_ids)
             session.commit()
 #lease management - preventing competing collectors
 #attemps to claim ownership

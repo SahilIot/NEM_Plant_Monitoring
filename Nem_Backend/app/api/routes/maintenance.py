@@ -7,6 +7,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import Executable
 
+from pydantic import ValidationError
+
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.api.routes.auth import get_current_user, require_roles
 from app.models import (
@@ -190,6 +193,15 @@ def _validate_instruction_documents(
     return normalized_ids
 
 
+def _runtime_freshness_seconds() -> int | None:
+    """Runtime freshness limit shown to clients so a display never extends a stale signal."""
+    try:
+        return get_settings().runtime_freshness_seconds
+    except ValidationError:
+        # Settings could not be loaded (incomplete environment): clients then show only the stored value.
+        return None
+
+
 def _schedule_read(
     session: Session,
     schedule: MaintenanceSchedule,
@@ -298,6 +310,11 @@ def _schedule_read(
 
         # Return the appropriate progress unit (hours, cycles, or days).
         "progress_unit": progress_unit,
+        "runtime_freshness_seconds": (
+            _runtime_freshness_seconds()
+            if schedule.schedule_mode == "runtime"
+            else None
+        ),
     }
 )
 
@@ -308,7 +325,6 @@ def _create_occurrence(
     *,
     due_date: date,
 ) -> MaintenanceRecord:
-    due_at = datetime.combine(due_date, time.max, tzinfo=timezone.utc)
     record = MaintenanceRecord(
         asset_id=schedule.asset_id,
         summary=schedule.title,

@@ -1139,10 +1139,15 @@ def apply_template_update(
         # Re-evaluate every rule that uses this shared rule right away with its new thresholds, so
         # statuses and alerts are corrected now rather than after the next PLC value or evaluation cycle.
         session.flush()
-        stale_after = request.app.state.settings.monitoring_default_stale_after_seconds
+        settings = request.app.state.settings
         for rule in assigned_rules:
             if rule.is_enabled:
-                evaluate_rules(session, rule_id=rule.id, stale_after_seconds=stale_after)
+                evaluate_rules(
+                    session,
+                    rule_id=rule.id,
+                    stale_after_seconds=settings.monitoring_default_stale_after_seconds,
+                    runtime_gap_seconds=settings.runtime_freshness_seconds,
+                )
 
 
 #Retrieves the template and replaces its fields with the values in the request - Save the changes.

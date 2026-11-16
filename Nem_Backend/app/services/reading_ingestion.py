@@ -63,6 +63,7 @@ def ingest_reading(
     payload: ReadingCreate,
     *,
     stale_after_seconds: int,
+    runtime_gap_seconds: int | None = None,
     commit: bool = True,
 ) -> Reading:
     validate_reading(session, payload)
@@ -76,17 +77,20 @@ def ingest_reading(
         value=reading.value,
         at=reading.recorded_at,
         stale_after_seconds=stale_after_seconds,
+        runtime_gap_seconds=runtime_gap_seconds,
     )
     evaluate_reading_rules(
         session,
         asset_id=reading.asset_id,
         variable_id=reading.variable_id,
         stale_after_seconds=stale_after_seconds,
+        runtime_gap_seconds=runtime_gap_seconds,
     )
     update_maintenance_progress(
         session,
         [reading],
         stale_after_seconds=stale_after_seconds,
+        runtime_gap_seconds=runtime_gap_seconds,
     )
     if commit:
         session.commit()

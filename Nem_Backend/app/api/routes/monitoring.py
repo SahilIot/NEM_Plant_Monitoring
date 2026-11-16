@@ -104,6 +104,7 @@ def manually_evaluate(
         session,
         #configure threshold for treating data as stale
         stale_after_seconds=request.app.state.settings.monitoring_default_stale_after_seconds,
+        runtime_gap_seconds=request.app.state.settings.runtime_freshness_seconds,
         asset_id=asset_id,
         rule_id=rule_id,
     )

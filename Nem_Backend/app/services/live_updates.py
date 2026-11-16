@@ -236,7 +236,7 @@ async def serve_live_updates(
     *,
     authorized_asset_ids: set[int] | None = None,
     authorization_check: Callable[
-        [], Awaitable[tuple[bool, set[int] | None]]
+        [dict[str, Any]], Awaitable[tuple[bool, set[int] | None]]
     ] | None = None,
 ) -> None:
     await websocket.accept(subprotocol="nem-auth" if "nem-auth" in websocket.scope.get("subprotocols", []) else None)
@@ -254,7 +254,7 @@ async def serve_live_updates(
             except asyncio.TimeoutError:
                 update = hub._event("heartbeat")
             if authorization_check is not None:
-                authorized, authorized_asset_ids = await authorization_check()
+                authorized, authorized_asset_ids = await authorization_check(update)
                 if not authorized:
                     await websocket.close(code=1008, reason="Session is invalid or expired")
                     return

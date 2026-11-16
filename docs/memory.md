@@ -73,10 +73,14 @@ roadmap.
    direct asset selections take precedence, with parent assignments inherited
    only when no direct selections exist. Removed or superseded recipients are
    skipped. Actual delivery still requires a safe SMTP verification.
-4. **Maintenance recurrence is calendar-based.** The schema and service support
-   days, weeks, months, and years plus confirm/decline of proposed dates.
-   Running-hour/cycle-based maintenance scheduling is not implemented in the
-   inspected code.
+4. **Maintenance has calendar, runtime and usage modes.** Calendar schedules
+   support days, weeks, months and years plus confirm/decline of proposed dates.
+   Runtime (running hours) and usage (cycles) schedules accumulate progress from
+   Boolean signals in `services/maintenance_progress.py`. Editing a schedule never
+   resets progress (only completing an occurrence does), and progress changes are
+   pushed live through the WebSocket hub. None of this was run against a live PLC
+   or database in the last change set; it was verified by code reading and
+   syntax/compile checks only.
 5. **Current terminology varies.** Current asset rule choices include “Cycle
    Clock” and “Motor Running Time”; some README text uses “Motor Rotation”.
    Preserve UI labels unless product owners confirm a terminology change.

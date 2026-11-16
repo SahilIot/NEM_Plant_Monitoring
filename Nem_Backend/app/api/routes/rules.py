@@ -488,6 +488,7 @@ def update_rule(
             session,
             rule_id=rule.id,
             stale_after_seconds=request.app.state.settings.monitoring_default_stale_after_seconds,
+            runtime_gap_seconds=request.app.state.settings.runtime_freshness_seconds,
         )
     session.commit()
     session.refresh(rule)

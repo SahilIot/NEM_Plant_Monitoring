@@ -2,7 +2,7 @@
 # including running-hour accumulation, cycle counting through False-to-True transitions,
 # stale and out-of-order reading protection, signal baseline management, maintenance threshold detection, duplicate alert and occurrence prevention, automatic maintenance record creation, email notifications, and maintenance event generation within the existing database transaction.from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -29,6 +29,7 @@ def update_maintenance_progress(
     readings: list[Reading],
     *,
     stale_after_seconds: int,
+    runtime_gap_seconds: int | None = None,
 ) -> int:
     """
     Update runtime- and usage-based maintenance progress.
@@ -102,9 +103,15 @@ def update_maintenance_progress(
             )
 
             if schedule.schedule_mode == "runtime":
-                # Count only the interval during which the previous sample
-                # confirmed that the machine was running.
-                if schedule.last_signal_value is True and fresh_previous_sample:
+                # Count only the interval during which the previous sample confirmed that the machine
+                # was running, and only across a short gap: an outage or a run of bad-quality reads
+                # must never be added to runtime (cycles keep the general stale limit).
+                runtime_gap = runtime_gap_seconds or stale_after_seconds
+                if (
+                    schedule.last_signal_value is True
+                    and elapsed_seconds is not None
+                    and 0 < elapsed_seconds <= runtime_gap
+                ):
                     schedule.current_progress += elapsed_seconds / 3600.0
 
                 threshold = schedule.runtime_interval_hours
