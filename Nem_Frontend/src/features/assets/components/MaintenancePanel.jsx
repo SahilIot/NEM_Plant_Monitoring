@@ -25,10 +25,6 @@ import { DotsIcon } from "../../../components/common/Icons.jsx";
 import { auditUser, formatAuditTime, formatTime } from "../../../utils/format.js";
 import MaintenanceDetails from "./MaintenanceDetails.jsx";
 import MaintenanceRegistrationDialog from "./MaintenanceRegistrationDialog.jsx";
-import {
-  LEGACY_RULE_CHOICES,
-  legacyRulePath,
-} from "../rules/monitoringRuleFlow.js";
 import "./MaintenancePanel.css";
 
 const API_BASE = (import.meta.env.VITE_API_URL || "/api/v1").replace(/\/+$/, "");
@@ -271,7 +267,6 @@ export default function MaintenancePanel({
   const actionMenuTriggerRef = useRef(null);
   const startRequestRef = useRef(false);
   const scheduleDeleteGuard = useRef(false);
-  const [legacyRuleOptionsOpen, setLegacyRuleOptionsOpen] = useState(false);
   const [values, setValues] = useState(() => formValues(null));
   const [scheduleValues, setScheduleValues] = useState({
     title: "",
@@ -2644,37 +2639,6 @@ export default function MaintenancePanel({
               </button>
             </div>
           </form>
-        </Modal>
-      )}
-
-      {legacyRuleOptionsOpen && (
-        <Modal
-          title="Additional asset rule workflows"
-          onClose={() => setLegacyRuleOptionsOpen(false)}
-        >
-          <div className="rule-type-options">
-            {LEGACY_RULE_CHOICES.map((choice) => (
-              <button
-                key={choice.kind}
-                type="button"
-                className="rule-type-option"
-                onClick={() => {
-                  setLegacyRuleOptionsOpen(false);
-                  navigate(legacyRulePath(assetId, choice.kind), {
-                    state: {
-                      from: captureNavigationOrigin(location, {
-                        ...(navigationState || location.state),
-                        activeTab: "logbook",
-                      }),
-                    },
-                  });
-                }}
-              >
-                <strong>{choice.label}</strong>
-                <small>{choice.description}</small>
-              </button>
-            ))}
-          </div>
         </Modal>
       )}
     </>

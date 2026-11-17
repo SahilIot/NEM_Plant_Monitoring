@@ -60,6 +60,15 @@ function crumbs(path, assets, t) {
     ];
   }
 
+  if ((m = matchPath("/assets/:id/rules/:ruleId/status", path))) {
+    const asset = assets.find((x) => x.id === Number(m.params.id));
+    return [
+      { label: t("nav.assets"), to: "/assets" },
+      { label: asset ? asset.name : t("assets.assetNumber", { id: m.params.id }), to: `/assets/${m.params.id}` },
+      { label: "Rule status" },
+    ];
+  }
+
   if ((m = matchPath("/assets/:id", path))) {
     const asset = assets.find((x) => x.id === Number(m.params.id));
     return [

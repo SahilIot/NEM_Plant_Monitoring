@@ -1,0 +1,8 @@
+.asset-delete-dialog { display: grid; gap: 14px; max-height: 60vh; overflow: auto; }
+.asset-delete-dialog h4 { margin: 0 0 6px; font-size: 14px; }
+.asset-delete-tree { list-style: none; margin: 0; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; max-height: 160px; overflow: auto; }
+.asset-delete-counts td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.asset-delete-confirm { display: grid; gap: 6px; }
+.asset-delete-confirm input { height: var(--ctl); }
+.asset-delete-actions { flex-wrap: wrap; }
+@media (max-width: 520px) { .asset-delete-actions > button { flex: 1 1 100%; } }

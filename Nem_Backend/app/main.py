@@ -30,6 +30,7 @@ from app.api.routes import (
     notifications,
     plc,
     readings,
+    rule_parameters,
     rule_visibility,
     rules,
     variables,
@@ -662,6 +663,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(variables.router, prefix="/api/v1")
     application.include_router(readings.router, prefix="/api/v1")
     application.include_router(rules.router, prefix="/api/v1")
+    application.include_router(rule_parameters.router, prefix="/api/v1")
     application.include_router(monitoring.router, prefix="/api/v1")
     application.include_router(notifications.router, prefix="/api/v1")
     application.include_router(plc.router, prefix="/api/v1")

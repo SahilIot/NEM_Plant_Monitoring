@@ -21,7 +21,7 @@ import DocumentViewerPage from "../features/configuration/pages/DocumentViewerPa
 import DocumentsPage from "../features/configuration/pages/DocumentsPage.jsx";
 import RuleLibrary from "../features/configuration/pages/RuleLibrary.jsx";
 import RuleTypeSelectPage from "../features/configuration/pages/RuleTypeSelectPage.jsx";
-import LibraryRuleCreatePage from "../features/configuration/pages/LibraryRuleCreatePage.jsx";
+import TemplateRulePage from "../features/configuration/pages/TemplateRulePage.jsx";
 import CollectionLibrary from "../features/configuration/pages/CollectionLibrary.jsx";
 
 import Plc from "../features/plc/pages/Plc.jsx";
@@ -89,6 +89,8 @@ export default function App() {
         {/* Assets */}
         <Route path="/assets" element={<AssetsIndex />} />
         <Route path="/assets/:id" element={<AssetDetail />} />
+        {/* Dedicated status page for one multi-parameter rule, inside the asset page shell. */}
+        <Route path="/assets/:id/rules/:ruleId/status" element={<AssetDetail />} />
         {/* Reuse the asset maintenance panel on a dedicated schedule-details page. */}
         <Route
           path="/assets/:id/maintenance/schedules/:scheduleId/details"
@@ -111,7 +113,11 @@ export default function App() {
         />
         <Route
           path="/configuration/rules/new/:kind"
-          element={<LibraryRuleCreatePage />}
+          element={<TemplateRulePage />}
+        />
+        <Route
+          path="/configuration/rules/:templateId/edit"
+          element={<TemplateRulePage />}
         />
         <Route
           path="/configuration/collections"
@@ -181,21 +187,9 @@ export default function App() {
   element={<CreateMaintenanceSchedulePage />}
 />
 
-{/* Monitoring Rules */}
+{/* Monitoring Rules: creation only. Existing rules are edited per parameter from their detail page. */}
 <Route
   path="/assets/:id/monitoring-rules/new/:choiceId"
-  element={<CreateMonitoringRulePage />}
-/>
-
-{/* Monitoring Rules */}
-<Route
-  path="/assets/:id/monitoring-rules/new/:choiceId"
-  element={<CreateMonitoringRulePage />}
-/>
-
-{/* Edit existing monitoring rule */}
-<Route
-  path="/assets/:id/monitoring-rules/:rule_type/edit"
   element={<CreateMonitoringRulePage />}
 />
 

@@ -163,6 +163,23 @@ SUPERVISOR_EDITABLE_PARAMETERS = frozenset({
     "warning_thresholds", "alert_threshold",
     "warning_thresholds_seconds", "alert_threshold_seconds",
 })
+# Multi-parameter rules: the numeric limits inside each parameter definition are the thresholds.
+SUPERVISOR_EDITABLE_LIMITS = frozenset({
+    "lower_alert", "lower_warning", "upper_warning", "upper_alert", "due", "overdue",
+})
+
+
+def _without_limits(parameters: dict) -> dict:
+    """Parameters with every numeric limit of every parameter definition removed (for comparison)."""
+    stripped = dict(parameters)
+    defs = stripped.get("parameter_defs")
+    if isinstance(defs, list):
+        stripped["parameter_defs"] = [
+            {**item, "config": {k: v for k, v in (item.get("config") or {}).items() if k not in SUPERVISOR_EDITABLE_LIMITS}}
+            if isinstance(item, dict) else item
+            for item in defs
+        ]
+    return stripped
 
 # This function first allows system sessions , then it retrieves the authenticated user , admin are allowed to edit everything
 def enforce_template_edit_permission(
@@ -189,8 +206,8 @@ def enforce_template_edit_permission(
             continue
         old = getattr(template, field, None)
         if field == "parameters":
-            old_params = {k: v for k, v in (old or {}).items() if k not in SUPERVISOR_EDITABLE_PARAMETERS}
-            new_params = {k: v for k, v in (new or {}).items() if k not in SUPERVISOR_EDITABLE_PARAMETERS}
+            old_params = _without_limits({k: v for k, v in (old or {}).items() if k not in SUPERVISOR_EDITABLE_PARAMETERS})
+            new_params = _without_limits({k: v for k, v in (new or {}).items() if k not in SUPERVISOR_EDITABLE_PARAMETERS})
             if old_params != new_params:
                 raise denied
         elif values_differ(old, new):

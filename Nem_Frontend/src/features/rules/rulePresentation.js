@@ -11,6 +11,11 @@ export function formatRuleDuration(seconds) {
 // Show the configured threshold or condition using the same wording in both assignment modals.
 export function ruleConditionSummary(rule) {
   const parameters = rule.parameters || {};
+  if (rule.rule_type === "multi_parameter") {
+    const defs = Array.isArray(parameters.parameter_defs) ? parameters.parameter_defs : [];
+    const category = ["interval", "interval_based"].includes(parameters.category) ? "Interval Based" : "Parameter Threshold";
+    return `${category} · ${defs.length} parameter${defs.length === 1 ? "" : "s"}${defs.length ? `: ${defs.map((item) => item.name).join(", ")}` : ""}`;
+  }
   if (rule.rule_type === "runtime_duration") {
     const warningThresholds = parameters.warning_thresholds_seconds || [];
     const alertThreshold = parameters.alert_threshold_seconds;

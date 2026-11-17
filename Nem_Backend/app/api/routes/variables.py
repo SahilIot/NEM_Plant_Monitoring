@@ -1,12 +1,13 @@
 #main purpose is to  create,view,filter and update machine variables in the db 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models import Alert, Asset, MonitoringRule, Reading, RuleState, Variable
 from app.services.access_scope import access_scope
+from app.services.asset_deletion import variable_deletion_summary
 from app.schemas.variable import VariableCreate, VariableRead, VariableUpdate
 
 router = APIRouter(tags=["variables"])
@@ -146,40 +147,33 @@ def update_variable(variable_id: int,payload: VariableUpdate,session: Session = 
     session.refresh(variable)
     return variable
 
+@router.get("/variables/{variable_id}/deletion-summary")
+def variable_deletion_summary_endpoint(variable_id: int, request: Request, session: Session = Depends(get_db)) -> dict:
+    variable = variable_or_404(session, variable_id)
+    return variable_deletion_summary(session, variable, getattr(request.app.state, "opcua_collector", None))
+
+# Permanent deletion is refused while rules, parameters, schedules, alerts or collector mappings still use the
+# variable (never silently deleted). A variable with only raw readings needs confirm=true.
 @router.delete("/variables/{variable_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_variable(
     variable_id: int,
     request: Request,
+    confirm: bool = Query(default=False),
     session: Session = Depends(get_db),
 ) -> Response:
     variable = variable_or_404(session, variable_id)
-    references = (
-        (Reading, Reading.variable_id),
-        (MonitoringRule, MonitoringRule.variable_id),
-        (RuleState, RuleState.target_variable_id),
-        (Alert, Alert.target_variable_id),
-    )
-    if any(
-        session.scalar(select(column).where(column == variable.id).limit(1))
-        for model, column in references
-    ):
-        raise HTTPException( status_code=409,detail=("Cannot delete a variable referenced by readings, monitoring "
-                "rules, rule states, or alerts. Deactivate it instead."),)
-
-    collector = getattr(request.app.state, "opcua_collector", None)
-    if collector is not None and any(
-        signal.variable_id == variable.id
-        for mapping in collector.mappings
-        for signal in (
-            mapping.cycle_signal,
-            mapping.running_signal,
-            *mapping.readings,
-        )
-        if signal is not None
-    ):
-        raise HTTPException(status_code=409,detail=("Cannot delete a variable used by OPC UA_MACHINE_MAPPINGS. "
-                "Remove its mapping and restart the backend first."),)
-
-    session.delete(variable)
-    session.commit()
+    summary = variable_deletion_summary(session, variable, getattr(request.app.state, "opcua_collector", None))
+    if summary["blockers"]:
+        raise HTTPException(status_code=409, detail="Cannot delete this variable: " + " ".join(summary["blockers"]))
+    if summary["requires_confirmation"] and not confirm:
+        raise HTTPException(status_code=409, detail=(
+            f"This variable has {summary['counts']['readings']} stored reading(s) that will be deleted with it. "
+            "Confirm to proceed, or deactivate it instead."))
+    try:
+        session.execute(delete(Reading).where(Reading.variable_id == variable.id))
+        session.execute(delete(Variable).where(Variable.id == variable.id))
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="Deletion was rolled back because the variable is still referenced. Nothing was deleted.") from error
     return Response(status_code=status.HTTP_204_NO_CONTENT)

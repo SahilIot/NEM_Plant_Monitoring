@@ -23,7 +23,7 @@ export default function AddRuleChooserModal({ collection, onSelectExisting, onCr
           <span className="add-rule-option-icon" aria-hidden="true"><FilePlus2 size={20} /></span>
           <span className="add-rule-option-text">
             <strong>Create New Rule</strong>
-            <span>Create a Motor Running, Cycle Clock or other rule that is added to this collection straight away.</span>
+            <span>Create an Interval Based or Parameter Threshold rule that is added to this collection straight away.</span>
           </span>
         </button>
       </div>

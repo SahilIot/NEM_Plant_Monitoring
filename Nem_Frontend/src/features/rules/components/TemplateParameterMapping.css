@@ -1,0 +1,8 @@
+.tpm-list { display: grid; gap: 6px; margin-top: 6px; width: 100%; }
+.tpm-row { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(160px, 1.4fr); gap: 8px; align-items: center; font-size: 13px; }
+.tpm-name { display: grid; color: var(--text, inherit); }
+.tpm-name small { color: var(--muted, #6b7280); }
+.tpm-row select { min-width: 0; width: 100%; }
+@media (max-width: 640px) { .tpm-row { grid-template-columns: 1fr; } }
+.tpm-list { text-align: left; }
+.tpm-row select { max-width: 100%; }

@@ -1,0 +1,95 @@
+/* "Edit parameter" dialog. Same tokens and control styling as the rule-creation forms
+   (.rule-create-page .form-group): --ctl, --r-ctl, --action, --line-strong, --ink, --muted. */
+.modal.pe-modal {
+  width: 620px; max-width: 100%; padding: 0; display: flex; flex-direction: column;
+  max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow: hidden;
+  border-radius: var(--r-panel);
+}
+.pe-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 20px 14px; border-bottom: 1px solid var(--line); }
+.pe-head-text { min-width: 0; }
+.pe-modal .pe-head h3 { margin: 0; font-size: 17px; line-height: 1.3; }
+.pe-head p { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.pe-head .icon-outline { flex: none; }
+.pe-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 20px 16px; display: flex; flex-direction: column; gap: 0; }
+.pe-foot { display: flex; justify-content: flex-end; gap: 9px; padding: 12px 20px; border-top: 1px solid var(--line); background: var(--surface); }
+
+.pe-section { padding: 14px 0 16px; border-bottom: 1px solid var(--line); min-width: 0; }
+.pe-section h4 { margin: 0 0 10px; color: var(--ink); font-size: 14px; font-weight: 600; line-height: 1.3; }
+.pe-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; min-width: 0; }
+.pe-fields .form-group-wide { grid-column: 1 / -1; }
+
+.pe-modal .form-group { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 0; color: var(--ink); }
+.pe-modal .form-group label { color: var(--ink-2); font-size: 13px; font-weight: 600; line-height: 1.4; }
+.pe-modal .optional-label { margin-left: 4px; color: var(--muted); font-size: 11px; font-weight: 400; }
+.pe-modal .form-group small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.pe-modal .form-group input:not([type="search"]),
+.pe-modal .form-group select {
+  width: 100%; min-width: 0; min-height: 38px; padding: 8px 10px; border: 1px solid var(--line-strong);
+  border-radius: var(--r-ctl); outline: none; background: var(--surface); color: var(--ink);
+  font-family: var(--font); font-size: 14px; line-height: 1.45; transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.pe-modal .iw-picker input[type="search"] {
+  width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--r-ctl);
+  outline: none; background: var(--surface); color: var(--ink); font-family: var(--font);
+}
+.pe-modal .form-group input:focus, .pe-modal .form-group select:focus, .pe-modal .iw-picker input[type="search"]:focus {
+  border-color: var(--action); box-shadow: 0 0 0 3px var(--action-soft);
+}
+.pe-modal .form-group input:disabled, .pe-modal .form-group select:disabled { opacity: 0.65; cursor: not-allowed; }
+/* Styled select: no browser arrow, one chevron that works in both themes. */
+.pe-modal .form-group select {
+  appearance: none; -webkit-appearance: none; padding-right: 32px; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%238a96a3' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 11px center;
+}
+.pe-modal .form-group input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
+.pe-modal .form-group input[type="number"]::-webkit-outer-spin-button,
+.pe-modal .form-group input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.pe-modal input[type="datetime-local"] { color-scheme: light dark; }
+html[data-theme="dark"] .pe-modal input[type="datetime-local"] { color-scheme: dark; }
+
+/* Unit inside the input group, at its right edge (same as the rule-creation forms). */
+.pe-modal .rule-input-unit { position: relative; display: block; }
+.pe-modal .rule-input-unit input { padding-right: 58px; }
+.pe-modal .rule-input-unit-label { position: absolute; top: 50%; right: 10px; transform: translateY(-50%); color: var(--muted); font-size: 12px; pointer-events: none; }
+
+.pe-readonly {
+  min-height: 38px; display: flex; align-items: center; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: var(--r-ctl); background: var(--surface-2); color: var(--ink-2); font-size: 14px; line-height: 1.45; overflow-wrap: anywhere;
+}
+.pe-instructions { display: block; font-size: 13px; }
+.pe-instructions p { margin: 0 0 4px; white-space: pre-wrap; }
+.pe-instructions p:last-child { margin-bottom: 0; }
+.pe-instructions a { color: var(--action); }
+
+.pe-question { margin: 12px 0 8px; color: var(--ink); font-weight: 600; }
+.pe-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pe-item {
+  width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer; padding: 9px 12px;
+  border-radius: var(--r-ctl); border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
+}
+.pe-item:hover, .pe-item:focus-visible { border-color: var(--action); background: var(--action-soft); outline: none; }
+.pe-item svg { flex: none; color: var(--muted); }
+.pe-item-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pe-item-text strong { font-size: 14px; overflow-wrap: anywhere; }
+.pe-item-text small { color: var(--muted); font-size: 12px; }
+.pe-back { align-self: flex-start; display: inline-flex; align-items: center; gap: 2px; margin-top: 10px; padding: 2px 4px 2px 0; background: none; border: 0; cursor: pointer; font-size: 12.5px; color: var(--muted); }
+.pe-back:hover:not(:disabled) { color: var(--ink); }
+
+.pe-note { margin: 12px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.pe-problems, .pe-error {
+  margin: 12px 0 0; padding: 10px 13px; border: 1px solid var(--alert); border-radius: var(--r-ctl);
+  background: var(--alert-soft); color: var(--ink); font-size: 13px;
+}
+.pe-problems { padding-left: 30px; }
+
+@media (max-width: 560px) {
+  .pe-fields { grid-template-columns: minmax(0, 1fr); }
+  .pe-head, .pe-body, .pe-foot { padding-left: 14px; padding-right: 14px; }
+  .pe-foot .btn-outline, .pe-foot .btn-primary { flex: 1 1 0; }
+}
+/* The existing variable card, laid out compactly inside the dialog. */
+.pe-modal .iw-selected { margin: 0; }
+.pe-modal .iw-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
+.pe-modal .iw-selected-actions .btn-outline, .pe-modal .iw-picker-head .btn-outline { height: 32px; padding: 0 12px; font-size: 13px; }
+.pe-modal .iw-var-list { max-height: 220px; }

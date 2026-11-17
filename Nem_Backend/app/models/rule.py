@@ -1,4 +1,5 @@
 # Reusable monitoring rule templates, separate from asset-specific rules.
+import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -13,6 +14,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -193,7 +195,8 @@ class MonitoringRule(AuditNamesMixin, Base):
         CheckConstraint(
             "rule_type IN "
             "('parameter_threshold', 'runtime_duration', 'duration', "
-            "'generic', 'boolean_condition', 'boolean_count_threshold')",
+            "'generic', 'boolean_condition', 'boolean_count_threshold', "
+            "'multi_parameter')",
             name="ck_nem_monitoring_rules_type",
         ),
         Index(
@@ -245,6 +248,13 @@ class MonitoringRule(AuditNamesMixin, Base):
     created_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[created_by_id], lazy="selectin") # type: ignore
     updated_by_user: Mapped["User | None"] = relationship("User", foreign_keys=[updated_by_id], lazy="selectin") # type: ignore
     label_records: Mapped[list[Label]] = relationship(secondary=rule_labels, lazy="selectin",)
+    # Only 'multi_parameter' rules have parameter rows; every other rule type leaves this empty.
+    parameter_items: Mapped[list["RuleParameter"]] = relationship(
+        "RuleParameter",
+        order_by="RuleParameter.position",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
     @property
     def shared_rule(self) -> bool:
@@ -312,7 +322,17 @@ class Alert(Base):
             "rule_id",
             "target_asset_id",
             unique=True,
-            postgresql_where=text("status = 'active'"),
+            postgresql_where=text("status = 'active' AND parameter_id IS NULL"),
+        ),
+        # Multi-parameter rules raise one alert per parameter, so one parameter's alert can never
+        # be resolved, replaced or hidden by another's.
+        Index(
+            "uq_nem_alerts_active_rule_asset_parameter",
+            "rule_id",
+            "target_asset_id",
+            "parameter_id",
+            unique=True,
+            postgresql_where=text("status = 'active' AND parameter_id IS NOT NULL"),
         ),
         Index(
             "uq_nem_alerts_active_maintenance_due",
@@ -343,6 +363,12 @@ class Alert(Base):
         index=True,
     )
     maintenance_due_date: Mapped[date | None] = mapped_column(Date)
+    # Set only for alerts raised by one parameter of a multi-parameter rule. The name is kept as a
+    # snapshot so history stays readable after the parameter is edited or removed.
+    parameter_id: Mapped[int | None] = mapped_column(
+        ForeignKey("nem_rule_parameters.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    parameter_name: Mapped[str | None] = mapped_column(String(200))
 
     target_asset_id: Mapped[int] = mapped_column(
         ForeignKey("assets.id", ondelete="RESTRICT"),
@@ -409,3 +435,88 @@ class SchedulerLease(Base):
     owner_id: Mapped[str] = mapped_column(String(100), nullable=False)
     lease_until: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, index=True)
     updated_at: Mapped[datetime] = mapped_column( UTCDateTime(), nullable=False)
+
+
+class RuleParameter(Base):
+    """One independently configured parameter of a 'multi_parameter' rule.
+
+    `key` is the stable identity (never the position), so editing, reordering or removing other
+    parameters cannot change which parameter this row is.
+    """
+
+    __tablename__ = "nem_rule_parameters"
+    __table_args__ = (
+        UniqueConstraint("rule_id", "key", name="uq_nem_rule_parameters_rule_key"),
+        CheckConstraint("kind IN ('number', 'boolean', 'interval')", name="ck_nem_rule_parameters_kind"),
+        CheckConstraint(
+            "aggregation IN ('none', 'counter', 'last', 'timer')",
+            name="ck_nem_rule_parameters_aggregation",
+        ),
+        CheckConstraint(
+            "lifecycle_status IN ('active', 'suspended', 'deactivated')",
+            name="ck_nem_rule_parameters_lifecycle",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    rule_id: Mapped[int] = mapped_column(
+        ForeignKey("nem_monitoring_rules.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    key: Mapped[str] = mapped_column(String(36), nullable=False, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    position: Mapped[int] = mapped_column(nullable=False, default=0)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    variable_id: Mapped[int | None] = mapped_column(
+        ForeignKey("variables.id", ondelete="RESTRICT"), index=True
+    )
+    aggregation: Mapped[str] = mapped_column(String(20), nullable=False, default="none")
+    config: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    # Independent of the parent rule's lifecycle: only 'active' parameters are evaluated and can alert.
+    lifecycle_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="active", server_default="active"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    state: Mapped["RuleParameterState | None"] = relationship(
+        "RuleParameterState", uselist=False, cascade="all, delete-orphan", lazy="selectin"
+    )
+
+
+class RuleParameterState(Base):
+    """Latest evaluation of one rule parameter (the rule's own RuleState holds the combined result)."""
+
+    __tablename__ = "nem_rule_parameter_states"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('normal', 'warning', 'alert', 'unknown')",
+            name="ck_nem_rule_parameter_states_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    parameter_id: Mapped[int] = mapped_column(
+        ForeignKey("nem_rule_parameters.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")
+    # Evaluated (aggregated) value and the raw latest PLC value, kept apart so the UI can tell them apart.
+    latest_value: Mapped[Any | None] = mapped_column(JSON)
+    raw_value: Mapped[Any | None] = mapped_column(JSON)
+    message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    error_message: Mapped[str | None] = mapped_column(Text)
+    last_evaluated_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    # Incremental checkpoint for cumulative (interval) aggregation; never shown to users.
+    aggregate_state: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    # Timestamp of the latest reading seen (even when stale) and the last reading that was valid and fresh.
+    reading_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    last_valid_value: Mapped[Any | None] = mapped_column(JSON)
+    last_valid_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    # Set when this parameter's alert was completed while its condition still holds, so the same
+    # continuing condition does not immediately raise a new alert. Cleared when it returns to Normal.
+    completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())

@@ -1,41 +1,23 @@
 import React, { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Cog, RefreshCw } from "lucide-react";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import {
   rememberNavigationOrigin,
   returnToNavigationOrigin,
 } from "../../../utils/navigation.js";
+import RuleCategoryOptions from "../../rules/components/RuleCategoryOptions.jsx";
 import "../../rules/pages/RuleCreatePage.css";
 import "./NewRuleWorkflow.css";
 
 export const LIBRARY_PATH = "/configuration/rules";
 export const COLLECTIONS_PATH = "/configuration/collections";
 
-// Reusable-rule types that have a full-page creation form. Temperature Based and
-// Parameter threshold templates are still created in the existing rule modal.
-export const NEW_RULE_TYPES = [
-  {
-    kind: "motor-running",
-    title: "Motor Running",
-    description:
-      "Monitor machine running conditions and configured running-duration thresholds.",
-    Icon: Cog,
-  },
-  {
-    kind: "cycle-clock",
-    title: "Cycle Clock",
-    description:
-      "Monitor machine cycles and accumulated cycle thresholds.",
-    Icon: RefreshCw,
-  },
-];
-
 export default function RuleTypeSelectPage() {
   const { user } = useAuth();
-  const canCreateRules = user?.role === "Administrator";
   const navigate = useNavigate();
   const location = useLocation();
+  const suggest = Boolean(location.state?.suggest);
+  const canCreateRules = user?.role === "Administrator" || (suggest && user?.role === "Supervisor");
   const from = location.state?.from;
   // Set when the rule is being added from inside a Rule Collection.
   const collection = location.state?.collection || null;
@@ -50,23 +32,6 @@ export default function RuleTypeSelectPage() {
       from,
       collection ? COLLECTIONS_PATH : LIBRARY_PATH
     );
-
-  // The existing reusable-rule modal stays available for the other rule types.
-  const openOtherRuleTypes = () =>
-    collection?.draft
-      ? navigate(COLLECTIONS_PATH, {
-          replace: true,
-          state: { ...(from?.state || {}), openOtherRule: true },
-        })
-      : collection
-      ? navigate(COLLECTIONS_PATH, {
-          replace: true,
-          state: { ...(from?.state || {}), openAddRule: collection },
-        })
-      : navigate(LIBRARY_PATH, {
-          replace: true,
-          state: { ...(from?.state || {}), openCreate: true },
-        });
 
   return (
     <div className="rule-create-page rule-create-page-select">
@@ -99,42 +64,15 @@ export default function RuleTypeSelectPage() {
           </p>
         )}
 
-        <div className="rule-type-grid">
-          {NEW_RULE_TYPES.map(({ kind, title, description, Icon }) => (
-            <button
-              key={kind}
-              type="button"
-              className="rule-type-card"
-              disabled={!canCreateRules}
-              onClick={() =>
-                navigate(`${LIBRARY_PATH}/new/${kind}`, {
-                  replace: true,
-                  state: { from, collection },
-                })
-              }
-            >
-              <span className="rule-type-icon" aria-hidden="true">
-                <Icon size={20} />
-              </span>
-              <span className="rule-type-text">
-                <strong>{title}</strong>
-                <span>{description}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-
-        <p className="rule-type-other">
-          Need a Temperature Based or Parameter threshold rule?{" "}
-          <button
-            type="button"
-            className="rule-type-link"
-            onClick={openOtherRuleTypes}
-            disabled={!canCreateRules}
-          >
-            Other rule types
-          </button>
-        </p>
+        <RuleCategoryOptions
+          disabled={!canCreateRules}
+          onSelect={(category) =>
+            navigate(`${LIBRARY_PATH}/new/${category === "interval" ? "interval" : "parameter"}`, {
+              replace: true,
+              state: { from, collection, suggest },
+            })
+          }
+        />
       </div>
     </div>
   );

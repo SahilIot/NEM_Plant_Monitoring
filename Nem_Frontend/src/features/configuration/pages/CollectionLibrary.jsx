@@ -7,7 +7,6 @@ import { BackIcon } from "../../../components/common/Icons.jsx";
 import { EmptyState, LoadingIndicator, Modal, useConfirmation } from "../../../components/common/UI.jsx";
 import LabelsField from "../../../components/common/LabelsField.jsx";
 import RuleCollectionCreateModal from "./RuleCollectionCreateModal.jsx";
-import ReusableRuleModal from "./ReusableRuleModal.jsx";
 import AddRuleChooserModal from "./AddRuleChooserModal.jsx";
 import ExistingRulesPicker from "./ExistingRulesPicker.jsx";
 import { MAX_COLLECTION_RULES } from "./collectionLimits.js";
@@ -39,8 +38,6 @@ export default function CollectionLibrary() {
   const [editingCollection, setEditingCollection] = useState(null);
   const [viewingId, setViewingId] = useState(null);
   const [viewingRule, setViewingRule] = useState(null);
-  const [editingRule, setEditingRule] = useState(null);
-  const [addingTo, setAddingTo] = useState(null);
   const [choosing, setChoosing] = useState(null); // Add rule: choose between existing and new
   const [picking, setPicking] = useState(null); // Add rule: select existing rules
   const [createDraft, setCreateDraft] = useState(null); // Create collection form restored after the Add Rule page
@@ -80,18 +77,12 @@ export default function CollectionLibrary() {
     }
     const draft = flash?.state?.collectionDraft || state.collectionDraft;
     if (draft && canManage) {
-      setCreateDraft({ draft, openOtherRule: Boolean(state.openOtherRule) });
+      setCreateDraft({ draft });
       setEditingCollection(null);
       setCreating(true);
     }
-    if (state.collectionDraft || state.openOtherRule) {
+    if (state.collectionDraft) {
       delete state.collectionDraft;
-      delete state.openOtherRule;
-      changed = true;
-    }
-    if (state.openAddRule) {
-      if (canManage) setAddingTo(state.openAddRule);
-      delete state.openAddRule;
       changed = true;
     }
     if (changed) nav(`${location.pathname}${location.search}${location.hash}`, { replace: true, state });
@@ -325,14 +316,14 @@ export default function CollectionLibrary() {
                 <div className="rl-rule-row" key={rule.id}>
                   <div className="main">
                     <strong>{rule.name}</strong>
-                    <small>{displayType(rule)} · {ruleKind(rule)} · {rule.is_enabled ? "Available" : "Disabled"}</small>
+                    <small>{displayType(rule)} · {rule.is_enabled ? "Available" : "Disabled"}</small>
                     <small>{templateSummary(rule)}</small>
                     {rule.description && <small>{rule.description}</small>}
                   </div>
                   <div className="rule-library-actions rl-actions">
                     <button type="button" className="btn-outline" aria-label={`View ${rule.name}`} title="View rule details (including assigned assets)" onClick={() => setViewingRule(rule)}><Eye size={15} /></button>
                     {canManage && (
-                      <button type="button" className="btn-outline" aria-label={`Edit ${rule.name}`} title="Edit rule" onClick={() => setEditingRule({ collection: viewing, rule })}><Pencil size={15} /></button>
+                      <button type="button" className="btn-outline" aria-label={`Edit ${rule.name}`} title="Edit rule" onClick={() => nav(`/configuration/rules/${rule.id}/edit`, { state: { from: captureNavigationOrigin(location, location.state), collection: viewing } })}><Pencil size={15} /></button>
                     )}
                   </div>
                 </div>
@@ -360,7 +351,6 @@ export default function CollectionLibrary() {
           key={createDraft ? "restored-draft" : "form"}
           collection={editingCollection}
           initialDraft={createDraft?.draft || null}
-          openOtherRule={Boolean(createDraft?.openOtherRule)}
           onClose={() => { setCreating(false); setEditingCollection(null); setCreateDraft(null); }}
           onCreate={async (payload) => {
             // The collection, its new rules and the existing rules it uses are saved by the backend in
@@ -411,29 +401,6 @@ export default function CollectionLibrary() {
             setMessage(failed.length
               ? { text: `${addedText} Could not add: ${failed.join(" ")}`.trim(), error: true }
               : { text: addedText, error: false });
-          }}
-        />
-      )}
-
-      {addingTo && (
-        <ReusableRuleModal
-          collection={addingTo}
-          onClose={() => setAddingTo(null)}
-          onCreated={async () => {
-            setAddingTo(null);
-            await refresh("Rule added to the collection.");
-          }}
-        />
-      )}
-
-      {editingRule && (
-        <ReusableRuleModal
-          collection={editingRule.collection}
-          template={editingRule.rule}
-          onClose={() => setEditingRule(null)}
-          onUpdated={async () => {
-            setEditingRule(null);
-            await refresh("Rule updated.");
           }}
         />
       )}

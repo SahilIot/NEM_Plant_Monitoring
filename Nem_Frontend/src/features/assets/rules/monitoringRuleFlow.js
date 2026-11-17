@@ -1,17 +1,24 @@
 export const MONITORING_RULE_CHOICES = [
   {
     id: "motor_rotation",
-    label: "Cycle Clock",
+    label: "Interval Based",
     description: "Count each OFF-to-ON cycle and alert at the configured count thresholds.",
     ruleType: "boolean_count_threshold",
     defaultName: "Cycle Clock",
   },
   {
     id: "running_time",
-    label: "Motor Running Time",
+    label: "Interval Based",
     description: "Accumulate runtime while this asset's Boolean running signal is true.",
     ruleType: "runtime_duration",
     defaultName: "Motor Running Time",
+  },
+  {
+    id: "parameter_threshold",
+    label: "Parameter Threshold",
+    description: "Compare a variable's value with a threshold and alert when it is crossed.",
+    ruleType: "parameter_threshold",
+    defaultName: "Parameter Threshold",
   },
   {
     // Temperature monitoring reuses the existing numeric-threshold rule engine so the
@@ -26,22 +33,11 @@ export const MONITORING_RULE_CHOICES = [
   },
 ];
 
-export const LEGACY_RULE_CHOICES = [
-  {
-    kind: "interval",
-    label: "Motor Running Time",
-    description: "Accumulate time while the Boolean running signal is ON and alert at runtime thresholds.",
-  },
-  {
-    kind: "usage",
-    label: "Cycle Clock",
-    description: "Count OFF-to-ON transitions and set warning and alert cycle-count thresholds.",
-  },
-  {
-    kind: "time",
-    label: "Running Time-based",
-    description: "Start tracking Boolean running time at a scheduled date and time.",
-  },
+// What an asset-level Interval Based rule measures. Each basis keeps its own workflow route.
+export const INTERVAL_BASES = [
+  { kind: "interval", label: "Running time" },
+  { kind: "usage", label: "Cycle count" },
+  { kind: "time", label: "Scheduled running time" },
 ];
 
 export function monitoringRuleFormSelection(choiceId) {
@@ -57,11 +53,7 @@ export function monitoringRuleFormSelection(choiceId) {
           (item) => item.ruleType === "boolean_count_threshold"
         )
       : undefined) ||
-    (choiceId === "parameter_threshold"
-      ? MONITORING_RULE_CHOICES.find(
-          (item) => item.ruleType === "parameter_threshold"
-        )
-      : undefined);
+    undefined;
   if (!choice) {
     throw new Error("Select a supported monitoring rule type.");
   }
@@ -76,8 +68,8 @@ export function monitoringRuleFormSelection(choiceId) {
 }
 
 export function legacyRulePath(assetId, kind) {
-  if (!LEGACY_RULE_CHOICES.some((choice) => choice.kind === kind)) {
-    throw new Error("Select a supported legacy rule workflow.");
+  if (!INTERVAL_BASES.some((basis) => basis.kind === kind)) {
+    throw new Error("Select a supported interval rule workflow.");
   }
   return `/assets/${assetId}/rules/new/${kind}`;
 }
@@ -157,8 +149,8 @@ export function buildAssetMonitoringRule(
     }
     rule.variable_id = variableId;
     rule.parameters = {
-      warning_thresholds_seconds: [warning1 * 3600, warning2 * 3600],
-      alert_threshold_seconds: alert * 3600,
+      warning_thresholds_seconds: [Math.round(warning1 * 3600), Math.round(warning2 * 3600)],
+      alert_threshold_seconds: Math.round(alert * 3600),
     };
     if (values.activation_at) {
       const activationAt = new Date(values.activation_at);

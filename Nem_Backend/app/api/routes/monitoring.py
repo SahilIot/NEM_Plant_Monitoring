@@ -417,7 +417,15 @@ def complete_alert(
         alert.status = "resolved"
         alert.resolved_at = now
         alert.last_updated_at = now
-        if alert.rule_id is not None:
+        if alert.parameter_id is not None:
+            # One parameter of a multi-parameter rule: complete only this parameter's alert. The rule and
+            # its other parameters keep running; this parameter re-arms once it returns to Normal.
+            from app.models import RuleParameterState
+
+            parameter_state = session.scalar(select(RuleParameterState).where(RuleParameterState.parameter_id == alert.parameter_id))
+            if parameter_state is not None:
+                parameter_state.completed_at = now
+        if alert.rule_id is not None and alert.parameter_id is None:
             rule = session.scalar(
                 select(MonitoringRule)
                 .where(MonitoringRule.id == alert.rule_id)
@@ -444,9 +452,11 @@ def complete_alert(
                 "acknowledged_by": alert.acknowledged_by,
                 "acknowledged_at": alert.acknowledged_at.isoformat(),
                 "outcome": "alert_instance_completed",
+                "parameter_id": alert.parameter_id,
+                "parameter_name": alert.parameter_name,
             },
         )
-        if alert.rule_id is not None:
+        if alert.rule_id is not None and alert.parameter_id is None:
             emit_event(
                 session,
                 event_type="rule_completed",

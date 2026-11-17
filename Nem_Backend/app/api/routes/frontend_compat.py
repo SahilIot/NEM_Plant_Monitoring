@@ -23,6 +23,9 @@ from docx import Document as WordDocument
 from docx.opc.exceptions import PackageNotFoundError
 
 from app.db.session import get_db
+from app.services.legacy_parameters import serialize_legacy_parameters
+from app.services import template_parameters as template_params
+from app.services.rule_parameters import serialize_parameters
 from app.core.labels import normalize_label_names
 from app.models import (
     Alert,
@@ -359,6 +362,10 @@ def _rule_row(session: Session, rule: MonitoringRule) -> dict[str, Any]:
         "last_evaluated_at": state.last_evaluated_at,
         "condition_started_at": state.condition_started_at,
         "rule_type": rule.rule_type,
+        # Parameter rows exist only for multi-parameter rules; other rule types omit the key.
+        # Every rule has a parameter list: parameter rows for multi-parameter rules, one adapted parameter for older ones.
+        "parameter_items": (serialize_parameters(rule) if rule.rule_type == "multi_parameter"
+                            else serialize_legacy_parameters(session, rule)),
         # The id of a shared rule is only disclosed to roles that may see shared rules.
         "source_template_id": _visible_source_template_id(session, rule),
         # True when this rule is an asset use of a shared rule: edits change every asset using it.
@@ -511,6 +518,29 @@ def _mapped_variable(
         raise HTTPException(status_code=422,detail=(f"Rule variable '{source.key}' must have exactly one active variable with the same key and data type on the target asset"),)
     return matches[0]
 
+def _multi_copy_definition(session: Session, request: Request, source: MonitoringRule, target_asset_id: int) -> dict[str, Any]:
+    """Copy of a multi-parameter rule: every parameter is connected to the same-key variable on the target asset.
+
+    Lifecycle, progress and alerts are not copied; parameter keys are kept so a copy of a shared rule stays in step with it.
+    """
+    from app.api.routes.rule_parameters import _check_parameters
+    from app.schemas.rule_parameters import RuleParameterIn
+
+    items = []
+    for parameter in source.parameter_items:
+        mapped = _mapped_variable(session, parameter.variable_id, target_asset_id)
+        items.append({"key": parameter.key, "name": parameter.name, "position": parameter.position, "kind": parameter.kind,
+                      "variable_id": mapped.id if mapped else None, "aggregation": parameter.aggregation,
+                      "config": parameter.config})
+    _check_parameters(session, request, session.get(Asset, target_asset_id),
+                      [RuleParameterIn(**{k: v for k, v in item.items() if k != "position"}) for item in items],
+                      (source.parameters or {}).get("category"))
+    definition = _rule_definition(source, target_asset_id, None)
+    definition["parameters"] = {k: v for k, v in (source.parameters or {}).items() if k != "document_ids"}
+    definition["_parameter_items"] = items
+    return definition
+
+
 def _rule_definition(
     source: MonitoringRule,
     target_asset_id: int,
@@ -661,9 +691,13 @@ def _template_rule_definition(
         *,
         allow_disabled: bool = False,
         activate: bool = False,
+        parameter_mappings: dict[str, int] | None = None,
 ) -> dict[str, Any]:
         if not template.is_enabled and not allow_disabled:
             raise HTTPException(status_code=422, detail=f"Rule template '{template.name}' is disabled")
+        if template_params.is_multi(template):
+            return template_params.instance_definition(
+                session, request, template, asset_id, parameter_mappings, activate=activate)
         candidates = _template_variables(
             session,
             template,
@@ -875,10 +909,10 @@ def submit_rule_template_request(
             maintenance_details=maintenance.model_dump(mode="json"),
         )
     else:
-        _validate_template_collection(session, payload.collection_id)
+        # A suggestion never names a collection: only an Administrator places a rule in one, on approval.
         item = MonitoringRuleTemplateRequest(
             # Converts the payload into a dictionary while excluding labels, since labels are handled separately.
-            **payload.model_dump(exclude={"labels"}),
+            **{**payload.model_dump(exclude={"labels"}), "collection_id": None},
             requested_by=user.id,
             status="pending",
             suggestion_type="monitoring_rule",
@@ -1106,6 +1140,9 @@ def apply_template_update(
         getattr(template, field) != values[field]
         for field in semantic_fields
     )
+    if (values["rule_type"] == "multi_parameter") != template_params.is_multi(template) and session.scalar(
+        select(MonitoringRule.id).where(MonitoringRule.source_template_id == template.id).limit(1)):
+        raise HTTPException(status_code=409, detail="A shared rule that is already assigned cannot switch between single-parameter and multi-parameter")
     change_log = record_template_changes(session, template, values,labels,)
     for field, value in values.items():
         setattr(template, field, value)
@@ -1123,6 +1160,9 @@ def apply_template_update(
         with internal_propagation_scope(session):
             for rule in assigned_rules:
                 try:
+                    if template_params.is_multi(template):
+                        template_params.sync_instance(session, request, rule, template)
+                        continue
                     definition = _template_rule_definition(
                         session,
                         template,
@@ -1227,6 +1267,7 @@ def assign_template_to_assets(
                 request,
                 payload.variable_mappings.get(asset_id),
                 activate=activate_on_assign,
+                parameter_mappings=payload.parameter_mappings.get(asset_id),
             )
             existing = session.scalars(
                 select(MonitoringRule)
@@ -1246,7 +1287,7 @@ def assign_template_to_assets(
 
         created = []
         for asset_id, definition in prepared:
-            rule = MonitoringRule(**definition)
+            rule = template_params.instantiate(definition)
             session.add(rule)
             session.flush()
             assign_labels(session, rule, template.labels)
@@ -1269,6 +1310,48 @@ def assign_template_to_assets(
         session.commit()
         return {"created": created, "already_assigned": already_assigned}
 
+def _multi_template_row(session: Session, request: Request, template: MonitoringRuleTemplate, asset: Asset,
+                        assigned: list[MonitoringRule]) -> dict[str, Any]:
+    # Assignment-dialog row of a multi-parameter template: one variable choice per parameter.
+    reason = None
+    parameters = []
+    mapping_required = False
+    suggested: dict[str, int] = {}
+    for definition in template_params.template_defs(template):
+        candidates = template_params.candidates_for(session, request, asset, definition)
+        mapped = template_params.suggested_variable(definition, candidates)
+        if mapped is not None:
+            suggested[definition["key"]] = mapped.id
+        needs = bool(definition.get("uses_variable", True))
+        if needs and not candidates and reason is None:
+            reason = f"No active compatible variable is available for parameter '{definition['name']}' on the target asset"
+        if needs and candidates and mapped is None:
+            mapping_required = True
+        parameters.append({
+            "key": definition["key"], "name": definition["name"], "kind": definition["kind"],
+            "aggregation": definition["aggregation"], "uses_variable": needs,
+            "mapped_variable_id": mapped.id if mapped else None,
+            "compatible_variables": [{"id": v.id, "name": v.name, "key": v.key, "data_type": v.data_type} for v in candidates],
+        })
+    if reason is None and not template.is_enabled:
+        reason = f"Rule template '{template.name}' is disabled"
+    if reason is None and not mapping_required:
+        try:
+            template_params.instance_definition(session, request, template, asset.id, suggested, activate=False)
+        except HTTPException as error:
+            reason = str(error.detail)
+    return {
+        **RuleTemplateRead.model_validate(template).model_dump(mode="json"),
+        "labels": [{"id": label.id, "name": label.name} for label in (template.label_records or [])],
+        "assigned": any(rule.source_template_id == template.id for rule in assigned),
+        "unavailable_reason": reason,
+        "variable_mapping_required": mapping_required,
+        "mapped_variable_name": None,
+        "compatible_variables": [],
+        "parameter_candidates": parameters,
+    }
+
+
 #endpoint loads the templates library for a particular asset and provides info. needed by assignment dialog
 @router.get("/assets/{asset_id}/rules/predefined")
 def frontend_predefined_rules(
@@ -1290,7 +1373,11 @@ def frontend_predefined_rules(
         )
     ).all()
     result = []
+    asset_row = session.get(Asset, asset_id)
     for template in templates:
+        if template_params.is_multi(template):
+            result.append(_multi_template_row(session, request, template, asset_row, assigned))
+            continue
         reason = None
         candidates = _template_variables(
             session,
@@ -1415,6 +1502,7 @@ def frontend_assign_predefined_rules(
             request,
             payload.variable_mappings.get(template.id),
             activate=activate_on_assign,
+            parameter_mappings=payload.parameter_mappings.get(template.id),
         )
         if any(
             rule.source_template_id == template.id
@@ -1424,11 +1512,11 @@ def frontend_assign_predefined_rules(
             already_assigned.append(template.id)
             continue
         prepared.append((template, definition))
-        existing.append(MonitoringRule(**definition))
+        existing.append(MonitoringRule(**template_params.plain(definition)))
 
     created = []
     for template, definition in prepared:
-        rule = MonitoringRule(**definition)
+        rule = template_params.instantiate(definition)
         session.add(rule)
         session.flush()
         assign_labels(session, rule, template.labels)
@@ -1499,10 +1587,7 @@ def frontend_unassign_rule_collection(
         return {"collection_id": collection_id, "removed": 0}
     # Match individual rule deletion: active rules must be disabled before removal.
     if any(rule.is_enabled for rule in rules):
-        raise HTTPException(
-            status_code=409,
-            detail="Deactivate the collection's assigned rules before unassigning it.",
-        )
+        raise HTTPException(status_code=409,detail="Deactivate the collection's assigned rules before unassigning it.",)
 
     rule_ids = [rule.id for rule in rules]
     alert_ids = session.scalars(
@@ -1516,13 +1601,8 @@ def frontend_unassign_rule_collection(
         .where(MaintenanceRecord.alert_id.in_(alert_ids))
         .limit(1)
     ):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "A collection rule has maintenance records linked to its alerts. "
-                "Remove those links before unassigning the collection."
-            ),
-        )
+        raise HTTPException(status_code=409,detail=("A collection rule has maintenance records linked to its alerts. "
+                "Remove those links before unassigning the collection."),)
 
     deleted_rules = [{"id": rule.id, "name": rule.name} for rule in rules]
     try:
@@ -1533,9 +1613,7 @@ def frontend_unassign_rule_collection(
         if alert_ids:
             session.execute(delete(Alert).where(Alert.id.in_(alert_ids)))
         session.execute(delete(RuleState).where(RuleState.rule_id.in_(rule_ids)))
-        session.execute(
-            delete(RuleCounterState).where(RuleCounterState.rule_id.in_(rule_ids))
-        )
+        session.execute(delete(RuleCounterState).where(RuleCounterState.rule_id.in_(rule_ids)))
         session.execute(delete(MonitoringRule).where(MonitoringRule.id.in_(rule_ids)))
         for rule in deleted_rules:
             emit_event(
@@ -1606,6 +1684,14 @@ def frontend_copy_asset_rules(
     for source in selected:
         if source.rule_type == "generic":
             raise HTTPException(status_code=422,detail=f"Rule '{source.name}' has no monitoring evaluator and cannot be copied",)
+        if source.rule_type == "multi_parameter":
+            definition = _multi_copy_definition(session, request, source, asset_id)
+            if any(_same_rule_definition(rule, definition) for rule in existing):
+                already_copied.append(source.id)
+                continue
+            prepared.append((source, definition))
+            existing.append(MonitoringRule(**template_params.plain(definition)))
+            continue
         mapped = _mapped_variable(session, source.variable_id, asset_id)
         definition = _rule_definition(source, asset_id, mapped)
         try:
@@ -1632,7 +1718,7 @@ def frontend_copy_asset_rules(
 
     created = []
     for source, definition in prepared:
-        rule = MonitoringRule(**definition)
+        rule = template_params.instantiate(definition)
         session.add(rule)
         session.flush()
         assign_labels(session, rule, source.labels)

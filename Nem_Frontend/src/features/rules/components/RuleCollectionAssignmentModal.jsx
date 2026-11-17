@@ -19,6 +19,8 @@ import {
   ruleConditionSummary,
 } from "../rulePresentation.js";
 import "./RuleCollectionAssignmentModal.css";
+import TemplateParameterMapping, { isMultiTemplate, mappingIncomplete, parameterMappingsPayload } from "./TemplateParameterMapping.jsx";
+import "./TemplateParameterMapping.css";
 
 export default function RuleCollectionAssignmentModal({
   assetId,
@@ -36,6 +38,7 @@ export default function RuleCollectionAssignmentModal({
   const [assetRules, setAssetRules] = useState([]);
   const [selected, setSelected] = useState(() => new Set());
   const [variableMappings, setVariableMappings] = useState({});
+  const [parameterMappings, setParameterMappings] = useState({});
   const [search, setSearch] = useState("");
   const [severity, setSeverity] = useState("all");
   const [labelIds, setLabelIds] = useState([]);
@@ -160,7 +163,9 @@ export default function RuleCollectionAssignmentModal({
 
   const mappingsComplete = selectedTemplates.every(
     (template) =>
-      !template.variable_mapping_required || Boolean(variableMappings[template.id])
+      isMultiTemplate(template)
+        ? !mappingIncomplete(template, parameterMappings)
+        : !template.variable_mapping_required || Boolean(variableMappings[template.id])
   );
 
   // Enforce the existing assignment endpoint's batch limit before accepting a new selection.
@@ -201,6 +206,7 @@ export default function RuleCollectionAssignmentModal({
               Number(variableMappings[template.id]),
             ])
         ),
+        parameter_mappings: parameterMappingsPayload(selectedTemplates, parameterMappings),
       });
       await onAssigned?.({
         ...result,
@@ -408,6 +414,18 @@ export default function RuleCollectionAssignmentModal({
                                 <small className="rca-member-error">
                                   {template.unavailable_reason}
                                 </small>
+                              ) : isMultiTemplate(template) ? (
+                                <TemplateParameterMapping
+                                  template={template}
+                                  state={parameterMappings}
+                                  disabled={saving}
+                                  onChange={(templateId, key, value) =>
+                                    setParameterMappings((previous) => ({
+                                      ...previous,
+                                      [templateId]: { ...(previous[templateId] || {}), [key]: value },
+                                    }))
+                                  }
+                                />
                               ) : template.variable_mapping_required ? (
                                 <select
                                   aria-label={`Variable mapping for ${template.name}`}

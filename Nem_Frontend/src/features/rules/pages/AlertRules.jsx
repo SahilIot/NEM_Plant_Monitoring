@@ -86,12 +86,8 @@ export default function AlertRules() {
                   className={r.asset_id ? "clickable" : ""}
                   onClick={() =>
                     r.asset_id &&
-                    nav(`/assets/${r.asset_id}`, {
-                      state: {
-                        ...(location.state || {}),
-                        selectedRuleId: r.id,
-                        selectedRule: r,
-                      },
+                    nav(`/assets/${r.asset_id}/rules/${r.id}/status`, {
+                      state: { ...(location.state || {}), activeTab: "status" },
                     })
                   }
                 >

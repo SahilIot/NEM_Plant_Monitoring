@@ -1,0 +1,263 @@
+.interval-demo {
+  --demo-normal: var(--ok);
+  --demo-normal-soft: var(--ok-soft);
+  --demo-due: var(--warn);
+  --demo-due-soft: var(--warn-soft);
+  --demo-overdue: var(--alert);
+  --demo-overdue-soft: var(--alert-soft);
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.interval-demo-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.interval-demo-badge,
+.interval-demo-status {
+  padding: 2px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.interval-demo-badge.is-sample {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.interval-demo-badge.is-live {
+  border-color: var(--action);
+  background: var(--action-soft);
+  color: var(--action);
+}
+
+.interval-demo-status.status-normal { border-color: var(--demo-normal); background: var(--demo-normal-soft); color: var(--ink); }
+.interval-demo-status.status-due { border-color: var(--demo-due); background: var(--demo-due-soft); color: var(--ink); }
+.interval-demo-status.status-overdue { border-color: var(--demo-overdue); background: var(--demo-overdue-soft); color: var(--ink); }
+.interval-demo-status.status-unavailable { color: var(--muted); }
+
+.interval-demo-mode {
+  display: inline-flex;
+  margin-left: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-ctl);
+  overflow: hidden;
+}
+
+.interval-demo-mode button {
+  padding: 3px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  cursor: pointer;
+}
+
+.interval-demo-mode button[aria-pressed="true"] {
+  background: var(--action);
+  color: #fff;
+}
+
+.interval-demo-stage {
+  position: relative;
+  height: 52px;
+  margin: 4px 8px 0;
+}
+
+.interval-demo-bar {
+  position: absolute;
+  top: 12px;
+  left: 0;
+  right: 0;
+  display: flex;
+  height: 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-ctl);
+  overflow: hidden;
+}
+
+.interval-demo-region {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.region-normal { background: var(--demo-normal-soft); }
+.region-due { background: var(--demo-due-soft); }
+.region-overdue { background: var(--demo-overdue-soft); }
+
+.interval-demo-limit,
+.interval-demo-marker {
+  position: absolute;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+
+.interval-demo-limit {
+  top: 6px;
+  width: 18px;
+  height: 34px;
+}
+
+.interval-demo-limit::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--ink-2);
+}
+
+.limit-due::after { background: var(--demo-due); }
+.limit-overdue::after { background: var(--demo-overdue); }
+
+.interval-demo-marker {
+  top: 3px;
+  width: 20px;
+  height: 40px;
+}
+
+.interval-demo-marker::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 0;
+  height: 0;
+  margin-left: -6px;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 9px solid var(--ink);
+}
+
+.interval-demo-marker::after {
+  content: "";
+  position: absolute;
+  top: 9px;
+  bottom: 4px;
+  left: 50%;
+  width: 3px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: var(--ink);
+}
+
+.interval-demo-limit:focus-visible,
+.interval-demo-marker:focus-visible,
+.interval-demo-limit.is-open,
+.interval-demo-marker.is-open {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+
+.interval-demo-tip {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  z-index: 5;
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  width: max-content;
+  max-width: min(260px, 70vw);
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-ctl);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.28);
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.interval-demo-tip.is-start { transform: translateX(-12px); }
+.interval-demo-tip.is-end { transform: translateX(calc(-100% + 12px)); }
+.interval-demo-tip.is-visible { display: flex; }
+.interval-demo-tip strong { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+.interval-demo-scale {
+  position: absolute;
+  top: 38px;
+  left: 0;
+  right: 0;
+  height: 14px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.interval-demo-scale span {
+  position: absolute;
+  transform: translateX(-50%);
+  font-variant-numeric: tabular-nums;
+}
+
+.interval-demo-scale span:first-child { transform: none; }
+
+.interval-demo-figures {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px 14px;
+  margin: 0;
+}
+
+.interval-demo-figures div { min-width: 0; }
+.interval-demo-figures dt { color: var(--muted); font-size: 11px; }
+.interval-demo-figures dd { margin: 0; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+.interval-demo-try {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-2);
+}
+
+.interval-demo-try input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--action);
+}
+
+.interval-demo-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+@media (max-width: 640px) {
+  .interval-demo-figures { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .interval-demo-try { grid-template-columns: 1fr; gap: 4px; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .interval-demo-marker { transition: left 0.15s ease; }
+}

@@ -104,7 +104,7 @@ def initialize_database(engine: Engine) -> None:
 
 
 _RULE_TYPES = ("parameter_threshold", "runtime_duration", "duration",
-    "generic", "boolean_condition", "boolean_count_threshold",)
+    "generic", "boolean_condition", "boolean_count_threshold", "multi_parameter",)
 
 # This function checks whether an existing PostgreSQL db has the correct allowed rule types.
 def _reconcile_rule_type_constraint(engine: Engine) -> None:
@@ -549,6 +549,73 @@ def _remove_visibility_requests(engine: Engine) -> None:
 
 
 # Largest and important function this creates missing tables and other supported objects described in the SQLAlchemy models.
+def _upgrade_parameter_alerts(engine: Engine) -> None:
+    """Additive upgrade for per-parameter alerts on multi-parameter rules (PostgreSQL only).
+
+    Existing alerts keep parameter_id NULL, so they satisfy the narrowed one-active-alert-per-rule
+    index unchanged. The new per-parameter index is created by create_all on fresh databases.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+    tables = set(inspect(engine).get_table_names())
+    with engine.begin() as connection:
+        if "nem_alerts" in tables and "nem_rule_parameters" in tables:
+            connection.execute(text("ALTER TABLE nem_alerts ADD COLUMN IF NOT EXISTS parameter_id INTEGER "
+                                    "REFERENCES nem_rule_parameters(id) ON DELETE SET NULL"))
+            connection.execute(text("ALTER TABLE nem_alerts ADD COLUMN IF NOT EXISTS parameter_name VARCHAR(200)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_nem_alerts_parameter_id ON nem_alerts (parameter_id)"))
+            definition = connection.execute(text(
+                "SELECT indexdef FROM pg_indexes WHERE indexname = 'uq_nem_alerts_active_rule_asset'")).scalar()
+            if definition is not None and "parameter_id" not in definition:
+                connection.execute(text("DROP INDEX uq_nem_alerts_active_rule_asset"))
+                definition = None
+            if definition is None:
+                connection.execute(text(
+                    "CREATE UNIQUE INDEX uq_nem_alerts_active_rule_asset ON nem_alerts (rule_id, target_asset_id) "
+                    "WHERE status = 'active' AND parameter_id IS NULL"))
+            connection.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_nem_alerts_active_rule_asset_parameter "
+                "ON nem_alerts (rule_id, target_asset_id, parameter_id) "
+                "WHERE status = 'active' AND parameter_id IS NOT NULL"))
+        if "nem_rule_parameter_states" in tables:
+            for column, kind in (("reading_at", "TIMESTAMP"), ("last_valid_value", "JSON"),
+                                 ("last_valid_at", "TIMESTAMP"), ("completed_at", "TIMESTAMP")):
+                connection.execute(text(
+                    f"ALTER TABLE nem_rule_parameter_states ADD COLUMN IF NOT EXISTS {column} {kind}"))
+
+
+def _upgrade_parameter_lifecycle(engine: Engine) -> None:
+    """Additive upgrade: per-parameter lifecycle (PostgreSQL only, idempotent).
+
+    Every existing parameter becomes 'active', so existing multi-parameter rules behave exactly as before.
+    Reverse it with `downgrade_parameter_lifecycle` (not run automatically).
+    """
+    if engine.dialect.name != "postgresql":
+        return
+    if "nem_rule_parameters" not in set(inspect(engine).get_table_names()):
+        return
+    with engine.begin() as connection:
+        connection.execute(text(
+            "ALTER TABLE nem_rule_parameters ADD COLUMN IF NOT EXISTS lifecycle_status "
+            "VARCHAR(20) NOT NULL DEFAULT 'active'"))
+        exists = connection.execute(text(
+            "SELECT 1 FROM pg_constraint WHERE conname = 'ck_nem_rule_parameters_lifecycle'")).scalar()
+        if not exists:
+            connection.execute(text(
+                "ALTER TABLE nem_rule_parameters ADD CONSTRAINT ck_nem_rule_parameters_lifecycle "
+                "CHECK (lifecycle_status IN ('active', 'suspended', 'deactivated'))"))
+
+
+def downgrade_parameter_lifecycle(engine: Engine) -> None:
+    """Reverses `_upgrade_parameter_lifecycle`. Suspended/deactivated parameters lose that setting, so
+    re-suspend or remove them first if they must not start evaluating again."""
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE nem_rule_parameters DROP CONSTRAINT IF EXISTS ck_nem_rule_parameters_lifecycle"))
+        connection.execute(text("ALTER TABLE nem_rule_parameters DROP COLUMN IF EXISTS lifecycle_status"))
+
+
 def _initialize_schema(engine: Engine) -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_auth_roles(engine)
@@ -719,6 +786,8 @@ def _initialize_schema(engine: Engine) -> None:
         _drop_column_if_present(engine, "nem_monitoring_rules", "is_archived")
     if "nem_monitoring_rules" in table_names:
         _reconcile_rule_type_constraint(engine)
+    _upgrade_parameter_alerts(engine)
+    _upgrade_parameter_lifecycle(engine)
     _migrate_legacy_rule_templates(engine)
     _migrate_boolean_duration_templates(engine)
     _migrate_existing_rule_counters(engine)

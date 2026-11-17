@@ -4,7 +4,9 @@
 # HTTP Exception - Returns HTTP errors such as 404,409,422 etc
 #Query - Validates query parameters such as limits and offsets
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status 
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from sqlalchemy.exc import IntegrityError
+from app.services.asset_deletion import asset_deletion_summary, delete_asset_tree
 #Build SQL queries using SQLAlchemy, func provide sql functions such as count, session represents a database session
 
 from sqlalchemy import delete, false, func, or_, select
@@ -212,33 +214,36 @@ def move_asset(asset_id: int,
     session.refresh(asset)
     return _asset_read(session, asset)
 
-# Deleting an asset, ensuring it has no children, variables, readings, or rules associated with it before deletion. If any of these exist, a 409 conflict error is raised, suggesting deactivation instead of deletion.
-@router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_asset(asset_id: int, session: Session = Depends(get_db)) -> Response:
+# Dependency summary shown before a permanent delete: the full affected hierarchy, what will be removed,
+# what is retained, and anything that blocks deletion.
+@router.get("/{asset_id}/deletion-summary")
+def asset_deletion_summary_endpoint(asset_id: int, request: Request, session: Session = Depends(get_db)) -> dict:
     asset = asset_or_404(session, asset_id)
-    references = (
-        (Asset, Asset.parent_asset_id),
-        (Variable, Variable.asset_id),
-        (Reading, Reading.asset_id),
-        (MonitoringRule, MonitoringRule.target_asset_id),
-        (RuleState, RuleState.target_asset_id),
-        (Alert, Alert.target_asset_id),
-        (MaintenanceRecord, MaintenanceRecord.asset_id),
-        (MaintenanceSchedule, MaintenanceSchedule.asset_id),
-        (MachineMonitoringState, MachineMonitoringState.asset_id),
-        (RuleCounterState, RuleCounterState.asset_id),
-    )
-    if any(session.scalar(select(column).where(column == asset.id).limit(1))
-        for model, column in references
-    ):
-        raise HTTPException(status_code=409,
-            detail=(
-                "Cannot delete an asset while it has child assets, variables, "
-                "monitoring data, rules, alerts, maintenance records, or history. "
-                "Deactivate it instead."
-            ),
-        )
-    session.execute(delete(MonitoringEvent).where(MonitoringEvent.asset_id == asset.id))
-    session.delete(asset)
-    session.commit()
+    return asset_deletion_summary(session, asset, getattr(request.app.state, "opcua_collector", None))
+
+# Permanent deletion, separate from deactivation. Empty assets delete directly; an asset with dependencies
+# (child assets, variables, rules, history ...) needs confirm_name equal to its exact name after the summary
+# was reviewed. Everything is removed in dependency order inside one transaction; any failure rolls back.
+@router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_asset(asset_id: int, request: Request, confirm_name: str | None = Query(default=None),
+                 session: Session = Depends(get_db)) -> Response:
+    asset = asset_or_404(session, asset_id)
+    summary = asset_deletion_summary(session, asset, getattr(request.app.state, "opcua_collector", None))
+    if summary["blockers"]:
+        raise HTTPException(status_code=409, detail="Cannot delete this asset: " + " ".join(summary["blockers"])
+                            + " Deactivate it instead to keep all records.")
+    if summary["requires_confirmation"] and confirm_name != asset.name:
+        raise HTTPException(status_code=409, detail=(
+            "This asset has dependent records. Review the deletion summary and confirm by sending the exact "
+            "asset name as confirm_name, or deactivate the asset instead."))
+    try:
+        delete_asset_tree(session, asset)
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=("Deletion was rolled back because records changed or are still referenced elsewhere. "
+            "Nothing was deleted. Review the summary and try again, or deactivate the asset.")) from error
+    except Exception:
+        session.rollback()
+        raise
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -32,6 +32,8 @@ class AlertRead(ORMModel):
     rule_id: int | None
     maintenance_schedule_id: int | None = None
     maintenance_due_date: date | None = None
+    parameter_id: int | None = None
+    parameter_name: str | None = None
     target_asset_id: int
     target_variable_id: int | None
     severity: Literal["warning", "alert"]

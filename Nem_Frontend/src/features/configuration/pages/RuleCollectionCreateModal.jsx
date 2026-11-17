@@ -1,12 +1,7 @@
 import React, { useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Plus, Trash2 } from "lucide-react";
-import { CreateModal, Modal } from "../../../components/common/UI.jsx";
-import {
-  FIELDS,
-  initialTemplate,
-  templatePayload,
-} from "./RuleLibrary.jsx";
+import { Modal } from "../../../components/common/UI.jsx";
 import LabelsField from "../../../components/common/LabelsField.jsx";
 import { VISIBILITY_LABELS, useSupervisorChoices } from "./RuleVisibility.jsx";
 import AddRuleChooserModal from "./AddRuleChooserModal.jsx";
@@ -23,7 +18,6 @@ export default function RuleCollectionCreateModal({
   collection = null,
   // Set when returning from the full-page Add Rule workflow: the form is restored as it was left.
   initialDraft = null,
-  openOtherRule = false,
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -36,7 +30,6 @@ export default function RuleCollectionCreateModal({
   const [existing, setExisting] = useState(initialDraft?.existing ?? []);
   const [chooserOpen, setChooserOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [ruleModalOpen, setRuleModalOpen] = useState(Boolean(openOtherRule));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [visibilityType, setVisibilityType] = useState(initialDraft?.visibilityType ?? "");
@@ -57,12 +50,6 @@ export default function RuleCollectionCreateModal({
         collection: { draft: true, name: name.trim() || "New collection", ruleCount: total },
       },
     });
-  };
-
-  const addRule = (values) => {
-    setRules((current) => [...current, templatePayload(values)]);
-    setRuleModalOpen(false);
-    setError("");
   };
 
   const save = async (event) => {
@@ -119,7 +106,7 @@ export default function RuleCollectionCreateModal({
 
   return (
     <>
-      {!ruleModalOpen && !chooserOpen && !pickerOpen && (
+      {!chooserOpen && !pickerOpen && (
       <Modal
         title={collection ? "Edit collection" : "Create rule collection"}
         onClose={saving ? undefined : onClose}
@@ -305,18 +292,6 @@ export default function RuleCollectionCreateModal({
             setPickerOpen(false);
             setError("");
           }}
-        />
-      )}
-
-      {ruleModalOpen && (
-        <CreateModal
-          title="Add monitoring rule"
-          intro="Configure this reusable rule using the same settings as the Monitoring Rule Library."
-          fields={FIELDS}
-          initialValues={initialTemplate(null)}
-          submitLabel="Add rule to collection"
-          onSubmit={addRule}
-          onClose={() => setRuleModalOpen(false)}
         />
       )}
     </>

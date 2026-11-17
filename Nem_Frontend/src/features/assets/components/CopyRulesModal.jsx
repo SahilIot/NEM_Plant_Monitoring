@@ -1,9 +1,80 @@
 
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertCircle,
+  ArrowRight,
+  Check,
+  CheckCircle2,
+  Search,
+  X,
+} from "lucide-react";
 import { api } from "../../../services/api.js";
 import { LoadingIndicator } from "../../../components/common/UI.jsx";
 import "./CopyRulesModal.css";
+import { ruleCategoryLabel } from "../../rules/ruleCategories.js";
+
+// Display category only; the rule's stored type is not touched.
+const RULE_TYPE_LABELS = {
+  parameter_threshold: "Parameter Threshold",
+  runtime_duration: "Interval Based · Running time",
+  duration: "Interval Based",
+  boolean_count_threshold: "Interval Based · Cycle count",
+  generic: "Generic",
+};
+
+const formatSeconds = (value) => {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds)) return String(value);
+  if (seconds >= 3600) return `${+(seconds / 3600).toFixed(2)} h`;
+  if (seconds >= 60) return `${+(seconds / 60).toFixed(1)} min`;
+  return `${seconds} s`;
+};
+
+// One-line, display-only summary of a rule's thresholds. It never feeds the copy request.
+function ruleCondition(rule) {
+  const parameters = rule.parameters || {};
+
+  if (rule.rule_type === "multi_parameter") {
+    const items = Array.isArray(rule.parameter_items) ? rule.parameter_items : [];
+    return `${items.length} parameter${items.length === 1 ? "" : "s"}${items.length ? `: ${items.map((item) => item.name).join(", ")}` : ""}`;
+  }
+
+  if (rule.rule_type === "runtime_duration") {
+    const warnings = parameters.warning_thresholds_seconds;
+    const alert = parameters.alert_threshold_seconds;
+    if (Array.isArray(warnings) && warnings.length === 2 && alert != null) {
+      return `Warnings at ${formatSeconds(warnings[0])} / ${formatSeconds(warnings[1])}, alert at ${formatSeconds(alert)}`;
+    }
+    if (parameters.duration_seconds != null) {
+      return `Runs for ${formatSeconds(parameters.duration_seconds)}`;
+    }
+  }
+
+  if (rule.rule_type === "boolean_count_threshold") {
+    const warnings = parameters.warning_thresholds;
+    if (Array.isArray(warnings) && warnings.length === 2 && parameters.alert_threshold != null) {
+      return `Warnings at ${warnings[0]} / ${warnings[1]} cycles, alert at ${parameters.alert_threshold}`;
+    }
+  }
+
+  if (rule.rule_type === "duration" && parameters.duration_seconds != null) {
+    return `Condition held for ${formatSeconds(parameters.duration_seconds)}`;
+  }
+
+  if (rule.rule_type === "parameter_threshold") {
+    if (typeof parameters.expected_value === "boolean") {
+      const negated = rule.operator === "!=" || rule.operator === "ne";
+      return `Signal ${negated ? "is not" : "is"} ${parameters.expected_value ? "ON" : "OFF"}`;
+    }
+    if (rule.threshold != null) {
+      const unit = rule.variable_unit ? ` ${rule.variable_unit}` : "";
+      return `Value ${rule.operator || ""} ${rule.threshold}${unit}`.replace(/\s+/g, " ");
+    }
+  }
+
+  return "";
+}
 
 export default function CopyRulesModal({
   assetId,
@@ -23,7 +94,11 @@ export default function CopyRulesModal({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [sourceError, setSourceError] = useState("");
+  const [search, setSearch] = useState("");
   const [results, setResults] = useState(null);
+  const loadToken = useRef(0);
+  const submitting = useRef(false);
 
   const otherAssets = useMemo(
     () =>
@@ -68,6 +143,8 @@ export default function CopyRulesModal({
   }, [assetId]);
 
   const loadSource = async (value) => {
+    // A newer selection supersedes any request still in flight for an older one.
+    const token = ++loadToken.current;
     setSourceId(value);
     setSourceRules([]);
     setSourceVariables([]);
@@ -75,6 +152,7 @@ export default function CopyRulesModal({
     setResults(null);
     setReviewing(false);
     setError("");
+    setSourceError("");
 
     if (!value) return;
 
@@ -88,17 +166,19 @@ export default function CopyRulesModal({
         ),
       ]);
 
+      if (token !== loadToken.current) return;
       setSourceRules(Array.isArray(rules) ? rules : []);
       setSourceVariables(
         Array.isArray(variables) ? variables : []
       );
     } catch (err) {
-      setError(
+      if (token !== loadToken.current) return;
+      setSourceError(
         err.message ||
           "Source asset rules could not be loaded."
       );
     } finally {
-      setLoading(false);
+      if (token === loadToken.current) setLoading(false);
     }
   };
 
@@ -192,7 +272,34 @@ export default function CopyRulesModal({
     return { variable, reason: "" };
   };
 
+  // Each parameter keeps its own variable: it must match exactly one variable (same key and
+  // data type) on the destination asset, otherwise the whole rule is not copied.
+  const getMultiParameterStatus = (rule) => {
+    for (const parameter of rule.parameter_items || []) {
+      if (parameter.variable_id == null) continue;
+      const source = sourceVariables.find((variable) => Number(variable.id) === Number(parameter.variable_id));
+      if (!source) {
+        return { variable: null, reason: `The source variable of "${parameter.name}" is missing or inactive.` };
+      }
+      const matches = destinationVariables.filter(
+        (variable) =>
+          variable.key?.trim().toLowerCase() === source.key?.trim().toLowerCase() &&
+          variable.data_type === source.data_type
+      );
+      if (matches.length !== 1) {
+        return {
+          variable: null,
+          reason: matches.length
+            ? `Multiple destination variables match "${parameter.name}".`
+            : `No active destination variable matches "${source.key}" for "${parameter.name}".`,
+        };
+      }
+    }
+    return { variable: null, reason: "" };
+  };
+
   const getRuleStatus = (rule) => {
+    if (rule.rule_type === "multi_parameter") return getMultiParameterStatus(rule);
     const supported = [
       "parameter_threshold",
       "runtime_duration",
@@ -347,8 +454,67 @@ export default function CopyRulesModal({
     (rule) => !rule.copyCheck.reason
   );
 
+  // Rules that can be ticked right now: compatible, and not hidden by the "include deactivated" switch.
+  const selectableRules = copyableRules.filter(
+    (rule) => includeDisabled || rule.is_enabled
+  );
+  const allSelected =
+    selectableRules.length > 0 &&
+    selectableRules.every((rule) => selected.includes(rule.id));
+
+  const assetPaths = useMemo(() => {
+    const byId = new Map(assets.map((asset) => [Number(asset.id), asset]));
+    const pathOf = (asset) => {
+      const names = [];
+      const seen = new Set([Number(asset.id)]);
+      let parentId = asset.parent_asset_id;
+      while (parentId != null && !seen.has(Number(parentId))) {
+        seen.add(Number(parentId));
+        const parent = byId.get(Number(parentId));
+        if (!parent) break;
+        names.unshift(parent.name);
+        parentId = parent.parent_asset_id;
+      }
+      return names.join(" › ");
+    };
+    return new Map(assets.map((asset) => [Number(asset.id), pathOf(asset)]));
+  }, [assets]);
+
+  const destination = assets.find(
+    (asset) => Number(asset.id) === Number(assetId)
+  );
+  const source = otherAssets.find(
+    (asset) => String(asset.id) === String(sourceId)
+  );
+
+  const assetGroups = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const groups = new Map();
+
+    otherAssets.forEach((asset) => {
+      const path = assetPaths.get(Number(asset.id)) || "";
+      const haystack = `${asset.name} ${asset.asset_type || ""} ${path}`.toLowerCase();
+      if (query && !haystack.includes(query)) return;
+      if (!groups.has(path)) groups.set(path, []);
+      groups.get(path).push(asset);
+    });
+
+    return [...groups.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([path, items]) => ({
+        path,
+        items: items.sort((a, b) => String(a.name).localeCompare(String(b.name))),
+      }));
+  }, [otherAssets, assetPaths, search]);
+
+  const matchedAssetCount = assetGroups.reduce(
+    (total, group) => total + group.items.length,
+    0
+  );
+
   const toggleRule = (id) => {
     setReviewing(false);
+    setResults(null);
     setSelected((current) =>
       current.includes(id)
         ? current.filter((item) => item !== id)
@@ -356,9 +522,22 @@ export default function CopyRulesModal({
     );
   };
 
-  const copyRules = async () => {
-    if (!selected.length || saving) return;
+  const selectAllRules = () => {
+    setReviewing(false);
+    setResults(null);
+    setSelected(selectableRules.map((rule) => rule.id));
+  };
 
+  const clearSelection = () => {
+    setReviewing(false);
+    setSelected([]);
+  };
+
+  const copyRules = async () => {
+    // The ref blocks a second click in the same tick, before `saving` re-renders.
+    if (!selected.length || saving || submitting.current) return;
+
+    submitting.current = true;
     setSaving(true);
     setError("");
 
@@ -378,209 +557,347 @@ export default function CopyRulesModal({
       if (result.created?.length) await onCopied?.(result);
     } catch (err) {
       setError(err.message || "Could not copy the selected rules.");
+      setReviewing(false);
     } finally {
+      submitting.current = false;
       setSaving(false);
     }
   };
 
+  const destinationName = destination?.name || `Asset ${assetId}`;
+
   return (
     <div
-  className="copy-rules-overlay"
-  onMouseDown={(event) => {
-    if (event.target === event.currentTarget && !saving) onClose();
-  }}
->
+      className="copy-rules-overlay"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !saving) onClose();
+      }}
+    >
       <section
-        className="modal copy-rules-modal"
+        className="copy-rules-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="copy-rules-title"
       >
-        <header className="modal-header">
-          <h2 id="copy-rules-title">
-            Copy rules from another asset
-          </h2>
+        <header className="cr-header">
+          <div className="cr-heading">
+            <h2 id="copy-rules-title">Copy Rules from Another Asset</h2>
+            <p>Select another asset and choose which rules you want to copy.</p>
+            <span className="cr-destination">
+              <ArrowRight size={14} aria-hidden="true" />
+              Copying to
+              <strong title={destinationName}>{destinationName}</strong>
+            </span>
+          </div>
 
           <button
             type="button"
-            className="copy-rules-close"
+            className="cr-close"
             onClick={onClose}
             disabled={saving}
             aria-label="Close"
           >
-            ×
+            <X size={18} aria-hidden="true" />
           </button>
         </header>
 
-        <div className="modal-body">
-          <p>
-            Select a source asset and choose which rules to
-            copy. New rules will be created disabled on this
-            asset; the source rules will not be changed.
-          </p>
+        <div className="cr-body">
+          <section className="cr-panel cr-assets" aria-label="Source asset">
+            <div className="cr-panel-head">
+              <h3>1. Source asset</h3>
+              <span className="cr-count">{otherAssets.length}</span>
+            </div>
 
-          <label
-            className="field-label"
-            htmlFor="copy-rules-source"
-          >
-            Source asset
-          </label>
+            <div className="cr-search">
+              <Search size={15} aria-hidden="true" />
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search assets"
+                aria-label="Search assets"
+                disabled={saving || !otherAssets.length}
+                autoFocus
+              />
+            </div>
 
-          <select
-            id="copy-rules-source"
-            className="form-input"
-            value={sourceId}
-            onChange={(event) =>
-              loadSource(event.target.value)
-            }
-            disabled={saving}
-          >
-            <option value="">Select an asset</option>
-
-            {otherAssets.map((asset) => (
-              <option key={asset.id} value={asset.id}>
-                {asset.name}
-              </option>
-            ))}
-          </select>
-
-          {!otherAssets.length && (
-            <p className="copy-rules-loading">No other assets are available.</p>
-          )}
-
-          {loading && (
-            <LoadingIndicator compact message="Loading rules and variables" />
-          )}
-
-          {sourceId && !loading && (
-            <>
-              <label className="copy-rules-include-disabled">
-                <input
-                  type="checkbox"
-                  checked={includeDisabled}
-                  disabled={saving}
-                  onChange={(event) => {
-                    const checked = event.target.checked;
-                    setIncludeDisabled(checked);
-                    if (!checked) {
-                      setSelected((current) => current.filter((id) =>
-                        sourceRules.find((rule) => rule.id === id)?.is_enabled
-                      ));
-                    }
-                    setReviewing(false);
-                  }}
-                />
-                Include deactivated rules
-              </label>
-              <div className="copy-rules-summary">
-                {copyableRules.length} copyable of{" "}
-                {sourceRules.length} rules
-                {" · "}
-                {selected.length} selected
-              </div>
-
-              {!sourceRules.length && (
-                <p>This asset has no rules to copy.</p>
+            <div className="cr-scroll" role="listbox" aria-label="Available assets">
+              {!otherAssets.length && (
+                <p className="cr-empty">No other assets are available.</p>
               )}
 
-              <div className="copy-rules-list">
-                {eligibleRules.map((rule) => {
-                  const reason = rule.copyCheck.reason;
-                  const deactivated = !rule.is_enabled;
-                  const excluded = deactivated && !includeDisabled;
+              {otherAssets.length > 0 && !matchedAssetCount && (
+                <p className="cr-empty">No assets match “{search.trim()}”.</p>
+              )}
 
-                  return (
-                    <label
-                      className="copy-rule-row"
-                      key={rule.id}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selected.includes(rule.id)}
-                        disabled={saving || Boolean(reason) || excluded}
-                        onChange={() => toggleRule(rule.id)}
-                      />
+              {assetGroups.map((group) => (
+                <div className="cr-group" key={group.path || "__top"}>
+                  {assetGroups.length > 1 && (
+                    <div className="cr-group-title" title={group.path}>
+                      {group.path || "Top level"}
+                    </div>
+                  )}
 
-                      <span className="copy-rule-content">
-                        <strong>{rule.name}</strong>
-
-                        <small>
-                          {rule.rule_type} · {rule.severity} · {deactivated ? "Deactivated" : "Activated"}
-                          {rule.copyCheck.variable
-                            ? ` · Variable: ${rule.copyCheck.variable.name}`
-                            : ""}
-                        </small>
-
-                        {reason && (
-                          <small className="form-error">
-                            {reason}
+                  {group.items.map((asset) => {
+                    const active = String(asset.id) === String(sourceId);
+                    return (
+                      <button
+                        type="button"
+                        key={asset.id}
+                        role="option"
+                        aria-selected={active}
+                        className={`cr-asset${active ? " is-active" : ""}`}
+                        disabled={saving}
+                        onClick={() => !active && loadSource(String(asset.id))}
+                      >
+                        <span className="cr-asset-main">
+                          <strong>{asset.name}</strong>
+                          <small>
+                            {[asset.asset_type, `ID ${asset.id}`]
+                              .filter(Boolean)
+                              .join(" · ")}
                           </small>
+                        </span>
+                        {asset.status === "disabled" && (
+                          <span className="cr-chip">Disabled</span>
                         )}
-                      </span>
-                    </label>
-                  );
-                })}
+                        {active && <Check size={16} aria-hidden="true" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="cr-panel cr-rules" aria-label="Rules to copy">
+            <div className="cr-panel-head">
+              <h3>2. Rules{source ? ` in ${source.name}` : ""}</h3>
+              {sourceId && !loading && !sourceError && (
+                <span className="cr-count">
+                  {copyableRules.length} of {sourceRules.length} copyable
+                </span>
+              )}
+            </div>
+
+            {!sourceId && (
+              <p className="cr-empty cr-placeholder">
+                Choose a source asset to see its rules.
+              </p>
+            )}
+
+            {sourceId && loading && (
+              <LoadingIndicator compact message="Loading rules and variables" />
+            )}
+
+            {sourceId && !loading && sourceError && (
+              <div className="cr-notice is-error" role="alert">
+                <AlertCircle size={16} aria-hidden="true" />
+                <span>{sourceError}</span>
+                <button
+                  type="button"
+                  className="cr-link"
+                  onClick={() => loadSource(String(sourceId))}
+                >
+                  Retry
+                </button>
               </div>
-            </>
-          )}
+            )}
 
-          {reviewing && (
-            <div className="copy-rules-confirmation" role="status">
-              Copy {selected.length} selected rule(s) to this asset? Source rules will remain unchanged; copied rules will be created inactive.
-            </div>
-          )}
+            {sourceId && !loading && !sourceError && (
+              <>
+                {!sourceRules.length ? (
+                  <p className="cr-empty">This asset has no rules to copy.</p>
+                ) : (
+                  <>
+                    <div className="cr-toolbar">
+                      <span className="cr-selected-count" aria-live="polite">
+                        {selected.length} selected
+                      </span>
+                      <button
+                        type="button"
+                        className="cr-link"
+                        onClick={selectAllRules}
+                        disabled={saving || !selectableRules.length || allSelected}
+                      >
+                        Select all
+                      </button>
+                      <button
+                        type="button"
+                        className="cr-link"
+                        onClick={clearSelection}
+                        disabled={saving || !selected.length}
+                      >
+                        Deselect all
+                      </button>
+                      <label className="cr-toggle">
+                        <input
+                          type="checkbox"
+                          checked={includeDisabled}
+                          disabled={saving}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            setIncludeDisabled(checked);
+                            if (!checked) {
+                              setSelected((current) =>
+                                current.filter(
+                                  (id) =>
+                                    sourceRules.find((rule) => rule.id === id)
+                                      ?.is_enabled
+                                )
+                              );
+                            }
+                            setReviewing(false);
+                          }}
+                        />
+                        Include deactivated rules
+                      </label>
+                    </div>
 
-          {results && (
-            <div
-              className="copy-rules-results"
-              role="status"
-            >
-              <strong>
-                {results.copied.length} rule(s) copied.
-              </strong>
+                    <div className="cr-scroll cr-rule-list">
+                      {eligibleRules.map((rule) => {
+                        const reason = rule.copyCheck.reason;
+                        const deactivated = !rule.is_enabled;
+                        const excluded = deactivated && !includeDisabled;
+                        const unavailable = Boolean(reason) || excluded;
+                        const checked = selected.includes(rule.id);
+                        const condition = ruleCondition(rule);
+                        const signal = rule.variable_name;
+                        const mapped = rule.copyCheck.variable?.name;
 
-              {results.copied.length > 0 && (
-                <p>
-                  Created disabled:{" "}
-                  {results.copied.map((rule) => rule.name).join(", ")}
-                </p>
-              )}
+                        return (
+                          <label
+                            className={`cr-rule${checked ? " is-selected" : ""}${
+                              unavailable ? " is-unavailable" : ""
+                            }`}
+                            key={rule.id}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={saving || unavailable}
+                              onChange={() => toggleRule(rule.id)}
+                            />
 
-              {results.alreadyCopied.length > 0 && (
-                <p>{results.alreadyCopied.length} matching rule(s) were already on this asset.</p>
-              )}
-              {results.excludedDisabled > 0 && (
-                <p>{results.excludedDisabled} deactivated rule(s) were excluded.</p>
-              )}
-            </div>
-          )}
+                            <span className="cr-rule-main">
+                              <span className="cr-rule-title">
+                                <strong>{rule.name}</strong>
+                                <span
+                                  className={`cr-chip ${
+                                    deactivated ? "" : "is-ok"
+                                  }`}
+                                >
+                                  {deactivated ? "Deactivated" : "Activated"}
+                                </span>
+                                {rule.severity && (
+                                  <span
+                                    className={`cr-chip is-${
+                                      ["alert", "warning"].includes(rule.severity)
+                                        ? rule.severity
+                                        : "plain"
+                                    }`}
+                                  >
+                                    {rule.severity}
+                                  </span>
+                                )}
+                              </span>
+
+                              <small>
+                                {(rule.rule_type === "multi_parameter" && ruleCategoryLabel(rule)) ||
+                                  RULE_TYPE_LABELS[rule.rule_type] ||
+                                  rule.rule_type ||
+                                  "Unknown type"}
+                                {signal ? ` · Signal: ${signal}` : ""}
+                                {mapped && mapped !== signal
+                                  ? ` → ${mapped} on this asset`
+                                  : ""}
+                              </small>
+
+                              {condition && <small>{condition}</small>}
+
+                              {reason && (
+                                <small className="cr-reason">{reason}</small>
+                              )}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </section>
         </div>
 
-        <footer className="modal-actions">
-          <button
-            type="button"
-            className="btn-outline"
-            onClick={onClose}
-            disabled={saving}
-          >
-            Close
-          </button>
+        {(error || results) && (
+          <div className="cr-feedback">
+            {error && (
+              <div className="cr-notice is-error" role="alert">
+                <AlertCircle size={16} aria-hidden="true" />
+                <span>{error}</span>
+              </div>
+            )}
 
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => {
-              if (reviewing) copyRules();
-              else setReviewing(true);
-            }}
-            disabled={saving || !selected.length || loading}
-          >
-            {saving
-              ? "Copying…"
-              : reviewing
-                ? `Confirm copy (${selected.length})`
-                : `Review copy (${selected.length})`}
-          </button>
+            {results && (
+              <div className="cr-notice is-ok" role="status">
+                <CheckCircle2 size={16} aria-hidden="true" />
+                <span>
+                  <strong>{results.copied.length} rule(s) copied.</strong>
+                  {results.copied.length > 0 &&
+                    ` Created deactivated: ${results.copied
+                      .map((rule) => rule.name)
+                      .join(", ")}.`}
+                  {results.alreadyCopied.length > 0 &&
+                    ` ${results.alreadyCopied.length} matching rule(s) were already on this asset.`}
+                  {results.excludedDisabled > 0 &&
+                    ` ${results.excludedDisabled} deactivated rule(s) were excluded.`}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        <footer className="cr-footer">
+          {reviewing ? (
+            <p className="cr-confirm" role="status">
+              Copy {selected.length} selected rule(s) to {destinationName}? Source
+              rules stay unchanged; copied rules are created deactivated.
+            </p>
+          ) : (
+            <p className="cr-summary">
+              {selected.length
+                ? `${selected.length} rule(s) selected`
+                : "No rules selected"}
+            </p>
+          )}
+
+          <div className="cr-actions">
+            <button
+              type="button"
+              className="btn-outline"
+              onClick={() => (reviewing ? setReviewing(false) : onClose())}
+              disabled={saving}
+            >
+              {reviewing ? "Back" : results ? "Close" : "Cancel"}
+            </button>
+
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => {
+                if (reviewing) copyRules();
+                else setReviewing(true);
+              }}
+              disabled={saving || !selected.length || loading}
+            >
+              {saving
+                ? "Copying…"
+                : reviewing
+                  ? `Confirm copy (${selected.length})`
+                  : "Copy Selected Rules"}
+            </button>
+          </div>
         </footer>
       </section>
     </div>

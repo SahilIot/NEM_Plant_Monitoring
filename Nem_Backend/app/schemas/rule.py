@@ -240,6 +240,7 @@ class RuleTemplateCreate(ORMModel):
         "duration",
         "boolean_count_threshold",
         "generic",
+        "multi_parameter",
     ]
     required_variable_types: list[Literal["number", "integer", "boolean", "string"]] | None = None
     variable_key: str | None = Field(default=None, max_length=100)
@@ -274,6 +275,15 @@ class RuleTemplateCreate(ORMModel):
     @model_validator(mode="after")
     def validate_template_definition(self):
         required_types = self.required_variable_types
+        if self.rule_type == "multi_parameter":
+            # Parameter-based template: definitions live in parameters.parameter_defs; variables are chosen per asset.
+            from app.schemas.rule_parameters import normalize_template_parameters
+
+            if required_types or self.operator is not None or self.threshold is not None or self.variable_key:
+                raise ValueError("Multi-parameter templates keep their configuration in their parameters")
+            self.parameters = normalize_template_parameters(self.parameters)
+            self.required_variable_types = None
+            return self
         if self.rule_type == "parameter_threshold":
             # Initialize the main threshold from the warning threshold for temperature rules when missing, then validate all temperature-specific parameters.
             if (self.parameters or {}).get("temperature_rule") is True:
@@ -414,6 +424,8 @@ class RuleTemplateCreateRequest(RuleTemplateCreate):
 class RuleTemplateAssetAssignment(ORMModel):
     asset_ids: list[int] = Field(min_length=1, max_length=100)
     variable_mappings: dict[int, int] = Field(default_factory=dict)
+    # Multi-parameter templates: asset id -> {parameter key -> variable id}.
+    parameter_mappings: dict[int, dict[str, int]] = Field(default_factory=dict)
 
     @field_validator("asset_ids")
     @classmethod
@@ -570,6 +582,8 @@ class UsageRuleCreate(FrontendRuleCreate):
 class RuleSelection(ORMModel):
     rule_ids: list[int] = Field(min_length=1, max_length=100)
     variable_mappings: dict[int, int] = Field(default_factory=dict)
+    # Multi-parameter templates: template id -> {parameter key -> variable id}.
+    parameter_mappings: dict[int, dict[str, int]] = Field(default_factory=dict)
 
     @field_validator("rule_ids")
     @classmethod

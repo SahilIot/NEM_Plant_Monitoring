@@ -805,8 +805,10 @@ class OpcUaCollector:
 
         for mapping in self.mappings:
             asset = session.get(Asset, mapping.asset_id)
-            if asset is None or not asset.is_active:
-                raise OpcUaConfigurationError(f"OPC UA mapping references missing or inactive asset {mapping.asset_id}.")
+            if asset is None:
+                raise OpcUaConfigurationError(f"OPC UA mapping references missing asset {mapping.asset_id}.")
+            if not asset.is_active:
+                continue  # deactivated asset: stop polling it, keep the mapping for reactivation
             signals = [
                 (mapping.cycle_signal, True, "cycle"),
                 (mapping.running_signal, True, "running"),
@@ -819,10 +821,11 @@ class OpcUaCollector:
                 if (
                     variable is None
                     or variable.asset_id != mapping.asset_id
-                    or not variable.is_active
                     or (is_state_signal and variable.data_type != "boolean")
                 ):
-                    raise OpcUaConfigurationError("OPC UA NodeIds must map to active variables belonging to their configured asset; cycle and running signals must be boolean.")
+                    raise OpcUaConfigurationError("OPC UA NodeIds must map to variables belonging to their configured asset; cycle and running signals must be boolean.")
+                if not variable.is_active:
+                    continue  # deactivated variable: not polled, mapping kept for reactivation
                 if variable.id in active_variable_ids:
                     node_mappings.setdefault(signal.node_id, []).append(
                         (mapping, role, signal.variable_id)

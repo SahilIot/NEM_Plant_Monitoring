@@ -153,7 +153,7 @@ export default function ExistingRulesPicker({ collection, onClose, onDone, defer
               <input type="checkbox" checked disabled aria-label={`${rule.name} is already in this collection`} />
               <div className="main">
                 <strong>{rule.name} <span className="add-rule-badge">{stagedIds.has(rule.id) ? "Already selected" : "Already in this collection"}</span></strong>
-                <small>{displayType(rule)} · {ruleKind(rule)} · {rule.is_enabled ? "Available" : "Disabled"}</small>
+                <small>{displayType(rule)} · {rule.is_enabled ? "Available" : "Disabled"}</small>
                 <small>{templateSummary(rule)}</small>
               </div>
             </div>
@@ -166,7 +166,7 @@ export default function ExistingRulesPicker({ collection, onClose, onDone, defer
                 <input type="checkbox" checked={on} disabled={blocked || saving} onChange={() => toggle(rule.id)} />
                 <div className="main">
                   <strong>{rule.name}</strong>
-                  <small>{displayType(rule)} · {ruleKind(rule)} · {rule.is_enabled ? "Available" : "Disabled"}</small>
+                  <small>{displayType(rule)} · {rule.is_enabled ? "Available" : "Disabled"}</small>
                   <small>{templateSummary(rule)}</small>
                   {rule.description && <small>{rule.description}</small>}
                 </div>

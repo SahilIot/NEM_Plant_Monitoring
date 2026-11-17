@@ -5,6 +5,8 @@ import { LoadingIndicator } from "../../../components/common/UI.jsx";
 import { captureNavigationOrigin } from "../../../utils/navigation.js";
 import "./PredefinedRulesModal.css";
 import LabelsField from "../../../components/common/LabelsField.jsx";
+import TemplateParameterMapping, { isMultiTemplate, mappingIncomplete, parameterMappingsPayload } from "./TemplateParameterMapping.jsx";
+import "./TemplateParameterMapping.css";
 import { matchesRuleFilters, ruleConditionSummary } from "../rulePresentation.js";
 import {
   ShieldCheck,
@@ -27,6 +29,7 @@ export default function PredefinedRulesModal({
   const [rules, setRules] = useState([]);
   const [selected, setSelected] = useState(() => new Set());
   const [variableMappings, setVariableMappings] = useState({});
+  const [parameterMappings, setParameterMappings] = useState({});
   const [search, setSearch] = useState("");
   const [severity, setSeverity] = useState("all");
   const [loading, setLoading] = useState(true);
@@ -91,6 +94,10 @@ export default function PredefinedRulesModal({
             .filter((id) => variableMappings[id])
             .map((id) => [id, Number(variableMappings[id])])
         ),
+        parameter_mappings: parameterMappingsPayload(
+          [...selected].map((id) => rules.find((item) => item.id === id)).filter(Boolean),
+          parameterMappings
+        ),
       });
       await onAssigned?.(result);
       onClose();
@@ -106,6 +113,7 @@ export default function PredefinedRulesModal({
   ).length;
   const mappingsComplete = [...selected].every((id) => {
     const rule = rules.find((item) => item.id === id);
+    if (isMultiTemplate(rule)) return !mappingIncomplete(rule, parameterMappings);
     return !rule?.variable_mapping_required || Boolean(variableMappings[id]);
   });
 
@@ -243,8 +251,22 @@ export default function PredefinedRulesModal({
                     {ruleConditionSummary(rule)}
                   </small>
                   {unavailable && <small className="prm-unavailable">{rule.unavailable_reason}</small>}
+                  {isMultiTemplate(rule) && !rule.assigned && !unavailable && (
+                    <TemplateParameterMapping
+                      template={rule}
+                      state={parameterMappings}
+                      disabled={disabled}
+                      onChange={(templateId, key, value) => {
+                        setParameterMappings((current) => ({
+                          ...current,
+                          [templateId]: { ...(current[templateId] || {}), [key]: value },
+                        }));
+                        setSelected((current) => new Set(current).add(templateId));
+                      }}
+                    />
+                  )}
                 </span>
-                {mappingRequired && (
+                {mappingRequired && !isMultiTemplate(rule) && (
                   <select
                     aria-label={`Variable mapping for ${rule.name}`}
                     value={variableMappings[rule.id] || ""}

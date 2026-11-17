@@ -1492,3 +1492,21 @@ button:disabled {
   cursor: not-allowed;
   pointer-events: none;
 }
+.asset-page .rule-card.rule-card-clickable { cursor: pointer; }
+.asset-page .rule-card.rule-card-clickable:hover { border-color: var(--line-strong); }
+.asset-page .rule-card.rule-card-clickable:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
+.asset-page .rule-card.is-expanded { border-color: var(--action); box-shadow: inset 3px 0 0 var(--action); }
+.asset-page .rule-detail-section { margin: 4px 0 14px; }
+
+.asset-page .rule-detail-page { display: grid; gap: 10px; margin-top: 6px; }
+.asset-page .rule-detail-back {
+  justify-self: start; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px 4px 0;
+  border: 0; background: none; color: var(--action); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.asset-page .rule-detail-back:hover { text-decoration: underline; }
+.asset-page .rule-detail-back:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; border-radius: 3px; }
+.asset-page .rule-detail-page .rsd-inline { margin-top: 0; }
+
+/* The variables table has status and lifecycle actions; give its dialog room instead of scrolling sideways. */
+.modal:has(.variables-table) { width: min(900px, 100%); }
+.variables-table .variable-row-actions { flex-wrap: nowrap; align-items: center; }

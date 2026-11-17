@@ -23,6 +23,8 @@ _ENTITY_ID_ATTRIBUTES = {
     "nem_monitoring_rules": ("id", "target_asset_id", "variable_id"),
     "nem_rule_states": ("id", "rule_id", "target_asset_id", "target_variable_id"),
     "nem_rule_counter_states": ("id", "rule_id", "asset_id"),
+    "nem_rule_parameters": ("id", "rule_id"),
+    "nem_rule_parameter_states": ("id", "parameter_id"),
     "machine_monitoring_states": ("asset_id",),
     "nem_alerts": ("id", "rule_id", "target_asset_id", "maintenance_schedule_id"),
     "nem_monitoring_events": ("id", "rule_id", "asset_id", "alert_id"),

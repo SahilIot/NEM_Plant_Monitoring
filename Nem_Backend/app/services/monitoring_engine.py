@@ -512,7 +512,7 @@ def _transition_state(
         )
 
     if (
-        error_message not in {None, "stale_reading"}
+        error_message not in {None, "stale_reading", "variable_inactive", "awaiting_fresh_reading", "asset_inactive"}
         and (transitioned or previous_error != error_message)
     ):
         emit_event(
@@ -1145,6 +1145,17 @@ def evaluate_rule(
         )
 
     if not asset.is_active:
+        if rule.rule_type == "multi_parameter":
+            # Mark every parameter as paused so that reactivation waits for a fresh reading, like a variable does.
+            from app.models import RuleParameter, RuleParameterState
+
+            for parameter_state in session.scalars(
+                select(RuleParameterState)
+                .join(RuleParameter, RuleParameter.id == RuleParameterState.parameter_id)
+                .where(RuleParameter.rule_id == rule.id)
+            ).all():
+                parameter_state.error_message = "variable_inactive"
+                parameter_state.last_evaluated_at = now
         return _transition_state(
             session,
             rule,
@@ -1155,7 +1166,14 @@ def evaluate_rule(
             message=("Target asset is inactive; physical operating status is not inferred."),
             evaluated_at=now,
             condition_started_at=None,
+            error_message="asset_inactive",
         )
+
+    if rule.rule_type == "multi_parameter":
+        # Several independently evaluated parameters; the rule shows the worst of them.
+        from app.services.rule_parameters import evaluate_multi_parameter
+
+        return evaluate_multi_parameter(session, rule, asset, state, now, stale_after_seconds)
 
     if rule.rule_type in UNEVALUATED_RULE_TYPES:
         # Allowed by the database constraint (so existing rows load) but no evaluator
@@ -1190,10 +1208,52 @@ def evaluate_rule(
         )
 
     if (
-        variable is None
-        or variable.asset_id != asset.id
-        or not variable.is_active
+        variable is not None
+        and variable.asset_id == asset.id
+        and not variable.is_active
     ):
+        # Deliberately paused: not a failure, no alert, counters/runtime progress untouched.
+        return _transition_state(
+            session,
+            rule,
+            asset,
+            state,
+            next_status="unknown",
+            value=None,
+            message="Variable is inactive; monitoring is paused until it is reactivated and reports a fresh reading.",
+            evaluated_at=now,
+            condition_started_at=None,
+            error_message="variable_inactive",
+        )
+    if (
+        variable is not None
+        and state is not None
+        and state.error_message in {"variable_inactive", "awaiting_fresh_reading", "asset_inactive"}
+        and state.last_evaluated_at is not None
+    ):
+        newest = session.scalar(
+            select(Reading.recorded_at).where(Reading.variable_id == variable.id)
+            .order_by(Reading.recorded_at.desc()).limit(1)
+        )
+        previous = state.last_evaluated_at
+        if newest is not None and newest.tzinfo is None:
+            newest = newest.replace(tzinfo=timezone.utc)
+        if previous.tzinfo is None:
+            previous = previous.replace(tzinfo=timezone.utc)
+        if newest is None or newest <= previous:
+            return _transition_state(
+                session,
+                rule,
+                asset,
+                state,
+                next_status="unknown",
+                value=None,
+                message="Reactivated; waiting for a fresh reading before monitoring resumes.",
+                evaluated_at=now,
+                condition_started_at=None,
+                error_message="awaiting_fresh_reading",
+            )
+    if variable is None or variable.asset_id != asset.id:
         return _transition_state(
             session,
             rule,
@@ -1468,13 +1528,22 @@ def evaluate_rules(
             ):
                 continue
 
-        state = evaluate_rule(
-            session,
-            rule,
-            evaluated_at=now,
-            stale_after_seconds=stale_after_seconds,
-            runtime_gap_seconds=runtime_gap_seconds,
-        )
+        # One failing rule must never stop the others: its partial changes are rolled back to the
+        # savepoint, the failure is logged, and the pass carries on with the next rule.
+        try:
+            with session.begin_nested():
+                state = evaluate_rule(
+                    session,
+                    rule,
+                    evaluated_at=now,
+                    stale_after_seconds=stale_after_seconds,
+                    runtime_gap_seconds=runtime_gap_seconds,
+                )
+        except Exception:
+            LOGGER.exception("Evaluation of rule %s failed; continuing with the remaining rules", rule.id)
+            counts["evaluated"] += 1
+            counts["unknown"] += 1
+            continue
 
         if state is not None:
             counts["evaluated"] += 1
@@ -1589,13 +1658,20 @@ def evaluate_reading_rules(
     }
 
     for rule in matching:
-        state = evaluate_rule(
-            session,
-            rule,
-            evaluated_at=evaluated_at,
-            stale_after_seconds=stale_after_seconds,
-            runtime_gap_seconds=runtime_gap_seconds,
-        )
+        try:
+            with session.begin_nested():
+                state = evaluate_rule(
+                    session,
+                    rule,
+                    evaluated_at=evaluated_at,
+                    stale_after_seconds=stale_after_seconds,
+                    runtime_gap_seconds=runtime_gap_seconds,
+                )
+        except Exception:
+            LOGGER.exception("Evaluation of rule %s failed; continuing with the remaining rules", rule.id)
+            counts["evaluated"] += 1
+            counts["unknown"] += 1
+            continue
 
         if state is not None:
             counts["evaluated"] += 1
@@ -1642,6 +1718,11 @@ def set_rule_enabled_state(
             counter.last_signal_at = None
             counter.runtime_checkpoint_at = None
             counter.updated_at = now
+
+    if rule.rule_type == "multi_parameter":
+        from app.services.rule_parameters import pause_parameters, resume_parameters
+
+        (resume_parameters if enabled else pause_parameters)(session, rule, now)
 
     if asset is not None:
         state = current_state(session, rule, asset)

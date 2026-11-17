@@ -12,8 +12,8 @@ import {
 } from "lucide-react";
 import CopyRulesModal from "../components/CopyRulesModal.jsx";
 import PredefinedRulesModal from "../../rules/components/PredefinedRulesModal.jsx";
+import RuleCategoryOptions from "../../rules/components/RuleCategoryOptions.jsx";
 import RuleCollectionAssignmentModal from "../../rules/components/RuleCollectionAssignmentModal.jsx";
-import { SHARED_RULE_WARNING } from "../../configuration/pages/RuleVisibility.jsx";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import {
@@ -21,21 +21,18 @@ import {
   subscribeLiveUpdates,
 } from "../../../services/liveUpdates.js";
 import AssetSupervisors from "../components/AssetSupervisors.jsx";
+import AssetDeletionDialog from "../components/AssetDeletionDialog.jsx";
 import CurrentMaintenanceCards from "../components/CurrentMaintenanceCards.jsx";
 import MaintenanceDetails from "../components/MaintenanceDetails.jsx";
 import MaintenancePanel from "../components/MaintenancePanel.jsx";
+import RuleStatusDetail from "../../rules/components/RuleStatusDetail.jsx";
+import ParameterEditDialog from "../../rules/components/ParameterEditDialog.jsx";
 import "./AssetDetail.css";
 import {
-  LEGACY_RULE_CHOICES,
   legacyRulePath,
-  buildAssetMonitoringRule,
 } from "../rules/monitoringRuleFlow.js";
 import {
-  auditUser,
-  formatAuditTime,
-  formatDuration,
   formatTime,
-  formatValue,
 } from "../../../utils/format.js";
 import {
   captureNavigationOrigin,
@@ -70,85 +67,6 @@ const HEALTH_LABEL = {
   ok: "No active alerts",
   off: "Disabled",
 };
-
-function thresholdMetrics(rule) {
-  const expectedBoolean = rule.parameters?.expected_value;
-  if (rule.rule_type === "parameter_threshold" && typeof expectedBoolean === "boolean") {
-    return [{
-      label: "Condition",
-      value: `${rule.operator === "!=" || rule.operator === "ne" ? "is not" : "is"} ${expectedBoolean ? "ON" : "OFF"}`,
-    }];
-  }
-  if (rule.rule_type === "runtime_duration") {
-    const warnings = rule.parameters?.warning_thresholds_seconds;
-    const alert = rule.parameters?.alert_threshold_seconds;
-    if (Array.isArray(warnings) && warnings.length === 2 && alert != null) {
-      return [
-        { label: "Warning", value: `${(Number(warnings[0]) / 3600).toFixed(2)} h` },
-        { label: "Higher warning", value: `${(Number(warnings[1]) / 3600).toFixed(2)} h` },
-        { label: "Alert", value: `${(Number(alert) / 3600).toFixed(2)} h` },
-      ];
-    }
-  }
-  if (rule.rule_type === "boolean_count_threshold") {
-    const warnings = rule.parameters?.warning_thresholds;
-    const alert = rule.parameters?.alert_threshold;
-    if (Array.isArray(warnings) && warnings.length === 2 && alert != null) {
-      return [
-        { label: "Warning", value: Number(warnings[0]).toLocaleString() },
-        { label: "Higher warning", value: Number(warnings[1]).toLocaleString() },
-        { label: "Alert", value: Number(alert).toLocaleString() },
-      ];
-    }
-  }
-  if (rule.threshold !== null && rule.threshold !== undefined) {
-    return [
-      {
-        label: "Threshold",
-        value: `${rule.operator || ""} ${formatValue(rule.threshold)}`.trim(),
-      },
-    ];
-  }
-  return [];
-}
-
-function thresholdSequence(rule) {
-  const parameters = rule.parameters || {};
-  if (
-    rule.rule_type === "runtime_duration" &&
-    Array.isArray(parameters.warning_thresholds_seconds) &&
-    parameters.warning_thresholds_seconds.length === 2 &&
-    parameters.alert_threshold_seconds != null
-  ) {
-    return [
-      { label: "Warning", value: Number(parameters.warning_thresholds_seconds[0]) },
-      { label: "Higher warning", value: Number(parameters.warning_thresholds_seconds[1]) },
-      { label: "Alert", value: Number(parameters.alert_threshold_seconds) },
-    ];
-  }
-  if (
-    rule.rule_type === "boolean_count_threshold" &&
-    Array.isArray(parameters.warning_thresholds) &&
-    parameters.warning_thresholds.length === 2 &&
-    parameters.alert_threshold != null
-  ) {
-    return [
-      { label: "Warning", value: Number(parameters.warning_thresholds[0]) },
-      { label: "Higher warning", value: Number(parameters.warning_thresholds[1]) },
-      { label: "Alert", value: Number(parameters.alert_threshold) },
-    ];
-  }
-  return [];
-}
-
-function compactRuleDuration(seconds) {
-  const value = Number(seconds);
-  if (!Number.isFinite(value) || value <= 0) return "duration not set";
-  if (value % 86400 === 0) return `${value / 86400}d`;
-  if (value % 3600 === 0) return `${value / 3600}h`;
-  if (value % 60 === 0) return `${value / 60}m`;
-  return `${value}s`;
-}
 
 function eventActionLabel(eventType) {
   if (!eventType) return "Event";
@@ -185,316 +103,6 @@ function eventAuditSummary(event) {
   }
   return parts.join(" · ");
 }
-
-function ruleConditionSummary(rule) {
-  const parameters = rule.parameters || {};
-  if (rule.rule_type === "duration") {
-    const duration = compactRuleDuration(parameters.duration_seconds);
-    if (parameters.condition === "threshold") {
-      if (rule.variable_data_type === "boolean") {
-        return `Invalid condition: Boolean signal cannot be compared with ${parameters.operator || ""} ${parameters.threshold}; expected ON/OFF for ${duration}.`;
-      }
-      return `Value ${parameters.operator || ""} ${parameters.threshold} for ${duration}`.trim();
-    }
-    if (typeof parameters.expected_value === "boolean") {
-      return `Signal ${parameters.expected_value ? "ON" : "OFF"} continuously for ${duration}`;
-    }
-  }
-  if (rule.rule_type === "runtime_duration") {
-    const warnings = parameters.warning_thresholds_seconds;
-    const alert = parameters.alert_threshold_seconds;
-    if (Array.isArray(warnings) && warnings.length === 2 && alert != null) {
-      return `Running time · warnings at ${compactRuleDuration(warnings[0])} / ${compactRuleDuration(warnings[1])}, alert at ${compactRuleDuration(alert)}`;
-    }
-  }
-  if (rule.rule_type === "boolean_count_threshold") {
-    const warnings = parameters.warning_thresholds;
-    if (Array.isArray(warnings) && warnings.length === 2 && parameters.alert_threshold != null) {
-      return `Cycle count · warnings at ${warnings[0]} / ${warnings[1]}, alert at ${parameters.alert_threshold}`;
-    }
-  }
-  if (
-    rule.rule_type === "parameter_threshold" &&
-    typeof parameters.expected_value === "boolean"
-  ) {
-    return `Signal ${rule.operator === "!=" || rule.operator === "ne" ? "is not" : "is"} ${parameters.expected_value ? "ON" : "OFF"}`;
-  }
-  if (rule.rule_type === "parameter_threshold" && rule.threshold != null) {
-    return `Value ${rule.operator || ""} ${rule.threshold}`.trim();
-  }
-  return null;
-}
-
-function formatTimeUntilStart(milliseconds) {
-  if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "Starting now";
-  let remaining = Math.ceil(milliseconds / 1000);
-  const days = Math.floor(remaining / 86400);
-  remaining %= 86400;
-  const hours = Math.floor(remaining / 3600);
-  remaining %= 3600;
-  const minutes = Math.floor(remaining / 60);
-  const seconds = remaining % 60;
-  return `${days}d ${hours}h ${minutes}m ${seconds}s`;
-}
-
-const isBlank = (value) =>
-  value === undefined || value === null || String(value).trim() === "";
-
-const sameNumber = (a, b) =>
-  !isBlank(a) && !isBlank(b) && Number(a) === Number(b);
-
-// Builds the rule-specific threshold/interval part of a PATCH payload from
-// the edit form. Only values the user actually changed are included.
-function buildRuleThresholdChanges(ruleType, values, initial) {
-  const changes = {};
-
-  if (ruleType === "runtime_duration") {
-    const keys = [
-      "runtime_warning_hours",
-      "runtime_warning_2_hours",
-      "runtime_alert_hours",
-    ];
-    if (!keys.every((key) => sameNumber(values[key], initial[key]))) {
-      const [warning1, warning2, alert] = keys.map((key) => Number(values[key]));
-      if (
-        keys.some((key) => isBlank(values[key])) ||
-        ![warning1, warning2, alert].every(
-          (value) => Number.isFinite(value) && value > 0
-        ) ||
-        warning1 >= warning2 ||
-        warning2 >= alert
-      ) {
-        throw new Error(
-          "Running-time thresholds must be positive and strictly increasing."
-        );
-      }
-      changes.parameters = {
-        warning_thresholds_seconds: [
-          Math.round(warning1 * 3600),
-          Math.round(warning2 * 3600),
-        ],
-        alert_threshold_seconds: Math.round(alert * 3600),
-      };
-    }
-  } else if (ruleType === "boolean_count_threshold") {
-    const keys = ["warning_threshold_1", "warning_threshold_2", "alert_threshold"];
-    if (!keys.every((key) => sameNumber(values[key], initial[key]))) {
-      const [warning1, warning2, alert] = keys.map((key) => Number(values[key]));
-      if (
-        keys.some((key) => isBlank(values[key])) ||
-        ![warning1, warning2, alert].every(
-          (value) => Number.isSafeInteger(value) && value > 0
-        ) ||
-        warning1 >= warning2 ||
-        warning2 >= alert
-      ) {
-        throw new Error(
-          "Cycle thresholds must be positive whole numbers in increasing order."
-        );
-      }
-      changes.parameters = {
-        warning_thresholds: [warning1, warning2],
-        alert_threshold: alert,
-      };
-    }
-  } else if (
-    ruleType === "parameter_threshold" &&
-    !sameNumber(values.threshold, initial.threshold) &&
-    !isBlank(values.threshold)
-  ) {
-    const threshold = Number(values.threshold);
-    if (!Number.isFinite(threshold)) {
-      throw new Error("Enter a valid numeric threshold.");
-    }
-    changes.threshold = threshold;
-  }
-
-  if (
-    !isBlank(values.evaluation_interval_seconds) &&
-    !sameNumber(values.evaluation_interval_seconds, initial.evaluation_interval_seconds)
-  ) {
-    const interval = Number(values.evaluation_interval_seconds);
-    if (!Number.isInteger(interval) || interval < 1) {
-      throw new Error("Evaluation interval must be a whole number of seconds (1 or more).");
-    }
-    changes.evaluation_interval_seconds = interval;
-  }
-
-  return changes;
-}
-
-const ruleFields = (
-  variables,
-  cycleVariableIds,
-  runtimeVariableIds,
-  mappingBypassEnabled
-) => [
-  {
-    key: "name",
-    label: "Rule name",
-    required: true,
-    placeholder: "e.g. Motor temperature limit",
-  },
-  {
-    key: "description",
-    label: "Description",
-    type: "textarea",
-    placeholder: "What should this rule watch?",
-  },
-  { key: "labels", label: "Labels", type: "labels" },
-  {
-    key: "rule_type",
-    label: "Rule type",
-    type: "select",
-    default: "parameter_threshold",
-    options: [
-      ["parameter_threshold", "Numeric value threshold (e.g. temperature)"],
-      ["boolean_count_threshold", "Cycle Clock (Boolean ON/OFF count)"],
-      ["runtime_duration", "Motor Running Time"],
-    ],
-    hint: mappingBypassEnabled
-      ? "Choose a Boolean variable marked for the signal's actual purpose."
-      : "Cycle counts come from this asset's configured PLC cycle signal.",
-  },
-  {
-    key: "variable_id",
-    label: "Numeric variable",
-    type: "select",
-    required: true,
-    showWhen: { key: "rule_type", equals: "parameter_threshold" },
-    options: variables
-      .filter((v) => v.data_type === "number" || v.data_type === "integer")
-      .map((v) => [
-      v.id,
-      `${v.name}${v.unit ? ` (${v.unit})` : ""}`,
-    ]),
-  },
-  {
-    key: "cycle_variable_id",
-    label: mappingBypassEnabled
-      ? "Boolean cycle signal"
-      : "Configured Boolean cycle signal",
-    type: "select",
-    required: true,
-    showWhen: { key: "rule_type", equals: "boolean_count_threshold" },
-    options: variables
-      .filter((v) => cycleVariableIds.includes(v.id))
-      .map((v) => [v.id, `${v.name} (#${v.id})`]),
-    hint: cycleVariableIds.length
-      ? mappingBypassEnabled
-        ? "Only variables marked as Cycle signal are available."
-        : "Only Boolean variables configured as this asset's OPC UA cycle signal are available."
-      : mappingBypassEnabled
-        ? "Edit a Boolean variable in the asset's Variables panel and set its purpose to Cycle signal."
-        : "No OPC UA cycle signal is configured for this asset. Configure it in backend OPCUA_MACHINE_MAPPINGS first.",
-  },
-  {
-    key: "runtime_variable_id",
-    label: "OPC UA Boolean running signal",
-    type: "select",
-    required: true,
-    showWhen: { key: "rule_type", equals: "runtime_duration" },
-    options: variables
-      .filter((variable) =>
-        variable.data_type === "boolean" &&
-        runtimeVariableIds.includes(variable.id)
-      )
-      .map((variable) => [variable.id, variable.name]),
-    hint: mappingBypassEnabled
-      ? runtimeVariableIds.length
-        ? "Only variables marked as Machine running state are available."
-        : "Edit a Boolean variable in the asset's Variables panel and set its purpose to Machine running state."
-      : "Select a mapped Boolean OPC UA variable that is true while the machine runs.",
-  },
-  {
-    key: "operator",
-    label: "Trigger when value is",
-    type: "select",
-    showWhen: { key: "rule_type", equals: "parameter_threshold" },
-    requiredWhen: { key: "rule_type", equals: "parameter_threshold" },
-    default: ">=",
-    options: [
-      [">=", "Greater than or equal to"],
-      [">", "Greater than"],
-      ["<=", "Less than or equal to"],
-      ["<", "Less than"],
-      ["==", "Equal to"],
-      ["!=", "Not equal to"],
-    ],
-  },
-  {
-    key: "threshold",
-    label: "Threshold",
-    type: "number",
-    showWhen: { key: "rule_type", equals: "parameter_threshold" },
-    requiredWhen: { key: "rule_type", equals: "parameter_threshold" },
-    placeholder: "e.g. 900",
-  },
-  {
-    key: "warning_threshold_1",
-    label: "Warning at cycle count",
-    type: "number",
-    showWhen: { key: "rule_type", equals: "boolean_count_threshold" },
-    requiredWhen: { key: "rule_type", equals: "boolean_count_threshold" },
-    placeholder: "e.g. 9000",
-  },
-  {
-    key: "warning_threshold_2",
-    label: "Higher warning at cycle count",
-    type: "number",
-    showWhen: { key: "rule_type", equals: "boolean_count_threshold" },
-    requiredWhen: { key: "rule_type", equals: "boolean_count_threshold" },
-    placeholder: "e.g. 9500",
-  },
-  {
-    key: "alert_threshold",
-    label: "Alert at cycle count",
-    type: "number",
-    showWhen: { key: "rule_type", equals: "boolean_count_threshold" },
-    requiredWhen: { key: "rule_type", equals: "boolean_count_threshold" },
-    placeholder: "e.g. 10000",
-  },
-  {
-    key: "runtime_warning_hours",
-    label: "Warning threshold (hours)",
-    type: "number",
-    showWhen: { key: "rule_type", equals: "runtime_duration" },
-    requiredWhen: { key: "rule_type", equals: "runtime_duration" },
-    placeholder: "e.g. 8",
-  },
-  {
-    key: "runtime_warning_2_hours",
-    label: "Higher warning threshold (hours)",
-    type: "number",
-    showWhen: { key: "rule_type", equals: "runtime_duration" },
-    requiredWhen: { key: "rule_type", equals: "runtime_duration" },
-    placeholder: "e.g. 9",
-  },
-  {
-    key: "runtime_alert_hours",
-    label: "Alert threshold (hours)",
-    type: "number",
-    showWhen: { key: "rule_type", equals: "runtime_duration" },
-    requiredWhen: { key: "rule_type", equals: "runtime_duration" },
-    placeholder: "e.g. 10",
-  },
-  {
-    key: "severity",
-    label: "Severity",
-    type: "select",
-    default: "warning",
-    options: [
-      ["warning", "Warning"],
-      ["alert", "Alert"],
-    ],
-  },
-  {
-    key: "evaluation_interval_seconds",
-    label: "Evaluation interval (seconds)",
-    type: "number",
-    placeholder: "Leave blank to keep the current interval",
-  },
-];
 
 const LOG_FIELDS = [
   {
@@ -549,6 +157,17 @@ const VARIABLE_FIELDS = [
     placeholder: "e.g. °C, rpm, cycles",
   },
   {
+    key: "is_active",
+    label: "Status",
+    type: "select",
+    default: "true",
+    options: [
+      ["true", "Active"],
+      ["false", "Inactive"],
+    ],
+    hint: "Inactive variables are not polled or evaluated. Their rules, readings, alerts and history are kept.",
+  },
+  {
     key: "opcua_node_id",
     label: "OPC UA NodeId",
     placeholder: "e.g. ns=2;s=Machine.Cycle",
@@ -584,6 +203,28 @@ const VARIABLE_FIELDS = [
 },
 ];
 
+// "Parameters: 3 · 1 Normal · 1 Due · 1 Overdue" for a rule card. Suspended and deactivated parameters are
+// counted separately and never as Normal; a rule that is not running reports that nothing is evaluated.
+function parameterSummary(rule) {
+  const items = rule.parameter_items || [];
+  if (items.length === 0) return "No parameters";
+  if (rule.lifecycle_status && rule.lifecycle_status !== "in_progress") return `${items.length} · not evaluating`;
+  const evaluating = items.filter((item) => item.lifecycle_status === "active");
+  const intervalOnly = items.every((item) => item.kind === "interval");
+  const labels = intervalOnly
+    ? [["normal", "Normal"], ["warning", "Due"], ["alert", "Overdue"]]
+    : [["normal", "Normal"], ["warning", "Warning"], ["alert", "Alert"]];
+  const parts = [...labels, ["unknown", "Not evaluated"]]
+    .map(([status, label]) => [evaluating.filter((item) => item.status === status).length, label])
+    .filter(([count]) => count > 0)
+    .map(([count, label]) => `${count} ${label}`);
+  for (const [name, label] of [["suspended", "Suspended"], ["deactivated", "Deactivated"]]) {
+    const count = items.filter((item) => item.lifecycle_status === name).length;
+    if (count > 0) parts.push(`${count} ${label}`);
+  }
+  return [String(items.length), ...parts].join(" · ");
+}
+
 export default function AssetDetail() {
   const confirm = useConfirmation();
   const { user } = useAuth();
@@ -593,7 +234,9 @@ export default function AssetDetail() {
   const canManageRules = isAdministrator || isSupervisor;
   const canChangeRuleLifecycle = isAdministrator;
   const canManageLogbook = canManageRules;
-  const { id, scheduleId } = useParams();
+  const { id, scheduleId, ruleId } = useParams();
+  // Dedicated page for one multi-parameter rule: /assets/:id/rules/:ruleId/status
+  const detailRuleId = ruleId ? Number(ruleId) : null;
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -625,13 +268,9 @@ export default function AssetDetail() {
   rulesRef.current = rules;
   const [variables, setVariables] = useState([]);
   const [allVariables, setAllVariables] = useState([]);
-  const [runtimeReadings, setRuntimeReadings] = useState(new Map());
-  const [clockNow, setClockNow] = useState(Date.now());
   const [cycleVariableIds, setCycleVariableIds] = useState([]);
   const [runtimeVariableIds, setRuntimeVariableIds] = useState([]);
-  const [mappingBypassEnabled, setMappingBypassEnabled] = useState(false);
   const [editingVariable, setEditingVariable] = useState(null);
-  const [ruleStates, setRuleStates] = useState(new Map());
   const [children, setChildren] = useState(
     Boolean(routeState.assetIncludeChildren)
   );
@@ -645,9 +284,23 @@ export default function AssetDetail() {
   const [deletingRuleId, setDeletingRuleId] = useState(null);
   const [ruleActionMenuId, setRuleActionMenuId] = useState(null);
   const [lifecycleAction, setLifecycleAction] = useState(null);
-  const [viewRule, setViewRule] = useState(null);
-  const [completionDetails, setCompletionDetails] = useState(null);
-  const [completionDetailsError, setCompletionDetailsError] = useState("");
+  // Technical details on the rule detail page are opt-in (three-dot menu) and reset per rule.
+  const [showTechnical, setShowTechnical] = useState(false);
+  useEffect(() => {
+    setShowTechnical(false);
+  }, [detailRuleId]);
+  // "Edit parameter" on the multi-parameter detail page: the rule being edited, and a refresh trigger.
+  const [parameterEdit, setParameterEdit] = useState(null); // { ruleId, parameterId, alwaysSelect }
+  const [statusRefresh, setStatusRefresh] = useState(0);
+  const openRuleStatusPage = (ruleId, technical = false) => {
+    setShowTechnical(technical);
+    navigate(`/assets/${assetId}/rules/${ruleId}/status`, {
+      state: { ...assetNavigationState, activeTab: "status" },
+    });
+  };
+  const closeRuleStatusPage = () => {
+    navigate(`/assets/${assetId}`, { state: { ...assetNavigationState, activeTab: "status" } });
+  };
   const [actionNotification, setActionNotification] = useState(null);
   const actionNotice =
     actionNotification?.assetId === assetId ? actionNotification : null;
@@ -678,7 +331,6 @@ export default function AssetDetail() {
   };
   const [sortMenu, setSortMenu] = useState(false);
   const [modal, setModal] = useState(null);
-  const [monitoringRuleSelection, setMonitoringRuleSelection] = useState(null);
   const [showPredefinedRules, setShowPredefinedRules] = useState(false);
   // Keep the new collection workflow independent of the existing predefined-rule modal.
   const [showRuleCollections, setShowRuleCollections] = useState(false);
@@ -708,6 +360,8 @@ export default function AssetDetail() {
   );
   const [loadError, setLoadError] = useState("");
   const [deletingAsset, setDeletingAsset] = useState(false);
+  const [showDeleteAsset, setShowDeleteAsset] = useState(false);
+  const [togglingVariableId, setTogglingVariableId] = useState(null);
   const [deletingVariableId, setDeletingVariableId] = useState(null);
   const [variableDeleteError, setVariableDeleteError] = useState("");
   const [selectedEntry, setSelectedEntry] = useState(null);
@@ -724,7 +378,6 @@ export default function AssetDetail() {
 
   const seq = useRef(0);
   const ruleListSeq = useRef(0);
-  const ruleStatusSeq = useRef(0);
   const plcStatusSeq = useRef(0);
   const bulkRequest = useRef(false);
   const permanentDeleteRequest = useRef(false);
@@ -850,15 +503,13 @@ export default function AssetDetail() {
   } = {}) => {
     const generation = seq.current;
     const ruleRequest = includeRuleList ? ++ruleListSeq.current : null;
-    const statusRequest = ++ruleStatusSeq.current;
     const plcRequest = includePlcStatus ? ++plcStatusSeq.current : null;
 
     try {
-      const [r, st, plc] = await Promise.allSettled([
+      const [r, plc] = await Promise.allSettled([
         includeRuleList
           ? api.get(`/assets/${assetId}/rules?include_children=${children}`)
           : Promise.resolve(null),
-        api.getAll("/monitoring/status", 500),
         includePlcStatus ? api.get("/plc/status") : Promise.resolve(null),
       ]);
 
@@ -871,32 +522,10 @@ export default function AssetDetail() {
       ) {
         const loadedRules = Array.isArray(r.value) ? r.value : [];
         setRules(loadedRules);
-        const runtimeVariableIds = [
-          ...new Set(
-            loadedRules
-              .filter((rule) => rule.rule_type === "runtime_duration")
-              .map((rule) => rule.variable_id)
-              .filter((variableId) => variableId != null)
-          ),
-        ];
-        const signalReadings = await Promise.all(
-          runtimeVariableIds.map(async (variableId) => {
-            try {
-              return [
-                variableId,
-                await api.get(`/readings/variables/${variableId}/latest`),
-              ];
-            } catch (error) {
-              if (error.status === 404) return [variableId, null];
-              throw error;
-            }
-          })
-        );
         if (
           generation === seq.current &&
           ruleRequest === ruleListSeq.current
         ) {
-          setRuntimeReadings(new Map(signalReadings));
           setLoadError("");
         }
       } else if (
@@ -910,19 +539,6 @@ export default function AssetDetail() {
       }
 
       if (
-        statusRequest === ruleStatusSeq.current &&
-        st.status === "fulfilled"
-      ) {
-        setRuleStates(
-          new Map(
-            (Array.isArray(st.value) ? st.value : []).map(
-              (s) => [s.rule_id, s]
-            )
-          )
-        );
-      }
-
-      if (
         includePlcStatus &&
         plcRequest === plcStatusSeq.current &&
         plc.status === "fulfilled"
@@ -930,8 +546,6 @@ export default function AssetDetail() {
         const mappings = Array.isArray(plc.value?.mappings)
           ? plc.value.mappings
           : [];
-        const bypassEnabled = plc.value?.mapping_bypass_enabled === true;
-        setMappingBypassEnabled(bypassEnabled);
         setCycleVariableIds(
           mappings
             .filter(
@@ -1097,7 +711,6 @@ export default function AssetDetail() {
     setChildren(Boolean(restoredState.assetIncludeChildren));
     setRules([]);
     setAllVariables([]);
-    setRuntimeReadings(new Map());
     setVariables([]);
     setLogs([]);
     setMaintenanceTypeFilter(restoredState.maintenanceTypeFilter || "");
@@ -1124,39 +737,6 @@ export default function AssetDetail() {
   useEffect(() => {
     loadLive();
   }, [loadLive]);
-
-  const hasRuntimeRules = rules.some(
-    (rule) => rule.rule_type === "runtime_duration"
-  );
-
-  useEffect(() => {
-    if (!hasRuntimeRules) return;
-
-    let timer;
-    const updateClock = () => {
-      setClockNow(Date.now());
-      timer = window.setTimeout(
-        updateClock,
-        1000 - (Date.now() % 1000)
-      );
-    };
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== "visible") return;
-      window.clearTimeout(timer);
-      updateClock();
-    };
-
-    updateClock();
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      window.clearTimeout(timer);
-      document.removeEventListener(
-        "visibilitychange",
-        handleVisibilityChange
-      );
-    };
-  }, [hasRuntimeRules]);
 
   useEffect(() => {
     if (
@@ -1416,23 +996,6 @@ useEffect(() => {
     };
   }, [tab, assetId]);
 
-  const availableVariables = variables;
-  const ruleFormFields = useMemo(
-    () =>
-      ruleFields(
-        availableVariables,
-        cycleVariableIds,
-        runtimeVariableIds,
-        mappingBypassEnabled
-      ),
-    [
-      availableVariables,
-      cycleVariableIds,
-      runtimeVariableIds,
-      mappingBypassEnabled,
-    ]
-  );
-
   const isAct = (rule) => rule.state === "activated";
   const nAct = rules.filter(isAct).length;
   const nNot = rules.length - nAct + completedMaintenanceCount;
@@ -1591,100 +1154,183 @@ const filteredEvents = [...events]
     return "Deactivated";
   };
 
-  const clearSelectedRuleContext = () => {
-    if (routeState.selectedRuleId == null) return;
-    const nextState = { ...routeState };
-    delete nextState.selectedRuleId;
-    delete nextState.selectedRule;
-    navigate(
-      `${location.pathname}${location.search}${location.hash}`,
-      { replace: true, state: nextState }
+  // Action menu items for one rule; shared by the rule card and the details-section header.
+  const renderRuleMenu = (rule) => {
+    // On the rule's own detail page "View rule" would only reopen the page.
+    const onDetailPage = detailRuleId === rule.id;
+    return (
+<FloatingMenu align="right" role="menu">
+    {!onDetailPage && (
+    <button
+      type="button"
+      className="rule-action-menu-item rule-action-menu-item--view"
+      role="menuitem"
+      onClick={() => {
+        setRuleActionMenuId(null);
+        openRuleStatusPage(rule.id);
+      }}
+    >
+      <Eye size={16} aria-hidden="true" />
+      <span>View rule</span>
+    </button>
+    )}
+
+    {(
+      <button
+        type="button"
+        className="rule-action-menu-item rule-action-menu-item--view"
+        role="menuitem"
+        onClick={() => {
+          setRuleActionMenuId(null);
+          if (detailRuleId === rule.id) setShowTechnical((current) => !current);
+          else openRuleStatusPage(rule.id, true);
+        }}
+      >
+        <Eye size={16} aria-hidden="true" />
+        <span>
+          {detailRuleId === rule.id && showTechnical
+            ? "Hide technical details"
+            : "View technical details"}
+        </span>
+      </button>
+    )}
+
+    <button
+      type="button"
+      className="rule-action-menu-item rule-action-menu-item--edit"
+      role="menuitem"
+      onClick={() => {
+        setRuleActionMenuId(null);
+        // Editing always starts from the parameter selector, whether the rule has one parameter or many.
+        setParameterEdit({ ruleId: rule.id, parameterId: null, alwaysSelect: true });
+      }}
+      disabled={
+        (!canManageRules && !isSupervisor) ||
+        (isSupervisor && lifecycleStatus(rule) === "in_progress")
+      }
+      title={
+        !canManageRules
+          ? "You do not have permission to manage monitoring rules."
+          : isSupervisor && lifecycleStatus(rule) === "in_progress"
+            ? "A running rule cannot be edited by a Supervisor. Edit it while it is not activated."
+            : undefined
+      }
+    >
+      <Pencil size={16} aria-hidden="true" />
+      <span>Edit parameter</span>
+    </button>
+
+    {/* Suspend rule */}
+    {lifecycleStatus(rule) === "in_progress" && (
+      <button
+        type="button"
+        className="rule-action-menu-item rule-action-menu-item--lifecycle"
+        role="menuitem"
+        onClick={() => {
+          setRuleActionMenuId(null);
+          setLifecycleAction({ rule, action: "suspend" });
+        }}
+        disabled={!canChangeRuleLifecycle || deletingRuleId !== null}
+        title={
+          !canChangeRuleLifecycle
+            ? "Only Administrators can change monitoring rule states."
+            : undefined
+        }
+      >
+        <Pause size={16} aria-hidden="true" />
+        Suspend rule
+      </button>
+    )}
+
+    {/* Activate rule: suspended */}
+    {lifecycleStatus(rule) === "suspended" && (
+      <button
+        type="button"
+        className="rule-action-menu-item rule-action-menu-item--lifecycle"
+        role="menuitem"
+        onClick={() => {
+          setRuleActionMenuId(null);
+          setLifecycleAction({ rule, action: "resume" });
+        }}
+        disabled={deletingRuleId !== null || !isAdministrator}
+        title={
+          !isAdministrator
+              ? "Only Administrators can activate suspended rules."
+            : undefined
+        }
+      >
+        <Power size={16} aria-hidden="true" />
+        Activate rule
+      </button>
+    )}
+
+    {/* Activate rule: deactivated */}
+    {lifecycleStatus(rule) === "deactivated" && (
+      <button
+        type="button"
+        className="rule-action-menu-item rule-action-menu-item--lifecycle"
+        role="menuitem"
+        onClick={() => {
+          setRuleActionMenuId(null);
+          setLifecycleAction({ rule, action: "activate" });
+        }}
+        disabled={deletingRuleId !== null || !(canChangeRuleLifecycle || isSupervisor)}
+        title={
+          !(canChangeRuleLifecycle || isSupervisor)
+            ? "Only Administrators and Supervisors can activate monitoring rules."
+            : undefined
+        }
+      >
+        <Power size={16} aria-hidden="true" />
+        Activate rule
+      </button>
+    )}
+
+    {/* Deactivate rule */}
+    {["in_progress", "suspended"].includes(lifecycleStatus(rule)) && (
+      <button
+        type="button"
+        className="rule-action-menu-item rule-action-menu-item--lifecycle"
+        role="menuitem"
+        onClick={() => {
+          setRuleActionMenuId(null);
+          setLifecycleAction({ rule, action: "deactivate" });
+        }}
+        disabled={!canChangeRuleLifecycle || deletingRuleId !== null}
+        title={
+          !canChangeRuleLifecycle
+            ? "Only Administrators can change monitoring rule states."
+            : undefined
+        }
+      >
+        <Power size={16} aria-hidden="true" />
+        Deactivate rule
+      </button>
+    )}
+
+    {lifecycleStatus(rule) !== "in_progress" && (
+      <button
+        type="button"
+        className="rule-action-menu-item rule-action-menu-item--delete"
+        role="menuitem"
+        onClick={() => {
+          setRuleActionMenuId(null);
+          permanentlyDeleteRule(rule);
+        }}
+        disabled={!isAdministrator || deletingRuleId !== null}
+        title={!isAdministrator ? "Only Administrators can permanently delete rules." : "Permanently delete rule"}
+      >
+        <Trash2 size={16} aria-hidden="true" />
+        <span>{deletingRuleId === rule.id ? "Deleting…" : "Delete rule"}</span>
+      </button>
+    )}
+                          </FloatingMenu>
     );
   };
 
   const selectRuleList = (nextList) => {
-    clearSelectedRuleContext();
-    setViewRule(null);
-    setCompletionDetails(null);
-    setCompletionDetailsError("");
     setList(nextList);
   };
-
-  const openRuleDetails = async (rule, isActive = () => true) => {
-    setViewRule(rule);
-    setCompletionDetails(null);
-    setCompletionDetailsError("");
-
-    try {
-      const response = await api.get(`/events?rule_id=${rule.id}&limit=100`);
-      if (!isActive()) return;
-      const ruleEvents = response.items || [];
-      const acknowledgement = ruleEvents.find(
-        (item) => item.event_type === "alert_acknowledged"
-      );
-      const completion = ruleEvents.find(
-        (item) => item.event_type === "rule_completed"
-      );
-      setCompletionDetails({
-        acknowledged_by:
-          completion?.metadata?.acknowledged_by ||
-          acknowledgement?.metadata?.acknowledged_by,
-        acknowledged_at:
-          completion?.metadata?.acknowledged_at ||
-          acknowledgement?.metadata?.acknowledged_at ||
-          acknowledgement?.occurred_at,
-        completed_by: completion?.metadata?.completed_by,
-        completed_at:
-          completion?.metadata?.completed_at || completion?.occurred_at,
-      });
-    } catch (error) {
-      if (!isActive()) return;
-      setCompletionDetailsError(
-        error.message || "Could not load completion details."
-      );
-    }
-  };
-
-  useEffect(() => {
-    const selectedRuleId = Number(routeState.selectedRuleId);
-    if (!Number.isInteger(selectedRuleId) || selectedRuleId <= 0) return undefined;
-
-    const routeGeneration = assetRouteGeneration.current;
-    const isActive = () =>
-      routeGeneration === assetRouteGeneration.current;
-    const nextState = { ...routeState };
-    delete nextState.selectedRuleId;
-    delete nextState.selectedRule;
-    navigate(
-      `${location.pathname}${location.search}${location.hash}`,
-      { replace: true, state: nextState }
-    );
-
-    const loadSelectedRule = async () => {
-      try {
-        const selectedRule = await api.get(`/rules/${selectedRuleId}`);
-        if (!isActive()) return;
-        if (Number(selectedRule.target_asset_id) !== assetId) {
-          throw new Error("The selected rule does not belong to this asset.");
-        }
-
-        const ruleContext =
-          Number(routeState.selectedRule?.id) === selectedRuleId
-            ? routeState.selectedRule
-            : {};
-        await openRuleDetails(
-          { ...ruleContext, ...selectedRule },
-          isActive
-        );
-      } catch (error) {
-        if (isActive()) {
-          setLoadError(error.message || "Could not load the selected rule.");
-        }
-      }
-    };
-
-    loadSelectedRule();
-  }, [assetId, location.key]);
 
   const permanentlyDeleteRule = async (rule) => {
     if (!isAdministrator || permanentDeleteRequest.current) return;
@@ -1711,217 +1357,6 @@ const filteredEvents = [...events]
       setDeletingRuleId(null);
     }
   };
-
-  const addRule = async (values) => {
-    if (!canManageRules) return;
-
-    const editId = monitoringRuleSelection?.ruleId;
-    if (editId) {
-      // A rule created from a shared rule is one record for every asset using it.
-      let sharedRule = false;
-      try {
-        sharedRule = Boolean((await api.get(`/rules/${editId}`))?.shared_rule);
-      } catch {
-        sharedRule = false;
-      }
-      if (
-        sharedRule &&
-        !(await confirm(SHARED_RULE_WARNING, {
-          title: "Shared rule",
-          confirmLabel: "Continue",
-        }))
-      ) {
-        return;
-      }
-    }
-    if (editId && isSupervisor) {
-      // Supervisors may only change thresholds and intervals; send just those.
-      const payload = buildRuleThresholdChanges(
-        monitoringRuleSelection?.initialValues?.rule_type,
-        values,
-        monitoringRuleSelection?.initialValues || {}
-      );
-      if (Object.keys(payload).length === 0) {
-        setModal(null);
-        setMonitoringRuleSelection(null);
-        setActionNotice("No changes were made to the rule.");
-        return;
-      }
-      await api.patch(`/rules/${editId}`, payload);
-    } else {
-      // An unchanged stored signal stays valid when editing; the backend still checks the
-      // PLC mapping. Creating a rule, or choosing a different signal, is validated as before.
-      const initial = monitoringRuleSelection?.initialValues || {};
-      const keepStored = (list, key) =>
-        editId && initial[key] != null && String(values[key]) === String(initial[key])
-          ? [...new Set([...list, Number(initial[key])])]
-          : list;
-      const rule = buildAssetMonitoringRule(values, assetId, {
-        variables: availableVariables,
-        cycleVariableIds: keepStored(cycleVariableIds, "cycle_variable_id"),
-        runtimeVariableIds: keepStored(runtimeVariableIds, "runtime_variable_id"),
-      });
-      rule.labels = values.labels || [];
-
-      if (editId) {
-        // Editing must not change activation state or the stale timeout.
-        delete rule.is_enabled;
-        delete rule.stale_after_seconds;
-        if (!isBlank(values.evaluation_interval_seconds)) {
-          rule.evaluation_interval_seconds = Number(
-            values.evaluation_interval_seconds
-          );
-        }
-        await api.patch(`/rules/${editId}`, rule);
-      } else {
-        await api.post(`/assets/${assetId}/rules`, rule);
-      }
-    }
-
-    setModal(null);
-    setMonitoringRuleSelection(null);
-    setList("activated");
-    await refreshAll();
-  };
-
-  const openMonitoringRuleForm = (choiceId) => {
-    setModal(null);
-    setMonitoringRuleSelection(null);
-
-    navigate(`/assets/${assetId}/monitoring-rules/new/${choiceId}`, {
-      state: {
-        from: captureNavigationOrigin(location, assetNavigationState),
-      },
-    });
-  };
-
-  const openEditRuleForm = (rule) => {
-    if (!canManageRules) return;
-
-    const parameters = rule.parameters || {};
-    const initialValues = {
-      name: rule.name || "",
-      description: rule.description || "",
-      labels: rule.labels || [],
-      rule_type: rule.rule_type || "parameter_threshold",
-      severity: rule.severity || "warning",
-      evaluation_interval_seconds:
-        rule.evaluation_interval_seconds ?? null,
-    };
-
-    if (rule.rule_type === "parameter_threshold") {
-      initialValues.variable_id = rule.variable_id;
-      initialValues.operator = rule.operator || ">=";
-      initialValues.threshold = rule.threshold;
-    } else if (rule.rule_type === "boolean_count_threshold") {
-      initialValues.cycle_variable_id = rule.variable_id;
-      const countWarnings = parameters.warning_thresholds;
-      initialValues.warning_threshold_1 = Array.isArray(countWarnings)
-        ? countWarnings[0] ?? null
-        : null;
-      initialValues.warning_threshold_2 = Array.isArray(countWarnings)
-        ? countWarnings[1] ?? null
-        : null;
-      initialValues.alert_threshold = parameters.alert_threshold ?? null;
-    } else if (rule.rule_type === "runtime_duration") {
-      initialValues.runtime_variable_id = rule.variable_id;
-      const warnings = parameters.warning_thresholds_seconds;
-      const alert = parameters.alert_threshold_seconds;
-      initialValues.runtime_warning_hours =
-        Array.isArray(warnings) && warnings.length >= 1
-          ? warnings[0] / 3600
-          : null;
-      initialValues.runtime_warning_2_hours =
-        Array.isArray(warnings) && warnings.length >= 2
-          ? warnings[1] / 3600
-          : null;
-      initialValues.runtime_alert_hours =
-        alert != null ? alert / 3600 : null;
-    }
-
-    setMonitoringRuleSelection({
-      title: "Edit rule",
-      initialValues,
-      ruleId: rule.id,
-    });
-    setModal("add");
-  };
-
-  const monitoringRuleFormFields = useMemo(
-    () => {
-      const isEditing = Boolean(monitoringRuleSelection?.ruleId);
-      const editingRuleType =
-        monitoringRuleSelection?.initialValues?.rule_type;
-
-      return ruleFormFields
-        .filter(
-          (field) =>
-            field.key !== "evaluation_interval_seconds" || isEditing
-        )
-        .map((field) => {
-        let disabled = false;
-        let options = field.options;
-
-        if (field.key === "rule_type") {
-          if (isEditing) {
-            disabled = true;
-          }
-          if (options && editingRuleType) {
-            options = field.options.filter(
-              ([ruleType]) => ruleType === editingRuleType
-            );
-          }
-        }
-
-        // Editing keeps the rule's stored signal/variable selected even when the live
-        // PLC-mapping list does not (yet) offer it, instead of blanking the field.
-        let preserveInitial = false;
-        if (
-          isEditing &&
-          ["variable_id", "cycle_variable_id", "runtime_variable_id"].includes(field.key) &&
-          field.showWhen?.equals === editingRuleType
-        ) {
-          const storedId = monitoringRuleSelection?.initialValues?.[field.key];
-          if (storedId !== undefined && storedId !== null) {
-            preserveInitial = true;
-            if (!(options || []).some(([id]) => String(id) === String(storedId))) {
-              const stored = availableVariables.find(
-                (variable) => String(variable.id) === String(storedId)
-              );
-              options = [
-                [storedId, stored ? `${stored.name} (#${storedId})` : `Current signal (#${storedId})`],
-                ...(options || []),
-              ];
-            }
-          }
-        }
-
-        if (isSupervisor && isEditing) {
-          const allowedFields = [
-            "threshold",
-            "evaluation_interval_seconds",
-            "warning_threshold_1",
-            "warning_threshold_2",
-            "alert_threshold",
-            "runtime_warning_hours",
-            "runtime_warning_2_hours",
-            "runtime_alert_hours",
-          ];
-          if (!allowedFields.includes(field.key)) {
-            disabled = true;
-          }
-        }
-
-        return {
-          ...field,
-          disabled,
-          options,
-          preserveInitial,
-        };
-      });
-    },
-    [ruleFormFields, monitoringRuleSelection, isSupervisor, availableVariables]
-  );
 
   const bulk = async (state) => {
     if (!canChangeRuleLifecycle || bulkRequest.current || bulkSaving) return;
@@ -2156,6 +1591,7 @@ const filteredEvents = [...events]
           ? values.signal_role
           : null,
       unit: values.unit?.trim() || null,
+      is_active: String(values.is_active) !== "false",
       opcua_node_id: values.opcua_node_id?.trim() || null,
     // Data source and connector
     data_source: values.data_source || "none",
@@ -2181,6 +1617,7 @@ const filteredEvents = [...events]
           ? values.signal_role
           : null,
       unit: values.unit?.trim() || null,
+      is_active: String(values.is_active) !== "false",
       opcua_node_id: values.opcua_node_id?.trim() || null,
     });
 
@@ -2189,35 +1626,80 @@ const filteredEvents = [...events]
     await loadVariables();
   };
 
-  const deleteAsset = async () => {
+  const deleteAsset = () => {
     if (!isAdministrator || deletingAsset) return;
-    const confirmed = await confirm(
-      `Permanently delete asset "${asset.name}" and its asset-scoped event history? This cannot be undone. Deletion is blocked if it still has child assets, variables, readings, rules, alerts, or maintenance records.`,
-      {
-        title: "Permanently delete asset",
-        confirmLabel: "Delete permanently",
-        destructive: true,
-      }
-    );
-    if (!confirmed) return;
+    setShowDeleteAsset(true);
+  };
 
-    setDeletingAsset(true);
+  const setAssetActive = async (active) => {
+    if (!isAdministrator || deletingAsset) return;
+    if (!active) {
+      const ok = await confirm(
+        `Deactivate "${asset.name}"? Monitoring stops and no readings are accepted. All variables, rules, alerts, history and maintenance records are kept, and you can reactivate it at any time.`,
+        { title: "Deactivate asset", confirmLabel: "Deactivate" }
+      );
+      if (!ok) return;
+    }
     setLoadError("");
     try {
-      await api.del(`/assets/${assetId}`);
+      await api.patch(`/assets/${assetId}`, { is_active: active });
       await reload();
-      navigate("/assets", { replace: true });
+      setActionNotice(active ? `Asset "${asset.name}" was reactivated.` : `Asset "${asset.name}" was deactivated. All records were kept.`);
     } catch (error) {
-      setLoadError(error.message || "Could not delete the asset.");
+      setLoadError(error.message || "Could not change the asset status.");
+    }
+  };
+
+  const toggleVariableActive = async (variable) => {
+    if (!isAdministrator || togglingVariableId !== null) return;
+    const next = !variable.is_active;
+    if (!next) {
+      const ok = await confirm(
+        `Deactivate variable "${variable.name}"? It stops being polled and rules that use it show as not evaluated. Rule mappings, readings, alerts, counters and history are kept. On reactivation, monitoring resumes after a fresh valid reading.`,
+        { title: "Deactivate variable", confirmLabel: "Deactivate" }
+      );
+      if (!ok) return;
+    }
+    setTogglingVariableId(variable.id);
+    setVariableDeleteError("");
+    try {
+      await api.patch(`/variables/${variable.id}`, { is_active: next });
+      await loadVariables();
+    } catch (error) {
+      setVariableDeleteError(error.message || "Could not change the variable status.");
     } finally {
-      setDeletingAsset(false);
+      setTogglingVariableId(null);
     }
   };
 
   const deleteVariable = async (variable) => {
     if (!isAdministrator || deletingVariableId !== null) return;
+    setVariableDeleteError("");
+    let summary;
+    try {
+      summary = await api.get(`/variables/${variable.id}/deletion-summary`);
+    } catch (error) {
+      setVariableDeleteError(error.message || "Could not check what depends on this variable.");
+      return;
+    }
+    const c = summary.counts;
+    const used = [
+      c.rules && `${c.rules} monitoring rule(s)`,
+      c.rule_parameters && `${c.rule_parameters} rule parameter(s)`,
+      c.maintenance_schedules && `${c.maintenance_schedules} maintenance schedule(s)`,
+      c.alerts && `${c.alerts} alert(s)`,
+      c.readings && `${c.readings} stored reading(s)`,
+    ].filter(Boolean);
+    if (!summary.can_delete) {
+      setVariableDeleteError(
+        `"${variable.name}" cannot be deleted. ${summary.blockers.join(" ")} ${summary.alternative}`
+      );
+      return;
+    }
     const confirmed = await confirm(
-      `Permanently delete variable "${variable.name}"? Variables with readings, monitoring rules, alerts, or an OPC UA mapping cannot be deleted.`,
+      `Permanently delete variable "${variable.name}"? ` +
+        (used.length ? `This permanently deletes ${used.join(", ")}. ` : "Nothing depends on it. ") +
+        "Rules, alerts and maintenance configuration are never deleted with a variable. This cannot be undone.",
       {
         title: "Permanently delete variable",
         confirmLabel: "Delete permanently",
@@ -2229,7 +1711,7 @@ const filteredEvents = [...events]
     setDeletingVariableId(variable.id);
     setVariableDeleteError("");
     try {
-      await api.del(`/variables/${variable.id}`);
+      await api.del(`/variables/${variable.id}${summary.requires_confirmation ? "?confirm=true" : ""}`);
       await loadVariables();
     } catch (error) {
       setVariableDeleteError(
@@ -2333,9 +1815,17 @@ const filteredEvents = [...events]
             className="link-btn danger-link"
             onClick={deleteAsset}
             disabled={deletingAsset || !isAdministrator}
-            title={!isAdministrator ? "Administrator access required to manage assets." : "Permanently delete this asset if it has no related records"}
+            title={!isAdministrator ? "Administrator access required to manage assets." : "Review dependencies and permanently delete this asset"}
           >
             {deletingAsset ? "Deleting asset…" : "Delete asset"}
+          </button>
+          <button
+            className="link-btn"
+            onClick={() => setAssetActive(!asset.is_active)}
+            disabled={!isAdministrator}
+            title={!isAdministrator ? "Administrator access required to manage assets." : asset.is_active ? "Stop monitoring and keep all records" : "Resume monitoring"}
+          >
+            {asset.is_active ? "Deactivate asset" : "Reactivate asset"}
           </button>
           <button
           type="button"
@@ -2384,7 +1874,48 @@ const filteredEvents = [...events]
         ))}
       </div>
 
-      {tab === "status" && (
+      {tab === "status" && detailRuleId !== null && (() => {
+        const detailRule = rules.find((item) => item.id === detailRuleId);
+        const menuKey = `detail:${detailRuleId}`;
+        return (
+          <section className="rule-detail-page" aria-label="Rule status details">
+            <button type="button" className="rule-detail-back" onClick={closeRuleStatusPage}>
+              <span aria-hidden="true">←</span> Back to Current status
+            </button>
+            {!detailRule && rules.length === 0 && <p className="muted">Loading rule…</p>}
+            {!detailRule && rules.length > 0 && (
+              <p className="muted">This rule was not found on this asset. It may have been deleted.</p>
+            )}
+            {detailRule && (
+              <RuleStatusDetail
+                key={detailRule.id}
+                ruleId={detailRule.id}
+                showTechnical={showTechnical}
+                refreshToken={statusRefresh}
+                onEditParameter={(parameter) => setParameterEdit({ ruleId: detailRule.id, parameterId: parameter.id })}
+                actions={
+                  <div className="dropdown rule-actions-menu" data-menu-open={ruleActionMenuId === menuKey}>
+                    <button
+                      type="button"
+                      className="icon-outline sm"
+                      title={`More actions for ${detailRule.name}`}
+                      aria-label={`More actions for ${detailRule.name}`}
+                      aria-haspopup="menu"
+                      aria-expanded={ruleActionMenuId === menuKey}
+                      onClick={() => setRuleActionMenuId((current) => (current === menuKey ? null : menuKey))}
+                    >
+                      <DotsIcon size={17} />
+                    </button>
+                    {ruleActionMenuId === menuKey && renderRuleMenu(detailRule)}
+                  </div>
+                }
+              />
+            )}
+          </section>
+        );
+      })()}
+
+      {tab === "status" && detailRuleId === null && (
         <>
           <div className="toolbar rule-toolbar">
             <button
@@ -2573,151 +2104,33 @@ const filteredEvents = [...events]
           ) : (
             <div className="rule-list">
               {shown.map((rule) => {
-                const state = ruleStates.get(rule.id);
-
-                const currentValue =
-                  state?.latest_value ?? rule.latest_value;
-                const runtimeReading = runtimeReadings.get(rule.variable_id);
-                const evaluatedAt = state?.last_evaluated_at
-                  ? new Date(state.last_evaluated_at).getTime()
-                  : Number.NaN;
-                const signalAt = runtimeReading?.recorded_at
-                  ? new Date(runtimeReading.recorded_at).getTime()
-                  : Number.NaN;
-                const signalIsFresh =
-                  Number.isFinite(signalAt) &&
-                  clockNow - signalAt <=
-                    (Number(rule.stale_after_seconds) || 300) * 1000;
-                const runtimeIsRunning =
-                  rule.rule_type === "runtime_duration" &&
-                  state?.status !== "unknown" &&
-                  runtimeReading?.value === true &&
-                  signalIsFresh;
-                const displayedValue =
-                  runtimeIsRunning &&
-                  Number.isFinite(currentValue) &&
-                  Number.isFinite(evaluatedAt)
-                    ? currentValue +
-                      Math.max(0, clockNow - evaluatedAt) / 1000
-                    : currentValue;
-                const numericCurrentValue =
-                  displayedValue === null || displayedValue === undefined
-                    ? Number.NaN
-                    : Number(displayedValue);
-                const runtimeCurrentSeconds =
-                  rule.rule_type === "runtime_duration" &&
-                  !Number.isFinite(numericCurrentValue)
-                    ? 0
-                    : numericCurrentValue;
-                const canShowNextThreshold =
-                  rule.rule_type === "boolean_count_threshold" &&
-                  lifecycleStatus(rule) === "in_progress" &&
-                  ["ok", "warning"].includes(rule.status) &&
-                  Number.isFinite(numericCurrentValue);
-                const nextThreshold = canShowNextThreshold
-                  ? thresholdSequence(rule).find(
-                      (threshold) => threshold.value > numericCurrentValue
-                    )
-                  : null;
-                const formattedCurrentValue =
-                  rule.rule_type === "runtime_duration"
-                    ? formatDuration(displayedValue)
-                    : rule.rule_type === "boolean_count_threshold" &&
-                        Number.isFinite(numericCurrentValue)
-                      ? numericCurrentValue.toLocaleString()
-                      : formatValue(displayedValue);
-                const formattedNextThreshold = nextThreshold
-                  ? rule.rule_type === "runtime_duration"
-                    ? formatDuration(nextThreshold.value)
-                    : nextThreshold.value.toLocaleString()
-                  : null;
-                const scheduledActivationAt =
-                  rule.rule_type === "runtime_duration"
-                    ? Date.parse(rule.parameters?.activation_at)
-                    : Number.NaN;
-                const scheduledStartCountdown =
-                  lifecycleStatus(rule) === "in_progress" &&
-                  Number.isFinite(scheduledActivationAt) &&
-                  scheduledActivationAt > clockNow
-                    ? scheduledActivationAt - clockNow
-                    : null;
-                const runtimeThresholds = thresholdSequence(rule);
-                const runtimeNextThreshold =
-                  rule.rule_type === "runtime_duration" &&
-                  Number.isFinite(runtimeCurrentSeconds)
-                    ? runtimeThresholds.find(
-                        (threshold) => threshold.value > runtimeCurrentSeconds
-                      )
-                    : null;
-                const runtimeAlertReached =
-                  rule.rule_type === "runtime_duration" &&
-                  Number.isFinite(runtimeCurrentSeconds) &&
-                  runtimeCurrentSeconds >=
-                    Number(rule.parameters?.alert_threshold_seconds);
-                const runtimeAlert =
-                  rule.rule_type === "runtime_duration"
-                    ? alerts.find(
-                        (alert) =>
-                          alert.rule_id === rule.id &&
-                          alert.target_asset_id ===
-                            (state?.target_asset_id ?? rule.target_asset_id) &&
-                          alert.severity === "alert" &&
-                          alert.status === "active"
-                      )
-                    : null;
-                const runtimeAlertPending =
-                  runtimeAlertReached &&
-                  lifecycleStatus(rule) === "in_progress" &&
-                  state?.status === "alert" &&
-                  runtimeAlert &&
-                  !runtimeAlert.acknowledged_at;
-                const runtimeAlertStartedAt = Date.parse(
-                  state?.last_transition_at || ""
-                );
-                const runtimeOvertimeSeconds = runtimeAlertPending
-                  ? Number.isFinite(runtimeAlertStartedAt)
-                    ? Math.max(0, (clockNow - runtimeAlertStartedAt) / 1000)
-                    : Math.max(
-                        0,
-                        runtimeCurrentSeconds -
-                          Number(rule.parameters?.alert_threshold_seconds)
-                      )
-                  : 0;
-                const parameters = rule.parameters || {};
-                const isTimedBooleanRule =
-                  rule.rule_type === "duration" &&
-                  typeof parameters.expected_value === "boolean" &&
-                  Number.isFinite(Number(parameters.duration_seconds));
-                const conditionStartedAt = state?.condition_started_at
-                  ? new Date(state.condition_started_at).getTime()
-                  : Number.NaN;
-                const conditionMatches =
-                  isTimedBooleanRule &&
-                  displayedValue === parameters.expected_value;
-                const conditionElapsedSeconds =
-                  conditionMatches && Number.isFinite(conditionStartedAt)
-                      ? Math.max(0, (clockNow - conditionStartedAt) / 1000)
-                      : 0;
-
+                // Every rule, whatever its type or parameter count, is one compact parent card that opens its detail page.
+                const open = () => openRuleStatusPage(rule.id);
                 return (
                   <article
                     key={rule.id}
-                    className={`rule-row rule-card ${rule.status || "unknown"}${ruleActionMenuId === rule.id ? " rule-card-menu-open" : ""}`}
+                    className={`rule-row rule-card rule-card-clickable ${rule.status || "unknown"}${ruleActionMenuId === rule.id ? " rule-card-menu-open" : ""}`}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Open status details for ${rule.name}`}
+                    onClick={(event) => {
+                      // The action menu renders in a portal; its clicks still bubble here through React.
+                      if (!event.currentTarget.contains(event.target)) return;
+                      if (event.target.closest(".rule-card-actions")) return;
+                      open();
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) return;
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        open();
+                      }
+                    }}
                   >
                     <span className={"sev " + rule.status} />
 
                     <div className="rule-name rule-card-main">
                       <strong>{rule.name}</strong>
-                      {rule.description && (
-                        <small className="rule-description">{rule.description}</small>
-                      )}
-                      {ruleConditionSummary(rule) && (
-                        <small
-                          className={`rule-description${rule.evaluation_error === "invalid_rule_or_reading" ? " error-message" : ""}`}
-                        >
-                          {ruleConditionSummary(rule)}
-                        </small>
-                      )}
                       {rule.labels?.length > 0 && (
                         <span className="labels-chips asset-rule-labels">
                           {rule.labels.map((label) => (
@@ -2736,46 +2149,8 @@ const filteredEvents = [...events]
 
                     <div className="rule-card-metrics">
                       <div className="rule-current-next-value">
-                        <span>
-                          {list === "not_activated"
-                            ? "Last evaluated"
-                            : scheduledStartCountdown !== null
-                                ? "Due in"
-                                : isTimedBooleanRule
-                                  ? "Signal / Hold time"
-                                : rule.rule_type === "boolean_count_threshold"
-                                  ? "Current / Target"
-                                : rule.rule_type === "runtime_duration"
-                                  ? runtimeAlertPending
-                                    ? "Take action"
-                                    : "Current / Next"
-                                : "Current / Next"}
-                        </span>
-                        <b>
-                          {list === "not_activated"
-                            ? rule.last_evaluated_at
-                              ? formatTime(rule.last_evaluated_at)
-                              : "Not evaluated yet"
-                            : scheduledStartCountdown !== null
-                              ? formatTimeUntilStart(scheduledStartCountdown)
-                              : isTimedBooleanRule
-                                ? `${formatValue(displayedValue)} · ${formatDuration(conditionElapsedSeconds)} / ${formatDuration(parameters.duration_seconds)}`
-                            : rule.rule_type === "runtime_duration"
-                              ? runtimeAlertPending
-                                ? `Required time complete · ${formatDuration(runtimeOvertimeSeconds)} over`
-                                : `${formatDuration(runtimeCurrentSeconds)} / ${runtimeNextThreshold ? `Next warning in ${formatDuration(runtimeNextThreshold.value - runtimeCurrentSeconds)}` : "—"}`
-                            : <>
-                                {displayedValue !== null && displayedValue !== undefined
-                                  ? formattedCurrentValue
-                                  : "—"}
-                                {" / "}
-                                {nextThreshold
-                                  ? rule.rule_type === "boolean_count_threshold"
-                                    ? formattedNextThreshold
-                                    : `${nextThreshold.label} at ${formattedNextThreshold}`
-                                  : "—"}
-                              </>}
-                        </b>
+                        <span>Parameters</span>
+                        <b>{parameterSummary(rule)}</b>
                       </div>
                     </div>
 
@@ -2798,153 +2173,8 @@ const filteredEvents = [...events]
                           }
                         >
                           <DotsIcon size={17} />
-                     
-</button>
-{ruleActionMenuId === rule.id && (
-  <FloatingMenu align="right" role="menu">
-    <button
-      type="button"
-      className="rule-action-menu-item rule-action-menu-item--view"
-      role="menuitem"
-      onClick={() => {
-        setRuleActionMenuId(null);
-        openRuleDetails(rule);
-      }}
-    >
-      <Eye size={16} aria-hidden="true" />
-      <span>View rule</span>
-    </button>
-
-    <button
-      type="button"
-      className="rule-action-menu-item rule-action-menu-item--edit"
-      role="menuitem"
-      onClick={() => {
-        setRuleActionMenuId(null);
-        openEditRuleForm(rule);
-      }}
-      disabled={
-        (!canManageRules && !isSupervisor) ||
-        (isSupervisor && lifecycleStatus(rule) === "in_progress")
-      }
-      title={
-        !canManageRules
-          ? "You do not have permission to manage monitoring rules."
-          : isSupervisor && lifecycleStatus(rule) === "in_progress"
-            ? "A running rule cannot be edited by a Supervisor. Edit it while it is not activated."
-            : undefined
-      }
-    >
-      <Pencil size={16} aria-hidden="true" />
-      <span>Edit rule</span>
-    </button>
-
-    {/* Suspend rule */}
-    {lifecycleStatus(rule) === "in_progress" && (
-      <button
-        type="button"
-        className="rule-action-menu-item rule-action-menu-item--lifecycle"
-        role="menuitem"
-        onClick={() => {
-          setRuleActionMenuId(null);
-          setLifecycleAction({ rule, action: "suspend" });
-        }}
-        disabled={!canChangeRuleLifecycle || deletingRuleId !== null}
-        title={
-          !canChangeRuleLifecycle
-            ? "Only Administrators can change monitoring rule states."
-            : undefined
-        }
-      >
-        <Pause size={16} aria-hidden="true" />
-        Suspend rule
-      </button>
-    )}
-
-    {/* Activate rule: suspended */}
-    {lifecycleStatus(rule) === "suspended" && (
-      <button
-        type="button"
-        className="rule-action-menu-item rule-action-menu-item--lifecycle"
-        role="menuitem"
-        onClick={() => {
-          setRuleActionMenuId(null);
-          setLifecycleAction({ rule, action: "resume" });
-        }}
-        disabled={deletingRuleId !== null || !isAdministrator}
-        title={
-          !isAdministrator
-              ? "Only Administrators can activate suspended rules."
-            : undefined
-        }
-      >
-        <Power size={16} aria-hidden="true" />
-        Activate rule
-      </button>
-    )}
-
-    {/* Activate rule: deactivated */}
-    {lifecycleStatus(rule) === "deactivated" && (
-      <button
-        type="button"
-        className="rule-action-menu-item rule-action-menu-item--lifecycle"
-        role="menuitem"
-        onClick={() => {
-          setRuleActionMenuId(null);
-          setLifecycleAction({ rule, action: "activate" });
-        }}
-        disabled={deletingRuleId !== null || !(canChangeRuleLifecycle || isSupervisor)}
-        title={
-          !(canChangeRuleLifecycle || isSupervisor)
-            ? "Only Administrators and Supervisors can activate monitoring rules."
-            : undefined
-        }
-      >
-        <Power size={16} aria-hidden="true" />
-        Activate rule
-      </button>
-    )}
-
-    {/* Deactivate rule */}
-    {["in_progress", "suspended"].includes(lifecycleStatus(rule)) && (
-      <button
-        type="button"
-        className="rule-action-menu-item rule-action-menu-item--lifecycle"
-        role="menuitem"
-        onClick={() => {
-          setRuleActionMenuId(null);
-          setLifecycleAction({ rule, action: "deactivate" });
-        }}
-        disabled={!canChangeRuleLifecycle || deletingRuleId !== null}
-        title={
-          !canChangeRuleLifecycle
-            ? "Only Administrators can change monitoring rule states."
-            : undefined
-        }
-      >
-        <Power size={16} aria-hidden="true" />
-        Deactivate rule
-      </button>
-    )}
-
-    {lifecycleStatus(rule) !== "in_progress" && (
-      <button
-        type="button"
-        className="rule-action-menu-item rule-action-menu-item--delete"
-        role="menuitem"
-        onClick={() => {
-          setRuleActionMenuId(null);
-          permanentlyDeleteRule(rule);
-        }}
-        disabled={!isAdministrator || deletingRuleId !== null}
-        title={!isAdministrator ? "Only Administrators can permanently delete rules." : "Permanently delete rule"}
-      >
-        <Trash2 size={16} aria-hidden="true" />
-        <span>{deletingRuleId === rule.id ? "Deleting…" : "Delete rule"}</span>
-      </button>
-    )}
-                          </FloatingMenu>
-                        )}
+                        </button>
+                        {ruleActionMenuId === rule.id && renderRuleMenu(rule)}
                       </div>
                     </div>
                   </article>
@@ -3654,7 +2884,7 @@ const filteredEvents = [...events]
         onClick={() => setModal("ruleTypeOptions")}
       >
         <strong>Create A Rule</strong>
-        <small>Create an interval, time, or usage-based rule.</small>
+        <small>Create an Interval Based or Parameter Threshold rule.</small>
       </button>
 
       <button
@@ -3701,30 +2931,40 @@ const filteredEvents = [...events]
     title="Create A Rule"
     onClose={() => setModal(null)}
   >
-    <div className="rule-type-options">
-      {LEGACY_RULE_CHOICES.map((choice) => (
-        <button
-          key={choice.kind}
-          type="button"
-          className="rule-type-option"
-          onClick={() => {
-            setModal(null);
-            navigate(legacyRulePath(assetId, choice.kind), {
-              state: {
-                from: captureNavigationOrigin(
-                  location,
-                  assetNavigationState
-                ),
-              },
-            });
-          }}
-        >
-          <strong>{choice.label}</strong>
-          <small>{choice.description}</small>
-        </button>
-      ))}
-    </div>
+    <RuleCategoryOptions
+      onSelect={(category) => {
+        setModal(null);
+        const state = {
+          from: captureNavigationOrigin(location, assetNavigationState),
+        };
+        navigate(
+          category === "interval"
+            ? legacyRulePath(assetId, "interval")
+            : `/assets/${assetId}/monitoring-rules/new/parameter_threshold`,
+          { state }
+        );
+      }}
+    />
   </Modal>
+)}
+
+{parameterEdit !== null && (
+  <ParameterEditDialog
+    ruleId={parameterEdit.ruleId}
+    parameterId={parameterEdit.parameterId}
+    alwaysSelect={Boolean(parameterEdit.alwaysSelect)}
+    assetId={assetId}
+    assetName={asset?.name}
+    ruleName={rules.find((item) => item.id === parameterEdit.ruleId)?.name}
+    ruleInfo={rules.find((item) => item.id === parameterEdit.ruleId)?.parameters}
+    onClose={() => setParameterEdit(null)}
+    onSaved={() => {
+      setParameterEdit(null);
+      setStatusRefresh((value) => value + 1);
+      refreshAll();
+      setActionNotice("Parameter saved.");
+    }}
+  />
 )}
 
 {lifecycleAction && (
@@ -3787,166 +3027,6 @@ const filteredEvents = [...events]
   </Modal>
 )}
 
-{viewRule && (
-  <Modal
-    title={viewRule.name || "Monitoring rule"}
-    onClose={() => {
-      setViewRule(null);
-      setCompletionDetails(null);
-      setCompletionDetailsError("");
-      clearSelectedRuleContext();
-    }}
-    wide
-  >
-    <dl className="rule-detail-grid">
-      <div>
-        <dt>Rule type</dt>
-        <dd>
-          {viewRule.rule_type === "runtime_duration"
-            ? "Running time"
-            : viewRule.rule_type === "boolean_count_threshold"
-              ? "Cycle count"
-              : viewRule.rule_type === "parameter_threshold"
-                ? "Parameter threshold"
-                : viewRule.rule_type === "duration" &&
-                    viewRule.parameters?.condition === "interval_elapsed"
-                  ? "Interval based"
-                  : viewRule.rule_type?.replaceAll("_", " ") || "—"}
-        </dd>
-      </div>
-      <div>
-        <dt>Lifecycle</dt>
-        <dd>{lifecycleLabel(viewRule)}</dd>
-      </div>
-      <div>
-        <dt>Asset</dt>
-        <dd>
-          {assets.find(
-            (candidate) =>
-              candidate.id === Number(viewRule.target_asset_id)
-          )?.name ||
-            viewRule.asset_name ||
-            (viewRule.target_asset_id != null
-              ? `Asset ${viewRule.target_asset_id}`
-              : "—")}
-        </dd>
-      </div>
-      <div>
-        <dt>Evaluation status</dt>
-        <dd><StatusBadge status={viewRule.status || "unknown"} /></dd>
-      </div>
-      <div>
-        <dt>Variable</dt>
-        <dd>{viewRule.variable_name || "Asset-level rule"}</dd>
-      </div>
-      <div>
-        <dt>Condition</dt>
-        <dd>{ruleConditionSummary(viewRule) || "No condition summary available."}</dd>
-      </div>
-      <div>
-        <dt>Created by</dt>
-        <dd>{auditUser(viewRule.created_by)}</dd>
-      </div>
-      <div>
-        <dt>Created on</dt>
-        <dd>{formatAuditTime(viewRule.created_at)}</dd>
-      </div>
-      <div>
-        <dt>Last updated by</dt>
-        <dd>{auditUser(viewRule.updated_by)}</dd>
-      </div>
-      <div>
-        <dt>Last updated on</dt>
-        <dd>{viewRule.updated_by ? formatAuditTime(viewRule.updated_at) : "Unknown"}</dd>
-      </div>
-      {viewRule.description && (
-        <div>
-          <dt>Description</dt>
-          <dd>{viewRule.description}</dd>
-        </div>
-      )}
-      {thresholdMetrics(viewRule).map((metric) => (
-        <div key={metric.label}>
-          <dt>{metric.label} threshold</dt>
-          <dd>{metric.value}</dd>
-        </div>
-      ))}
-      <div>
-        <dt>Latest value</dt>
-        <dd>{formatValue(viewRule.latest_value)}</dd>
-      </div>
-      <div>
-        <dt>Last evaluated</dt>
-        <dd>{viewRule.last_evaluated_at ? formatTime(viewRule.last_evaluated_at) : "Not evaluated yet"}</dd>
-      </div>
-      {viewRule.evaluation_message && (
-        <div>
-          <dt>Evaluation detail</dt>
-          <dd>{viewRule.evaluation_message}</dd>
-        </div>
-      )}
-      {completionDetailsError ? (
-        <div>
-          <dt>Action history</dt>
-          <dd className="error-message">{completionDetailsError}</dd>
-        </div>
-      ) : completionDetails === null ? (
-        <div>
-          <dt>Action history</dt>
-          <dd>Loading acknowledgement and completion details…</dd>
-        </div>
-      ) : (
-        <>
-          {completionDetails.acknowledged_by && (
-            <>
-              <div>
-                <dt>Acknowledged by</dt>
-                <dd>{completionDetails.acknowledged_by}</dd>
-              </div>
-              <div>
-                <dt>Acknowledged at</dt>
-                <dd>{completionDetails.acknowledged_at
-                  ? formatTime(completionDetails.acknowledged_at)
-                  : "—"}</dd>
-              </div>
-            </>
-          )}
-          {lifecycleStatus(viewRule) === "completed" && (
-            <>
-              <div>
-                <dt>Completion</dt>
-                <dd>Rule successfully completed and deactivated.</dd>
-              </div>
-              <div>
-                <dt>Completed by</dt>
-                <dd>{completionDetails.completed_by || "—"}</dd>
-              </div>
-              <div>
-                <dt>Completed at</dt>
-                <dd>{completionDetails.completed_at
-                  ? formatTime(completionDetails.completed_at)
-                  : viewRule.completed_at
-                    ? formatTime(viewRule.completed_at)
-                    : "—"}</dd>
-              </div>
-            </>
-          )}
-        </>
-      )}
-    </dl>
-    <div className="modal-actions">
-      <button type="button" className="btn-primary" onClick={() => {
-        setViewRule(null);
-        setCompletionDetails(null);
-        setCompletionDetailsError("");
-        clearSelectedRuleContext();
-      }}>
-        Close
-      </button>
-    </div>
-  </Modal>
-)}
-
 {tab === "logbook" && modal === "view" && selectedEntry && (
   <Modal
     title="Maintenance details"
@@ -3995,30 +3075,6 @@ const filteredEvents = [...events]
 )}
 
 
-      {modal === "add" && (
-        <CreateModal
-          title={monitoringRuleSelection?.title || "Create monitoring rule"}
-          submitLabel={
-            monitoringRuleSelection?.ruleId ? "Save rule" : "Create rule"
-          }
-          intro={
-            !canManageRules
-              ? "You do not have permission to create or edit monitoring rules."
-              : availableVariables.length
-                ? undefined
-                : "This asset has no active variables yet. Add one under Variables, then come back to create a rule."
-          }
-          fields={monitoringRuleFormFields}
-          initialValues={monitoringRuleSelection?.initialValues}
-          onSubmit={addRule}
-          disabled={!canManageRules}
-          onClose={() => {
-            setModal(null);
-            setMonitoringRuleSelection(null);
-          }}
-        />
-      )}
-
       {modal === "log" && (
         <CreateModal
           title="New logbook entry"
@@ -4060,15 +3116,15 @@ const filteredEvents = [...events]
             },
             {
               key: "is_active",
-              label: "Monitoring",
+              label: "Status",
               type: "select",
               default: String(asset.is_active),
               options: [
-                ["true", "Enabled"],
-                ["false", "Disabled"],
+                ["true", "Active"],
+                ["false", "Inactive"],
               ],
               hint:
-                "Disabled assets stay in the hierarchy but are greyed out.",
+                "Inactive assets stop monitoring but keep all variables, rules, alerts and history.",
             },
           ]}
         />
@@ -4079,13 +3135,29 @@ const filteredEvents = [...events]
           title={editingVariable ? "Edit variable" : "Add variable"}
           submitLabel={editingVariable ? "Save variable" : "Add variable"}
           fields={VARIABLE_FIELDS}
-          initialValues={editingVariable || {}}
+          initialValues={editingVariable ? { ...editingVariable, is_active: String(editingVariable.is_active) } : {}}
           onSubmit={editingVariable ? updateVariable : addVariable}
           disabled={!isAdministrator}
           intro={!isAdministrator ? "Administrator access required to manage variables and OPC UA mappings." : undefined}
           onClose={() => {
             setEditingVariable(null);
             setModal("variables");
+          }}
+        />
+      )}
+
+      {showDeleteAsset && (
+        <AssetDeletionDialog
+          asset={asset}
+          onClose={() => setShowDeleteAsset(false)}
+          onDeactivate={async () => {
+            setShowDeleteAsset(false);
+            await setAssetActive(false);
+          }}
+          onDeleted={async () => {
+            setShowDeleteAsset(false);
+            await reload();
+            navigate("/assets", { replace: true });
           }}
         />
       )}
@@ -4140,7 +3212,7 @@ const filteredEvents = [...events]
                     >
                       {variable.opcua_node_id || "—"}
                     </td>
-                    <td>{variable.is_active ? "Active" : "Inactive"}</td>
+                    <td><span className={"badge " + (variable.is_active ? "ok" : "unknown")}>{variable.is_active ? "Active" : "Inactive"}</span></td>
                     <td className="variable-actions-cell">
                       <div className="variable-row-actions">
                         <button
@@ -4155,6 +3227,15 @@ const filteredEvents = [...events]
                           aria-label="Edit variable"
                         >
                           <Pencil size={16} aria-hidden="true" />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-outline"
+                          onClick={() => toggleVariableActive(variable)}
+                          disabled={!isAdministrator || togglingVariableId !== null || deletingVariableId !== null}
+                          title={variable.is_active ? "Deactivate: stop monitoring, keep all data" : "Reactivate: resume after a fresh reading"}
+                        >
+                          {variable.is_active ? "Deactivate" : "Reactivate"}
                         </button>
                         <button
                           type="button"

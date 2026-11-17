@@ -1,84 +1,7 @@
-/* New rule workflow in the Monitoring Rule Library: type selection and the shared
-   full-page form. Form sections reuse the styles in rules/pages/RuleCreatePage.css. */
-.rule-create-page .rule-type-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin: 4px 0 14px;
-}
-
-.rule-create-page .rule-type-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  width: 100%;
-  min-width: 0;
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-panel);
-  background: var(--surface);
-  color: var(--ink);
-  font-family: var(--font);
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
-}
-
-.rule-create-page .rule-type-card:hover:not(:disabled) {
-  border-color: var(--action);
-  background: var(--surface-2);
-}
-
-.rule-create-page .rule-type-card:active:not(:disabled) {
-  border-color: var(--action);
-  background: var(--action-soft);
-}
-
-.rule-create-page .rule-type-card:focus-visible,
+/* New rule workflow in the Monitoring Rule Library: the shared full-page form. Form sections reuse the styles in rules/pages/RuleCreatePage.css. */
 .rule-create-page .rule-type-link:focus-visible {
   outline: 2px solid var(--action);
   outline-offset: 2px;
-}
-
-.rule-create-page .rule-type-card:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.rule-create-page .rule-type-icon {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--r-ctl);
-  background: var(--action-soft);
-  color: var(--action);
-}
-
-.rule-create-page .rule-type-text {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.rule-create-page .rule-type-text strong {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.rule-create-page .rule-type-text span {
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.45;
-}
-
-.rule-create-page .rule-type-other {
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
 }
 
 .rule-create-page .rule-type-link {
@@ -105,10 +28,4 @@
 
 .rule-create-page .rule-visibility-supervisors {
   margin-top: 8px;
-}
-
-@container rulecreate (max-width: 560px) {
-  .rule-create-page .rule-type-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }

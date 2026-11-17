@@ -21,7 +21,6 @@ import {
   returnToNavigationOrigin,
 } from "../../../utils/navigation.js";
 import {
-  CreateModal,
   EmptyState,
   LoadingIndicator,
   Modal,
@@ -29,126 +28,14 @@ import {
 } from "../../../components/common/UI.jsx";
 import LabelsField from "../../../components/common/LabelsField.jsx";
 import {
-  SHARED_RULE_WARNING,
-  VISIBILITY_CHANGE_WARNING,
   VISIBILITY_LABELS,
   VisibilityBadge,
   VisibilityModal,
-  saveVisibility,
-  useSupervisorChoices,
-  visibilityChanged,
-  visibilityFields,
-  visibilityInitial,
-  visibilityPayload,
 } from "./RuleVisibility.jsx";
+import { ruleCategoryLabel } from "../../rules/ruleCategories.js";
 import "./RuleLibrary.css";
 import CopyRuleModal from "./CopyRuleModal.jsx";
 import "./CopyRuleModal.css";
-
-const RULE_TYPES = [
-  ["interval_based", "Interval based"],
-  ["temperature_monitoring", "Temperature Based"],
-  ["parameter_threshold", "Parameter threshold"],
-];
-
-const COMPARISON_OPTIONS = [
-  [">=", "Greater than or equal"],
-  [">", "Greater than"],
-  ["<=", "Less than or equal"],
-  ["<", "Less than"],
-  ["==", "Equal"],
-  ["!=", "Not equal"],
-];
-
-const BOOLEAN_COMPARISON_OPTIONS = [
-  ["==", "Is"],
-  ["!=", "Is not"],
-];
-
-export const FIELDS = [
-  { key: "name", label: "Rule name", required: true, placeholder: "e.g. High motor temperature" },
-  { key: "description", label: "Description", type: "textarea" },
-  { key: "labels", label: "Labels", type: "labels" },
-  { key: "rule_type", label: "Rule type", type: "select", required: true, default: "interval_based", options: RULE_TYPES },
-  {
-    key: "temperature_unit",
-    label: "Temperature unit",
-    type: "select",
-    default: "°C",
-    options: [["°C", "°C"], ["°F", "°F"]],
-    showWhen: { key: "rule_type", equals: "temperature_monitoring" },
-    requiredWhen: { key: "rule_type", equals: "temperature_monitoring" },
-    hint: "Temperature rules reuse the standard numeric threshold engine while preserving the selected engineering unit.",
-  },
-  {
-    key: "temperature_warning_threshold",
-    label: "Warning temperature threshold",
-    type: "number",
-    placeholder: "e.g. 70",
-    showWhen: { key: "rule_type", equals: "temperature_monitoring" },
-    requiredWhen: { key: "rule_type", equals: "temperature_monitoring" },
-  },
-  {
-    key: "temperature_alert_threshold",
-    label: "Alert temperature threshold",
-    type: "number",
-    placeholder: "e.g. 85",
-    showWhen: { key: "rule_type", equals: "temperature_monitoring" },
-    requiredWhen: { key: "rule_type", equals: "temperature_monitoring" },
-  },
-  {
-    key: "variable_type",
-    label: "Variable type",
-    type: "select",
-    default: "number",
-    options: [
-      ["integer", "Integer"],
-      ["boolean", "Boolean"],
-    ],
-    showWhen: { key: "rule_type", equals: "parameter_threshold" },
-    requiredWhen: { key: "rule_type", equals: "parameter_threshold" },
-    hint: "Assigned assets must have an active variable with this data type.",
-    onChange: (value, _values, setValues) => {
-      setValues((current) => ({
-        ...current,
-        operator: value === "boolean" ? "==" : ">=",
-      }));
-    },
-  },
-  {
-    key: "variable_key",
-    label: "Preferred variable key (optional)",
-    placeholder: "e.g. motor_temperature",
-    hint: "Used to suggest a mapping when assigning this rule.",
-    showWhen: (values) =>
-      values.rule_type === "parameter_threshold" ||
-      values.rule_type === "interval_based",
-  },
-// Updated the running signal type to support both Boolean and Integer variables.
-  {key: "runtime_variable_type",label: "Running signal type",type: "select",default: "boolean",options: [["boolean", "Boolean"],["integer", "Integer"],],showWhen: { key: "rule_type", equals: "interval_based" },requiredWhen: { key: "rule_type", equals: "interval_based" },hint: "Boolean: runtime accumulates when the signal is ON. Integer: runtime accumulates when the value is greater than 0.",},
-  { key: "boolean_behavior", label: "Boolean rule behavior", type: "select", default: "running_time", options: [["running_time", "Accumulate running time while ON"], ["cycle_count", "Count OFF-to-ON cycles"], ["state", "Check the current ON/OFF state"]], showWhen: (values) => values.rule_type === "parameter_threshold" && values.variable_type === "boolean", hint: "Cycle counting increments once for each OFF-to-ON transition." },
-  { key: "runtime_warning_hours", label: "Warning after running (hours)", type: "number", required: true, default: 1, showWhen: (values) => values.rule_type === "interval_based" || (values.rule_type === "parameter_threshold" && values.variable_type === "boolean" && values.boolean_behavior === "running_time"), hint: "Runtime accumulates only while the selected Boolean signal is ON." },
-  { key: "runtime_warning_2_hours", label: "Higher warning (hours)", type: "number", required: true, default: 1.5, showWhen: (values) => values.rule_type === "interval_based" || (values.rule_type === "parameter_threshold" && values.variable_type === "boolean" && values.boolean_behavior === "running_time") },
-  { key: "runtime_alert_hours", label: "Alert after running (hours)", type: "number", required: true, default: 2, showWhen: (values) => values.rule_type === "interval_based" || (values.rule_type === "parameter_threshold" && values.variable_type === "boolean" && values.boolean_behavior === "running_time") },
-  { key: "cycle_warning_threshold_1", label: "Warning at cycle count", type: "number", requiredWhen: (values) => values.rule_type === "parameter_threshold" && values.variable_type === "boolean" && values.boolean_behavior === "cycle_count", placeholder: "e.g. 9000", showWhen: (values) => values.rule_type === "parameter_threshold" && values.variable_type === "boolean" && values.boolean_behavior === "cycle_count" },
-  { key: "cycle_warning_threshold_2", label: "Higher warning at cycle count", type: "number", requiredWhen: (values) => values.rule_type === "parameter_threshold" && values.variable_type === "boolean" && values.boolean_behavior === "cycle_count", placeholder: "e.g. 9500", showWhen: (values) => values.rule_type === "parameter_threshold" && values.variable_type === "boolean" && values.boolean_behavior === "cycle_count" },
-  { key: "cycle_alert_threshold", label: "Alert at cycle count", type: "number", requiredWhen: (values) => values.rule_type === "parameter_threshold" && values.variable_type === "boolean" && values.boolean_behavior === "cycle_count", placeholder: "e.g. 10000", showWhen: (values) => values.rule_type === "parameter_threshold" && values.variable_type === "boolean" && values.boolean_behavior === "cycle_count" },
-  { key: "operator", label: "Condition", type: "select", required: true, default: ">=", options: (values) => values.variable_type === "boolean" ? BOOLEAN_COMPARISON_OPTIONS : COMPARISON_OPTIONS, showWhen: (values) => values.rule_type === "parameter_threshold" && (values.variable_type !== "boolean" || values.boolean_behavior === "state") },
-  { key: "threshold", label: "Threshold", type: "number", requiredWhen: (values) => values.rule_type === "parameter_threshold" && values.variable_type !== "boolean", showWhen: (values) => values.rule_type === "parameter_threshold" && values.variable_type !== "boolean" },
-  { key: "expected_boolean", label: "Boolean value", type: "select", requiredWhen: { key: "rule_type", equals: "parameter_threshold" }, options: [["true", "ON"], ["false", "OFF"]], default: "true", showWhen: (values) => values.rule_type === "parameter_threshold" && values.variable_type === "boolean" && values.boolean_behavior === "state" },
-  { key: "severity", label: "Severity", type: "select", required: true, default: "warning", options: [["warning", "Warning"], ["alert", "Alert"]] },
-  { key: "is_enabled", label: "Rule status", type: "select", required: true, default: "true", options: [["true", "Available"], ["false", "Disabled"]] },
-  { key: "evaluation_interval_seconds", label: "Check interval (seconds)", type: "number", showWhen: (values) => values.rule_type === "parameter_threshold" && (values.variable_type !== "boolean" || values.boolean_behavior === "state") },
-  { key: "stale_after_seconds", label: "Stale reading timeout (seconds)", type: "number", showWhen: (values) => values.rule_type === "parameter_threshold" && (values.variable_type !== "boolean" || values.boolean_behavior === "state") },
-];
-
-export const LEGACY_EDIT_FIELDS = [
-  { key: "name", label: "Rule name", required: true },
-  { key: "description", label: "Description", type: "textarea" },
-  { key: "labels", label: "Labels", type: "labels" },
-  { key: "severity", label: "Severity", type: "select", required: true, options: [["warning", "Warning"], ["alert", "Alert"]] },
-  { key: "is_enabled", label: "Rule status", type: "select", required: true, options: [["true", "Available"], ["false", "Disabled"]] },
-];
 
 function formatInterval(seconds) {
   for (const [unit, divisor] of [
@@ -166,6 +53,11 @@ function formatInterval(seconds) {
 
 export function templateSummary(template) {
   const parameters = template.parameters || {};
+  if (template.rule_type === "multi_parameter") {
+    const defs = parameters.parameter_defs || [];
+    const names = defs.map((def) => def.name).join(", ");
+    return `${defs.length} parameter${defs.length === 1 ? "" : "s"}${names ? ` · ${names}` : ""}`;
+  }
   if (template.rule_type === "parameter_threshold" && parameters.temperature_rule === true) {
     const unit = parameters.unit || "°C";
     return `Temperature · warning at ${parameters.warning_threshold ?? "—"} ${unit} · alert at ${parameters.alert_threshold ?? "—"} ${unit}`;
@@ -215,328 +107,26 @@ export function templateSummary(template) {
   return "Asset-level configuration";
 }
 
-const needsRuntimeThresholdConfiguration = (template) =>
-  template.rule_type === "parameter_threshold" &&
-  template.required_variable_types?.includes("boolean") &&
-  template.parameters?.expected_value === true &&
-  template.parameters?.evaluation_mode !== "state";
-
-export const displayType = (rule) => {
-  if (rule.rule_type === "parameter_threshold" && rule.parameters?.temperature_rule === true) {
-    return "Temperature Based";
-  }
-  return rule.rule_type === "duration" &&
-    rule.parameters?.condition === "interval_elapsed"
-      ? "Interval based"
-      : rule.rule_type === "runtime_duration"
-        ? "Interval based"
-      : rule.rule_type === "boolean_count_threshold"
-        ? "Parameter threshold"
-      : RULE_TYPES.find(([value]) => value === rule.rule_type)?.[1] ||
-        rule.rule_type?.replaceAll("_", " ") ||
-        "Monitoring rule";
-};
+// User-facing rule type: Interval Based or Parameter Threshold. The stored backend type is unchanged.
+export const displayType = (rule) =>
+  ruleCategoryLabel(rule) ||
+  rule.rule_type?.replaceAll("_", " ") ||
+  "Monitoring rule";
 
 // Monitoring category, derived only from the rule types the system implements.
-export const ruleKind = (rule) => {
-  const parameters = rule.parameters || {};
-  if (rule.rule_type === "runtime_duration") return "Runtime-based";
-  if (rule.rule_type === "boolean_count_threshold") return "Cycle count";
-  if (rule.rule_type === "duration") return "Time interval";
-  if (rule.rule_type === "parameter_threshold") {
-    if (parameters.temperature_rule === true) {
-      return "Threshold";
-    }
-    if (rule.required_variable_types?.includes("boolean")) {
-      return parameters.evaluation_mode === "state" ? "Boolean condition" : "Runtime-based";
-    }
-    return "Threshold";
-  }
-  return displayType(rule);
-};
+// Only two categories are exposed anywhere: Interval Based and Parameter Threshold.
+export const ruleKind = (rule) => displayType(rule);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-export const supportsCurrentRuleEditor = (rule) =>
-  rule.rule_type === "parameter_threshold" ||
-  rule.rule_type === "runtime_duration" ||
-  rule.rule_type === "boolean_count_threshold";
-
-export function legacyTemplatePayload(values, template) {
-  return {
-    name: values.name,
-    description: values.description || null,
-    labels: values.labels || template.labels || [],
-    rule_type: template.rule_type,
-    required_variable_types: template.required_variable_types,
-    variable_key: template.variable_key,
-    operator: template.operator,
-    threshold: template.threshold,
-    parameters: template.parameters,
-    severity: values.severity,
-    is_enabled: values.is_enabled !== "false",
-    evaluation_interval_seconds: template.evaluation_interval_seconds,
-    stale_after_seconds: template.stale_after_seconds,
-  };
-}
-
-export function initialTemplate(template) {
-  if (!template) return {};
-  const params = template.parameters || {};
-  const required = template.required_variable_types || [];
-  const variableType = required.length === 2 && required.includes("number") && required.includes("integer")
-    ? "number"
-    : required[0] || "number";
-  const isTemperatureMonitoring =
-    template.rule_type === "parameter_threshold" && params.temperature_rule === true;
-  const isInterval =
-    template.rule_type === "duration" &&
-    params.condition === "interval_elapsed";
-  const intervalSeconds = params.interval_seconds;
-  const intervalUnits = [
-    ["days", 86400],
-    ["hours", 3600],
-    ["minutes", 60],
-    ["seconds", 1],
-  ];
-  const intervalUnit =
-    intervalUnits.find(([, seconds]) =>
-      Number.isInteger(intervalSeconds / seconds)
-    )?.[0] || "seconds";
-  const isRuntime = template.rule_type === "runtime_duration";
-  const isCycleCount = template.rule_type === "boolean_count_threshold";
-  const isBooleanRunningTemplate =
-    template.rule_type === "parameter_threshold" &&
-    required.includes("boolean") &&
-    params.expected_value === true &&
-    params.evaluation_mode !== "state";
-  return {
-    ...template,
-    rule_type: isTemperatureMonitoring
-      ? "temperature_monitoring"
-      : isInterval || isRuntime
-        ? "interval_based"
-        : isCycleCount
-          ? "parameter_threshold"
-          : template.rule_type,
-    variable_type: variableType,
-    boolean_behavior: isCycleCount
-      ? "cycle_count"
-      : isBooleanRunningTemplate
-        ? "running_time"
-        : "state",
-    temperature_unit: params.unit || "°C",
-    temperature_warning_threshold: params.warning_threshold ?? "",
-    temperature_alert_threshold: params.alert_threshold ?? "",
-    runtime_warning_hours: isRuntime
-      ? Number(params.warning_thresholds_seconds?.[0] || 0) / 3600
-      : isBooleanRunningTemplate
-        ? 1
-        : "",
-    runtime_warning_2_hours: isRuntime
-      ? Number(params.warning_thresholds_seconds?.[1] || 0) / 3600
-      : isBooleanRunningTemplate
-        ? 1.5
-        : "",
-    runtime_alert_hours: isRuntime
-      ? Number(params.alert_threshold_seconds || 0) / 3600
-      : isBooleanRunningTemplate
-        ? 2
-        : "",
-    cycle_warning_threshold_1: isCycleCount
-      ? params.warning_thresholds?.[0] ?? ""
-      : "",
-    cycle_warning_threshold_2: isCycleCount
-      ? params.warning_thresholds?.[1] ?? ""
-      : "",
-    cycle_alert_threshold: isCycleCount
-      ? params.alert_threshold ?? ""
-      : "",
-    expected_boolean: String(params.expected_value ?? true),
-    threshold: template.threshold ?? params.warning_threshold ?? "",
-    operator: template.operator || (variableType === "boolean" ? "==" : ">="),
-    interval_unit: intervalUnit,
-    is_enabled: String(template.is_enabled),
-  };
-}
-
-
-const SUPERVISOR_CYCLE_FIELDS = [
-  "cycle_warning_threshold_1",
-  "cycle_warning_threshold_2",
-  "cycle_alert_threshold",
-];
-
-const SUPERVISOR_RUNTIME_FIELDS = [
-  "runtime_warning_hours",
-  "runtime_warning_2_hours",
-  "runtime_alert_hours",
-];
-
-function getSupervisorEditableFields(template) {
-  if (!template) return [];
-
-  const values = initialTemplate(template);
-
-  const isCycleRule =
-    template.rule_type === "boolean_count_threshold" ||
-    (
-      values.rule_type === "parameter_threshold" &&
-      values.variable_type === "boolean" &&
-      values.boolean_behavior === "cycle_count"
-    );
-
-  const isRuntimeRule =
-    template.rule_type === "runtime_duration" ||
-    (
-      values.rule_type === "interval_based" &&
-      (
-        template.required_variable_types?.includes("boolean") ||
-        values.runtime_variable_type === "boolean"
-      )
-    );
-
-  if (isCycleRule) {
-    return SUPERVISOR_CYCLE_FIELDS;
-  }
-
-  if (isRuntimeRule) {
-    return SUPERVISOR_RUNTIME_FIELDS;
-  }
-
-  return [];
-}
-
-export function templatePayload(values) {
-  const isBooleanRunning =
-    values.rule_type === "parameter_threshold" &&
-    values.variable_type === "boolean" &&
-    values.boolean_behavior === "running_time";
-  const isBooleanCycleCount =
-    values.rule_type === "parameter_threshold" &&
-    values.variable_type === "boolean" &&
-    values.boolean_behavior === "cycle_count";
-  const isTemperatureMonitoring = values.rule_type === "temperature_monitoring";
-  const isInterval = values.rule_type === "interval_based" || isBooleanRunning;
-  const type = isBooleanCycleCount
-    ? "boolean_count_threshold"
-    : isTemperatureMonitoring
-      ? "parameter_threshold"
-      : isInterval
-        ? "runtime_duration"
-        : values.rule_type;
-  let required_variable_types = null;
-  let parameters = null;
-  let operator = null;
-  let threshold = null;
-  let variable_key = null;
-  if (isInterval) {
-    const warning1 = Number(values.runtime_warning_hours) * 3600;
-    const warning2 = Number(values.runtime_warning_2_hours) * 3600;
-    const alert = Number(values.runtime_alert_hours) * 3600;
-    if (
-      ![warning1, warning2, alert].every((value) => Number.isFinite(value) && value > 0) ||
-      warning1 >= warning2 ||
-      warning2 >= alert
-    ) {
-      throw new Error("Running-time thresholds must be positive and strictly increasing.");
-    }
-    required_variable_types = ["boolean"];
-    variable_key = values.variable_key || null;
-    parameters = {
-      warning_thresholds_seconds: [warning1, warning2],
-      alert_threshold_seconds: alert,
-    };
-  } else if (type === "parameter_threshold") {
-    // Temperature calls continue to use the shared parameter-threshold engine, but the
-    // reusable-rule payload carries explicit unit and threshold metadata so the rule can be
-    // created, edited, copied, assigned and evaluated without a parallel rule system.
-    if (isTemperatureMonitoring) {
-      // Temperature rules stay on the shared parameter-threshold engine, but they need to
-      // carry the warning/alert thresholds in the rule parameters while also satisfying the
-      // backend's single-threshold validation for this generic numeric rule type.
-      const warning = Number(values.temperature_warning_threshold);
-      const alert = Number(values.temperature_alert_threshold);
-      const unit = String(values.temperature_unit || "°C").trim() || "°C";
-      if (
-        !Number.isFinite(warning) ||
-        !Number.isFinite(alert) ||
-        warning <= 0 ||
-        alert <= 0 ||
-        warning >= alert
-      ) {
-        throw new Error("Temperature warning and alert thresholds must be positive and the alert must be higher than the warning.");
-      }
-      required_variable_types = ["number", "integer"];
-      variable_key = values.variable_key || null;
-      threshold = warning;
-      operator = ">=";
-      parameters = {
-        temperature_rule: true,
-        unit,
-        warning_threshold: warning,
-        alert_threshold: alert,
-      };
-    } else {
-      required_variable_types = values.variable_type === "boolean"
-        ? ["boolean"]
-        : values.variable_type === "integer"
-          ? ["integer"]
-          : ["number", "integer"];
-      variable_key = values.variable_key || null;
-      operator = values.operator;
-      if (values.variable_type === "boolean") {
-        parameters = {
-          expected_value: values.expected_boolean === "true",
-          evaluation_mode: "state",
-        };
-      } else {
-        threshold = values.threshold;
-      }
-    }
-  } else if (type === "boolean_count_threshold") {
-    const warning1 = Number(values.cycle_warning_threshold_1);
-    const warning2 = Number(values.cycle_warning_threshold_2);
-    const alert = Number(values.cycle_alert_threshold);
-    if (
-      ![warning1, warning2, alert].every(
-        (value) => Number.isSafeInteger(value) && value > 0
-      ) ||
-      warning1 >= warning2 ||
-      warning2 >= alert
-    ) {
-      throw new Error(
-        "Cycle thresholds must be positive whole numbers in increasing order."
-      );
-    }
-    required_variable_types = ["boolean"];
-    variable_key = values.variable_key || null;
-    parameters = {
-      warning_thresholds: [warning1, warning2],
-      alert_threshold: alert,
-    };
-  }
-  return {
-    name: values.name,
-    description: values.description || null,
-    rule_type: type,
-    required_variable_types,
-    variable_key,
-    operator,
-    threshold,
-    parameters,
-    severity: values.severity,
-    is_enabled: values.is_enabled !== "false",
-    labels: values.labels || [],
-    evaluation_interval_seconds: values.evaluation_interval_seconds || null,
-    stale_after_seconds: values.stale_after_seconds || null,
-  };
-}
 
 // Read-only details of a shared rule. Audit values are the shared rule's own
 // (not those of any asset-specific rule created from it).
 function formatHistoryValue(value) {
   if (value === null || value === undefined || value === "") return "—";
+  if (value && Array.isArray(value.parameter_defs)) {
+    const names = value.parameter_defs.map((item) => item.name).filter(Boolean).join(", ");
+    return `${value.parameter_defs.length} parameter(s)${names ? `: ${names}` : ""}`;
+  }
   if (typeof value === "object") return JSON.stringify(value);
   return String(value).replaceAll("_", " ");
 }
@@ -660,15 +250,12 @@ export default function RuleLibrary() {
  const isSupervisor = user?.role === "Supervisor";
  const isOperator = user?.role === "Operator";
 
- const isRestrictedEditor = isSupervisor;
 
  const canCreateRules = isAdministrator;
  const canEditRules =
  isAdministrator || isSupervisor;
- const canAssignRules = isAdministrator || isSupervisor;
 
   const confirm = useConfirmation();
-  const supervisorChoices = useSupervisorChoices(isAdministrator);
   const navigate = useNavigate();
   const location = useLocation();
   const [copying, setCopying] = useState(null);
@@ -697,14 +284,12 @@ export default function RuleLibrary() {
   const [kindFilter, setKindFilter] = useState("all");
   const [sort, setSort] = useState("newest");
   const [labelIds, setLabelIds] = useState([]);
-  const [labelsRevision, setLabelsRevision] = useState(0);
+  const labelsRevision = 0;
   const templateLoadGeneration = useRef(0);
   const labelFilterQuery = labelIds
     .map((id) => `label_ids=${encodeURIComponent(id)}`)
     .join("&");
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [suggesting, setSuggesting] = useState(false);
+  // Rule type chosen on the New Rule page, used to preset the create form.
   const [visibilityTarget, setVisibilityTarget] = useState(null);
   const [viewing, setViewing] = useState(null);
   const [busyId, setBusyId] = useState(null);
@@ -792,15 +377,6 @@ useEffect(() => {
     shouldClearTransientState = true;
   }
 
-  if (retainedState.openCreate) {
-    if (canCreateRules) {
-      setSuggesting(false);
-      setEditing(null);
-      setModalOpen(true);
-    }
-    delete retainedState.openCreate;
-    shouldClearTransientState = true;
-  }
 
   if (shouldClearTransientState) {
     navigate(
@@ -881,171 +457,6 @@ useEffect(() => {
   const clearFilters = () => {
     setSearch(""); setStatus("all"); setTypeFilter("all"); setKindFilter("all"); setLabelIds([]);
   };
-
-  const save = async (values) => {
-    if (suggesting) {
-      if (!isSupervisor || editing) return;
-    } else if (editing ? !canEditRules : !canCreateRules) {
-      return;
-    }
-    let payload;
-    
-    if (editing && isSupervisor) {
-      const editableFields = getSupervisorEditableFields(editing);
-      if (editableFields.length === 0) {
-        throw new Error(
-          "Supervisors can edit only cycle-count or running-time thresholds for supported rules."
-        );
-      }
-      const original = initialTemplate(editing);
-      if (
-        editableFields.every((field) =>
-          SUPERVISOR_CYCLE_FIELDS.includes(field)
-      )
-    ) {
-      const warning1 = Number(values.cycle_warning_threshold_1);
-      const warning2 = Number(values.cycle_warning_threshold_2);
-      const alert = Number(values.cycle_alert_threshold);
-
-      if (
-        ![warning1, warning2, alert].every(
-          (value) => Number.isSafeInteger(value) && value > 0
-        ) ||
-        warning1 >= warning2 ||
-        warning2 >= alert
-      ) {
-        throw new Error(
-          "Cycle thresholds must be positive whole numbers in increasing order."
-        );
-      }
-
-      payload = {
-        ...editing,
-        parameters: {
-          ...(editing.parameters || {}),
-          warning_thresholds: [warning1, warning2],
-          alert_threshold: alert,
-        },
-      };
-    } else {
-      const warning1 = Number(values.runtime_warning_hours) * 3600;
-      const warning2 = Number(values.runtime_warning_2_hours) * 3600;
-      const alert = Number(values.runtime_alert_hours) * 3600;
-
-      if (
-        ![warning1, warning2, alert].every(
-          (value) => Number.isFinite(value) && value > 0
-        ) ||
-        warning1 >= warning2 ||
-        warning2 >= alert
-      ) {
-        throw new Error(
-          "Running-time thresholds must be positive and strictly increasing."
-        );
-      }
-
-      payload = {
-        ...editing,
-        parameters: {
-          ...(editing.parameters || {}),
-          warning_thresholds_seconds: [warning1, warning2],
-          alert_threshold_seconds: alert,
-        },
-      };
-    }
-
-    void original;
-  } else if (editing && isRestrictedEditor) {
-    if (
-      !supportsCurrentRuleEditor(editing) ||
-      editing.rule_type !== "parameter_threshold" ||
-      editing.threshold == null
-    ) {
-      throw new Error(
-        "Only the threshold of a numeric parameter rule can be edited with your role."
-      );
-    }
-
-    const newThreshold = Number(values.threshold);
-
-    if (!Number.isFinite(newThreshold)) {
-      throw new Error("Please enter a valid threshold.");
-    }
-
-    payload = {
-      ...editing,
-      threshold: newThreshold,
-      evaluation_interval_seconds: newInterval,
-    };
-  } else {
-    payload = {
-      ...(editing && !supportsCurrentRuleEditor(editing)
-      ? legacyTemplatePayload(values, editing)
-      : templatePayload(values)),
-      collection_id: editing?.collection_id ?? null,
-    };
-  }
-
-if (suggesting) {
-  const suggestionPayload = templatePayload(values);
-  delete suggestionPayload.labels;
-
-  await api.post("/rule-template-requests", {
-    ...suggestionPayload,
-    collection_id: null,
-  });
-
-  setMessage({
-    text: "Rule suggestion submitted for Administrator review.",
-    error: false,
-  });
-} else if (editing) {
-  // The shared rule is one record used by every asset: confirm before changing it for all of them.
-  const changesVisibility = isAdministrator && visibilityChanged(editing, values);
-  if (changesVisibility && values.visibility_type === "specific_supervisors" && !(values.visibility_supervisor_ids || []).length) {
-    throw new Error("Select at least one Supervisor.");
-  }
-  const proceed = await confirm(
-    changesVisibility ? `${SHARED_RULE_WARNING}\n\n${VISIBILITY_CHANGE_WARNING}` : SHARED_RULE_WARNING,
-    { title: changesVisibility ? "Shared rule and access" : "Shared rule", confirmLabel: "Continue" }
-  );
-  if (!proceed) return;
-  await api.put(`/rule-templates/${editing.id}`, payload);
-  if (changesVisibility) {
-    try {
-      await saveVisibility(editing, values);
-    } catch (err) {
-      throw new Error(`The rule was saved, but its visibility could not be changed: ${err.message}`);
-    }
-  }
-
-  setMessage({
-    text: "Rule updated successfully.",
-    error: false,
-  });
-} else {
-  await api.post("/rule-templates", { ...payload, ...visibilityPayload(values) });
-
-  setMessage({
-    text: "Rule created successfully.",
-    error: false,
-  });
-}
-
-setModalOpen(false);
-if (!suggesting) setLabelsRevision((revision) => revision + 1);
-setEditing(null);
-setSuggesting(false);
-try {
-  await load();
-} catch (error) {
-  setMessage({
-    text: `The change was saved, but the list could not be refreshed: ${error.message}`,
-    error: true,
-  });
-}
-};
-
 
 const reviewRequest = async (request, action) => {
   if (!isAdministrator || reviewingId !== null) return;
@@ -1363,10 +774,6 @@ const reviewRequest = async (request, action) => {
             <option value="all">All rule types</option>
             {stats.types.map((type) => <option key={type} value={type}>{type}</option>)}
           </select>
-          <select aria-label="Filter by category" value={kindFilter} onChange={(event) => setKindFilter(event.target.value)}>
-            <option value="all">All categories</option>
-            {stats.kinds.map(([kind]) => <option key={kind} value={kind}>{kind}</option>)}
-          </select>
           <select aria-label="Filter rule availability" value={status} onChange={(event) => setStatus(event.target.value)}>
             <option value="all">All statuses</option>
             <option value="true">Available</option>
@@ -1395,7 +802,7 @@ const reviewRequest = async (request, action) => {
             <div className="rl-table-wrap">
               <table className="rl-table" aria-label="Monitoring rules">
                 <thead>
-                  <tr><th>Rule</th><th>Type</th><th>Category</th><th>Configuration</th><th>Variable</th><th>Status</th><th>Created</th><th><span className="sr-only">Actions</span></th></tr>
+                  <tr><th>Rule</th><th>Category</th><th>Configuration</th><th>Variable</th><th>Status</th><th>Created</th><th><span className="sr-only">Actions</span></th></tr>
                 </thead>
                 <tbody>
                   {visible.map((template) => (
@@ -1410,7 +817,6 @@ const reviewRequest = async (request, action) => {
                         )}
                       </td>
                       <td>{displayType(template)}</td>
-                      <td>{ruleKind(template)}</td>
                       <td className="rl-config">{templateSummary(template)}</td>
                       <td>{template.required_variable_types?.length ? template.required_variable_types.join(" / ") : "—"}{template.variable_key ? <div className="rl-desc">prefers {template.variable_key}</div> : null}</td>
                       <td>
@@ -1422,7 +828,7 @@ const reviewRequest = async (request, action) => {
                         <div className="rule-library-actions rl-actions">
                           <button type="button" className="btn-outline" onClick={() => setViewing(template)} title="View details" aria-label={`View ${template.name}`}><Eye size={15} /></button>
                           <button type="button" className="btn-outline" onClick={() => setCopying(template)} disabled={!canCreateRules} title={!canCreateRules ? "Administrator access required to copy reusable rules." : "Duplicate this reusable rule"} aria-label={`Duplicate ${template.name}`}><Copy size={15} /></button>
-                          <button type="button" className="btn-outline" onClick={() => {setSuggesting(false);setEditing(template);setModalOpen(true);}} disabled={!canEditRules} title="Edit rule" aria-label={`Edit ${template.name}`}><Pencil size={15} /></button>
+                          <button type="button" className="btn-outline" onClick={() => navigate(`/configuration/rules/${template.id}/edit`, { state: { from: captureNavigationOrigin(location, { ...location.state, ruleLibrarySearch: search, ruleLibraryStatus: status, ruleLibraryRequestStatus: requestStatus }) } })} disabled={!canEditRules} title="Edit rule" aria-label={`Edit ${template.name}`}><Pencil size={15} /></button>
                           <button type="button" className="btn-outline danger" onClick={() => remove(template)} disabled={busyId === template.id || !isAdministrator} title={!isAdministrator ? "Administrator access required to delete reusable rules." : "Delete rule"} aria-label={`Delete ${template.name}`}>{busyId === template.id ? "…" : <Trash2 size={15} />}</button>
                         </div>
                       </td>
@@ -1450,9 +856,17 @@ const reviewRequest = async (request, action) => {
         className="btn-outline"
         onClick={() => {
           setSuggestionChoiceOpen(false);
-          setSuggesting(true);
-          setEditing(null);
-          setModalOpen(true);
+          navigate("/configuration/rules/new", {
+            state: {
+              suggest: true,
+              from: captureNavigationOrigin(location, {
+                ...location.state,
+                ruleLibrarySearch: search,
+                ruleLibraryStatus: status,
+                ruleLibraryRequestStatus: requestStatus,
+              }),
+            },
+          });
         }}
       >
         <Activity size={17} />
@@ -1480,98 +894,6 @@ const reviewRequest = async (request, action) => {
       </button>
     </div>
   </Modal>
-)}
-
-{modalOpen && (
-  <CreateModal
-    title={
-      editing
-        ? "Edit rule"
-        : suggesting
-          ? "Suggest a new monitoring rule"
-          : "Create reusable rule"
-    }
-    intro={
-      suggesting
-        ? "Submit your proposed monitoring rule for Administrator review. It will not enter the reusable library until approved."
-        : editing && !supportsCurrentRuleEditor(editing)
-          ? `${displayType(editing)} is a legacy rule type. Its evaluation settings will be preserved while you edit its name, description, severity, and availability.`
-          : "Create a reusable rule, then assign it to one or more assets."
-    }
-fields={
-  suggesting && !editing
-    ? FIELDS.filter((field) => field.key !== "labels")
-    : editing && !supportsCurrentRuleEditor(editing)
-    ? [
-        ...LEGACY_EDIT_FIELDS.map((field) => ({
-          ...field,
-          disabled: isSupervisor,
-        })),
-        ...(isAdministrator ? visibilityFields(supervisorChoices) : []),
-      ]
-    : editing && isSupervisor
-      ? FIELDS.map((field) => ({
-          ...field,
-          disabled: ![
-            ...getSupervisorEditableFields(editing),
-            "threshold",
-          ].includes(field.key),
-        }))
-      : editing
-        ? isAdministrator
-          ? [...FIELDS, ...visibilityFields(supervisorChoices)]
-          : FIELDS
-        : [...FIELDS, ...visibilityFields(supervisorChoices)]
-}
-    initialValues={
-  suggesting && !editing
-    ? {
-        name: "",
-        description: "",
-        rule_type: "",
-        variable_type: "",
-        variable_key: "",
-        runtime_variable_type: "",
-        boolean_behavior: "",
-        runtime_warning_hours: "",
-        runtime_warning_2_hours: "",
-        runtime_alert_hours: "",
-        cycle_warning_threshold_1: "",
-        cycle_warning_threshold_2: "",
-        cycle_alert_threshold: "",
-        operator: "",
-        threshold: "",
-        expected_boolean: "",
-        severity: "",
-        is_enabled: "",
-        evaluation_interval_seconds: "",
-        stale_after_seconds: "",
-      }
-    : editing && isAdministrator
-      ? { ...initialTemplate(editing), ...visibilityInitial(editing) }
-      : initialTemplate(editing)
-}
-    submitLabel={
-      editing
-        ? "Save rule"
-        : suggesting
-          ? "Submit suggestion"
-          : "Create rule"
-    }
-    onSubmit={save}
-    disabled={
-      suggesting
-        ? !isSupervisor
-        : editing
-          ? !canEditRules
-          : !canCreateRules
-    }
-    onClose={() => {
-      setModalOpen(false);
-      setEditing(null);
-      setSuggesting(false);
-    }}
-  />
 )}
 
 {viewing && (

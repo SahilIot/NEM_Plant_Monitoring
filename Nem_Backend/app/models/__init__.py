@@ -19,6 +19,8 @@ from app.models.rule import (
     MonitoringRule,
     MonitoringRuleTemplate,
     MonitoringRuleTemplateRequest,
+    RuleParameter,
+    RuleParameterState,
     RuleState,
     SchedulerLease,
 )
@@ -29,7 +31,7 @@ from app.models import audit as _audit  # noqa: F401  (registers audit stamping)
 
 __all__ = [
     "User", "AuthSession",
-    "Asset", "Variable", "Reading", "MonitoringRule", "MonitoringRuleTemplate", "RuleState", "MaintenanceRecord",
+    "Asset", "Variable", "Reading", "MonitoringRule", "MonitoringRuleTemplate", "RuleState", "RuleParameter", "RuleParameterState", "MaintenanceRecord",
     "MaintenanceSchedule",
     "Alert", "MonitoringEvent", "SchedulerLease",
     "MachineMonitoringState",
