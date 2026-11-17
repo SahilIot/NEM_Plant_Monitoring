@@ -32,6 +32,14 @@ SECONDS_PER_HOUR = 3600.0
 MAX_READING_ID = 2**31 - 1
 # Readings folded into a cumulative checkpoint per pass; a larger backlog is drained over the following passes.
 CUMULATIVE_BATCH_LIMIT = 50_000
+# Batches folded in when a parameter is paused. A pause must not block the request for an unbounded backlog: anything
+# beyond this is folded in by the normal passes after the parameter resumes (see `gaps` in _cumulative_aggregate).
+PAUSE_BATCH_LIMIT = 4
+# How many readings before a window are searched for the signal's last parseable state.
+WINDOW_LOOKBACK_READINGS = 100
+# ... in at most this many pages of that size, so a long run of unparseable values cannot make the search unbounded.
+# If no parseable state is found the signal is treated as unknown, which credits no time and counts no cycle.
+WINDOW_LOOKBACK_PAGES = 10
 
 
 def effective_stale_after(rule: MonitoringRule, default: int | None = None) -> int:
@@ -105,7 +113,19 @@ def _window_aggregate(
     session: Session, variable: Variable, start: datetime, now: datetime, stale_after: int
 ) -> tuple[float, int]:
     # Seconds ON and OFF-to-ON count for a Boolean variable inside [start, now].
-    previous = _latest_reading(session, variable, not_after=start - timedelta(microseconds=1))
+    # The signal's state at `start` is the latest PARSEABLE reading before it; an unparseable one confirms nothing.
+    previous = None
+    for page in range(WINDOW_LOOKBACK_PAGES):
+        earlier = session.scalars(
+            select(Reading)
+            .where(Reading.variable_id == variable.id, Reading.recorded_at <= start - timedelta(microseconds=1))
+            .order_by(Reading.recorded_at.desc(), Reading.id.desc())
+            .offset(page * WINDOW_LOOKBACK_READINGS)
+            .limit(WINDOW_LOOKBACK_READINGS)
+        ).all()
+        previous = next((r for r in earlier if _as_bool(r.value) is not None), None)
+        if previous is not None or len(earlier) < WINDOW_LOOKBACK_READINGS:
+            break
     state = _as_bool(previous.value) if previous else None
     cursor = start
     on_seconds, count = 0.0, 0
@@ -116,15 +136,16 @@ def _window_aggregate(
     ).all()
     last_confirmed = (_aware(previous.recorded_at) if previous else None)
     for reading in readings:
+        value = _as_bool(reading.value)
+        if value is None:
+            continue  # not a sample: it must not confirm the signal or extend how long an old TRUE stays fresh
         at = _aware(reading.recorded_at)
         if state is True and last_confirmed is not None:
             credited_until = min(at, last_confirmed + timedelta(seconds=stale_after))
             on_seconds += max(0.0, (credited_until - max(cursor, last_confirmed)).total_seconds())
-        value = _as_bool(reading.value)
         if value is True and state is False:
             count += 1
-        if value is not None:
-            state = value
+        state = value
         cursor, last_confirmed = at, at
     if state is True and last_confirmed is not None:
         credited_until = min(now, last_confirmed + timedelta(seconds=stale_after))
@@ -139,15 +160,32 @@ def _cumulative_aggregate(
     start: datetime,
     now: datetime,
     stale_after: int,
-    drain: bool = False,
+    max_batches: int = 1,
 ) -> tuple[float, int]:
     # Running seconds and cycle count since `start`, advanced incrementally from a stored checkpoint.
-    # One pass folds in at most CUMULATIVE_BATCH_LIMIT readings (the rest are picked up on the next pass); `drain`
-    # keeps going until nothing is left, which pausing needs because readings recorded while paused are skipped.
+    # One batch folds in at most CUMULATIVE_BATCH_LIMIT readings, ordered by (recorded_at, id) so readings with the
+    # same timestamp are always taken in the same order and the checkpoint (cursor + reading id) resumes exactly after
+    # the last one folded in. `max_batches` bounds the work of one call; anything left is picked up by the next call.
+    # `gaps` are paused periods [from, to] whose readings must never be counted. A gap is only closed once every
+    # reading recorded before it has been folded in, so a large backlog at pause time is never skipped.
+    # An unparseable Boolean value is not a sample: it neither credits time, nor confirms the signal, nor changes it.
     checkpoint = dict(parameter_state.aggregate_state or {})
     if checkpoint.get("start") != start.isoformat():
         checkpoint = {"start": start.isoformat(), "cursor": None, "reading_id": 0,
                       "seconds": 0.0, "count": 0, "prev": None, "prev_at": None}
+    gaps = [(datetime.fromisoformat(g[0]), datetime.fromisoformat(g[1])) for g in checkpoint.get("gaps") or []]
+
+    def close_gap() -> datetime:
+        # The paused period is over: keep what ran up to the pause (never more than the stale limit) and forget the
+        # signal state, so nothing is credited across the pause.
+        gap_from, gap_to = gaps.pop(0)
+        if checkpoint["prev"] is True and checkpoint["prev_at"]:
+            prev_at = datetime.fromisoformat(checkpoint["prev_at"])
+            checkpoint["seconds"] += max(0.0, (min(gap_from, prev_at + timedelta(seconds=stale_after)) - prev_at).total_seconds())
+        checkpoint["prev"], checkpoint["prev_at"] = None, None
+        return gap_to
+
+    exhausted, batches = False, 0
     while True:
         cursor = datetime.fromisoformat(checkpoint["cursor"]) if checkpoint["cursor"] else None
         query = select(Reading).where(Reading.variable_id == variable.id, Reading.recorded_at >= start)
@@ -156,24 +194,39 @@ def _cumulative_aggregate(
                 Reading.recorded_at > cursor,
                 and_(Reading.recorded_at == cursor, Reading.id > min(int(checkpoint["reading_id"]), MAX_READING_ID)),
             ))
+        for gap_from, gap_to in gaps:
+            query = query.where(or_(Reading.recorded_at <= gap_from, Reading.recorded_at > gap_to))
         batch = session.scalars(query.order_by(Reading.recorded_at, Reading.id).limit(CUMULATIVE_BATCH_LIMIT)).all()
         for reading in batch:
             at = _aware(reading.recorded_at)
+            while gaps and at > gaps[0][1]:
+                close_gap()
             value = _as_bool(reading.value)
-            prev_at = datetime.fromisoformat(checkpoint["prev_at"]) if checkpoint["prev_at"] else None
-            if checkpoint["prev"] is True and prev_at is not None:
-                credited = min(at, prev_at + timedelta(seconds=stale_after))
-                checkpoint["seconds"] += max(0.0, (credited - prev_at).total_seconds())
-            if value is True and checkpoint["prev"] is False:
-                checkpoint["count"] += 1
             if value is not None:
+                prev_at = datetime.fromisoformat(checkpoint["prev_at"]) if checkpoint["prev_at"] else None
+                if checkpoint["prev"] is True and prev_at is not None:
+                    credited = min(at, prev_at + timedelta(seconds=stale_after))
+                    checkpoint["seconds"] += max(0.0, (credited - prev_at).total_seconds())
+                if value is True and checkpoint["prev"] is False:
+                    checkpoint["count"] += 1
                 checkpoint["prev"], checkpoint["prev_at"] = value, at.isoformat()
             checkpoint["cursor"], checkpoint["reading_id"] = at.isoformat(), reading.id
-        if not drain or len(batch) < CUMULATIVE_BATCH_LIMIT:
+        batches += 1
+        exhausted = len(batch) < CUMULATIVE_BATCH_LIMIT
+        if exhausted or batches >= max_batches:
             break
+    if exhausted:
+        while gaps:  # nothing is left before the gaps: close them and skip what was recorded inside them
+            gap_to = close_gap()
+            if checkpoint["cursor"] is None or datetime.fromisoformat(checkpoint["cursor"]) < gap_to:
+                checkpoint["cursor"], checkpoint["reading_id"] = gap_to.isoformat(), MAX_READING_ID
+    checkpoint["backlog"] = not exhausted
+    checkpoint["gaps"] = [[g[0].isoformat(), g[1].isoformat()] for g in gaps]
     parameter_state.aggregate_state = checkpoint
     seconds = float(checkpoint["seconds"])
-    if checkpoint["prev"] is True and checkpoint["prev_at"]:
+    if exhausted and checkpoint["prev"] is True and checkpoint["prev_at"]:
+        # The signal is still ON after the last reading: credit it up to now, within the stale limit. While readings
+        # are still waiting there is no such tail yet (the next reading decides it), so progress only ever increases.
         prev_at = datetime.fromisoformat(checkpoint["prev_at"])
         seconds += max(0.0, (min(now, prev_at + timedelta(seconds=stale_after)) - prev_at).total_seconds())
     return seconds, int(checkpoint["count"])
@@ -357,14 +410,13 @@ def _sync_parameter_alert(
 
 def overall_summary(results: list[tuple[str, str]]) -> dict[str, Any]:
     """The explicit overall-status strategy, shared by the evaluator and the API.
-
-    `results` is [(parameter name, status)]. Worst Parameter Wins with the order
+    results is [(parameter name, status)]. Worst Parameter Wins with the order
     Alert > Warning > Not Evaluated (unknown) > Normal:
-      * any Alert/Warning decides the overall status, even if other parameters are unavailable, so an
+        any Alert/Warning decides the overall status, even if other parameters are unavailable, so an
         unavailable parameter can never hide an active Alert;
-      * with no Alert/Warning, any unavailable/stale/not-evaluated parameter makes the overall status
-        Not Evaluated, never Normal;
-      * Normal only when every parameter is Normal.
+       with no Alert/Warning, any unavailable/stale/not-evaluated parameter makes the overall status
+       Not Evaluated, never Normal;
+       Normal only when every parameter is Normal.
     Unavailable parameters are always listed separately in `unavailable`.
     """
     worst = max((s for _n, s in results), key=lambda s: SEVERITY_ORDER[s], default="unknown")
@@ -402,8 +454,7 @@ def evaluate_multi_parameter(
         except Exception:
             # An unexpected failure in one parameter is shown as unavailable; the others still evaluate.
             LOGGER.exception("Parameter %s of rule %s could not be evaluated", parameter.id, rule.id)
-            status, value, raw, message, error = (
-                "unknown", None, None, "This parameter could not be evaluated.", "evaluation_error")
+            status, value, raw, message, error = ("unknown", None, None, "This parameter could not be evaluated.", "evaluation_error")
         try:
             # Result, alert and events of ONE parameter are written together or not at all.
             with session.begin_nested():
@@ -425,11 +476,22 @@ def evaluate_multi_parameter(
             # parameter is not shown with a stale result, keep its evaluated status in the rule's overall result (an
             # Alert is never hidden), and carry on with the remaining parameters; the next pass retries.
             LOGGER.exception("Result or alert of parameter %s of rule %s could not be saved", parameter.id, rule.id)
+            if status not in {"warning", "alert"}:
+                # Nothing about this parameter was saved (an open alert may still be waiting to be resolved), so it must
+                # not count as Normal. A Warning/Alert is kept: a failure never hides a real condition.
+                status, value, message = "unknown", None, "The result of this parameter could not be saved; it will be retried."
             try:
                 with session.begin_nested():
-                    parameter_state.status, parameter_state.latest_value, parameter_state.raw_value = "unknown", None, None
-                    parameter_state.message = "The result of this parameter could not be saved; it will be retried."
-                    parameter_state.error_message, parameter_state.last_evaluated_at = "evaluation_error", now
+                    if status in {"warning", "alert"}:
+                        # The condition is real even though its alert could not be recorded: keep it visible on the
+                        # parameter (and so in the status detail) and flag that the alert row is still to be written.
+                        parameter_state.status, parameter_state.latest_value, parameter_state.raw_value = status, value, raw
+                        parameter_state.message, parameter_state.error_message = message, "alert_not_recorded"
+                    else:
+                        parameter_state.status, parameter_state.latest_value, parameter_state.raw_value = "unknown", None, None
+                        parameter_state.message = "The result of this parameter could not be saved; it will be retried."
+                        parameter_state.error_message = "evaluation_error"
+                    parameter_state.last_evaluated_at = now
             except Exception:
                 LOGGER.exception("Parameter %s of rule %s could not be marked as failed", parameter.id, rule.id)
         results.append((parameter, status, value, message))
@@ -484,12 +546,17 @@ def _pause_one(session: Session, rule: MonitoringRule, parameter: RuleParameter,
                 except ValueError:
                     pass
             seconds, count = _cumulative_aggregate(session, parameter_state, variable, start, now,
-                                                   effective_stale_after(rule), drain=True)
+                                                   effective_stale_after(rule), max_batches=PAUSE_BATCH_LIMIT)
             parameter_state.latest_value = float(count) if config.get("interval_parameter") == "counter" else seconds / SECONDS_PER_HOUR
             checkpoint = dict(parameter_state.aggregate_state or {})
-            # Bank the time already credited since the last confirmed sample (never more than the stale limit), so the
-            # progress shown at the moment of pausing is exactly what is kept and resuming cannot lower it.
-            checkpoint.update(seconds=seconds, prev=None, prev_at=None)
+            if checkpoint.get("backlog"):
+                # Too many readings to fold in during this request. Remember the pause instant: on resume the readings
+                # recorded up to it are still folded in (by the normal passes) and only the paused period is skipped.
+                checkpoint["fold_until"] = now.isoformat()
+            else:
+                # Bank the time already credited since the last confirmed sample (never more than the stale limit), so
+                # the progress shown at the moment of pausing is exactly what is kept and resuming cannot lower it.
+                checkpoint.update(seconds=seconds, prev=None, prev_at=None)
             checkpoint["paused"] = True
             parameter_state.aggregate_state = checkpoint
     parameter_state.status = "unknown"
@@ -506,7 +573,12 @@ def _resume_one(parameter: RuleParameter, now: datetime) -> None:
         return
     checkpoint = dict(parameter_state.aggregate_state or {})
     if checkpoint.get("paused"):
-        checkpoint.update(paused=False, cursor=now.isoformat(), reading_id=MAX_READING_ID, prev=None, prev_at=None)
+        fold_until = checkpoint.pop("fold_until", None)
+        if fold_until:
+            # Backlog from before the pause is still waiting: keep the cursor, and only exclude [pause, resume].
+            checkpoint.update(paused=False, gaps=[*(checkpoint.get("gaps") or []), [fold_until, now.isoformat()]])
+        else:
+            checkpoint.update(paused=False, cursor=now.isoformat(), reading_id=MAX_READING_ID, prev=None, prev_at=None)
         parameter_state.aggregate_state = checkpoint
     parameter_state.completed_at = None
 
@@ -608,7 +680,6 @@ def _refresh_rule_state(session: Session, rule: MonitoringRule, now: datetime) -
 
 def reset_parameter_baseline(session: Session, parameter: RuleParameter) -> bool:
     """Restart ONLY this parameter's own progress after what it measures changed.
-
     Returns whether a stored state was really reset (a parameter that was never evaluated has nothing to reset), and
     records it on the session so an API response can report exactly what was reset, including shared-rule propagation.
     """
@@ -623,7 +694,6 @@ def reset_parameter_baseline(session: Session, parameter: RuleParameter) -> bool
 
 def archive_removed_parameter(session: Session, rule: MonitoringRule, parameter: RuleParameter, reason: str) -> None:
     """Keep a permanent record of a parameter that is being removed from a rule.
-
     Its alerts stay (resolved, with the parameter's name kept on them) and earlier events are untouched. The parameter's
     latest evaluation and progress would otherwise disappear with the row, so they are written to the event log first.
     """
@@ -653,7 +723,7 @@ def archive_removed_parameter(session: Session, rule: MonitoringRule, parameter:
 
 
 def serialize_parameters(rule: MonitoringRule) -> list[dict[str, Any]]:
-    """API view of a rule's parameters, including each parameter's own latest evaluation."""
+    # API view of a rule's parameters, including each parameter's own latest evaluation.
     items = []
     for parameter in rule.parameter_items:
         state = parameter.state
@@ -697,7 +767,6 @@ def _alert_view(alert: Alert) -> dict[str, Any]:
 
 def build_status_detail(session: Session, rule: MonitoringRule, now: datetime | None = None) -> dict[str, Any]:
     """Everything the Current Status detail view shows, computed by the backend only.
-
     The parent status is `overall_summary` over the stored per-parameter statuses (the same function and
     inputs the evaluator uses), and `rule_state_status` is the status stored on the rule itself, so the
     UI can show they agree. Nothing here re-evaluates readings and the frontend never recomputes it.
