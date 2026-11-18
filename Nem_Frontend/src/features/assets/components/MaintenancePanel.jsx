@@ -23,7 +23,8 @@ import {
   useConfirmation,
 } from "../../../components/common/UI.jsx";
 import { DotsIcon } from "../../../components/common/Icons.jsx";
-import { auditUser, formatAuditTime, formatTime } from "../../../utils/format.js";
+import RuleLiveHours from "./RuleLiveHours.jsx";
+import { auditUser, formatAuditTime, formatDurationHours, formatTime, isHoursUnit } from "../../../utils/format.js";
 import MaintenanceDetails from "./MaintenanceDetails.jsx";
 import MaintenanceRegistrationDialog from "./MaintenanceRegistrationDialog.jsx";
 import { recordDeleteConfirmation, recordDeleteState, scheduleDeleteState } from "../maintenanceDeletion.js";
@@ -92,16 +93,7 @@ function nullableDate(value) {
   return value ? new Date(value).toISOString() : null;
 }
 
-// Runtime progress and limits are stored as hours (3600 s each). Show them as elapsed HH:MM:SS; hours keep
-// growing past 24 and are never wrapped. Rounded to the nearest second so float noise (1.1 h = 3960.0000000000005 s)
-// cannot show as 01:05:59.
-function formatRuntimeHours(hours) {
-  const value = Number(hours);
-  if (!Number.isFinite(value) || value < 0) return "00:00:00";
-  const total = Math.round(value * 3600);
-  const pad = (number) => String(number).padStart(2, "0");
-  return `${pad(Math.floor(total / 3600))}:${pad(Math.floor((total % 3600) / 60))}:${pad(total % 60)}`;
-}
+// Runtime progress and limits are stored as hours; they are shown as HH:MM:SS with formatDurationHours (utils/format.js).
 
 // A runtime schedule is "live" only when its last confirmed sample says the machine is running, the schedule is
 // active and not waiting for maintenance (the backend pauses progress then).
@@ -1295,9 +1287,13 @@ export default function MaintenancePanel({
             <small>{isRuntime || isUsage || isRule ? "Progress" : "Recurrence"}</small>
             <strong>
               {isRuntime
-                ? `${formatRuntimeHours(progress)} / ${formatRuntimeHours(threshold)}`
+                ? `${formatDurationHours(progress)} / ${formatDurationHours(threshold)}`
                 : isUsage || isRule
-                  ? `${progress.toFixed(1)} / ${threshold} ${progressUnit}`
+                  ? isHoursUnit(progressUnit)
+                    ? isRule
+                      ? <><RuleLiveHours schedule={schedule} /> / {formatDurationHours(threshold)}</>
+                      : `${formatDurationHours(progress)} / ${formatDurationHours(threshold)}`
+                    : `${progress.toFixed(1)} / ${threshold} ${progressUnit}`
                 : schedule.recurrence_enabled
                   ? `Every ${schedule.recurrence_interval} ${schedule.recurrence_unit}`
                   : "Disabled"}
@@ -1615,8 +1611,12 @@ export default function MaintenancePanel({
               <div>
                 <small style={{ display: "block" }}>Current value / Due limit</small>
                 <strong>
-                  {Number(schedule.current_progress || 0).toFixed(1)} / {schedule.due_threshold ?? "—"} {schedule.threshold_unit || ""}
-                  {schedule.overdue_threshold != null ? ` (Overdue at ${schedule.overdue_threshold})` : ""}
+                  {isHoursUnit(schedule.threshold_unit)
+                    ? <><RuleLiveHours schedule={schedule} /> / {schedule.due_threshold == null ? "—" : formatDurationHours(schedule.due_threshold)}</>
+                    : `${Number(schedule.current_progress || 0).toFixed(1)} / ${schedule.due_threshold ?? "—"} ${schedule.threshold_unit || ""}`}
+                  {schedule.overdue_threshold != null
+                    ? ` (Overdue at ${isHoursUnit(schedule.threshold_unit) ? formatDurationHours(schedule.overdue_threshold) : schedule.overdue_threshold})`
+                    : ""}
                 </strong>
               </div>
               <div>

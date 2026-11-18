@@ -5,6 +5,8 @@ import { api } from "../../../services/api.js";
 import { shareInFlight } from "../../../services/liveUpdates.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { captureNavigationOrigin } from "../../../utils/navigation.js";
+import RuleLiveHours from "./RuleLiveHours.jsx";
+import { formatDurationHours, isHoursUnit } from "../../../utils/format.js";
 import { recordDeleteConfirmation, recordDeleteState } from "../maintenanceDeletion.js";
 import {
   EmptyState,
@@ -461,8 +463,9 @@ const openEdit = (record) => {
                   return (
                     <small className="rule-context">
                       {schedule?.source_rule_name || context.rule_name} · {schedule?.source_parameter_name || context.parameter_name}
-                      {" · Current "}{formatNumber(schedule?.current_progress)} {unit}
-                      {" · Due at "}{formatNumber(schedule?.due_threshold ?? context.due_threshold)} {unit}
+                      {isHoursUnit(unit)
+                        ? <>{" · Current "}{schedule ? <RuleLiveHours schedule={schedule} /> : formatDurationHours(null)}{` · Due at ${formatDurationHours(schedule?.due_threshold ?? context.due_threshold)}`}</>
+                        : <>{" · Current "}{formatNumber(schedule?.current_progress)} {unit}{" · Due at "}{formatNumber(schedule?.due_threshold ?? context.due_threshold)} {unit}</>}
                       {schedule?.created_at ? ` · Created ${new Date(schedule.created_at).toLocaleDateString()}` : ""}
                     </small>
                   );

@@ -73,3 +73,22 @@ export function formatValue(value) {
   return String(value);
 }
 
+// Elapsed time as HH:MM:SS. Hours keep growing past 24 (never wrapped to days). Rounded to the nearest second so
+// float noise (1.1 h = 3960.0000000000005 s) cannot show as 01:05:59. Null, non-numeric, negative and infinite
+// input show 00:00:00. Display only: callers keep the stored value for calculations.
+export function formatClock(seconds) {
+  const value = seconds === null || seconds === undefined || seconds === "" ? NaN : Number(seconds);
+  if (!Number.isFinite(value) || value < 0) return "00:00:00";
+  const total = Math.round(value);
+  const pad = (number) => String(number).padStart(2, "0");
+  return `${pad(Math.floor(total / 3600))}:${pad(Math.floor((total % 3600) / 60))}:${pad(total % 60)}`;
+}
+
+// Same, for a value stored in hours (runtime schedule progress and limits).
+export function formatDurationHours(hours) {
+  const value = hours === null || hours === undefined || hours === "" ? NaN : Number(hours);
+  return formatClock(value * 3600);
+}
+
+// True for the unit names the backend uses for time-based progress (rule schedules report "hours").
+export const isHoursUnit = (unit) => /^hours?$/i.test(String(unit || "").trim());
