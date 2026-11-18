@@ -253,7 +253,7 @@ function ClockedParameterCard({ p, getOffsetMs, ...rest }) {
   return <ParameterCardView p={{ ...p, value: hours }} {...rest} />;
 }
 
-function ParameterCardView({ p: source, rule, ruleId, determining, showTechnical, onEdit, onChanged }) {
+function ParameterCardView({ p: source, rule, ruleId, determining, onEdit, onChanged }) {
   // A suspended/deactivated parameter keeps its preserved progress on screen but has no status.
   const paused = source.availability === "suspended" || source.availability === "deactivated";
   const p = paused ? { ...source, paused: true } : source;
@@ -297,7 +297,7 @@ function ParameterCardView({ p: source, rule, ruleId, determining, showTechnical
           {p.active_alert.message}
         </p>
       )}
-      {(showTechnical || detailsOpen) && (
+      {detailsOpen && (
         <div className="rsd-param-body" aria-label={`Technical details for ${p.name}`}>
           <dl className="rsd-facts">
             <div><dt>Connected variable</dt><dd>{p.variable_name || "None (calendar based)"}</dd></div>
@@ -366,7 +366,7 @@ function LiveStatus({ connected, lastSync, staleLimit }) {
   );
 }
 
-export default function RuleStatusDetail({ ruleId, showTechnical = false, actions = null, refreshToken = 0, onEditParameter = null }) {
+export default function RuleStatusDetail({ ruleId, refreshToken = 0, onEditParameter = null }) {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState("");
   const [lastSync, setLastSync] = useState(null);
@@ -441,7 +441,6 @@ export default function RuleStatusDetail({ ruleId, showTechnical = false, action
           </div>
           <div className="rsd-top-right">
             {detail && <span className={`rsd-chip big is-${overall.status}`}>{overallWord(overall, intervalRule)}</span>}
-            {actions}
             <LiveStatus connected={connected} lastSync={lastSync} staleLimit={staleLimit} />
           </div>
         </header>
@@ -455,7 +454,7 @@ export default function RuleStatusDetail({ ruleId, showTechnical = false, action
               {detail.parameters.map((p) => (
                 <ParameterCard key={p.id} p={p} rule={detail.rule} ruleId={ruleId}
                   determining={overall.evaluating && overall.determined_by.includes(p.id) && p.status !== "normal"}
-                  showTechnical={showTechnical} getOffsetMs={getOffsetMs}
+                  getOffsetMs={getOffsetMs}
                   onEdit={onEditParameter} onChanged={load} />
               ))}
             </div>

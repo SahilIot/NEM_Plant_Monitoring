@@ -284,16 +284,10 @@ export default function AssetDetail() {
   const [deletingRuleId, setDeletingRuleId] = useState(null);
   const [ruleActionMenuId, setRuleActionMenuId] = useState(null);
   const [lifecycleAction, setLifecycleAction] = useState(null);
-  // Technical details on the rule detail page are opt-in (three-dot menu) and reset per rule.
-  const [showTechnical, setShowTechnical] = useState(false);
-  useEffect(() => {
-    setShowTechnical(false);
-  }, [detailRuleId]);
   // "Edit parameter" on the multi-parameter detail page: the rule being edited, and a refresh trigger.
   const [parameterEdit, setParameterEdit] = useState(null); // { ruleId, parameterId, alwaysSelect }
   const [statusRefresh, setStatusRefresh] = useState(0);
-  const openRuleStatusPage = (ruleId, technical = false) => {
-    setShowTechnical(technical);
+  const openRuleStatusPage = (ruleId) => {
     navigate(`/assets/${assetId}/rules/${ruleId}/status`, {
       state: { ...assetNavigationState, activeTab: "status" },
     });
@@ -1175,26 +1169,6 @@ const filteredEvents = [...events]
     </button>
     )}
 
-    {(
-      <button
-        type="button"
-        className="rule-action-menu-item rule-action-menu-item--view"
-        role="menuitem"
-        onClick={() => {
-          setRuleActionMenuId(null);
-          if (detailRuleId === rule.id) setShowTechnical((current) => !current);
-          else openRuleStatusPage(rule.id, true);
-        }}
-      >
-        <Eye size={16} aria-hidden="true" />
-        <span>
-          {detailRuleId === rule.id && showTechnical
-            ? "Hide technical details"
-            : "View technical details"}
-        </span>
-      </button>
-    )}
-
     <button
       type="button"
       className="rule-action-menu-item rule-action-menu-item--edit"
@@ -1876,7 +1850,6 @@ const filteredEvents = [...events]
 
       {tab === "status" && detailRuleId !== null && (() => {
         const detailRule = rules.find((item) => item.id === detailRuleId);
-        const menuKey = `detail:${detailRuleId}`;
         return (
           <section className="rule-detail-page" aria-label="Rule status details">
             <button type="button" className="rule-detail-back" onClick={closeRuleStatusPage}>
@@ -1890,25 +1863,8 @@ const filteredEvents = [...events]
               <RuleStatusDetail
                 key={detailRule.id}
                 ruleId={detailRule.id}
-                showTechnical={showTechnical}
                 refreshToken={statusRefresh}
                 onEditParameter={(parameter) => setParameterEdit({ ruleId: detailRule.id, parameterId: parameter.id })}
-                actions={
-                  <div className="dropdown rule-actions-menu" data-menu-open={ruleActionMenuId === menuKey}>
-                    <button
-                      type="button"
-                      className="icon-outline sm"
-                      title={`More actions for ${detailRule.name}`}
-                      aria-label={`More actions for ${detailRule.name}`}
-                      aria-haspopup="menu"
-                      aria-expanded={ruleActionMenuId === menuKey}
-                      onClick={() => setRuleActionMenuId((current) => (current === menuKey ? null : menuKey))}
-                    >
-                      <DotsIcon size={17} />
-                    </button>
-                    {ruleActionMenuId === menuKey && renderRuleMenu(detailRule)}
-                  </div>
-                }
               />
             )}
           </section>
