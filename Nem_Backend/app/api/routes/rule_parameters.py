@@ -75,16 +75,16 @@ def _stored_definition(parameter: RuleParameter) -> RuleParameterIn:
 
 
 def _enforce_supervisor_edit(user: User, parameter: RuleParameter, item: RuleParameterIn) -> None:
-    """Supervisors may change only the numeric limits of a parameter (the existing shared-rule/legacy policy).
+    """Supervisors may change only the Due and Overdue values of an interval parameter.
 
-    Name, type, variable, aggregation, expected state, severity, unit and interval type stay Administrator-only."""
+    Name, type, variable, aggregation, start time, other limits, expected state, severity and unit stay Administrator-only."""
     if user.role != "Supervisor":
         return
     old = _stored_definition(parameter)
     strip = lambda config: {k: v for k, v in (config or {}).items() if k not in SUPERVISOR_EDITABLE_LIMITS}  # noqa: E731
     if (old.name, old.kind, old.variable_id, old.aggregation, strip(old.config)) != (
             item.name, item.kind, item.variable_id, item.aggregation, strip(item.config)):
-        raise HTTPException(status_code=403, detail="Supervisors may only change the numeric thresholds of a parameter")
+        raise HTTPException(status_code=403, detail="Supervisors may only change the Due and Overdue values of a parameter")
 
 
 def _check_parameters(session: Session,request: Request,asset: Asset,items: list[RuleParameterIn],category: str,
@@ -302,12 +302,12 @@ def replace_rule_parameters(
         if item.key and item.kind != existing[item.key].kind:  # same rule as the single edit
             raise HTTPException(status_code=422, detail="A parameter's type cannot be changed; add a new parameter instead")
     if user.role == "Supervisor":
-        # Same policy as every other edit: only numeric limits. No adding, removing, reordering or renaming.
+        # Same policy as every other edit: only Due and Overdue. No adding, removing, reordering or renaming.
         if [item.key for item in payload.parameters] != [parameter.key for parameter in rule.parameter_items]:
-            raise HTTPException(status_code=403, detail="Supervisors may only change the numeric thresholds of a parameter")
+            raise HTTPException(status_code=403, detail="Supervisors may only change the Due and Overdue values of a parameter")
         if (payload.calculation_period_seconds is not None
                 and payload.calculation_period_seconds != (rule.parameters or {}).get("calculation_period_seconds")):
-            raise HTTPException(status_code=403, detail="Supervisors may only change the numeric thresholds of a parameter")
+            raise HTTPException(status_code=403, detail="Supervisors may only change the Due and Overdue values of a parameter")
         for item in payload.parameters:
             _enforce_supervisor_edit(user, existing[item.key], item)
     _check_parameters(session, request, asset, payload.parameters, category,

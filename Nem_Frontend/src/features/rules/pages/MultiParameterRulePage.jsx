@@ -5,7 +5,7 @@ import { useAuth } from "../../auth/AuthContext.jsx";
 import { LoadingIndicator } from "../../../components/common/UI.jsx";
 import { rememberNavigationOrigin, returnToNavigationOrigin } from "../../../utils/navigation.js";
 import ParameterRuleWizard from "../components/ParameterRuleWizard.jsx";
-import { buildMultiParameterPayload, newParameter } from "../components/parameterRules.js";
+import { buildMultiParameterPayload } from "../components/parameterRules.js";
 import { parameterForKind } from "../components/intervalConfig.js";
 import "./RuleCreatePage.css";
 
@@ -62,19 +62,17 @@ export default function MultiParameterRulePage({ category }) {
   useEffect(() => { rememberNavigationOrigin(location.state?.from); }, [location.state?.from]);
   const goBack = () => returnToNavigationOrigin(navigate, location.state?.from, fallback);
 
-  const initialValues = useMemo(() => {
-    const first = newParameter(category, 1);
-    // The entry route only chooses the first interval parameter; the wizard owns it afterwards.
-    if (category === "interval_based" && kind) {
-      const intervalParameter = parameterForKind(kind);
-      Object.assign(first, { intervalParameter, aggregation: intervalParameter === "counter" ? "counter" : "timer" });
-    }
-    return {
-      name: "", periodAmount: "1", periodUnit: "hours", parameters: [first],
-      comment: "", instructions: "", link: "", documentIds: [], labels: [],
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // A new rule starts with no parameters; the user adds each one with "+ Add Parameter".
+  const initialValues = useMemo(() => ({
+    name: "", periodAmount: "1", periodUnit: "hours", parameters: [],
+    comment: "", instructions: "", link: "", documentIds: [], labels: [],
+  }), []);
+  // The entry route only chooses what the first interval parameter measures; the wizard owns it afterwards.
+  const firstParameterDefaults = useMemo(() => {
+    if (category !== "interval_based" || !kind) return null;
+    const intervalParameter = parameterForKind(kind);
+    return { intervalParameter, aggregation: intervalParameter === "counter" ? "counter" : "timer" };
+  }, [category, kind]);
 
   const submit = async (values) => {
     const payload = buildMultiParameterPayload(values, category);
@@ -105,6 +103,7 @@ export default function MultiParameterRulePage({ category }) {
             eligible={eligible}
             canEdit={canManageRules}
             initialValues={initialValues}
+            firstParameterDefaults={firstParameterDefaults}
             onSubmit={submit}
             onCancel={goBack}
             topNotice={<>

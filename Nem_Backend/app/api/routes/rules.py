@@ -377,8 +377,6 @@ def update_rule(
         raise HTTPException(status_code=403, detail="You are not allowed to edit monitoring rules")
 
     rule = rule_or_404(session, rule_id)
-    if user.role == "Supervisor" and rule.is_enabled and rule.lifecycle_status == "in_progress":
-        raise HTTPException(status_code=403,detail="A running rule cannot be edited by a Supervisor. Ask an Administrator, or edit it while it is not activated.",)
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status_code=422, detail="Provide at least one field to update")
@@ -393,7 +391,7 @@ def update_rule(
             allowed_keys = SUPERVISOR_PARAMETER_KEYS.get(rule.rule_type, frozenset())
             disallowed = set(incoming) - allowed_keys
             if disallowed:
-                raise HTTPException(status_code=403,detail=( "Supervisors can only edit threshold parameters. "
+                raise HTTPException(status_code=403,detail=( "Supervisors can only edit Due and Overdue values. "
                         f"Restricted parameters: {', '.join(sorted(disallowed))}"),)
         changes["parameters"] = {**(rule.parameters or {}), **incoming}
 
@@ -407,14 +405,11 @@ def update_rule(
         return rule
 
     if user.role == "Supervisor":
-        allowed_fields = {"evaluation_interval_seconds"}
-        if rule.rule_type in SUPERVISOR_PARAMETER_KEYS:
-            allowed_fields.add("parameters")
-        else:
-            allowed_fields.add("threshold")
+        # Only the Due and Overdue values (the interval thresholds inside `parameters`) may change.
+        allowed_fields = {"parameters"} if rule.rule_type in SUPERVISOR_PARAMETER_KEYS else set()
         restricted = set(changes) - allowed_fields
         if restricted:
-            raise HTTPException(status_code=403,detail=("Supervisors can only edit threshold and evaluation interval values. "
+            raise HTTPException(status_code=403,detail=("Supervisors can only edit Due and Overdue values. "
                     f"Restricted fields: {', '.join(sorted(restricted))}"),)
 
     if rule.lifecycle_status == "completed" and changes.get("is_enabled") is True:

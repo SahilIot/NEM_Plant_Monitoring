@@ -153,6 +153,7 @@ export function validateForm(values, category, variables, templateMode = false) 
   if (values.link.trim() && !/^https?:\/\/\S+$/i.test(values.link.trim())) {
     problems.rule.push("The reference link must start with http:// or https://.");
   }
+  if (!values.parameters.length) problems.rule.push("Add at least one parameter.");
   const names = new Set();
   const used = new Map();
   for (const parameter of values.parameters) {

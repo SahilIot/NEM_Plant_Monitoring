@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 import { ChevronLeft, Pencil, X } from "lucide-react";
 import { api } from "../../../services/api.js";
+import { useAuth } from "../../auth/AuthContext.jsx";
 import { RuleField, UnitInput } from "./RuleFormParts.jsx";
 import VariableSelector from "./VariableSelector.jsx";
 import { parameterById, validateLimits } from "./intervalConfig.js";
@@ -108,6 +109,9 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
   const [showErrors, setShowErrors] = useState(false);
   const [saving, setSaving] = useState(false);
   const submitting = useRef(false);
+  // A Supervisor may change only Due and Overdue; every other field is shown but locked (the API enforces this too).
+  const { user } = useAuth();
+  const supervisor = user?.role === "Supervisor";
 
   const load = useCallback(async () => {
     setLoaded((current) => ({ ...current, status: "loading", error: "" }));
@@ -322,7 +326,7 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
 
       <Section title="Parameter information">
         <RuleField id="pe-name" label="Parameter name *" wide>
-          <input id="pe-name" value={form.name} maxLength={200} disabled={saving} autoComplete="off" onChange={(e) => patch({ name: e.target.value })} />
+          <input id="pe-name" value={form.name} maxLength={200} disabled={saving || supervisor} autoComplete="off" onChange={(e) => patch({ name: e.target.value })} />
         </RuleField>
         <div className="form-group form-group-wide">
           <label>{calendar ? "Variable" : "Connected PLC variable *"}</label>
@@ -330,7 +334,7 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
             <div className="pe-readonly" aria-readonly="true">None — counted from the calendar</div>
           ) : (
             <VariableSelector variables={selectableVariables} readings={readings} value={form.variableId} reasonFor={reasonFor}
-              assetName={assetName} disabled={saving} idPrefix="pe-var" onChange={(id) => patch({ variableId: id })} />
+              assetName={assetName} disabled={saving || supervisor} idPrefix="pe-var" onChange={(id) => patch({ variableId: id })} />
           )}
         </div>
       </Section>
@@ -341,7 +345,7 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
           <Fixed label="Aggregation" value={aggregationLabel(form.aggregation)} />
         ) : (
           <RuleField id="pe-aggregation" label="Aggregation *">
-            <select id="pe-aggregation" value={form.aggregation} disabled={saving} onChange={(e) => changeAggregation(e.target.value)}>
+            <select id="pe-aggregation" value={form.aggregation} disabled={saving || supervisor} onChange={(e) => changeAggregation(e.target.value)}>
               {aggregations.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
             </select>
           </RuleField>
@@ -356,14 +360,14 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
             {NUMBER_LIMITS.map(({ key, label }) => (
               <RuleField key={key} id={`pe-${key}`} label={label} optional>
                 <UnitInput unit={numberUnit({ ...selected, ...form }, variable) || ""}>
-                  <input id={`pe-${key}`} type="number" inputMode="decimal" step="any" value={form.limits[key]} disabled={saving}
+                  <input id={`pe-${key}`} type="number" inputMode="decimal" step="any" value={form.limits[key]} disabled={saving || supervisor}
                     onChange={(e) => patch({ limits: { ...form.limits, [key]: e.target.value } })} />
                 </UnitInput>
               </RuleField>
             ))}
             {(form.aggregation === "none" || form.aggregation === "last") && (
               <RuleField id="pe-unit" label="Unit" optional>
-                <input id="pe-unit" value={form.unit} maxLength={20} disabled={saving} autoComplete="off" onChange={(e) => patch({ unit: e.target.value })} />
+                <input id="pe-unit" value={form.unit} maxLength={20} disabled={saving || supervisor} autoComplete="off" onChange={(e) => patch({ unit: e.target.value })} />
               </RuleField>
             )}
           </>
@@ -371,12 +375,12 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
         {selected.kind === "boolean" && (
           <>
             <RuleField id="pe-expected" label="Expected state (normal) *">
-              <select id="pe-expected" value={String(form.expected)} disabled={saving} onChange={(e) => patch({ expected: e.target.value === "true" })}>
+              <select id="pe-expected" value={String(form.expected)} disabled={saving || supervisor} onChange={(e) => patch({ expected: e.target.value === "true" })}>
                 <option value="true">TRUE</option><option value="false">FALSE</option>
               </select>
             </RuleField>
             <RuleField id="pe-severity" label="When not matching, raise *">
-              <select id="pe-severity" value={form.severity} disabled={saving} onChange={(e) => patch({ severity: e.target.value })}>
+              <select id="pe-severity" value={form.severity} disabled={saving || supervisor} onChange={(e) => patch({ severity: e.target.value })}>
                 <option value="alert">Alert</option><option value="warning">Warning</option>
               </select>
             </RuleField>
@@ -396,7 +400,7 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
             </RuleField>
             {intervalType === "time" && (
               <RuleField id="pe-start" label="Start" optional={calendar} hint="Counting starts from this date and time." wide>
-                <input id="pe-start" type="datetime-local" value={form.activationAt} disabled={saving} onChange={(e) => patch({ activationAt: e.target.value })} />
+                <input id="pe-start" type="datetime-local" value={form.activationAt} disabled={saving || supervisor} onChange={(e) => patch({ activationAt: e.target.value })} />
               </RuleField>
             )}
           </>
@@ -418,6 +422,13 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
         </div>
       </Section>
 
+      {supervisor && (
+        <p className="pe-note" role="status">
+          {interval
+            ? "As a Supervisor you can change the Due and Overdue values only. Everything else is shown for reference."
+            : "As a Supervisor you can change Due and Overdue values of interval parameters only. This parameter has none, so it is shown for reference."}
+        </p>
+      )}
       <p className="pe-note">
         Only this parameter is changed. Changing the variable, aggregation or start time restarts this parameter's progress; the name and limits keep it. Other parameters and alert history are kept.
       </p>
@@ -428,7 +439,7 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
     </form>,
     <footer className="pe-foot">
       <button type="button" className="btn-outline" onClick={onClose} disabled={saving}>Cancel</button>
-      <button type="submit" form="pe-form" className="btn-primary" disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
+      <button type="submit" form="pe-form" className="btn-primary" disabled={saving || (supervisor && !interval)}>{saving ? "Saving…" : "Save changes"}</button>
     </footer>,
   );
 }

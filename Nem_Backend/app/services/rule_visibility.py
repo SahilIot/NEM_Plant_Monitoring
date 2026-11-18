@@ -157,16 +157,14 @@ def require_session_roles(session: Session, *roles: str) -> User | None:
 
 
 # Edit permission is separate from visibility. A Supervisor who can see a shared rule may
-# change only its numeric thresholds (the same fields the Rule Library editor offers them).
-SUPERVISOR_EDITABLE_FIELDS = frozenset({"threshold", "evaluation_interval_seconds", "parameters"})
+# change only the Due and Overdue values of its interval parameters; nothing else on the rule.
+SUPERVISOR_EDITABLE_FIELDS = frozenset({"parameters"})
 SUPERVISOR_EDITABLE_PARAMETERS = frozenset({
     "warning_thresholds", "alert_threshold",
     "warning_thresholds_seconds", "alert_threshold_seconds",
 })
-# Multi-parameter rules: the numeric limits inside each parameter definition are the thresholds.
-SUPERVISOR_EDITABLE_LIMITS = frozenset({
-    "lower_alert", "lower_warning", "upper_warning", "upper_alert", "due", "overdue",
-})
+# Multi-parameter rules: only the Due and Overdue limits inside a parameter definition may be changed.
+SUPERVISOR_EDITABLE_LIMITS = frozenset({"due", "overdue"})
 
 
 def _without_limits(parameters: dict) -> dict:
@@ -200,7 +198,7 @@ def enforce_template_edit_permission(
         return
     if user.role != "Supervisor":
         raise HTTPException(status_code=403, detail="Insufficient permissions")
-    denied = HTTPException(status_code=403,detail="Supervisors may only change the numeric thresholds of a shared rule",)
+    denied = HTTPException(status_code=403,detail="Supervisors may only change the Due and Overdue values of a shared rule",)
     for field, new in new_values.items():
         if field in SUPERVISOR_EDITABLE_FIELDS - {"parameters"}:
             continue
@@ -214,25 +212,6 @@ def enforce_template_edit_permission(
             raise denied
     if new_labels is not None and sorted(template.labels) != sorted(new_labels):
         raise denied
-    # A shared edit reaches every assignment, so none of them may be Running.
-    changes_values = any(
-        field in SUPERVISOR_EDITABLE_FIELDS and values_differ(getattr(template, field, None), new)
-        for field, new in new_values.items()
-    )
-    if changes_values:
-        from app.models import MonitoringRule
-        from app.services.access_scope import internal_propagation_scope
-
-        with internal_propagation_scope(session):
-            running = session.scalar(
-                select(MonitoringRule.id).where(
-                    MonitoringRule.source_template_id == template.id,
-                    MonitoringRule.is_enabled.is_(True),
-                    MonitoringRule.lifecycle_status == "in_progress",
-                ).limit(1)
-            )
-        if running is not None:
-            raise HTTPException(status_code=403,detail="This shared rule is Running on at least one asset. Only an Administrator can change it.",)
 
 
 _TRACKED_FIELDS = (

@@ -133,7 +133,7 @@ export default function TemplateRulePage() {
 
   const initialValues = useMemo(() => {
     if (!editing) {
-      return { name: "", periodAmount: "1", periodUnit: "hours", parameters: [newParameter(category, 1)], comment: "", instructions: "", link: "", documentIds: [], labels: [] };
+      return { name: "", periodAmount: "1", periodUnit: "hours", parameters: [], comment: "", instructions: "", link: "", documentIds: [], labels: [] };
     }
     if (!template) return null;
     return template.rule_type === "multi_parameter" ? valuesFromTemplate(template) : legacyValues(template);
@@ -232,6 +232,7 @@ export default function TemplateRulePage() {
               initialValues={initialValues}
               canEdit={canEdit}
               singleParameter={Boolean(legacy)}
+              limitsOnly={editing && !isAdmin && user?.role === "Supervisor"}
               submitLabel={editing ? "Save changes" : suggest ? "Send suggestion" : draftMode ? "Add rule to collection" : "Create rule"}
               savingLabel="Saving…"
               onSubmit={submit}
@@ -248,7 +249,9 @@ export default function TemplateRulePage() {
                     choices={supervisorChoices || []} disabled={!canEdit} />
                 </div>
               )}
-              topNotice={!canEdit && <p className="notice" role="status">Only Administrators can create reusable monitoring rules.</p>}
+              topNotice={!canEdit
+                ? <p className="notice" role="status">Only Administrators can create reusable monitoring rules.</p>
+                : editing && !isAdmin && <p className="notice" role="status">As a Supervisor you can change the Due and Overdue values only. Everything else is shown for reference.</p>}
             />
           </section>
         )}

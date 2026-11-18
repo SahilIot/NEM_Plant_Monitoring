@@ -90,6 +90,10 @@ export default function ParameterRuleWizard({
   extraProblem = "",
   // One fixed parameter (a reusable rule created before the parameter system): no add, remove, reorder or type change.
   singleParameter = false,
+  // A new rule starts with no parameters; these fields are applied to the first one the user adds.
+  firstParameterDefaults = null,
+  // A Supervisor editing a rule: every field is shown but locked except the Due and Overdue values.
+  limitsOnly = false,
 }) {
   const confirm = useConfirmation();
   const steps = STEPS[category];
@@ -142,10 +146,11 @@ export default function ParameterRuleWizard({
 
   const addParameter = () => {
     if (values.parameters.length >= MAX_PARAMETERS) return;
-    set({ parameters: [...values.parameters, newParameter(category, values.parameters.length + 1)] });
+    const added = newParameter(category, values.parameters.length + 1);
+    if (values.parameters.length === 0 && firstParameterDefaults) Object.assign(added, firstParameterDefaults);
+    set({ parameters: [...values.parameters, added] });
   };
   const removeParameter = async (p) => {
-    if (values.parameters.length === 1) return;
     const configured = p.variableId || (p.limits && Object.values(p.limits).some((v) => v !== "")) || p.due || p.overdue;
     if (configured && !(await confirm(`Remove "${p.name || "this parameter"}" and its configuration? Other parameters are not affected.`, { title: "Remove parameter?", confirmLabel: "Remove", cancelLabel: "Keep", destructive: true }))) return;
     set({ parameters: values.parameters.filter((x) => x.uid !== p.uid) });
@@ -199,10 +204,11 @@ export default function ParameterRuleWizard({
       const hit = pairs.find(({ m }) => re.test(m));
       return hit ? `${hit.p.name || "Parameter"}: ${hit.m}` : "";
     };
-    if (name === "General") return rule.find((m) => /name|period/i.test(m)) || find(/name|unique|start/i);
+    const needsParameter = rule.find((m) => /at least one parameter/i.test(m)) || "";
+    if (name === "General") return rule.find((m) => /name|period/i.test(m)) || (interval ? needsParameter : "") || find(/name|unique|start/i);
     if (name === "Variables") return find(/variable|aggregation|Timer|Counter|mapped/i);
     if (name === "Limits") return find(/Due|Overdue/);
-    if (name === "Parameters") return find(/./);
+    if (name === "Parameters") return needsParameter || find(/./);
     if (name === "Instructions") return rule.find((m) => /link/i.test(m)) || "";
     return "";
   };
@@ -240,17 +246,18 @@ export default function ParameterRuleWizard({
   };
 
   const disabled = saving || !canEdit;
+  const locked = disabled || limitsOnly; // for every field a Supervisor may not change
   const title = (text) => <h2 className="rule-section-title pw-title"><span ref={headingRef} tabIndex={-1}>{text}</span></h2>;
 
   const cardHead = (p, index) => (
     <div className="pw-card-head">
       <span className="pw-index" aria-hidden="true">{index + 1}</span>
       <input aria-label={`Parameter ${index + 1} name`} className="pw-name" value={p.name} maxLength={200}
-        onChange={(e) => update(p.uid, { name: e.target.value })} disabled={disabled} placeholder="Parameter name" />
+        onChange={(e) => update(p.uid, { name: e.target.value })} disabled={locked} placeholder="Parameter name" />
       {!singleParameter && <div className="pw-card-actions">
-        <button type="button" className="btn-outline" aria-label={`Move ${p.name || "parameter"} up`} disabled={disabled || index === 0} onClick={() => move(index, -1)}>↑</button>
-        <button type="button" className="btn-outline" aria-label={`Move ${p.name || "parameter"} down`} disabled={disabled || index === values.parameters.length - 1} onClick={() => move(index, 1)}>↓</button>
-        <button type="button" className="btn-outline pw-remove" disabled={disabled || values.parameters.length === 1} onClick={() => removeParameter(p)}>Remove</button>
+        <button type="button" className="btn-outline" aria-label={`Move ${p.name || "parameter"} up`} disabled={locked || index === 0} onClick={() => move(index, -1)}>↑</button>
+        <button type="button" className="btn-outline" aria-label={`Move ${p.name || "parameter"} down`} disabled={locked || index === values.parameters.length - 1} onClick={() => move(index, 1)}>↓</button>
+        <button type="button" className="btn-outline pw-remove" disabled={locked} onClick={() => removeParameter(p)}>Remove</button>
       </div>}
     </div>
   );
@@ -264,7 +271,7 @@ export default function ParameterRuleWizard({
     const info = options.find((o) => o.id === current);
     return (
       <RuleField id={`agg-${p.uid}`} label="Aggregation *" hint={info?.help || (current === "timer" ? "Timer adds up the time the signal is ON." : current === "counter" ? "Counter counts each OFF-to-ON cycle." : current === "none" ? "No variable: elapsed calendar time since the start time." : "")}>
-        <select id={`agg-${p.uid}`} value={current} disabled={disabled || singleParameter}
+        <select id={`agg-${p.uid}`} value={current} disabled={locked || singleParameter}
           onChange={(e) => (interval ? setIntervalAggregation(p, e.target.value) : patchCompat(p, { aggregation: e.target.value }))}>
           {options.map((o) => <option key={o.id} value={o.id} disabled={o.disabled}>{o.label}{o.disabled ? " (unavailable)" : ""}</option>)}
         </select>
@@ -276,12 +283,12 @@ export default function ParameterRuleWizard({
   const connect = (p, hint) => templateMode ? (
     <RuleField id={`vkey-${p.uid}`} label="Preferred variable key" optional wide
       hint="Chosen per asset when the rule is assigned. A key here only suggests the match on assets that have a variable with that key.">
-      <input id={`vkey-${p.uid}`} value={p.variableKey || ""} maxLength={200} disabled={disabled} autoComplete="off"
+      <input id={`vkey-${p.uid}`} value={p.variableKey || ""} maxLength={200} disabled={locked} autoComplete="off"
         onChange={(e) => update(p.uid, { variableKey: e.target.value })} />
     </RuleField>
   ) : (
     <VariableSelector variables={variables} readings={readings} value={p.variableId} reasonFor={reasonFor(p)}
-      assetName={assetName} disabled={disabled} idPrefix={`var-${p.uid}`} hint={hint}
+      assetName={assetName} disabled={locked} idPrefix={`var-${p.uid}`} hint={hint}
       onChange={(id) => update(p.uid, { variableId: id })} />
   );
 
@@ -291,7 +298,7 @@ export default function ParameterRuleWizard({
         <RuleField key={key} id={`${key}-${p.uid}`} label={label} optional>
           <UnitInput unit={numberUnit(p, variableOf(p)) || ""}>
             <input id={`${key}-${p.uid}`} type="number" inputMode="decimal" step="any" value={p.limits[key]}
-              onChange={(e) => update(p.uid, { limits: { ...p.limits, [key]: e.target.value } })} disabled={disabled} />
+              onChange={(e) => update(p.uid, { limits: { ...p.limits, [key]: e.target.value } })} disabled={locked} />
           </UnitInput>
         </RuleField>
       ))}
@@ -307,7 +314,7 @@ export default function ParameterRuleWizard({
         <div className="pw-type" role="radiogroup" aria-label="Parameter type">
           {["number", "boolean"].map((kind) => (
             <button key={kind} type="button" role="radio" aria-checked={p.kind === kind}
-              className={`iw-parameter-option${p.kind === kind ? " is-active" : ""}`} disabled={disabled} onClick={() => p.kind !== kind && setKind(p, kind)}>
+              className={`iw-parameter-option${p.kind === kind ? " is-active" : ""}`} disabled={locked} onClick={() => p.kind !== kind && setKind(p, kind)}>
               <strong>{kind === "number" ? "Number" : "Boolean"}</strong>
               <span>{kind === "number" ? "Compare a numeric value with lower and upper limits." : "Check that the signal is TRUE or FALSE as expected."}</span>
             </button>
@@ -324,12 +331,12 @@ export default function ParameterRuleWizard({
           <>
             <div className="pw-bool-config">
               <RuleField id={`exp-${p.uid}`} label="Expected state (normal) *">
-                <select id={`exp-${p.uid}`} value={String(p.expected)} onChange={(e) => update(p.uid, { expected: e.target.value === "true" })} disabled={disabled}>
+                <select id={`exp-${p.uid}`} value={String(p.expected)} onChange={(e) => update(p.uid, { expected: e.target.value === "true" })} disabled={locked}>
                   <option value="true">TRUE</option><option value="false">FALSE</option>
                 </select>
               </RuleField>
               <RuleField id={`sev-${p.uid}`} label="When not matching, raise *">
-                <select id={`sev-${p.uid}`} value={p.severity} onChange={(e) => update(p.uid, { severity: e.target.value })} disabled={disabled}>
+                <select id={`sev-${p.uid}`} value={p.severity} onChange={(e) => update(p.uid, { severity: e.target.value })} disabled={locked}>
                   <option value="alert">Alert</option><option value="warning">Warning</option>
                 </select>
               </RuleField>
@@ -355,14 +362,14 @@ export default function ParameterRuleWizard({
       <div className="iw-parameter-options" role="radiogroup" aria-label="Interval parameter">
         {INTERVAL_PARAMETERS.map((item) => (
           <button key={item.id} type="button" role="radio" aria-checked={item.id === p.intervalParameter}
-            className={`iw-parameter-option${item.id === p.intervalParameter ? " is-active" : ""}`} disabled={disabled || singleParameter} onClick={() => setInterval(p, item.id)}>
+            className={`iw-parameter-option${item.id === p.intervalParameter ? " is-active" : ""}`} disabled={locked || singleParameter} onClick={() => setInterval(p, item.id)}>
             <strong>{item.label}</strong><span>{item.summary}</span>
           </button>
         ))}
       </div>
       {p.intervalParameter === "time" && !templateMode && (
         <RuleField id={`act-${p.uid}`} label="Start counting on *" hint="Nothing is counted before this date and time.">
-          <input id={`act-${p.uid}`} type="datetime-local" value={p.activationAt} onChange={(e) => update(p.uid, { activationAt: e.target.value })} disabled={disabled} />
+          <input id={`act-${p.uid}`} type="datetime-local" value={p.activationAt} onChange={(e) => update(p.uid, { activationAt: e.target.value })} disabled={locked} />
         </RuleField>
       )}
       {intervalDemo(p)}
@@ -396,9 +403,12 @@ export default function ParameterRuleWizard({
   };
 
   const addButton = singleParameter ? null : (
-    <button type="button" className="btn-outline pw-add" onClick={addParameter} disabled={disabled || values.parameters.length >= MAX_PARAMETERS}>
-      + Add Parameter
-    </button>
+    <>
+      {values.parameters.length === 0 && <p className="iw-help">This rule has no parameters yet. Click “+ Add Parameter” to add one.</p>}
+      <button type="button" className="btn-outline pw-add" onClick={addParameter} disabled={locked || values.parameters.length >= MAX_PARAMETERS}>
+        + Add Parameter
+      </button>
+    </>
   );
 
   return (
@@ -423,12 +433,12 @@ export default function ParameterRuleWizard({
           <div className="pw-section">
             {title("1 · General configuration")}
             <RuleField id="pw-name" label="Rule name *" wide>
-              <input id="pw-name" name="name" value={values.name} onChange={field} maxLength={200} disabled={disabled} autoComplete="off"
+              <input id="pw-name" name="name" value={values.name} onChange={field} maxLength={200} disabled={locked} autoComplete="off"
                 placeholder={interval ? "e.g. Gearbox service" : "e.g. Motor health"} />
             </RuleField>
-            <RuleField id="pw-labels" label="Labels" optional wide><LabelsField id="pw-labels" value={values.labels} onChange={(labels) => set({ labels })} disabled={disabled} /></RuleField>
+            <RuleField id="pw-labels" label="Labels" optional wide><LabelsField id="pw-labels" value={values.labels} onChange={(labels) => set({ labels })} disabled={locked} /></RuleField>
             {!interval && (
-              <fieldset className="pw-period" disabled={disabled}>
+              <fieldset className="pw-period" disabled={locked}>
                 <legend>Calculation period *</legend>
                 <p className="iw-help">The period over which each parameter's value or aggregation is evaluated. The backend uses it when it evaluates the rule.</p>
                 <div className="pw-period-row">
@@ -509,10 +519,10 @@ export default function ParameterRuleWizard({
           <div className="pw-section">
             {title(`${steps.indexOf("Instructions") + 1} · Instructions and documents`)}
             <p className="iw-help">All optional. These apply to the whole rule.</p>
-            <RuleField id="pw-comment" label="Comment or description" optional wide><textarea id="pw-comment" name="comment" rows={3} value={values.comment} onChange={field} disabled={disabled} /></RuleField>
-            <RuleField id="pw-instructions" label="Instructions" optional wide hint="What should be done when this rule is raised."><textarea id="pw-instructions" name="instructions" rows={4} value={values.instructions} onChange={field} disabled={disabled} /></RuleField>
-            <RuleField id="pw-link" label="External reference link" optional wide hint="For example a manual (https://…)."><input id="pw-link" name="link" type="url" value={values.link} onChange={field} placeholder="https://" disabled={disabled} /></RuleField>
-            {!templateMode && <fieldset className="pw-docs" disabled={disabled}>
+            <RuleField id="pw-comment" label="Comment or description" optional wide><textarea id="pw-comment" name="comment" rows={3} value={values.comment} onChange={field} disabled={locked} /></RuleField>
+            <RuleField id="pw-instructions" label="Instructions" optional wide hint="What should be done when this rule is raised."><textarea id="pw-instructions" name="instructions" rows={4} value={values.instructions} onChange={field} disabled={locked} /></RuleField>
+            <RuleField id="pw-link" label="External reference link" optional wide hint="For example a manual (https://…)."><input id="pw-link" name="link" type="url" value={values.link} onChange={field} placeholder="https://" disabled={locked} /></RuleField>
+            {!templateMode && <fieldset className="pw-docs" disabled={locked}>
               <legend>Supporting documents <span className="optional-label">Optional</span></legend>
               {documents.length ? (
                 <ul className="pw-doc-list">

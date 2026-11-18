@@ -1178,15 +1178,12 @@ const filteredEvents = [...events]
         // Editing always starts from the parameter selector, whether the rule has one parameter or many.
         setParameterEdit({ ruleId: rule.id, parameterId: null, alwaysSelect: true });
       }}
-      disabled={
-        (!canManageRules && !isSupervisor) ||
-        (isSupervisor && lifecycleStatus(rule) === "in_progress")
-      }
+      disabled={!canManageRules && !isSupervisor}
       title={
-        !canManageRules
-          ? "You do not have permission to manage monitoring rules."
-          : isSupervisor && lifecycleStatus(rule) === "in_progress"
-            ? "A running rule cannot be edited by a Supervisor. Edit it while it is not activated."
+        isSupervisor
+          ? "Supervisors can change the Due and Overdue values only."
+          : !canManageRules
+            ? "You do not have permission to manage monitoring rules."
             : undefined
       }
     >
