@@ -2177,6 +2177,7 @@ const filteredEvents = [...events]
           <CurrentMaintenanceCards
             key={assetId}
             assetId={assetId}
+            assetName={asset?.name}
             refreshKey={maintenanceRefreshKey}
             onChanged={refreshMaintenanceData}
             onActionNotification={notifyAction}
@@ -2192,6 +2193,7 @@ const filteredEvents = [...events]
     <MaintenancePanel
       key={assetId}
       assetId={assetId}
+      assetName={asset?.name}
       scheduleId={scheduleId}
       progressRefreshKey={scheduleProgressKey}
       recordsRefreshKey={maintenanceRecordsKey}

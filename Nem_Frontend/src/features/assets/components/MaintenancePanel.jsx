@@ -26,6 +26,7 @@ import { DotsIcon } from "../../../components/common/Icons.jsx";
 import { auditUser, formatAuditTime, formatTime } from "../../../utils/format.js";
 import MaintenanceDetails from "./MaintenanceDetails.jsx";
 import MaintenanceRegistrationDialog from "./MaintenanceRegistrationDialog.jsx";
+import { recordDeleteConfirmation, recordDeleteState, scheduleDeleteState } from "../maintenanceDeletion.js";
 import "./MaintenancePanel.css";
 
 const API_BASE = (import.meta.env.VITE_API_URL || "/api/v1").replace(/\/+$/, "");
@@ -241,6 +242,7 @@ export default function MaintenancePanel({
   scheduleId,
   progressRefreshKey = 0,
   recordsRefreshKey = 0,
+  assetName,
   onChanged,
   onActionNotification,
   navigationState,
@@ -383,11 +385,9 @@ export default function MaintenancePanel({
   };
 
   const runPermanentDeleteRecord = async (record) => {
-    if (!isAdministrator || busy) return;
+    if (!recordDeleteState(record, { isAdministrator, records }).enabled || busy) return;
     const confirmed = await confirm(
-      record.status === "planned" && record.schedule_id != null
-        ? "Permanently delete this maintenance? Its recurring schedule, all of its maintenance records and history, and its active notifications will be deleted. This action cannot be undone."
-        : "Are you sure you want to delete this maintenance? This action cannot be undone.",
+      recordDeleteConfirmation(record, { assetName }),
       {
         title: "Delete Maintenance?",
         confirmLabel: "Delete Maintenance",
@@ -423,11 +423,15 @@ export default function MaintenancePanel({
 
   // Confirm and delete only through the existing Administrator-protected schedule endpoint.
   const deleteSchedule = async (schedule) => {
-    if (!isAdministrator || busy || scheduleDeleteGuard.current) return;
+    if (!scheduleDeleteState(schedule, { isAdministrator, records }).enabled || busy || scheduleDeleteGuard.current) return;
     scheduleDeleteGuard.current = true;
     try {
       const confirmed = await confirm(
-        `Delete maintenance schedule "${schedule.title}"?\n\nSchedules with linked occurrences or history cannot be deleted; cancel the schedule to preserve its records.`,
+        schedule.schedule_mode === "rule"
+          ? `Permanently delete the cancelled rule schedule "${schedule.title}"?\n\nThis removes the schedule and ALL of its completed and cancelled maintenance records and history. The monitoring rule itself is not changed. This cannot be undone.`
+          : schedule.status === "cancelled"
+          ? `Permanently delete the cancelled schedule "${schedule.title}"?\n\nThis removes the schedule and its ${records.filter((item) => item.schedule_id === schedule.id).length} maintenance record(s) and history, and its notifications. Other schedules, records and shared documents are kept. This cannot be undone.`
+          : `Permanently delete the maintenance schedule "${schedule.title}"?\n\nThis removes the whole schedule series. It has no maintenance records, so no history is lost. This cannot be undone.`,
         {
           title: "Delete schedule?",
           confirmLabel: "Delete schedule",
@@ -1030,13 +1034,21 @@ export default function MaintenancePanel({
       : new Date(`${String(schedule.current_due_date).slice(0, 10)}T00:00:00`).getTime();
   const activeSchedules = schedules
     .filter((schedule) => schedule.approval_status !== "pending")
-    // Cancelled because the rule is gone: no longer active work; kept in Jobs & History and reachable by link.
-    .filter((schedule) => !isCancelledUnavailable(schedule))
+    // A cancelled schedule is no longer active work: it is listed under Jobs & History (cancelledSchedules).
+    .filter((schedule) => schedule.status !== "cancelled")
+    // A schedule whose last occurrence was completed has finished its lifecycle (the backend sets status "completed"
+    // when there is no next cycle to approve). It is history: its completed job is listed under Jobs & History and the
+    // schedule stays reachable from that job. Runtime/usage schedules and rule parameters start their next cycle
+    // (a still-active schedule, or a new one), so those keep appearing here.
+    .filter((schedule) => schedule.status !== "completed")
     .sort((a, b) => {
       const first = dueTime(a);
       const second = dueTime(b);
       return first === second ? 0 : first < second ? -1 : 1;
     });
+  const cancelledSchedules = schedules
+    .filter((schedule) => schedule.status === "cancelled")
+    .sort((a, b) => String(b.cancelled_at || b.updated_at || "").localeCompare(String(a.cancelled_at || a.updated_at || "")));
   const pendingSchedules = schedules.filter(
     (schedule) => schedule.approval_status === "pending"
   );
@@ -1170,14 +1182,8 @@ export default function MaintenancePanel({
                   setActionMenuRecordId(null);
                   permanentlyDeleteRecord(record);
                 }}
-                disabled={busy || record.status === "in_progress" || Boolean(record.rule_context)}
-                title={
-                  record.rule_context
-                    ? "Maintenance created from a monitoring rule cannot be deleted. It is controlled by its rule and its history is preserved; deactivate or edit the rule instead."
-                    : record.status === "in_progress"
-                    ? "In-progress maintenance cannot be deleted."
-                    : "Permanently delete this maintenance"
-                }
+                disabled={!recordDeleteState(record, { isAdministrator, busy, records }).enabled}
+                title={recordDeleteState(record, { isAdministrator, busy, records }).reason}
               >
                 <Trash2 size={16} aria-hidden="true" />
                 <span>Delete Maintenance</span>
@@ -1270,7 +1276,9 @@ export default function MaintenancePanel({
                   : undefined
             }
           >
-            {isRule
+            {schedule.status === "cancelled"
+              ? `Cancelled${schedule.cancelled_at ? ` on ${formatTime(schedule.cancelled_at)}` : ""}${schedule.cancelled_by_name ? ` by ${schedule.cancelled_by_name}` : ""}${schedule.cancellation_reason ? ` · Reason: ${schedule.cancellation_reason}` : ""} · ${records.filter((item) => item.schedule_id === schedule.id).length} record(s)`
+              : isRule
               ? `${schedule.source_rule_name || "Rule"} · ${schedule.source_parameter_name || "Parameter"} · ${schedule.status === "active" ? (schedule.source_parameter_id == null ? "Unavailable — rule deleted" : schedule.eligibility === "ready" ? "Ready to Start" : "Not Due") : String(schedule.status).replaceAll("_", " ")}`
               : isRuntime || isUsage
               ? `PLC Variable: #${schedule.signal_variable_id}`
@@ -1422,8 +1430,8 @@ export default function MaintenancePanel({
             setActionMenuRecordId(null);
             deleteSchedule(schedule);
           }}
-          disabled={busy || schedule.schedule_mode === "rule"}
-          title={schedule.schedule_mode === "rule" ? "Maintenance created from a monitoring rule cannot be deleted. It is controlled by its rule and its history is preserved; deactivate or edit the rule instead." : "Delete schedule"}
+          disabled={!scheduleDeleteState(schedule, { isAdministrator, busy, records }).enabled}
+          title={scheduleDeleteState(schedule, { isAdministrator, busy, records }).reason}
         >
           <Trash2 size={16} aria-hidden="true" />
           <span>Delete schedule</span>
@@ -1565,9 +1573,9 @@ export default function MaintenancePanel({
             )}
           </p>
         )}
-        {isCancelledUnavailable(schedule) && (
+        {schedule.status === "cancelled" && (
           <p className="notice" role="status">
-            Cancelled – Rule unavailable. Cancelled by {schedule.cancelled_by_name || "an administrator"}
+            {isCancelledUnavailable(schedule) ? "Cancelled – Rule unavailable." : "Cancelled."} Cancelled by {schedule.cancelled_by_name || "an administrator"}
             {schedule.cancelled_at ? ` on ${formatTime(schedule.cancelled_at)}` : ""}.
             {schedule.cancellation_reason ? ` Reason: ${schedule.cancellation_reason}` : ""}
           </p>
@@ -2082,7 +2090,7 @@ export default function MaintenancePanel({
           >
             <FileText size={16} aria-hidden="true" />
             Jobs & History
-            <span>{visibleRecords.length}</span>
+            <span>{visibleRecords.length + cancelledSchedules.length}</span>
           </button>
         </div>
 
@@ -2139,7 +2147,7 @@ export default function MaintenancePanel({
           <>
             {loading ? (
               <LoadingIndicator compact message="Loading maintenance history" />
-            ) : visibleRecords.length === 0 ? (
+            ) : visibleRecords.length === 0 && cancelledSchedules.length === 0 ? (
               <EmptyState
                 art={false}
                 title={records.length === 0 ? "No maintenance jobs" : "No other maintenance jobs"}
@@ -2152,9 +2160,18 @@ export default function MaintenancePanel({
                 }
               />
             ) : (
-              <div className="maintenance-record-list">
-                {visibleRecords.map(renderRecordCard)}
-              </div>
+              <>
+                {cancelledSchedules.length > 0 && (
+                  <div className="maintenance-schedule-list" aria-label="Cancelled schedules">
+                    {cancelledSchedules.map(renderScheduleCard)}
+                  </div>
+                )}
+                {visibleRecords.length > 0 && (
+                  <div className="maintenance-record-list">
+                    {visibleRecords.map(renderRecordCard)}
+                  </div>
+                )}
+              </>
             )}
           </>
         )}

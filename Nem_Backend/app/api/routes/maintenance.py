@@ -714,6 +714,16 @@ def get_maintenance_schedule(
 
 # Deletes a locked schedule together with ALL of its maintenance records (past, present and future)
 # and its alerts in one transaction. Events are audit history: they are kept, only unlinked from the alerts.
+def _mark_schedule_cancelled(schedule: MaintenanceSchedule, user: User) -> None:
+    # Record who cancelled an ordinary schedule and when, so Jobs & History can show it (rule schedules set the same
+    # fields in rule_maintenance.cancel_unavailable). The first cancellation wins.
+    if schedule.cancelled_at is None:
+        schedule.cancelled_at = utc_now()
+        schedule.cancelled_by_id = getattr(user, "id", None)
+        schedule.cancelled_by_name = _user_label(user)
+        schedule.cancellation_kind = schedule.cancellation_kind or "manual"
+
+
 def _delete_schedule_tree(session: Session, schedule: MaintenanceSchedule, user: User) -> None:
     schedule_id = schedule.id
     records = session.scalars(
@@ -836,8 +846,29 @@ def permanently_delete_maintenance_schedule(
     )
     if schedule is None or not access_scope(session).allows(schedule.asset_id):
         raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
-    if schedule.schedule_mode == "rule":
-        raise HTTPException(status_code=409, detail=RULE_MAINTENANCE_DELETE_MESSAGE)
+    is_rule_schedule = schedule.schedule_mode == "rule"
+    if is_rule_schedule:
+        # Only a rule schedule that is already cancelled (for example rule unavailable) and holds only finished
+        # records may be removed; an active rule schedule is controlled by its rule.
+        if schedule.status != "cancelled":
+            raise HTTPException(status_code=409, detail=RULE_MAINTENANCE_DELETE_MESSAGE)
+        if session.scalar(
+            select(MaintenanceRecord.id)
+            .where(MaintenanceRecord.schedule_id == schedule_id, MaintenanceRecord.status.notin_(("completed", "cancelled")))
+            .limit(1)
+        ) is not None:
+            raise HTTPException(status_code=409, detail="This rule schedule still has unfinished maintenance and cannot be deleted.")
+        if session.scalar(
+            select(Alert.id).where(Alert.maintenance_schedule_id == schedule_id, Alert.status == "active").limit(1)
+        ) is not None:
+            raise HTTPException(status_code=409, detail="This rule schedule has an active alert. Resolve it before deleting the schedule.")
+        _delete_schedule_tree(session, schedule, user)
+        return
+    if schedule.status == "cancelled":
+        # A cancelled ordinary schedule is history: an Administrator may remove it together with its own records and
+        # alerts (an in-progress record still blocks it inside _delete_schedule_tree).
+        _delete_schedule_tree(session, schedule, user)
+        return
     # Refuse schedule deletion while any occurrence exists so linked and completed history is never erased.
     linked_record_id = session.scalar(
         select(MaintenanceRecord.id)
@@ -1181,6 +1212,7 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
                 schedule.current_occurrence_id = None
 
     if schedule.status == "cancelled":
+        _mark_schedule_cancelled(schedule, user)
         # Cancelled schedules must not retain proposals or active due alerts.
         schedule.proposed_due_date = None
         schedule.approval_status = "declined"
@@ -1411,7 +1443,9 @@ def permanently_delete_maintenance_record(
         raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
     if record.status == "in_progress":
         raise HTTPException(status_code=409,detail="Maintenance currently in progress cannot be permanently deleted.",)
-    if record.rule_context is not None:
+    if record.rule_context is not None and record.status not in {"completed", "cancelled"}:
+        # Finished rule history (completed or cancelled) may be removed by an Administrator, one record at a time.
+        # Open rule work stays controlled by its rule.
         raise HTTPException(status_code=409, detail=RULE_MAINTENANCE_DELETE_MESSAGE)
 
     if record.status == "planned" and record.schedule_id is not None:
@@ -1430,7 +1464,9 @@ def permanently_delete_maintenance_record(
             .where(MaintenanceSchedule.id == schedule_id)
             .with_for_update()
         )
-        if record.status != "completed" and session.scalar(
+        # Only unfinished planned work is tied to an active due alert. Completed and cancelled records are history: the
+        # alert belongs to the schedule/due date, is not removed with the record, and must not block cleaning it up.
+        if record.status == "planned" and session.scalar(
             select(Alert.id)
             .where(
                 Alert.maintenance_schedule_id == schedule_id,
@@ -1861,6 +1897,7 @@ def cancel_maintenance_record(
             schedule = _schedule_or_404(session, record.schedule_id)
 
             schedule.status = "cancelled"
+            _mark_schedule_cancelled(schedule, user)
             schedule.proposed_due_date = None
             schedule.approval_status = "declined"
 

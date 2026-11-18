@@ -5,6 +5,7 @@ import { api } from "../../../services/api.js";
 import { shareInFlight } from "../../../services/liveUpdates.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { captureNavigationOrigin } from "../../../utils/navigation.js";
+import { recordDeleteConfirmation, recordDeleteState } from "../maintenanceDeletion.js";
 import {
   EmptyState,
   FloatingMenu,
@@ -40,6 +41,7 @@ function formatNumber(value) {
 export default function CurrentMaintenanceCards({
   assetId,
   refreshKey = 0,
+  assetName,
   onChanged,
   onActionNotification,
   onCompletedRecordsCount,
@@ -133,12 +135,10 @@ const openEdit = (record) => {
   };
 
   const runPermanentDeleteRecord = async (record) => {
-    if (!isAdministrator || busy || record.status === "in_progress") return;
+    if (!recordDeleteState(record, { isAdministrator }).enabled || busy) return;
     if (
       !(await confirm(
-        record.status === "planned" && record.schedule_id != null
-          ? "Permanently delete this maintenance? Its recurring schedule, all of its maintenance records and history, and its active notifications will be deleted. This action cannot be undone."
-          : "Are you sure you want to delete this maintenance? This action cannot be undone.",
+        recordDeleteConfirmation(record, { assetName }),
         {
           title: "Delete Maintenance?",
           confirmLabel: "Delete Maintenance",
@@ -595,14 +595,8 @@ const openEdit = (record) => {
                               setActionMenuRecordId(null);
                               permanentlyDeleteRecord(record);
                             }}
-                            disabled={busy || inProgress || Boolean(record.rule_context)}
-                            title={
-                              record.rule_context
-                                ? "Maintenance created from a monitoring rule cannot be deleted. It is controlled by its rule and its history is preserved; deactivate or edit the rule instead."
-                                : inProgress
-                                ? "In-progress maintenance cannot be deleted."
-                                : "Permanently delete maintenance"
-                            }
+                            disabled={!recordDeleteState(record, { isAdministrator, busy }).enabled}
+                            title={recordDeleteState(record, { isAdministrator, busy }).reason}
                           >
                             <Trash2 size={16} aria-hidden="true" />
                             <span>Delete Maintenance</span>
