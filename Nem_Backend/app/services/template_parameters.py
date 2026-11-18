@@ -1,11 +1,5 @@
-# Multi-parameter rule templates: assigning them to assets, and keeping the linked asset rules in step.
-#
-# A template (rule_type "multi_parameter") stores parameter DEFINITIONS in `parameters["parameter_defs"]`, each with
-# a stable key. An asset rule created from it is an ordinary multi_parameter rule: its RuleParameter rows reuse the
-# definition keys, so a later template edit updates exactly the matching parameters, keeps their progress and
-# lifecycle, and never touches a variable that was chosen for that asset.
+# Rule-template management service.
 from __future__ import annotations
-
 from datetime import datetime, timezone
 from typing import Any
 
@@ -19,32 +13,29 @@ from app.schemas.rule_parameters import RuleParameterIn
 TEMPLATE_META_KEYS = ("category", "calculation_period_seconds", "combine", "reference_link", "maintenance_instructions")
 NUMERIC = {"number", "integer"}
 
-
+# Check whether the template is a multi-parameter rule.
 def is_multi(template: MonitoringRuleTemplate) -> bool:
     return template.rule_type == "multi_parameter"
 
-
+# Retrives parameter definitions stored in the template`s JSON feild
 def template_defs(template: MonitoringRuleTemplate) -> list[dict[str, Any]]:
     return list((template.parameters or {}).get("parameter_defs") or [])
 
-
+# Copies additional template settings into the actual asset rule.
 def rule_meta(template: MonitoringRuleTemplate) -> dict[str, Any]:
-    # The `parameters` JSON an asset rule created from this template carries (no definitions).
     source = template.parameters or {}
     return {key: source[key] for key in TEMPLATE_META_KEYS if source.get(key) is not None}
 
-
+# Determines which PLC variable dtypes are compatible with a parameter.
 def _compatible_types(definition: dict[str, Any]) -> set[str]:
     kind, aggregation = definition["kind"], definition["aggregation"]
     if kind == "number" and aggregation in {"none", "last"}:
         return set(NUMERIC)
     return {"boolean"}
 
-
+# Finds all PLC variables that can be selected for a particular rule parameter.
 def candidates_for(session: Session, request: Request, asset: Asset, definition: dict[str, Any],
                    keep_variable_ids: set[int] | None = None) -> list[Variable]:
-    # Active variables on the asset that this definition could be connected to.
-    # keep_variable_ids are variables already connected that stay valid while temporarily inactive.
     if not definition.get("uses_variable", True):
         return []
     from app.api.routes.rules import (
@@ -62,7 +53,7 @@ def candidates_for(session: Session, request: Request, asset: Asset, definition:
     return [v for v in variables if mapping(request, v.id) == (asset.id, v.id)
             or (bypass and v.opcua_node_id is not None and v.signal_role in {None, "cycle" if counter else "running"})]
 
-
+# Automatically suggests a variable when creating a rule.
 def suggested_variable(definition: dict[str, Any], candidates: list[Variable]) -> Variable | None:
     hint = (definition.get("variable_key") or "").casefold()
     if hint:
@@ -71,7 +62,7 @@ def suggested_variable(definition: dict[str, Any], candidates: list[Variable]) -
             return matches[0]
     return candidates[0] if len(candidates) == 1 else None
 
-
+# This function actually resolves the variable selected for a parameter.
 def resolve_variable(session: Session, request: Request, asset: Asset, definition: dict[str, Any],
                      requested: int | None, taken: set[tuple[int, str]]) -> Variable | None:
     if not definition.get("uses_variable", True):
@@ -90,7 +81,7 @@ def resolve_variable(session: Session, request: Request, asset: Asset, definitio
         raise HTTPException(status_code=422, detail=f"{label}: choose a variable for this parameter on the target asset")
     return chosen
 
-
+# This function prepare the parameter rows when creating a rule from a template.
 def build_items(session: Session, request: Request, asset: Asset, template: MonitoringRuleTemplate,
                 mappings: dict[str, int] | None) -> list[dict[str, Any]]:
     # RuleParameter column values for an asset rule made from the template, validated like a hand-made rule.
@@ -115,10 +106,10 @@ def build_items(session: Session, request: Request, asset: Asset, template: Moni
                       (template.parameters or {}).get("category"))
     return items
 
-
+# This function builds the complete rule definition for a specific asset.
 def instance_definition(session: Session, request: Request, template: MonitoringRuleTemplate, asset_id: int,
                         mappings: dict[str, int] | None, *, activate: bool) -> dict[str, Any]:
-    # Definition dict for MonitoringRule(**…) (the private `_parameter_items` key is popped by `instantiate`).
+    # Definition dict for MonitoringRule (the private _parameter_items key is popped by instantiate).
     if not template.is_enabled:
         raise HTTPException(status_code=422, detail=f"Rule template '{template.name}' is disabled")
     asset = session.get(Asset, asset_id)
@@ -133,11 +124,11 @@ def instance_definition(session: Session, request: Request, template: Monitoring
         "_parameter_items": items,
     }
 
-
+# Removes internal/private keys before passing the dictionary into the SQLAlchemy model.
 def plain(definition: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in definition.items() if not key.startswith("_")}
 
-
+# This function creates the actual SQLAlchemy rule object.
 def instantiate(definition: dict[str, Any]) -> MonitoringRule:
     # The rule plus its parameter rows (saved together with the session transaction).
     rule = MonitoringRule(**plain(definition))
@@ -145,13 +136,9 @@ def instantiate(definition: dict[str, Any]) -> MonitoringRule:
         rule.parameter_items.append(RuleParameter(**item))
     return rule
 
-
+# This func. sync. an existing asset rule with changes made to its shared template.
 def sync_instance(session: Session, request: Request, rule: MonitoringRule, template: MonitoringRuleTemplate) -> None:
-    """Bring one asset rule's parameters in line with its template after a template edit.
-    Matching is by key. Existing parameters keep their variable, progress, lifecycle and alerts; only a change to what is
-    measured (aggregation, interval type, start time) restarts that one parameter. Definitions the template added are
-    connected like a fresh assignment (and fail loudly if no variable can be chosen); definitions it removed end here.
-    """
+
     from app.api.routes.rule_parameters import _check_parameters, _measured_source
     from app.services.rule_parameters import reset_parameter_baseline
 
@@ -187,8 +174,7 @@ def sync_instance(session: Session, request: Request, rule: MonitoringRule, temp
         if variable_id is not None:
             allowed = {v.id for v in candidates_for(session, request, asset, definition, {variable_id})}
             if variable_id not in allowed:
-                raise HTTPException(status_code=409, detail=(
-                    f"Parameter '{definition['name']}': the connected variable on asset {asset.name} is not compatible "
+                raise HTTPException(status_code=409, detail=(f"Parameter '{definition['name']}': the connected variable on asset {asset.name} is not compatible "
                     "with the new configuration"))
         changed = _measured_source(parameter.variable_id, parameter.aggregation, parameter.config) != _measured_source(
             variable_id, definition["aggregation"], definition["config"])
