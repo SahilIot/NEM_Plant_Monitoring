@@ -13,7 +13,7 @@
 # Other legacy types are shown as one read-only parameter (`editable` false, with a reason); they are not converted.
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select

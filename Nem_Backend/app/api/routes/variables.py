@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models import Alert, Asset, MonitoringRule, Reading, RuleState, Variable
+from app.models import Asset, MonitoringRule, Reading, Variable
 from app.services.access_scope import access_scope
 from app.services.asset_deletion import variable_deletion_summary
 from app.schemas.variable import VariableCreate, VariableRead, VariableUpdate

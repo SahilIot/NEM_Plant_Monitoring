@@ -14,19 +14,7 @@ from sqlalchemy.orm import Session
 #get_db supplies the database session to an endpoint
 from app.db.session import get_db
 from app.services.access_scope import access_scope
-from app.models import (
-    Alert,
-    Asset,
-    MachineMonitoringState,
-    MaintenanceRecord,
-    MaintenanceSchedule,
-    MonitoringEvent,
-    MonitoringRule,
-    Reading,
-    RuleCounterState,
-    RuleState,
-    Variable,
-)
+from app.models import Asset
 from app.schemas.asset import AssetCreate, AssetRead, AssetTree, AssetUpdate # pydantic schema for input validation and output formatting
 
 router = APIRouter(prefix="/assets", tags=["assets"]) 
