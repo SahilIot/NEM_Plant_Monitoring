@@ -404,22 +404,6 @@ export default function Home() {
   const monitored = num(summary.monitored_assets);
   const total = num(summary.total_assets);
   const stats = summary.stats ?? {};
-  const cycleMappings = (plcStatus?.mappings || []).filter(
-    (mapping) =>
-      mapping.role === "cycle_signal" &&
-      mapping.mapping_valid &&
-      mapping.asset_active &&
-      mapping.variable_active
-  );
-  const machinesByAsset = new Map(
-    (plcStatus?.machines || []).map((machine) => [
-      machine.asset_id,
-      machine,
-    ])
-  );
-  const ruleStatesById = new Map(
-    monitoringStates.map((state) => [state.rule_id, state])
-  );
 
   const allClear =
     rulesAlert + rulesWarning + assetsAlert + assetsWarning === 0 &&

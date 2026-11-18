@@ -100,7 +100,6 @@ export default function AdminUsersPage() {
   const validatePhone = (value) => {
     const trimmed = value.trim();
     if (!trimmed) return { valid: true, normalized: "" };
-    const digits = trimmed.replace(/\D/g, "");
     if (!INDIAN_PHONE_REGEX.test(trimmed)) return { valid: false, normalized: "" };
     return { valid: true, normalized: normalizePhone(trimmed) };
   };

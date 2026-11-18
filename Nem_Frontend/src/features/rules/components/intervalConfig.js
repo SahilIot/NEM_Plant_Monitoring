@@ -46,18 +46,6 @@ export const INTERVAL_PARAMETERS = [
   },
 ];
 
-export const AGGREGATIONS = [
-  { id: "none", label: "None" },
-  { id: "timer", label: "Timer" },
-  { id: "counter", label: "Counter" },
-];
-
-export const AGGREGATION_HELP = {
-  none: "None keeps the raw signal value without accumulating it. Interval Based rules need an accumulated value, so None is not available here.",
-  timer: "Timer adds up the time the signal is ON (running hours).",
-  counter: "Counter counts each complete OFF-to-ON cycle of the signal.",
-};
-
 // Route kinds used by the existing asset and library URLs.
 const KIND_TO_PARAMETER = {
   interval: "usage",
@@ -69,7 +57,6 @@ const KIND_TO_PARAMETER = {
 
 export const parameterById = (id) => INTERVAL_PARAMETERS.find((item) => item.id === id) || INTERVAL_PARAMETERS[0];
 export const parameterForKind = (kind) => KIND_TO_PARAMETER[kind] || "usage";
-export const kindForParameter = (id) => (id === "counter" ? "usage" : id === "time" ? "time" : "interval");
 
 export const SAMPLE_VALUES = {
   hours: { current: 65, due: 100, overdue: 120 },
@@ -117,16 +104,6 @@ export function validateLimits(parameterId, dueText, overdueText) {
   if (errors.due) due = null;
   if (errors.overdue) overdue = null;
   return { due, overdue, errors };
-}
-
-/** The three stored levels for a Due/Overdue pair, in the units the backend stores. */
-export function storedThresholds(parameterId, due, overdue) {
-  if (parameterById(parameterId).aggregation === "counter") {
-    return { warnings: [due, overdue - 1], alert: overdue };
-  }
-  const dueSeconds = toSeconds(due);
-  const overdueSeconds = toSeconds(overdue);
-  return { warnings: [dueSeconds, overdueSeconds - 1], alert: overdueSeconds };
 }
 
 /** Status for a value against the two limits, with the backend's inclusive ">=" boundaries. */

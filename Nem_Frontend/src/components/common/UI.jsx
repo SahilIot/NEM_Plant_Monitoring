@@ -305,12 +305,6 @@ export function CreateModal({
       ? field.options(currentValues)
       : field.options || [];
 
-  const handleChange = (event) => {
-    const { name, value } = event.target;
-    setValues((current) => ({ ...current, [name]: value }));
-    setError("");
-  };
-
   const set = (key, value) => {
     setValues((current) => ({ ...current, [key]: value }));
     setError("");

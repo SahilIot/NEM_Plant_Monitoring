@@ -1143,7 +1143,7 @@ def apply_template_update(
     if (values["rule_type"] == "multi_parameter") != template_params.is_multi(template) and session.scalar(
         select(MonitoringRule.id).where(MonitoringRule.source_template_id == template.id).limit(1)):
         raise HTTPException(status_code=409, detail="A shared rule that is already assigned cannot switch between single-parameter and multi-parameter")
-    change_log = record_template_changes(session, template, values,labels,)
+    record_template_changes(session, template, values,labels,)
     for field, value in values.items():
         setattr(template, field, value)
     if labels is not None:

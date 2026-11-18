@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from app.services.asset_deletion import asset_deletion_summary, delete_asset_tree
 #Build SQL queries using SQLAlchemy, func provide sql functions such as count, session represents a database session
 
-from sqlalchemy import delete, false, func, or_, select
+from sqlalchemy import false, func, or_, select
 from sqlalchemy.orm import Session
 #get_db supplies the database session to an endpoint
 from app.db.session import get_db

@@ -249,7 +249,6 @@ export default function RuleLibrary() {
  const { user } = useAuth();
  const isAdministrator = user?.role === "Administrator";
  const isSupervisor = user?.role === "Supervisor";
- const isOperator = user?.role === "Operator";
 
 
  const canCreateRules = isAdministrator;

@@ -4,7 +4,6 @@
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 from app.services.maintenance_progress import update_maintenance_progress
 

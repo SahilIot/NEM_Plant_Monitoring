@@ -185,7 +185,7 @@ function LanguageSwitcher() {
 export default function Layout() {
   const { pathname } = useLocation();
   const { user, logout } = useAuth();
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const confirm = useConfirmation();
 
   const [rawAssets, setRawAssets] = useState([]);

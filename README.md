@@ -39,13 +39,15 @@ maintenance work and recurring calendar schedules.
 - **Alerts and events:** Maintain active/resolved alerts and event history;
   acknowledge and complete eligible alerts. Alert acknowledgement does not by
   itself clear a rule condition.
-- **Maintenance:** Create work records and three kinds of recurring schedules
-  (**calendar**, **runtime-based** and **usage-based**), manage
+- **Maintenance:** Create work records and recurring schedules
+  (**calendar**, **runtime-based** and **usage-based**; **rule-generated**
+  schedules are created from interval-based monitoring rules), manage
   planned/in-progress/completed/cancelled work, review proposed next dates
   (calendar schedules), register completion details, and view maintenance
   history. Due or overdue calendar schedules, and runtime/usage schedules that
   reach their interval, create warning alerts. See
-  [Runtime- and usage-based maintenance](#runtime--and-usage-based-maintenance).
+  [Runtime- and usage-based maintenance](#runtime--and-usage-based-maintenance)
+  and [docs/maintenance.md](docs/maintenance.md).
 - **Local accounts:** Authenticate with username/password, manage
   Administrator, Supervisor, and Operator accounts, and revoke sessions.
   Sessions expire after eight hours. Passwords are hashed; browser sessions
@@ -61,8 +63,9 @@ maintenance work and recurring calendar schedules.
   configured SMTP settings. Actual delivery depends on recipient assignments,
   valid addresses, email settings, and reachable SMTP.
 - **Live updates:** A WebSocket publishes committed database changes and OPC UA
-  connection changes. Dashboard views use these messages together with REST
-  refreshes/polling; the UI updates without a full-page reload.
+  connection changes. Dashboard views refetch only the data an event concerns
+  (coalesced, with a few REST refreshes as a fallback); the UI updates without
+  a full-page reload. See [docs/realtime-updates.md](docs/realtime-updates.md).
 
 No SMS delivery, analytics integration, or PLC control/write workflow is
 implemented in the current code. Runtime- and usage-based maintenance only
@@ -152,6 +155,7 @@ modified.
 NEM_Plant_Monitoring/
   README.md                         Setup and functionality guide
   docs/                             Architecture, design, product, rules, memory and task docs
+  .gitignore                        Editor, cache and log files (backend and frontend have their own)
   .postman/                         Postman workspace registration
   Nem_Backend/
     app/
@@ -165,6 +169,7 @@ NEM_Plant_Monitoring/
         config_transfer.py          Administrator-only configuration export / preview / import
         rules.py                    Asset-specific rule creation, listing and update
         rule_visibility.py          Admin-controlled shared-rule visibility, history, assignments
+        rule_parameters.py          Parameters of multi-parameter rules
         monitoring.py               Evaluation, status, alerts, events
         maintenance.py              Work records, recurring schedules, occurrences
         plc.py                      OPC UA status, test, discovery, one-shot read
@@ -189,6 +194,11 @@ NEM_Plant_Monitoring/
         access_scope.py             Asset-assignment scoping for REST and WebSocket
         rule_visibility.py          Shared-rule visibility, edit permission, change history
         maintenance_schedule.py     Calendar recurrence and due-date logic
+        rule_maintenance.py         Maintenance schedules generated from interval-based rules
+        rule_parameters.py          Multi-parameter rule evaluation and parameter state
+        template_parameters.py, legacy_parameters.py
+                                    Shared-rule parameter building; legacy single-rule mapping
+        asset_deletion.py           Asset deletion summary and cascade handling
         maintenance_progress.py     Runtime/usage progress from Boolean signals, due alerts, occurrences
         config_transfer.py          Configuration package build, validation and import
         email_notifications.py      Email outbox and SMTP delivery
@@ -205,7 +215,8 @@ NEM_Plant_Monitoring/
   Nem_Frontend/
     index.html, vite.config.js, package.json
     public/logo.png
-    scripts/add-react-imports.js    Adds `import React` to JSX files (npm run add-react-imports)
+    scripts/add-react-imports.js    Adds `import React` to JSX files (npm run add-react-imports);
+                                    not needed for builds (Vite uses the automatic JSX runtime)
     src/
       app/                          App.jsx (routes), main.jsx (router at /ui, providers)
       components/common/            Layout, Brand, GroupedMenu, LabelsField, Icons, UI controls
@@ -215,6 +226,7 @@ NEM_Plant_Monitoring/
                                     maintenance cards, maintenance details, completion
                                     registration dialog, copy rules),
                                     pages/ (asset index/detail, rule and maintenance creation),
+                                    maintenanceDeletion.js (delete eligibility and confirmation text),
                                     rules/monitoringRuleFlow.js
         plc/                        pages/Plc.jsx, styles/Plc.css
         rules/                      components/PredefinedRulesModal, RuleCollectionAssignmentModal,
@@ -233,8 +245,9 @@ NEM_Plant_Monitoring/
 The root `README.md` is the project setup and functionality guide. Detailed
 documentation is in [docs/architecture.md](docs/architecture.md),
 [docs/design.md](docs/design.md), [docs/prd.md](docs/prd.md),
-[docs/rules.md](docs/rules.md), [docs/memory.md](docs/memory.md), and
-[docs/tasks.md](docs/tasks.md).
+[docs/rules.md](docs/rules.md), [docs/maintenance.md](docs/maintenance.md),
+[docs/realtime-updates.md](docs/realtime-updates.md),
+[docs/memory.md](docs/memory.md), and [docs/tasks.md](docs/tasks.md).
 
 ## Requirements and local setup
 
@@ -601,8 +614,12 @@ or on a Current status card) only starts the schedule's own planned occurrence;
 it never creates an extra job. It is disabled, with a reason, when no planned
 occurrence exists (not due yet, awaiting approval, or a runtime/usage limit not
 reached) or one is already in progress. A started scheduled job stays under
-**Current status**; the logbook's **Jobs & History** tab lists only work that is
-not due or in progress, so completed jobs appear there. Starting is guarded in
+**Current status**. The logbook's **Schedules** tab lists active schedules only;
+**Jobs & History** lists work that is not due or in progress, completed and
+cancelled jobs, and cancelled schedules. Administrators can permanently delete
+ordinary Completed and Cancelled records and Cancelled schedules, and finished
+rule-generated records and cancelled rule schedules; in-progress and active
+rule work stays protected (details in [docs/maintenance.md](docs/maintenance.md)). Starting is guarded in
 the UI against repeated clicks and in the API (the record row is locked), so a
 second simultaneous request answers 409 and only one start event is recorded.
 
@@ -859,8 +876,9 @@ The `*_postgres.py` tests and `test_reading_api_maintenance.py` need
 `plc_monitoring_runtime_test`. They refuse to run against any other database or
 against the application database, and they roll back their changes afterwards.
 
-The frontend has one test file (`rulePresentation.test.js`) run by `npm test`
-(Node's test runner). A successful build validates compilation, not PLC,
+The frontend has Node test files (`Nem_Frontend/tests/*.test.js` and
+`src/features/rules/rulePresentation.test.js`) run by `npm test` (Node's test
+runner). A successful build validates compilation, not PLC,
 database, SMTP, authorization, or operational behavior. Test those integrations
 in a controlled environment before deployment.
 
@@ -870,5 +888,7 @@ in a controlled environment before deployment.
 - [Design and interaction](docs/design.md)
 - [Product requirements](docs/prd.md)
 - [Business rules](docs/rules.md)
+- [Maintenance lifecycle](docs/maintenance.md)
+- [Real-time updates](docs/realtime-updates.md)
 - [Implementation memory and verification notes](docs/memory.md)
 - [Development status and tasks](docs/tasks.md)

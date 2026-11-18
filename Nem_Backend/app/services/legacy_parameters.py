@@ -1,16 +1,3 @@
-# Parameter view of rules created before the parameter system (read and edit adapter).
-#
-# Older rules keep their original storage (MonitoringRule columns, RuleState, RuleCounterState, alerts), and
-# their evaluators are unchanged. This module only PRESENTS each one as a single parameter with the same shape
-# as a RuleParameter, so the UI treats every rule the same way, and translates edits and lifecycle actions on
-# that parameter back into the existing rule update / lifecycle logic. Nothing here writes new tables or columns.
-#
-#   boolean_count_threshold  -> Interval / Counter  (Due = first warning, Overdue = alert threshold)
-#   runtime_duration         -> Interval / Usage    (hours; Due = first warning, Overdue = alert threshold)
-#
-# Both warning stages are reported as "warning" by the evaluator, so showing only the first one (Due) is status
-# equivalent. The middle threshold is left untouched unless Due or Overdue is edited.
-# Other legacy types are shown as one read-only parameter (`editable` false, with a reason); they are not converted.
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -22,20 +9,18 @@ from sqlalchemy.orm import Session
 from app.models import Alert, Asset, MonitoringRule, RuleState, Variable
 from app.services.rule_parameters import SECONDS_PER_HOUR, _alert_view, _aware, overall_summary
 
-LEGACY_ID_OFFSET = 0  # a legacy parameter's id is the NEGATIVE rule id, so it can never collide with a row id
-
-
+# Generates a unique-looking parameter ID for an old rule.
 def legacy_parameter_id(rule: MonitoringRule) -> int:
     return -rule.id
 
-
+# Converts values into floating-point numbers.
 def _numbers(values: Any) -> list[float] | None:
     try:
         return [float(v) for v in values]
     except (TypeError, ValueError):
         return None
 
-
+# IMP -> This func determines how an old monitoring rule should appear as a parameter in the newer system.
 def mapping(rule: MonitoringRule) -> dict[str, Any]:
     # How this rule appears as a parameter: kind/config/aggregation, unit and whether it can be edited.
     p = rule.parameters or {}
@@ -60,22 +45,22 @@ def mapping(rule: MonitoringRule) -> dict[str, Any]:
     return {"editable": False, "reason": reason, "kind": "number", "aggregation": "none", "unit": None,
             "default_name": rule.name, "scale": 1.0, "config": {}}
 
-
+# Determine the display name of the virtual parameter.
 def parameter_name(rule: MonitoringRule, info: dict[str, Any]) -> str:
     return str((rule.parameters or {}).get("parameter_name") or info["default_name"])
 
-
+# Converts the old rule lifecycle into the lifecycle representation expected by the frontend
 def _lifecycle(rule: MonitoringRule) -> str:
     if rule.lifecycle_status == "in_progress" and rule.is_enabled:
         return "active"
     return {"suspended": "suspended", "deactivated": "deactivated", "completed": "completed"}.get(
         rule.lifecycle_status, "deactivated")
 
-
+# Retrieves the latest stored evaluation state for a rule.
 def _state(session: Session, rule: MonitoringRule) -> RuleState | None:
     return session.scalar(select(RuleState).where(RuleState.rule_id == rule.id))
 
-
+# This function converts an old rule into a parameter-shaped dictionary
 def serialize_legacy_parameters(session: Session, rule: MonitoringRule) -> list[dict[str, Any]]:
     info = mapping(rule)
     state = _state(session, rule)
@@ -98,7 +83,7 @@ def serialize_legacy_parameters(session: Session, rule: MonitoringRule) -> list[
         "unit": info["unit"],
     }]
 
-
+# responsible for building the detailed monitoring response for an old rule.
 def build_legacy_status_detail(session: Session, rule: MonitoringRule, now: datetime | None = None) -> dict[str, Any]:
     # Same payload as build_status_detail, for a rule that has no parameter rows.
     now = now or datetime.now(timezone.utc)
@@ -161,7 +146,7 @@ def build_legacy_status_detail(session: Session, rule: MonitoringRule, now: date
         "server_time": now,
     }
 
-
+# Allow supported legacy rules to be edited through the newer parameter editing interface.
 def rule_update_for_parameter(rule: MonitoringRule, payload: Any) -> dict[str, Any]:
     # RuleUpdate fields that apply an edit of the (single) parameter. Raises ValueError with a user message.
     info = mapping(rule)
@@ -208,7 +193,7 @@ def rule_update_for_parameter(rule: MonitoringRule, payload: Any) -> dict[str, A
         changes["parameters"] = parameters
     return changes
 
-
+# This function manages the intermediate warning threshold.
 def _middle(existing: float, due: float, overdue: float, unit: float, changed: bool) -> float:
     # Keep the stored second warning when it still fits; otherwise use the wizard convention (one unit below Overdue).
     if due < existing < overdue:

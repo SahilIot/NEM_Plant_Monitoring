@@ -796,7 +796,7 @@ def evaluate_runtime_duration(
     parameters = rule.parameters or {}
     try:
         activation_at = runtime_activation_at(rule)
-    except ValueError as error:
+    except ValueError:
         return _transition_state(
             session,
             rule,

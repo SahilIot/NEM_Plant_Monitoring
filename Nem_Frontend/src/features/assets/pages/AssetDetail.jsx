@@ -241,7 +241,7 @@ export default function AssetDetail() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const { assets, assetsLoaded, alerts = [], reload, refreshStatus } =
+  const { assets, assetsLoaded, reload, refreshStatus } =
     useOutletContext();
 
   const assetId = Number(id);

@@ -13,9 +13,6 @@ const VISIBILITY_HELP = {
   specific_supervisors: "Only the Supervisors you select (and Administrators) can see and manage it.",
 };
 
-export const SHARED_RULE_WARNING =
-  "This is a shared rule. Changing this configuration will affect all assets and users using this rule. Do you want to continue?";
-
 /** Active Supervisors an Administrator may grant visibility to (null while loading). */
 export function useSupervisorChoices(enabled = true) {
   const [choices, setChoices] = useState(null);
@@ -91,9 +88,6 @@ export function VisibilityPicker({ id, type, onType, ids, onIds, choices, disabl
     </div>
   );
 }
-
-export const VISIBILITY_CHANGE_WARNING =
-  "You are changing who can access this rule. The change applies to the shared rule itself, so it affects access for every asset that uses it, not only the one currently shown. Thresholds, activation state and assignments are not changed.";
 
 const sortedIds = (list) => [...(list || [])].map(Number).sort((a, b) => a - b);
 

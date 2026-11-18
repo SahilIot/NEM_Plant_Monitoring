@@ -71,9 +71,14 @@ deployment configuration or field validation.
    UI uses “Cycle Clock” while README text uses “Motor Rotation”; the model
    accepts `boolean_condition`, while `RuleCreate` does not list that literal.
    `generic` and `boolean_condition` have no evaluator and report unknown.
-5. **Testing coverage is not present in the inspected tree.** No backend
-   `tests/` directory or Python test source files were found. The frontend test
-   script exists, but the prior `npm test` run reported zero tests. Runtime and
+5. **Test coverage is limited.** `Nem_Backend/tests/` holds seven pytest files
+   (some need `DATABASE_URL`/`TEST_DATABASE_URL` for PostgreSQL) and the
+   frontend has Node tests (`Nem_Frontend/tests`, `rulePresentation.test.js`,
+   `maintenanceDeletion` rules are covered only by manual checks). Some
+   backend tests fail in the current tree because their fake user objects lack
+   an `id` used by newer code (`test_maintenance_completion.py`,
+   `test_maintenance_progress_postgres.py`) and `test_reading_api_maintenance.py`
+   needs a complete `Settings` environment to be collected. Runtime and
    integration acceptance remain unverified.
 
 ## Verification required
@@ -123,13 +128,23 @@ unnecessary:
   to `/configuration`.
 - Backend routes with no frontend caller (possible external integrations, see
   `.postman`): asset `children`, `hierarchy`, `move` and `rules/time|usage`;
-  document file `download`/`view`; maintenance `cancel` and `permanent`;
+  document file `download`/`view`; maintenance `cancel`;
   `monitoring-status`; `notifications/email/summary`; `plc/discover/{job_id}`;
   reading `latest` per asset and per variable.
 - About 100 CSS classes not referenced as literals in JavaScript (many may be
-  built dynamically), and a few write-only React state variables.
-- Dependencies: frontend `xlsx` (only `@e965/xlsx` is imported); backend
-  `python-dotenv`, `httpx` and `pytest` are not imported by application code.
+  built dynamically), and a few write-only React state variables
+  (`Home.jsx` `liveStatusError`, `AssetDetail.jsx` `variables`/`setDeletingAsset`,
+  `CurrentMaintenanceCards.jsx` `editingRecordId`, `Plc.jsx` `light`).
+- `Nem_Frontend/scripts/add-react-imports.js` and its npm script are no longer
+  needed by the build (Vite uses the automatic JSX runtime) but are harmless.
+- Other bulk deletions (`frontend_compat.py` logbook/event deletes,
+  `asset_deletion.py`) do not call `record_bulk_change`, so they do not publish
+  live-update events.
+- Dependencies checked and kept: `@e965/xlsx` is the only spreadsheet package
+  in `package.json` and is imported; backend `pytest` and `httpx` are used by
+  the tests, `python-dotenv` is required by `pydantic-settings` for `.env`
+  loading, `python-docx` and `python-multipart` are used by document upload
+  and `cryptography` by the OPC UA and settings encryption code.
 - `LOG_LEVEL` in `.env` is not read by `config.py`; the `npm test` script has
   no tests; local SQLite files (`*.db`) in `Nem_Backend` are leftovers.
 - Generic non-PostgreSQL `else` branches remain in `_initialize_schema`.

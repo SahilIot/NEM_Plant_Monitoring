@@ -231,6 +231,9 @@ removed may still carry the source `request`.
 
 ## Maintenance rules
 
+See also [maintenance.md](maintenance.md) for schedule modes (including
+rule-generated schedules), cancellation, and what Administrators may delete.
+
 - Individual records use `planned`, `in_progress`, `completed`, and `cancelled`
   statuses. Start/completion record actual timestamps. Completed records are
   read-only in the standard workflow. Maintenance records remain in normal

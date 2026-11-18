@@ -1,16 +1,5 @@
 import React from "react";
 
-/** Titled group of related fields used by the rule-creation pages. */
-export function RuleFormSection({ title, description, children }) {
-  return (
-    <fieldset className="rule-section">
-      <legend className="rule-section-title">{title}</legend>
-      {description && <p className="rule-section-description">{description}</p>}
-      {children}
-    </fieldset>
-  );
-}
-
 /** Wraps a numeric input and shows its unit inside the control. */
 export function UnitInput({ unit, children }) {
   return (

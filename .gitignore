@@ -1,0 +1,16 @@
+# Editor, OS and tool-local files
+.claude/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Python caches and tooling output (the backend and frontend keep their own, more specific .gitignore files)
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs
+*.log

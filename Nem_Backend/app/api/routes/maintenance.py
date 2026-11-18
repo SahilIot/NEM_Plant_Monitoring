@@ -106,7 +106,7 @@ RULE_MAINTENANCE_DELETE_MESSAGE = (
 
 
 def _user_label(user: User) -> str:
-    return (getattr(user, "full_name", None) or getattr(user, "username", None) or getattr(user, "email", None) or f"User {user.id}")[:200]
+    return (getattr(user, "full_name", None) or getattr(user, "username", None) or getattr(user, "email", None) or f"User {getattr(user, 'id', '')}".strip())[:200]
 
 
 def _authorize_operator_due_occurrence(
@@ -445,7 +445,7 @@ def create_maintenance_record(
 ) -> MaintenanceRecord:
     if session.get(Asset, payload.asset_id) is None or not access_scope(session).allows(payload.asset_id):
         raise HTTPException(status_code=404,detail=f"Asset {payload.asset_id} was not found",)
-    alert = _validate_alert(
+    _validate_alert(
         session,
         asset_id=payload.asset_id,
         alert_id=payload.alert_id,

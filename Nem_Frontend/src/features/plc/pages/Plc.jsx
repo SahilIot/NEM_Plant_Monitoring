@@ -419,17 +419,6 @@ export default function Plc() {
   };
 
   
-  const pill = !conn
-    ? { tone: "", text: monitoringError ? "Status unavailable" : "Checking…" }
-    : conn.connected
-      ? { tone: "ok", text: "Live" }
-      : conn.state === "disabled"
-        ? { tone: "", text: "Not configured" }
-        : conn.state === "connecting" || conn.state === "standby"
-          ? { tone: "warn", text: conn.state === "standby" ? "Standby" : "Connecting" }
-          : { tone: "bad", text: "Disconnected" };
-
-  const readOk = reading.startsWith("Read and saved");
 
   return (
     <div className="plc-page">

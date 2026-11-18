@@ -15,3 +15,7 @@ htmlcov/
 *.sqlite3
 /uploads/
 
+
+.mypy_cache/
+.ruff_cache/
+*.log
