@@ -39,6 +39,18 @@ def effective_stale_after(rule: MonitoringRule, default: int | None = None) -> i
 
     return int(get_settings().monitoring_default_stale_after_seconds)
 
+# Longest gap after a confirmed running sample that may still be credited as running time.
+def runtime_credit_limit(stale_after: int, source_id: str | None) -> int:
+    """Readings from the OPC UA collector are re-read every few seconds while connected, so a gap longer than the
+    running-signal timeout means the signal is gone: credit stops there. Readings from other sources (API, manual)
+    are not refreshed that way and keep the rule's own stale limit."""
+    from app.core.config import get_settings
+    from app.services.monitoring_engine import OPCUA_SOURCE_ID
+
+    if source_id != OPCUA_SOURCE_ID:
+        return stale_after
+    return min(stale_after, get_settings().runtime_freshness_seconds)
+
 # Converts supported values into Boolean states.
 def _as_bool(value: Any) -> bool | None:
     if isinstance(value, bool):
@@ -257,6 +269,7 @@ def _evaluate_parameter(
         return unknown(f"The latest reading is stale (older than {stale_after} seconds).", "stale_reading", raw=raw)
 
     aggregation = parameter.aggregation
+    credit_limit = runtime_credit_limit(stale_after, latest.source_id)
     if parameter.kind == "boolean":
         if aggregation == "last" and period:
             window_start = now - timedelta(seconds=period)
@@ -284,7 +297,7 @@ def _evaluate_parameter(
         if _as_bool(raw) is None:
             return unknown("The latest value is not a valid Boolean.", "invalid_value", raw=raw)
         window = period or 3600
-        seconds, count = _window_aggregate(session, variable, now - timedelta(seconds=window), now, stale_after)
+        seconds, count = _window_aggregate(session, variable, now - timedelta(seconds=window), now, credit_limit)
         value = seconds if aggregation == "timer" else float(count)
         status, message = number_status(value, config)
         return status, value, raw, f"{aggregation.capitalize()} over the period: " + message, None
@@ -296,7 +309,7 @@ def _evaluate_parameter(
     start = _aware(rule.created_at)
     if config.get("activation_at"):
         start = max(start, _aware(datetime.fromisoformat(str(config["activation_at"]).replace("Z", "+00:00"))))
-    seconds, count = _cumulative_aggregate(session, parameter_state, variable, start, now, stale_after)
+    seconds, count = _cumulative_aggregate(session, parameter_state, variable, start, now, credit_limit)
     if interval == "counter":
         value, unit = float(count), "cycles"
     else:
@@ -805,15 +818,22 @@ def build_status_detail(session: Session, rule: MonitoringRule, now: datetime | 
             config = item["config"] or {}
             if item["variable_id"] is None and config.get("interval_parameter") == "time":
                 item["live"] = {"mode": "calendar", "baseline_at": item["last_evaluated_at"]}
-            elif item["aggregation"] == "timer" and config.get("interval_parameter") == "usage":
-                fresh_until = _aware(item["reading_at"]) + timedelta(seconds=stale_after) if item["reading_at"] else None
+            elif item["aggregation"] == "timer" and config.get("interval_parameter") in {"usage", "time"}:
+                # Freshness comes from the newest reading (the collector re-reads running signals between two
+                # evaluations) and uses the same running-signal timeout as the evaluator's runtime credit.
+                newest = _latest_reading(session, variables[item["variable_id"]], not_after=now) if item["variable_id"] in variables else None
+                seen_at = _aware(newest.recorded_at) if newest else (_aware(item["reading_at"]) if item["reading_at"] else None)
+                limit = runtime_credit_limit(stale_after, newest.source_id if newest else None)
+                fresh_until = seen_at + timedelta(seconds=limit) if seen_at else None
+                state_value = newest.value if newest else item["raw_value"]
                 # The evaluator credits an ON segment up to its last reading's timestamp even when that stamp is a
                 # little later than the evaluation instant, so the value is exact as of the later of the two.
                 baseline = max(_aware(item["last_evaluated_at"]), _aware(item["reading_at"])) if item["reading_at"] else item["last_evaluated_at"]
                 item["live"] = {
                     "mode": "timer",
                     "baseline_at": baseline,
-                    "running": bool(_as_bool(item["raw_value"]) is True and fresh_until is not None),
+                    # Already credited up to the timeout: the stored value is final, the display must not move.
+                    "running": bool(_as_bool(state_value) is True and fresh_until is not None and fresh_until > _aware(baseline)),
                     "running_until": fresh_until,
                 }
         history = [_alert_view(a) for a in alerts_by_parameter.get(item["id"], [])]

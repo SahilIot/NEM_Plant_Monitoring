@@ -903,7 +903,12 @@ class OpcUaCollector:
             LOGGER.warning("Ignoring non-boolean OPC UA %s signal for asset %s",role,mapping.asset_id,)
             return
 
-        stale_after = self.settings.monitoring_default_stale_after_seconds
+        # Running signals must be fresh within the running-signal timeout; other Boolean readings keep the general limit.
+        stale_after = (
+            self.settings.runtime_freshness_seconds
+            if role == "running"
+            else self.settings.monitoring_default_stale_after_seconds
+        )
         if role in {"running", "reading"} and isinstance(
             notification.value, bool
         ):
@@ -912,6 +917,13 @@ class OpcUaCollector:
                     mapping.asset_id,)
                 return
             sample_age = utc_now() - _normalize_notification_timestamp(notification.recorded_at, notification.node_id)
+            if role == "running" and sample_age < -timedelta(seconds=stale_after):
+                LOGGER.warning(
+                    "Ignoring OPC UA running sample stamped in the future for asset %s (%.0f s ahead)",
+                    mapping.asset_id,
+                    -sample_age.total_seconds(),
+                )
+                return
             if sample_age > timedelta(seconds=stale_after):
                 LOGGER.warning(
                     "Ignoring stale Boolean OPC UA state sample for asset %s "

@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     opcua_machine_mappings: str = ""
     opcua_reconnect_delay_seconds: int = Field(default=5, ge=1, le=300)
     opcua_runtime_checkpoint_seconds: int = Field(default=10, ge=1, le=300)
+    # Longest gap after the last valid OPC UA running-signal sample that still counts as running time.
+    # It applies only to running signals (never to cycle, reading or communication settings) and must
+    # exceed the checkpoint interval, because the collector re-reads running signals at that interval.
+    opcua_running_signal_timeout_seconds: int = Field(default=15, ge=1, le=300)
     opcua_subscription_publishing_interval_ms: int = Field(default=1000, ge=1)
 
     model_config = SettingsConfigDict(
@@ -92,17 +96,28 @@ class Settings(BaseSettings):
             raise ValueError("TEST_DATABASE_URL must not point to DATABASE_URL's database")
         return self
 
+    @model_validator(mode="after")
+    def validate_running_signal_timeout(self) -> "Settings":
+        if self.opcua_running_signal_timeout_seconds <= self.opcua_runtime_checkpoint_seconds:
+            raise ValueError(
+                "OPCUA_RUNNING_SIGNAL_TIMEOUT_SECONDS must be greater than OPCUA_RUNTIME_CHECKPOINT_SECONDS, "
+                "otherwise a healthy running signal would be treated as stale between two re-reads"
+            )
+        return self
+
     @property
     def runtime_freshness_seconds(self) -> int:
         """Longest gap between two confirmed samples that may be counted as running time.
 
-        The collector re-reads running signals every ``opcua_runtime_checkpoint_seconds``, so a healthy
-        signal is never this old. It is deliberately much shorter than the general stale limit (default
-        300 s) so a PLC outage or a run of bad-quality reads is never added to runtime.
+        This is the single running-signal timeout (``opcua_running_signal_timeout_seconds``, default 15 s),
+        used by the collector, the legacy runtime counters, multi-parameter timers and the live timer
+        shown in the browser. The collector re-reads running signals every ``opcua_runtime_checkpoint_seconds``,
+        so a healthy signal is never this old, while a PLC outage or a run of bad-quality reads is never
+        added to runtime. It is never longer than the general stale limit.
         """
         return min(
             self.monitoring_default_stale_after_seconds,
-            max(30, 3 * self.opcua_runtime_checkpoint_seconds),
+            self.opcua_running_signal_timeout_seconds,
         )
 
     @property
