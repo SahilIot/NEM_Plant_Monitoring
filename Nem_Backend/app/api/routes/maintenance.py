@@ -963,10 +963,7 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
 
         for field in ("schedule_start_date", "first_due_date"):
             if field in changes and changes[field] is None:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"{field} cannot be null for a calendar schedule.",
-                )
+                raise HTTPException(status_code=422,detail=f"{field} cannot be null for a calendar schedule.",)
 
     else:
         supplied_calendar_fields = calendar_fields.intersection(changes)
