@@ -5,7 +5,7 @@ import logging
 import queue
 import threading
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Iterable
 from uuid import uuid4
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -22,7 +22,7 @@ _CRITICAL_TABLES = {
 }
 _MAX_RETAINED_CRITICAL_EVENTS = 256 #Maximum number of critical events retained
 _ASSIGNMENT_TABLE = "nem_asset_supervisors" # asset assignments; a change alters which assets users may see
-#Tracking which db entities changed ,tells the code which IDs to collect for each table.
+
 _ENTITY_ID_ATTRIBUTES = {
     "assets": ("id",),
     "variables": ("id", "asset_id"),
@@ -40,8 +40,7 @@ _ENTITY_ID_ATTRIBUTES = {
     "nem_maintenance_schedules": ("id", "asset_id"),
 }
 
-# Tables that carry no asset: a restricted user is told they changed (so lists refetch through the
-# permission-checked REST API) but never receives identifiers.
+
 _GLOBAL_TABLES = {
     "rule_collections",
     "nem_monitoring_rule_templates",
@@ -53,8 +52,6 @@ _GLOBAL_EVENT_PREFIXES = ("collection.", "rule_template.", "document.")
 # Event families that change what the Overview shows.
 _OVERVIEW_PREFIXES = ("asset.", "alert.", "rule.", "parameter.", "maintenance.", "counter.", "runtime.", "plc.", "monitoring.")
 
-# One name per kind of change, "<domain>.<what happened>". These are invalidation signals: they say what
-# changed so a page can refetch just that data; the committed database row stays the source of truth.
 _DOMAINS = {
     "assets": "asset",
     "variables": "variable",
@@ -71,19 +68,15 @@ _LIFECYCLE_EVENT = {"in_progress": "rule.activated", "suspended": "rule.suspende
 
 
 class PostgresEventBridge:
-    """Moves committed-change batches between server instances through PostgreSQL LISTEN/NOTIFY.
-
-    It needs no extra service. A sender thread and a listener thread each hold their own autocommit
-    connection, so nothing here touches request sessions or the event loop. If the listener loses its
-    connection it reconnects and tells clients to resynchronise, because notifications sent meanwhile are gone.
-    """
 
     def __init__(self, hub: "LiveUpdateHub", dsn: str) -> None:
         self._hub = hub
         self._dsn = dsn
         self._outbox: "queue.Queue[dict[str, Any]]" = queue.Queue(maxsize=256)
         self._stop = threading.Event()
-        self._overflowed = False
+
+        self._resync_lock = threading.Lock()
+        self._resync_pending = False
         self._threads = [
             threading.Thread(target=self._send_loop, name="live-notify-send", daemon=True),
             threading.Thread(target=self._listen_loop, name="live-notify-listen", daemon=True),
@@ -94,19 +87,25 @@ class PostgresEventBridge:
             thread.start()
 
     def stop(self) -> None:
+        # The sender polls the queue with a timeout and checks this flag, so a full queue cannot keep it blocked.
         self._stop.set()
-        self._outbox.put_nowait({}) if not self._outbox.full() else None
         for thread in self._threads:
             thread.join(timeout=3)
 
+    def _mark_resync(self) -> None:
+        with self._resync_lock:
+            self._resync_pending = True
+
+    def _take_resync(self) -> bool:
+        with self._resync_lock:
+            pending, self._resync_pending = self._resync_pending, False
+            return pending
+
     def send(self, batch: dict[str, Any]) -> None:
         try:
-            if self._overflowed:
-                batch = {**batch, "resync": True}
             self._outbox.put_nowait(batch)
-            self._overflowed = False
         except queue.Full:
-            self._overflowed = True  # the next batch that fits carries a resync marker
+            self._mark_resync()  # the batch is dropped; the next batch actually delivered carries `resync`
 
     def _send_loop(self) -> None:
         import psycopg
@@ -115,10 +114,21 @@ class PostgresEventBridge:
             try:
                 with psycopg.connect(self._dsn, autocommit=True) as connection:
                     while not self._stop.is_set():
-                        batch = self._outbox.get()
-                        if not batch:
-                            continue
-                        connection.execute("SELECT pg_notify(%s, %s)", (_BRIDGE_CHANNEL, json.dumps(batch)))
+                        try:
+                            batch = self._outbox.get(timeout=0.5)
+                        except queue.Empty:
+                            if not self._take_resync():
+                                continue
+                            batch = {"origin": self._hub.instance_id, "resync": True}
+                        else:
+                            if self._take_resync():
+                                batch = {**batch, "resync": True}
+                        try:
+                            connection.execute("SELECT pg_notify(%s, %s)", (_BRIDGE_CHANNEL, json.dumps(batch)))
+                        except Exception:
+                
+                            self._mark_resync()
+                            raise
             except Exception:  # noqa: BLE001 - keep trying; local delivery is unaffected
                 LOGGER.warning("Live-update notify connection failed; retrying", exc_info=True)
                 self._stop.wait(2)
@@ -363,6 +373,8 @@ class LiveUpdateHub:
     def _apply_remote(self, batch: dict[str, Any]) -> None:
         if batch.get("status"):
             self._publish(self._event("opcua_status", events=set(batch.get("events", ()))))
+            if batch.get("resync"):
+                self._publish(self._event("database_change", resync_required=True))
             return
         tables = set(batch.get("tables", ()))
         if tables:
@@ -501,6 +513,29 @@ def _collect_changed_tables(session: Session, flush_context: object) -> None:
                 ids.add(value)
                 if attribute in {"asset_id", "target_asset_id"} or (table_name == "assets" and attribute == "id"):
                     asset_ids.add(value)
+
+
+_BULK_ENTITY_ID_LIMIT = 500
+def record_bulk_change(
+    session: Session,
+    table: str,
+    *,
+    operation: str,
+    asset_ids: Iterable[int | None] = (),
+    entity_ids: Iterable[int | None] = (),
+) -> None:
+    def _ints(values: Iterable[int | None]) -> set[int]:
+        return {v for v in values if isinstance(v, int) and not isinstance(v, bool)}
+
+    session.info.setdefault("_live_changed_tables", set()).add(table)
+    names = session.info.setdefault("_live_changed_events", set())
+    domain = _DOMAINS.get(table)
+    if domain:
+        names.add(f"{domain}.{operation}")
+    session.info.setdefault("_live_changed_asset_ids", set()).update(_ints(asset_ids))
+    ids = _ints(entity_ids)
+    if len(ids) <= _BULK_ENTITY_ID_LIMIT:  # a huge list is sent as a plain table/asset invalidation instead
+        session.info.setdefault("_live_changed_entity_ids", {}).setdefault(table, set()).update(ids)
 
 
 def _publish_committed_changes(session: Session) -> None:

@@ -669,15 +669,36 @@ def _upgrade_rule_maintenance(engine: Engine) -> None:
                 "WHERE start_eligibility IS NOT NULL AND rule_context IS NULL AND (schedule_id IS NULL OR schedule_id NOT IN "
                 "(SELECT id FROM nem_maintenance_schedules WHERE schedule_mode = 'rule'))"))
             # Rule-created schedules that never got an eligibility: Ready only when the originating rule and parameter
-            # still exist, are active, and the parameter is at or beyond Due right now; otherwise Not Due.
+            # still exist, are eligible and active, AND the saved evaluation is a Due/Overdue result that is still fresh by
+            # the same policy runtime Start uses (effective_stale_after: the rule's own limit, else the global default; the
+            # evaluation may be as old as the rule's evaluation cadence). A PLC-signal parameter also needs a fresh reading
+            # time; a calendar parameter has no reading. Missing or implausible timestamps, or anything unclear, give
+            # Not Due - the next real evaluation promotes it to Ready, so this can only be too cautious, never too eager.
+            from app.core.config import get_settings
+            settings = get_settings()
             connection.execute(text(
                 "UPDATE nem_maintenance_schedules s SET eligibility = CASE WHEN s.source_parameter_id IS NOT NULL AND EXISTS ("
                 "SELECT 1 FROM nem_rule_parameters p JOIN nem_monitoring_rules r ON r.id = p.rule_id "
                 "JOIN nem_rule_parameter_states st ON st.parameter_id = p.id "
                 "WHERE p.id = s.source_parameter_id AND r.id = s.source_rule_id AND r.is_enabled "
+                "AND r.rule_type = 'multi_parameter' AND r.target_asset_id IS NOT NULL "
+                "AND (r.parameters::jsonb ->> 'category') = 'interval_based' "
+                "AND p.kind = 'interval' AND (p.config::jsonb ->> 'due') IS NOT NULL "
                 "AND r.lifecycle_status = 'in_progress' AND p.lifecycle_status = 'active' "
-                "AND st.status IN ('warning', 'alert')) THEN 'ready' ELSE 'not_due' END "
-                "WHERE s.schedule_mode = 'rule' AND s.eligibility IS NULL"))
+                "AND st.status IN ('warning', 'alert') "
+                "AND st.last_evaluated_at IS NOT NULL "
+                "AND st.last_evaluated_at <= (now() AT TIME ZONE 'utc') + interval '5 seconds' "
+                "AND st.last_evaluated_at >= (now() AT TIME ZONE 'utc') - make_interval(secs => GREATEST("
+                "COALESCE(NULLIF(r.stale_after_seconds, 0), :stale), COALESCE(r.evaluation_interval_seconds, :cadence))) "
+                "AND (p.variable_id IS NULL OR (st.reading_at IS NOT NULL "
+                "AND st.reading_at <= (now() AT TIME ZONE 'utc') + interval '5 seconds' "
+                "AND st.reading_at >= (now() AT TIME ZONE 'utc') - make_interval(secs => "
+                "COALESCE(NULLIF(r.stale_after_seconds, 0), :stale)) "
+                "AND COALESCE(st.error_message, '') NOT IN ('stale_reading', 'variable_inactive', 'awaiting_fresh_reading', 'invalid_value')))"
+                ") THEN 'ready' ELSE 'not_due' END "
+                "WHERE s.schedule_mode = 'rule' AND s.eligibility IS NULL"),
+                {"stale": int(settings.monitoring_default_stale_after_seconds),
+                 "cadence": int(settings.monitoring_evaluation_interval_seconds)})
             # An unstarted job always mirrors its rule schedule's eligibility (never Ready by default).
             connection.execute(text(
                 "UPDATE nem_maintenance_records m SET start_eligibility = COALESCE(s.eligibility, 'not_due') "
@@ -701,6 +722,21 @@ def _upgrade_rule_maintenance(engine: Engine) -> None:
                 "SELECT 1 FROM pg_constraint WHERE conname = 'ck_maintenance_schedule_eligibility'")).scalar():
             connection.execute(text("ALTER TABLE nem_maintenance_schedules ADD CONSTRAINT ck_maintenance_schedule_eligibility "
                                     "CHECK (eligibility IS NULL OR eligibility IN ('not_due', 'ready'))"))
+        # The index allows one open schedule per parameter. If the data already breaks that, stop with a precise message
+        # instead of deleting or choosing a record: the whole upgrade transaction is rolled back and nothing is changed.
+        duplicates = connection.execute(text(
+            "SELECT source_parameter_id, array_agg(id ORDER BY id) FROM nem_maintenance_schedules "
+            "WHERE source_parameter_id IS NOT NULL AND status = 'active' "
+            "GROUP BY source_parameter_id HAVING count(*) > 1 ORDER BY source_parameter_id")).all()
+        if duplicates:
+            listing = "; ".join(f"parameter {row[0]}: schedules {', '.join(str(i) for i in row[1])}" for row in duplicates)
+            raise RuntimeError(
+                "Cannot create uq_maintenance_schedule_open_rule_parameter: several ACTIVE maintenance schedules share one "
+                f"rule parameter ({listing}). No data was changed and the upgrade was rolled back. An administrator must "
+                "decide which schedule to keep per parameter and cancel the others (status 'cancelled', or use the "
+                "application's cancel-unavailable workflow), keeping their records for history; then restart the backend "
+                "to run the upgrade again. Do not delete rows to resolve this."
+            )
         connection.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_maintenance_schedule_open_rule_parameter "
             "ON nem_maintenance_schedules (source_parameter_id) "

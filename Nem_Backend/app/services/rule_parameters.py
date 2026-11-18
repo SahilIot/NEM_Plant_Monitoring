@@ -162,7 +162,7 @@ def _cumulative_aggregate(
     exhausted, batches = False, 0
     while True:
         cursor = datetime.fromisoformat(checkpoint["cursor"]) if checkpoint["cursor"] else None
-        query = select(Reading).where(Reading.variable_id == variable.id, Reading.recorded_at >= start)
+        query = select(Reading).where(Reading.variable_id == variable.id, Reading.recorded_at >= start, Reading.recorded_at <= now)
         if cursor is not None:
             query = query.where(or_(
                 Reading.recorded_at > cursor,
@@ -242,7 +242,7 @@ def _evaluate_parameter(
     if variable is None or variable.asset_id != asset.id:
         return unknown("The connected variable is unavailable or inactive.", "variable_unavailable")
 
-    latest = _latest_reading(session, variable)
+    latest = _latest_reading(session, variable, not_after=now)
     if latest is None:
         return unknown("No reading is available for the connected variable.", "no_reading")
     raw = latest.value
@@ -260,7 +260,7 @@ def _evaluate_parameter(
     if parameter.kind == "boolean":
         if aggregation == "last" and period:
             window_start = now - timedelta(seconds=period)
-            reading = _latest_reading(session, variable)
+            reading = _latest_reading(session, variable, not_after=now)
             if _aware(reading.recorded_at) < window_start:
                 return unknown("No reading inside the calculation period.", "no_reading_in_period", raw=raw)
         state = _as_bool(raw)

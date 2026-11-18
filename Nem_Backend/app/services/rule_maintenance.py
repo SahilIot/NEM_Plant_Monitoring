@@ -6,9 +6,11 @@ from typing import Any
 from sqlalchemy import event, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, attributes
-from app.models import Alert, Asset, MaintenanceRecord, MaintenanceSchedule, MonitoringRule, RuleParameter
+from app.models import Alert, Asset, MaintenanceRecord, MaintenanceSchedule, MonitoringRule, RuleParameter, RuleParameterState
 from app.services.email_notifications import enqueue_alert_notifications
+from app.core.config import get_settings
 from app.services.monitoring_engine import emit_event
+from app.services.rule_parameters import _aware, effective_stale_after
 
 LOGGER = logging.getLogger(__name__)
 
@@ -18,6 +20,8 @@ DUE_STATUSES = {"warning", "alert"}
 # A displayed progress value is only rewritten when it moved by at least this much (running hours / cycles),
 # so a continuously running machine does not rewrite the schedule on every evaluation pass.
 _PROGRESS_STEP = {"hours": 0.01, "cycles": 1.0}
+# Start only tolerates a saved timestamp this far ahead of the current time (clock difference between backend instances).
+_START_CLOCK_SKEW_SECONDS = 5.0
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -227,6 +231,14 @@ def _refresh_thresholds(session: Session, schedule: MaintenanceSchedule, rule: M
 # Sync schedules after rule changes.
 def sync_rule_schedules(session: Session, rule: MonitoringRule, now: datetime | None = None) -> None:
     if not is_eligible_rule(rule):
+        if rule.id is None:
+            return
+        now = now or _now()
+        for schedule in session.scalars(select(MaintenanceSchedule).where(
+                MaintenanceSchedule.source_rule_id == rule.id, MaintenanceSchedule.status == "active",
+                MaintenanceSchedule.eligibility == "not_due").with_for_update()).all():
+            _close(session, schedule, _job(session, schedule), now,
+                   "The monitoring rule is no longer an interval-based rule, so this maintenance was cancelled before it became due.")
         return
     now = now or _now()
     for parameter in list(rule.parameter_items):
@@ -423,14 +435,41 @@ def ensure_startable(session: Session, record: MaintenanceRecord) -> None:
         raise ValueError("The monitoring rule or parameter is suspended or deactivated, so this maintenance cannot be started. "
             "It stays ready and can be started once the rule is active again."
         )
-    state = parameter.state
-    if state is not None and state.status == "normal":
+    if not is_eligible_rule(rule) or not _valid_relationship(session, rule, parameter):
+        raise ValueError("The monitoring rule is no longer an interval-based rule for this parameter, so this maintenance "
+                         "cannot be started. Its schedule and history are kept.")
+    # The saved evaluation is the single source of truth: Start is only allowed on an explicit, fresh Due/Overdue result.
+    # Due is never recomputed here with a separate threshold.
+    state = session.scalar(select(RuleParameterState).where(RuleParameterState.parameter_id == parameter.id)
+                           .execution_options(populate_existing=True))
+    if state is None or state.last_evaluated_at is None:
+        raise ValueError("The rule has no saved evaluation for this parameter yet, so this maintenance cannot be started.")
+    if state.status == "normal":
         raise ValueError("The rule is below its Due limit again, so this maintenance cannot be started.")
-    due = (parameter.config or {}).get("due")
-    latest = state.latest_value if state is not None else None
-    if (isinstance(latest, (int, float)) and not isinstance(latest, bool)
-            and isinstance(due, (int, float)) and float(latest) < float(due)):
-        raise ValueError("The current value is below the rule's Due limit, so this maintenance cannot be started.")
+    if state.status == "unknown":
+        raise ValueError("The rule's current status for this parameter is unknown (no valid signal), so this maintenance "
+                         "cannot be started until the rule reports Due or Overdue again.")
+    if state.status not in DUE_STATUSES:
+        raise ValueError("The rule has not reported this parameter as Due or Overdue, so this maintenance cannot be started.")
+    now = _now()
+    # Same freshness limit as rule evaluation. The evaluation time may be as old as the rule's own evaluation cadence.
+    stale_after = effective_stale_after(rule)
+    cadence = rule.evaluation_interval_seconds or get_settings().monitoring_evaluation_interval_seconds
+    evaluated_age = (now - _aware(state.last_evaluated_at)).total_seconds()
+    if evaluated_age > max(stale_after, cadence) or evaluated_age < -_START_CLOCK_SKEW_SECONDS:
+        raise ValueError("The rule's Due evaluation is out of date, so this maintenance cannot be started until the rule "
+                         "evaluates again.")
+    if parameter.variable_id is not None:
+        # Counter/timer from a PLC signal: the reading itself must also be fresh. Calendar-based interval parameters have
+        # no reading and rely on the evaluation time above.
+        if state.reading_at is None:
+            raise ValueError("The signal has no reading, so this maintenance cannot be started.")
+        reading_age = (now - _aware(state.reading_at)).total_seconds()
+        if reading_age > stale_after or reading_age < -_START_CLOCK_SKEW_SECONDS:
+            raise ValueError("The signal for this rule is stale (no recent reading), so this maintenance cannot be started "
+                             "until it reports again.")
+        if state.error_message in {"stale_reading", "variable_inactive", "awaiting_fresh_reading", "invalid_value"}:
+            raise ValueError("The signal for this rule is not currently valid, so this maintenance cannot be started.")
 
 
 _SYNC_KEY = "_rule_maintenance_rules"
@@ -469,7 +508,10 @@ def _capture_changes(session: Session, flush_context: object) -> None:
         return
     touched = session.info.setdefault(_SYNC_KEY, set())
     for instance in (*session.new, *session.dirty):
-        if isinstance(instance, MonitoringRule) and instance.rule_type == "multi_parameter" and instance.id is not None:
+        if isinstance(instance, MonitoringRule) and instance.id is not None and (
+                instance.rule_type == "multi_parameter"
+                # A rule converted away from multi-parameter must still be synced so its unstarted schedules are closed.
+                or "multi_parameter" in attributes.get_history(instance, "rule_type").deleted):
             touched.add(instance.id)
         elif isinstance(instance, RuleParameter) and instance.kind == "interval" and instance.rule_id is not None:
             touched.add(instance.rule_id)
