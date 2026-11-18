@@ -136,6 +136,11 @@ export default function CreateMaintenanceSchedulePage() {
     usage_interval_count: "",
   });
 
+  // A schedule created by a monitoring rule: only its title, priority, technician, description and documents can be
+  // edited. The rule, limits, eligibility, status and timestamps are controlled by the rule and shown read-only.
+  const isRuleSchedule = isEdit && !isStandaloneEdit && form.schedule_mode === "rule";
+  const [ruleSchedule, setRuleSchedule] = useState(null);
+
   // Manage form submission, loading, editing, and API error states.
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(isEdit);
@@ -403,6 +408,8 @@ export default function CreateMaintenanceSchedulePage() {
               : "",
         });
 
+        if (record.schedule_mode === "rule") setRuleSchedule(record);
+
         // Restore previously attached instructions and documents.
         setSelectedDocuments(record.instruction_documents || []);
 
@@ -534,8 +541,14 @@ export default function CreateMaintenanceSchedulePage() {
     // Read the recurrence interval used by calendar-based schedules.
     let interval = Number(form.recurrence_interval);
 
+    // A rule-created schedule has no dates, intervals or PLC signal to validate or send.
+    if (isRuleSchedule) {
+      if (isSupervisor) {
+        setError("Supervisors cannot edit rule-created maintenance. An Administrator can edit its title, priority, technician, description and documents.");
+        return;
+      }
     // Validate schedule dates and recurrence settings for calendar schedules.
-    if (isCalendarSchedule) {
+    } else if (isCalendarSchedule) {
       if (!form.schedule_start_date || !form.first_due_date) {
         setError(
           "Schedule start date and first due date are required."
@@ -649,8 +662,19 @@ export default function CreateMaintenanceSchedulePage() {
       ),
     };
 
+    // Rule-created schedules accept only these fields; the server rejects everything else.
+    const ruleDetails = {
+      title: form.title.trim(),
+      priority: form.priority,
+      assigned_technician: form.assigned_technician.trim() || null,
+      description: form.description.trim() || null,
+      instruction_document_ids: selectedDocuments.map((item) => item.id),
+    };
+
     // Prepare different payloads for suggestions, Supervisor updates, and normal operations.
-    const payload = isSuggestion
+    const payload = isRuleSchedule
+      ? ruleDetails
+      : isSuggestion
       ? {
           asset_id: Number(suggestionAssetId),
           ...scheduleDetails,
@@ -928,7 +952,7 @@ export default function CreateMaintenanceSchedulePage() {
                       />
                     </label>
 
-                    <label className="field">
+                    {!isRuleSchedule && (                    <label className="field">
                       <span className="field-label">Maintenance type</span>
 
                       <select
@@ -943,6 +967,7 @@ export default function CreateMaintenanceSchedulePage() {
                         ))}
                       </select>
                     </label>
+                    )}
 
                     <label className="field">
                       <span className="field-label">Priority</span>
@@ -1057,8 +1082,36 @@ export default function CreateMaintenanceSchedulePage() {
                 </section>
               )}
 
+              {isRuleSchedule && ruleSchedule && (
+                <section className="create-schedule-section">
+                  <h2>Created from a monitoring rule (read-only)</h2>
+                  <p className="muted">
+                    This schedule is controlled by its monitoring rule. Edit the rule to change the Due limits; the
+                    information below cannot be changed here.{isSupervisor ? " Supervisors cannot edit rule-created maintenance; ask an Administrator to change its title, priority, technician, description or documents." : ""}
+                  </p>
+                  <div className="create-schedule-grid">
+                    {[
+                      ["Rule", ruleSchedule.source_rule_name],
+                      ["Parameter", ruleSchedule.source_parameter_name],
+                      ["Due limit", ruleSchedule.due_threshold != null ? `${ruleSchedule.due_threshold} ${ruleSchedule.threshold_unit || ""}` : null],
+                      ["Overdue limit", ruleSchedule.overdue_threshold != null ? `${ruleSchedule.overdue_threshold} ${ruleSchedule.threshold_unit || ""}` : null],
+                      ["Eligibility", ruleSchedule.eligibility === "ready" ? "Ready to Start" : "Not Due"],
+                      ["Value recorded at Due", ruleSchedule.due_value != null ? `${ruleSchedule.due_value} ${ruleSchedule.threshold_unit || ""}` : null],
+                      ["Schedule status", String(ruleSchedule.status || "").replaceAll("_", " ")],
+                      ["Schedule created", ruleSchedule.created_at ? new Date(ruleSchedule.created_at).toLocaleString() : null],
+                      ["Became Due", ruleSchedule.became_due_at ? new Date(ruleSchedule.became_due_at).toLocaleString() : null],
+                    ].map(([label, value]) => (
+                      <div className="field" key={label}>
+                        <span className="field-label">{label}</span>
+                        <strong>{value || "—"}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
               {/* Allow Administrators to choose the maintenance scheduling method. */}
-              {!isStandaloneEdit &&
+              {!isStandaloneEdit && !isRuleSchedule &&
               (!isSupervisor || isSuggestion) && (
                   <section className="create-schedule-section">
                     <h2>Maintenance schedule mode</h2>
@@ -1100,7 +1153,7 @@ export default function CreateMaintenanceSchedulePage() {
                 )}
 
               {/* Configure PLC signals and maintenance intervals for runtime and usage schedules. */}
-              {!isStandaloneEdit &&
+              {!isStandaloneEdit && !isRuleSchedule &&
               (!isSupervisor || isSuggestion) &&
               form.schedule_mode !== "calendar" && (
                   <section className="create-schedule-section">

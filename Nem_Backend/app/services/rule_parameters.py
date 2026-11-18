@@ -1,16 +1,4 @@
-# Evaluation of 'multi_parameter' rules.
-#
-# Each parameter is evaluated on its own and keeps its own RuleParameterState. The rule's single
-# RuleState (and therefore its single alert) shows the WORST parameter status, and its message names
-# the parameter(s) responsible, so one parameter's Normal value can never hide another's Alert.
-#
-# Aggregations are computed from stored readings, so nothing here changes OPC UA collection, the
-# runtime/cycle counters or maintenance progress:
-#   none     the latest reading
-#   last     the latest reading inside the calculation period
-#   timer    seconds the Boolean variable was ON            (period window, or cumulative for intervals)
-#   counter  number of OFF-to-ON transitions                (period window, or cumulative for intervals)
-# Boundaries are inclusive (>= / <=), like the existing threshold and interval evaluators.
+# Multi-parameter rule evaluation and status calculation.
 from __future__ import annotations
 
 import logging
@@ -41,10 +29,8 @@ WINDOW_LOOKBACK_READINGS = 100
 # If no parseable state is found the signal is treated as unknown, which credits no time and counts no cycle.
 WINDOW_LOOKBACK_PAGES = 10
 
-
+# Determines the reading freshness limit.
 def effective_stale_after(rule: MonitoringRule, default: int | None = None) -> int:
-    """The one place that decides how old a reading may be: the rule's own limit, else the caller's default, else the
-    configured default. Evaluation, pausing and the status detail all use it, so they can never disagree."""
     if rule.stale_after_seconds:
         return int(rule.stale_after_seconds)
     if default:
@@ -53,7 +39,7 @@ def effective_stale_after(rule: MonitoringRule, default: int | None = None) -> i
 
     return int(get_settings().monitoring_default_stale_after_seconds)
 
-
+# Converts supported values into Boolean states.
 def _as_bool(value: Any) -> bool | None:
     if isinstance(value, bool):
         return value
@@ -67,7 +53,7 @@ def _as_bool(value: Any) -> bool | None:
             return False
     return None
 
-
+# Validates numeric readings.
 def _as_number(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
@@ -77,9 +63,8 @@ def _as_number(value: Any) -> float | None:
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
-
+# Evaluates number thresholds.
 def number_status(value: float, config: dict[str, Any]) -> tuple[str, str]:
-    # (status, message) for a Number parameter. Inclusive boundaries.
     upper_alert, upper_warning = config.get("upper_alert"), config.get("upper_warning")
     lower_alert, lower_warning = config.get("lower_alert"), config.get("lower_warning")
     if upper_alert is not None and value >= upper_alert:
@@ -92,7 +77,7 @@ def number_status(value: float, config: dict[str, Any]) -> tuple[str, str]:
         return "warning", f"Lower warning limit {lower_warning:g} reached (value {value:g})."
     return "normal", f"Within limits (value {value:g})."
 
-
+# Evaluates Due and overdue limits.
 def interval_status(value: float, config: dict[str, Any], unit: str) -> tuple[str, str]:
     due, overdue = config["due"], config["overdue"]
     if value >= overdue:
@@ -101,19 +86,17 @@ def interval_status(value: float, config: dict[str, Any], unit: str) -> tuple[st
         return "warning", f"Due: {value:g} {unit} reached the Due limit {due:g}."
     return "normal", f"Normal: {value:g} {unit} (Due at {due:g})."
 
-
+# Fetches the latest variable reading.
 def _latest_reading(session: Session, variable: Variable, not_after: datetime | None = None) -> Reading | None:
     query = select(Reading).where(Reading.variable_id == variable.id)
     if not_after is not None:
         query = query.where(Reading.recorded_at <= not_after)
     return session.scalar(query.order_by(Reading.recorded_at.desc(), Reading.id.desc()).limit(1))
 
-
+# Calculates timer and counter values over a time window.
 def _window_aggregate(
     session: Session, variable: Variable, start: datetime, now: datetime, stale_after: int
 ) -> tuple[float, int]:
-    # Seconds ON and OFF-to-ON count for a Boolean variable inside [start, now].
-    # The signal's state at `start` is the latest PARSEABLE reading before it; an unparseable one confirms nothing.
     previous = None
     for page in range(WINDOW_LOOKBACK_PAGES):
         earlier = session.scalars(
@@ -152,7 +135,7 @@ def _window_aggregate(
         on_seconds += max(0.0, (credited_until - max(cursor, last_confirmed)).total_seconds())
     return on_seconds, count
 
-
+# Maintains cumulative running hours and cycles.
 def _cumulative_aggregate(
     session: Session,
     parameter_state: RuleParameterState,
@@ -162,13 +145,6 @@ def _cumulative_aggregate(
     stale_after: int,
     max_batches: int = 1,
 ) -> tuple[float, int]:
-    # Running seconds and cycle count since `start`, advanced incrementally from a stored checkpoint.
-    # One batch folds in at most CUMULATIVE_BATCH_LIMIT readings, ordered by (recorded_at, id) so readings with the
-    # same timestamp are always taken in the same order and the checkpoint (cursor + reading id) resumes exactly after
-    # the last one folded in. `max_batches` bounds the work of one call; anything left is picked up by the next call.
-    # `gaps` are paused periods [from, to] whose readings must never be counted. A gap is only closed once every
-    # reading recorded before it has been folded in, so a large backlog at pause time is never skipped.
-    # An unparseable Boolean value is not a sample: it neither credits time, nor confirms the signal, nor changes it.
     checkpoint = dict(parameter_state.aggregate_state or {})
     if checkpoint.get("start") != start.isoformat():
         checkpoint = {"start": start.isoformat(), "cursor": None, "reading_id": 0,
@@ -176,8 +152,6 @@ def _cumulative_aggregate(
     gaps = [(datetime.fromisoformat(g[0]), datetime.fromisoformat(g[1])) for g in checkpoint.get("gaps") or []]
 
     def close_gap() -> datetime:
-        # The paused period is over: keep what ran up to the pause (never more than the stale limit) and forget the
-        # signal state, so nothing is credited across the pause.
         gap_from, gap_to = gaps.pop(0)
         if checkpoint["prev"] is True and checkpoint["prev_at"]:
             prev_at = datetime.fromisoformat(checkpoint["prev_at"])
@@ -216,7 +190,7 @@ def _cumulative_aggregate(
         if exhausted or batches >= max_batches:
             break
     if exhausted:
-        while gaps:  # nothing is left before the gaps: close them and skip what was recorded inside them
+        while gaps:
             gap_to = close_gap()
             if checkpoint["cursor"] is None or datetime.fromisoformat(checkpoint["cursor"]) < gap_to:
                 checkpoint["cursor"], checkpoint["reading_id"] = gap_to.isoformat(), MAX_READING_ID
@@ -225,13 +199,11 @@ def _cumulative_aggregate(
     parameter_state.aggregate_state = checkpoint
     seconds = float(checkpoint["seconds"])
     if exhausted and checkpoint["prev"] is True and checkpoint["prev_at"]:
-        # The signal is still ON after the last reading: credit it up to now, within the stale limit. While readings
-        # are still waiting there is no such tail yet (the next reading decides it), so progress only ever increases.
         prev_at = datetime.fromisoformat(checkpoint["prev_at"])
         seconds += max(0.0, (min(now, prev_at + timedelta(seconds=stale_after)) - prev_at).total_seconds())
     return seconds, int(checkpoint["count"])
 
-
+# Evaluates one parameter.
 def _evaluate_parameter(
     session: Session,
     rule: MonitoringRule,
@@ -332,9 +304,9 @@ def _evaluate_parameter(
     status, message = interval_status(value, config, unit)
     return status, value, raw, message, None
 
-
+# The limit a Warning/Alert status crossed, and a short label for it (None for Boolean)
 def triggered_limit(parameter: RuleParameter, status: str, value: Any) -> tuple[float | None, str | None]:
-    """The limit a Warning/Alert status crossed, and a short label for it (None for Boolean)."""
+    # The limit a Warning/Alert status crossed, and a short label for it (None for Boolean)
     config = parameter.config or {}
     if status not in {"warning", "alert"} or not isinstance(value, (int, float)) or isinstance(value, bool):
         return None, None
@@ -348,12 +320,13 @@ def triggered_limit(parameter: RuleParameter, status: str, value: Any) -> tuple[
                 return limit, key.replace("_", " ").title()
     return None, None
 
-
+# Creates , updates or resolves that parameter`s alert.
 def _sync_parameter_alert(
     session: Session, rule: MonitoringRule, asset: Asset, parameter: RuleParameter,
     parameter_state: RuleParameterState, status: str, value: Any, message: str, now: datetime,
+    notify: bool = True,
 ) -> None:
-    """Raise, update or resolve THIS parameter's alert only. Unknown never resolves or hides an alert."""
+   # Raise, update or resolve THIS parameter's alert only. Unknown never resolves or hides an alert.
     from app.services.email_notifications import enqueue_alert_notifications
     from app.services.monitoring_engine import emit_event
 
@@ -383,7 +356,8 @@ def _sync_parameter_alert(
                     session.flush()
             except IntegrityError:
                 return  # another worker raised it first
-            enqueue_alert_notifications(session, alert, asset, rule)
+            if notify:  # False when the maintenance "ready to start" email already covers this Due moment
+                enqueue_alert_notifications(session, alert, asset, rule)
             emit_event(session, event_type="warning_triggered" if status == "warning" else "alert_triggered",
                        message=text, occurred_at=now, asset_id=asset.id, rule_id=rule.id,
                        alert_id=alert.id, severity=status, metadata=meta)
@@ -407,18 +381,8 @@ def _sync_parameter_alert(
                        asset_id=asset.id, rule_id=rule.id, alert_id=active.id, severity=active.severity,
                        metadata=meta)
 
-
+# Calculates the overall status of a multi-parameter rule.
 def overall_summary(results: list[tuple[str, str]]) -> dict[str, Any]:
-    """The explicit overall-status strategy, shared by the evaluator and the API.
-    results is [(parameter name, status)]. Worst Parameter Wins with the order
-    Alert > Warning > Not Evaluated (unknown) > Normal:
-        any Alert/Warning decides the overall status, even if other parameters are unavailable, so an
-        unavailable parameter can never hide an active Alert;
-       with no Alert/Warning, any unavailable/stale/not-evaluated parameter makes the overall status
-       Not Evaluated, never Normal;
-       Normal only when every parameter is Normal.
-    Unavailable parameters are always listed separately in `unavailable`.
-    """
     worst = max((s for _n, s in results), key=lambda s: SEVERITY_ORDER[s], default="unknown")
     return {
         "status": worst,
@@ -426,7 +390,22 @@ def overall_summary(results: list[tuple[str, str]]) -> dict[str, Any]:
         "unavailable": [n for n, s in results if s == "unknown"],
     }
 
+UNCHANGED_REWRITE_SECONDS = 5
 
+# Returns True if the parameter state is unchanged and does not need to be rewritten.
+def _result_unchanged(parameter_state: RuleParameterState, status: str, value: Any, raw: Any, message: str,
+                      error: str | None, now: datetime) -> bool:
+    if parameter_state.id is None or parameter_state.last_evaluated_at is None:
+        return False
+    if parameter_state.error_message in {"variable_inactive", "awaiting_fresh_reading"}:
+        return False  # these states are cleared by the arrival of a new reading: always record that
+    if (now - _aware(parameter_state.last_evaluated_at)).total_seconds() >= UNCHANGED_REWRITE_SECONDS:
+        return False
+    return (parameter_state.status == status and parameter_state.latest_value == value
+            and parameter_state.raw_value == raw and parameter_state.message == message
+            and parameter_state.error_message == error)
+
+# Evaluates all parameters of a multi-parameter rule, updates their states and alerts, and returns the overall rule state.
 def evaluate_multi_parameter(
     session: Session,
     rule: MonitoringRule,
@@ -434,10 +413,12 @@ def evaluate_multi_parameter(
     state: RuleState | None,
     now: datetime,
     stale_after_seconds: int,
+    skip_unchanged: bool = False,
 ) -> RuleState:
-    """Evaluate every parameter, raise/clear each parameter's own alert, record the worst on the rule."""
+
     stale_after = effective_stale_after(rule, stale_after_seconds)
     results: list[tuple[RuleParameter, str, Any, str]] = []
+    skipped = 0
     for parameter in list(rule.parameter_items):
         if parameter.lifecycle_status != "active":
             continue  # suspended/deactivated: no evaluation and no alerts; progress and history are kept
@@ -446,11 +427,25 @@ def evaluate_multi_parameter(
             parameter_state = RuleParameterState(parameter_id=parameter.id, status="unknown", message="")
             session.add(parameter_state)
             parameter.state = parameter_state
+        previous_reading_at = parameter_state.reading_at
         try:
-            with session.begin_nested():
-                status, value, raw, message, error = _evaluate_parameter(
-                    session, rule, parameter, parameter_state, asset, now, stale_after
-                )
+            if skip_unchanged:
+                # No savepoint here: leaving one flushes, and the flush itself would write the row and publish the
+                # event this mode exists to avoid. Nothing is flushed until the result is known to differ.
+                with session.no_autoflush:
+                    status, value, raw, message, error = _evaluate_parameter(
+                        session, rule, parameter, parameter_state, asset, now, stale_after
+                    )
+                if _result_unchanged(parameter_state, status, value, raw, message, error, now):
+                    parameter_state.reading_at = previous_reading_at  # _evaluate_parameter moved it; nothing else changed
+                    results.append((parameter, status, value, message))
+                    skipped += 1
+                    continue
+            else:
+                with session.begin_nested():
+                    status, value, raw, message, error = _evaluate_parameter(
+                        session, rule, parameter, parameter_state, asset, now, stale_after
+                    )
         except Exception:
             # An unexpected failure in one parameter is shown as unavailable; the others still evaluate.
             LOGGER.exception("Parameter %s of rule %s could not be evaluated", parameter.id, rule.id)
@@ -465,26 +460,28 @@ def evaluate_multi_parameter(
                 parameter_state.status, parameter_state.latest_value, parameter_state.raw_value = status, value, raw
                 parameter_state.message, parameter_state.error_message = message, error
                 parameter_state.last_evaluated_at = now
-                _sync_parameter_alert(session, rule, asset, parameter, parameter_state, status, value, message, now)
+                ready_now = False
+                if parameter.kind == "interval" and status != "unknown":
+                    try:
+                        with session.begin_nested():
+                            from app.services.rule_maintenance import apply_evaluation
+                            ready_now = apply_evaluation(session, rule, parameter, status, value, now)
+                    except Exception:  # noqa: BLE001 - a maintenance problem must never stop rule evaluation
+                        LOGGER.exception("Maintenance eligibility of parameter %s of rule %s could not be updated", parameter.id, rule.id)
+                _sync_parameter_alert(session, rule, asset, parameter, parameter_state, status, value, message, now,
+                                      notify=not (ready_now and status == "warning"))  # an Overdue alert always sends its own email
                 if error == "stale_reading" and previous_error != "stale_reading":
                     from app.services.monitoring_engine import emit_event
                     emit_event(session, event_type="stale_data_detected", message=f"{parameter.name}: {message}",
                                occurred_at=now, asset_id=asset.id, rule_id=rule.id,
                                metadata={"parameter_id": parameter.id, "parameter_name": parameter.name})
         except Exception:
-            # The savepoint undid everything written for this parameter. Record that it could not be saved so the
-            # parameter is not shown with a stale result, keep its evaluated status in the rule's overall result (an
-            # Alert is never hidden), and carry on with the remaining parameters; the next pass retries.
             LOGGER.exception("Result or alert of parameter %s of rule %s could not be saved", parameter.id, rule.id)
             if status not in {"warning", "alert"}:
-                # Nothing about this parameter was saved (an open alert may still be waiting to be resolved), so it must
-                # not count as Normal. A Warning/Alert is kept: a failure never hides a real condition.
                 status, value, message = "unknown", None, "The result of this parameter could not be saved; it will be retried."
             try:
                 with session.begin_nested():
                     if status in {"warning", "alert"}:
-                        # The condition is real even though its alert could not be recorded: keep it visible on the
-                        # parameter (and so in the status detail) and flag that the alert row is still to be written.
                         parameter_state.status, parameter_state.latest_value, parameter_state.raw_value = status, value, raw
                         parameter_state.message, parameter_state.error_message = message, "alert_not_recorded"
                     else:
@@ -519,6 +516,9 @@ def evaluate_multi_parameter(
             message = " ".join(culprits) + (f" ({others} other parameter(s) not in this state.)" if others else "")
         headline = next((v for _p, s, v, _m in results if s == overall), None)
         error = "parameter_unavailable" if overall == "unknown" else None
+    if (skip_unchanged and results and skipped == len(results) and state.id is not None
+            and state.status == overall and state.message == message and state.error_message == error):
+        return state  # nothing the rule shows has changed
     if state.status != overall:
         state.last_transition_at = now
     state.status = overall
@@ -527,11 +527,9 @@ def evaluate_multi_parameter(
     state.last_evaluated_at, state.condition_started_at = now, None
     return state
 
-
+# Pauses one parameter of a multi-parameter rule, updating its state and alert.
 def _pause_one(session: Session, rule: MonitoringRule, parameter: RuleParameter, now: datetime,
                message: str, error: str) -> None:
-    """Bank a cumulative interval parameter's progress up to the last confirmed sample and mark it paused.
-    Idempotent: a parameter that is already paused is not banked twice. Limits and progress are kept."""
     parameter_state = parameter.state
     if parameter_state is None:
         return
@@ -550,12 +548,8 @@ def _pause_one(session: Session, rule: MonitoringRule, parameter: RuleParameter,
             parameter_state.latest_value = float(count) if config.get("interval_parameter") == "counter" else seconds / SECONDS_PER_HOUR
             checkpoint = dict(parameter_state.aggregate_state or {})
             if checkpoint.get("backlog"):
-                # Too many readings to fold in during this request. Remember the pause instant: on resume the readings
-                # recorded up to it are still folded in (by the normal passes) and only the paused period is skipped.
                 checkpoint["fold_until"] = now.isoformat()
             else:
-                # Bank the time already credited since the last confirmed sample (never more than the stale limit), so
-                # the progress shown at the moment of pausing is exactly what is kept and resuming cannot lower it.
                 checkpoint.update(seconds=seconds, prev=None, prev_at=None)
             checkpoint["paused"] = True
             parameter_state.aggregate_state = checkpoint
@@ -564,10 +558,8 @@ def _pause_one(session: Session, rule: MonitoringRule, parameter: RuleParameter,
     parameter_state.error_message = error
     parameter_state.last_evaluated_at = now
 
-
+# Resumes one parameter of a multi-parameter rule, updating its state and alert.
 def _resume_one(parameter: RuleParameter, now: datetime) -> None:
-    """Keep banked interval progress but skip readings recorded while paused, so the paused period is
-    never counted. Normal signal-freshness rules apply from the next evaluation."""
     parameter_state = parameter.state
     if parameter_state is None:
         return
@@ -582,22 +574,20 @@ def _resume_one(parameter: RuleParameter, now: datetime) -> None:
         parameter_state.aggregate_state = checkpoint
     parameter_state.completed_at = None
 
-
+# Pauses parameters evaluation and progress.
 def pause_parameters(session: Session, rule: MonitoringRule, now: datetime) -> None:
-    """Rule suspended/deactivated: pause every parameter that is itself active. Parameters the user
-    suspended or deactivated individually are already paused and keep their own state."""
     for parameter in rule.parameter_items:
         if parameter.lifecycle_status == "active":
             _pause_one(session, rule, parameter, now, "Rule is not active; the parameter is not being evaluated.", "rule_inactive")
 
-
+# Resumes evaluation.
 def resume_parameters(session: Session, rule: MonitoringRule, now: datetime) -> None:
-    """Rule resumed/activated: resume only parameters that are themselves active."""
+    # Rule resumed/activated: resume only parameters that are themselves active.
     for parameter in rule.parameter_items:
         if parameter.lifecycle_status == "active":
             _resume_one(parameter, now)
 
-
+# Returns a message explaining why no parameter is being evaluated.
 def _no_active_message(items: list[RuleParameter]) -> str:
     suspended = sum(1 for p in items if p.lifecycle_status == "suspended")
     if suspended == len(items):
@@ -615,11 +605,9 @@ PARAMETER_LIFECYCLE_ACTIONS = {
     "activate": ({"deactivated"}, "active"),
 }
 
-
+# Suspends, resumes, deactivates or deactivates one parameter.
 def change_parameter_lifecycle(session: Session, rule: MonitoringRule, parameter: RuleParameter, action: str,
                                now: datetime) -> None:
-    """Suspend, resume, deactivate or activate ONE parameter. Other parameters and the parent rule are not
-    touched; the parent's stored status is recomputed from the parameters that are still evaluated."""
     from app.services.monitoring_engine import emit_event
 
     allowed, target = PARAMETER_LIFECYCLE_ACTIONS[action]
@@ -653,10 +641,8 @@ def change_parameter_lifecycle(session: Session, rule: MonitoringRule, parameter
     session.flush()
     _refresh_rule_state(session, rule, now)
 
-
+# Updates the overall state of a multi-parameter rule, based on the current states of its parameters.
 def _refresh_rule_state(session: Session, rule: MonitoringRule, now: datetime) -> None:
-    """Recompute the parent's stored status from the parameters that are still evaluated, so it never keeps
-    a Normal/Alert that belonged to a parameter that was just switched off."""
     if not (rule.is_enabled and rule.lifecycle_status == "in_progress"):
         return
     state = session.scalar(select(RuleState).where(RuleState.rule_id == rule.id))
@@ -677,12 +663,8 @@ def _refresh_rule_state(session: Session, rule: MonitoringRule, now: datetime) -
     if not live:
         state.latest_value = None
 
-
+# Resets an affected parameter`s aggragation baseline
 def reset_parameter_baseline(session: Session, parameter: RuleParameter) -> bool:
-    """Restart ONLY this parameter's own progress after what it measures changed.
-    Returns whether a stored state was really reset (a parameter that was never evaluated has nothing to reset), and
-    records it on the session so an API response can report exactly what was reset, including shared-rule propagation.
-    """
     state = parameter.state
     if state is None:
         return False
@@ -691,12 +673,8 @@ def reset_parameter_baseline(session: Session, parameter: RuleParameter) -> bool
     session.info.setdefault("parameter_state_resets", []).append((parameter.rule_id, parameter.id))
     return True
 
-
+# Preserve the removed parameter`s history`
 def archive_removed_parameter(session: Session, rule: MonitoringRule, parameter: RuleParameter, reason: str) -> None:
-    """Keep a permanent record of a parameter that is being removed from a rule.
-    Its alerts stay (resolved, with the parameter's name kept on them) and earlier events are untouched. The parameter's
-    latest evaluation and progress would otherwise disappear with the row, so they are written to the event log first.
-    """
     from app.services.monitoring_engine import emit_event
 
     def plain(value: Any) -> Any:
@@ -721,7 +699,7 @@ def archive_removed_parameter(session: Session, rule: MonitoringRule, parameter:
     emit_event(session, event_type="parameter_removed", message=f"Parameter '{parameter.name}' was removed from the rule.",
                occurred_at=datetime.now(timezone.utc), asset_id=rule.target_asset_id, rule_id=rule.id, metadata=snapshot)
 
-
+# Builds the parameter API data
 def serialize_parameters(rule: MonitoringRule) -> list[dict[str, Any]]:
     # API view of a rule's parameters, including each parameter's own latest evaluation.
     items = []
@@ -750,7 +728,7 @@ def serialize_parameters(rule: MonitoringRule) -> list[dict[str, Any]]:
         })
     return items
 
-
+# Builds the alert API data
 def _alert_view(alert: Alert) -> dict[str, Any]:
     return {
         "id": alert.id, "severity": alert.severity, "status": alert.status, "message": alert.message,
@@ -764,13 +742,8 @@ def _alert_view(alert: Alert) -> dict[str, Any]:
                      "acknowledged" if alert.acknowledged_at else "open"),
     }
 
-
+# Builds the current status response.
 def build_status_detail(session: Session, rule: MonitoringRule, now: datetime | None = None) -> dict[str, Any]:
-    """Everything the Current Status detail view shows, computed by the backend only.
-    The parent status is `overall_summary` over the stored per-parameter statuses (the same function and
-    inputs the evaluator uses), and `rule_state_status` is the status stored on the rule itself, so the
-    UI can show they agree. Nothing here re-evaluates readings and the frontend never recomputes it.
-    """
     now = now or datetime.now(timezone.utc)
     stale_after = effective_stale_after(rule)
     asset = session.get(Asset, rule.target_asset_id) if rule.target_asset_id else None
@@ -827,11 +800,6 @@ def build_status_detail(session: Session, rule: MonitoringRule, now: datetime | 
                 # Calendar intervals: the dates the Due and Overdue limits fall on (hours after activation).
                 item["schedule"]["due_at"] = start + timedelta(hours=float(config["due"]))
                 item["schedule"]["overdue_at"] = start + timedelta(hours=float(config["overdue"]))
-        # How the UI may advance an interval duration between evaluations (display only, no accounting):
-        #   timer    running-time interval: advances while the latest reading is a valid, fresh TRUE, and never
-        #            past reading_at + stale limit, exactly the window the evaluator credits;
-        #   calendar elapsed time since the schedule start;
-        #   None     counters and Number/Boolean parameters stay event-driven.
         item["live"] = None
         if item["kind"] == "interval" and evaluating and item["status"] != "unknown" and item["last_evaluated_at"]:
             config = item["config"] or {}

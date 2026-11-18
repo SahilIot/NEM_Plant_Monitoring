@@ -65,6 +65,9 @@
 .rsd-param-title { display: grid; min-width: 0; }
 .rsd-param-title strong { overflow-wrap: anywhere; }
 .rsd-param-title small { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.rsd-param-link { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.rsd-param-link:hover strong, .rsd-param-link:focus-visible strong { text-decoration: underline; }
+.rsd-param-link:disabled { cursor: progress; }
 .rsd-param-head-right { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .rsd-summary { margin: 0; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
 .rsd-summary b { font-size: 16px; font-variant-numeric: tabular-nums; }

@@ -606,6 +606,120 @@ def _upgrade_parameter_lifecycle(engine: Engine) -> None:
                 "CHECK (lifecycle_status IN ('active', 'suspended', 'deactivated'))"))
 
 
+def _upgrade_rule_maintenance(engine: Engine) -> None:
+    """Additive upgrade: maintenance schedules created from monitoring rules (PostgreSQL only, idempotent).
+
+    Existing non-rule schedules and jobs keep working unchanged: eligibility is NULL ("not rule-controlled"), which
+    never gates Start. Only rule-created jobs carry 'not_due'/'ready', set from the actual rule and parameter state.
+    Nothing is deleted. Reverse with `downgrade_rule_maintenance` (not run automatically).
+    """
+    if engine.dialect.name != "postgresql":
+        return
+    tables = set(inspect(engine).get_table_names())
+    if "nem_maintenance_schedules" not in tables:
+        return
+    schedule_columns = {
+        "source_rule_id": "INTEGER REFERENCES nem_monitoring_rules(id) ON DELETE SET NULL",
+        "source_parameter_id": "INTEGER REFERENCES nem_rule_parameters(id) ON DELETE SET NULL",
+        "source_parameter_key": "VARCHAR(36)",
+        "source_rule_name": "VARCHAR(200)",
+        "source_parameter_name": "VARCHAR(200)",
+        "source_rule_type": "VARCHAR(30)",
+        "eligibility": "VARCHAR(20)",
+        "due_threshold": "DOUBLE PRECISION",
+        "overdue_threshold": "DOUBLE PRECISION",
+        "threshold_unit": "VARCHAR(20)",
+        "cancelled_at": "TIMESTAMP",
+        "cancelled_by_id": "INTEGER REFERENCES auth_users(id) ON DELETE SET NULL",
+        "cancelled_by_name": "VARCHAR(200)",
+        "cancellation_reason": "TEXT",
+        "cancellation_kind": "VARCHAR(30)",
+        "became_due_at": "TIMESTAMP",  # naive UTC, as the models store it (same as a fresh database)
+        "due_value": "DOUBLE PRECISION",
+    }
+    record_columns = {
+        "start_eligibility": "VARCHAR(20)",
+        "rule_context": "JSON",
+        "started_by_id": "INTEGER",
+        "started_by_name": "VARCHAR(200)",
+        "completed_by_id": "INTEGER",
+        "completed_by_name": "VARCHAR(200)",
+    }
+    with engine.begin() as connection:
+        # Marks that a parameter has had its maintenance schedule created, so a schedule removed behind the
+        # application's back is never silently recreated. Parameters that already have a schedule are backfilled.
+        if "nem_rule_parameters" in tables:
+            connection.execute(text("ALTER TABLE nem_rule_parameters ADD COLUMN IF NOT EXISTS maintenance_scheduled_at TIMESTAMP"))
+        for name, definition in schedule_columns.items():
+            connection.execute(text(f"ALTER TABLE nem_maintenance_schedules ADD COLUMN IF NOT EXISTS {name} {definition}"))
+        if "nem_maintenance_records" in tables:
+            for name, definition in record_columns.items():
+                connection.execute(text(f"ALTER TABLE nem_maintenance_records ADD COLUMN IF NOT EXISTS {name} {definition}"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_nem_maintenance_schedules_source_rule_id "
+                                "ON nem_maintenance_schedules (source_rule_id)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_nem_maintenance_schedules_source_parameter_id "
+                                "ON nem_maintenance_schedules (source_parameter_id)"))
+        if "nem_maintenance_records" in tables:
+            # An earlier revision added this column as NOT NULL DEFAULT 'ready'. Make it nullable without a default
+            # (same as a fresh database), and clear the placeholder value on everything that is not rule-created.
+            connection.execute(text("ALTER TABLE nem_maintenance_records ALTER COLUMN start_eligibility DROP NOT NULL"))
+            connection.execute(text("ALTER TABLE nem_maintenance_records ALTER COLUMN start_eligibility DROP DEFAULT"))
+            connection.execute(text(
+                "UPDATE nem_maintenance_records SET start_eligibility = NULL "
+                "WHERE start_eligibility IS NOT NULL AND rule_context IS NULL AND (schedule_id IS NULL OR schedule_id NOT IN "
+                "(SELECT id FROM nem_maintenance_schedules WHERE schedule_mode = 'rule'))"))
+            # Rule-created schedules that never got an eligibility: Ready only when the originating rule and parameter
+            # still exist, are active, and the parameter is at or beyond Due right now; otherwise Not Due.
+            connection.execute(text(
+                "UPDATE nem_maintenance_schedules s SET eligibility = CASE WHEN s.source_parameter_id IS NOT NULL AND EXISTS ("
+                "SELECT 1 FROM nem_rule_parameters p JOIN nem_monitoring_rules r ON r.id = p.rule_id "
+                "JOIN nem_rule_parameter_states st ON st.parameter_id = p.id "
+                "WHERE p.id = s.source_parameter_id AND r.id = s.source_rule_id AND r.is_enabled "
+                "AND r.lifecycle_status = 'in_progress' AND p.lifecycle_status = 'active' "
+                "AND st.status IN ('warning', 'alert')) THEN 'ready' ELSE 'not_due' END "
+                "WHERE s.schedule_mode = 'rule' AND s.eligibility IS NULL"))
+            # An unstarted job always mirrors its rule schedule's eligibility (never Ready by default).
+            connection.execute(text(
+                "UPDATE nem_maintenance_records m SET start_eligibility = COALESCE(s.eligibility, 'not_due') "
+                "FROM nem_maintenance_schedules s WHERE m.schedule_id = s.id AND s.schedule_mode = 'rule' "
+                "AND m.status = 'planned' AND m.start_eligibility IS DISTINCT FROM COALESCE(s.eligibility, 'not_due')"))
+        if "nem_rule_parameters" in tables:
+            connection.execute(text(
+                "UPDATE nem_rule_parameters p SET maintenance_scheduled_at = "
+                "(SELECT max(s.created_at) FROM nem_maintenance_schedules s WHERE s.source_parameter_id = p.id) "
+                "WHERE p.maintenance_scheduled_at IS NULL AND EXISTS "
+                "(SELECT 1 FROM nem_maintenance_schedules s WHERE s.source_parameter_id = p.id)"))
+        # The mode check gains 'rule'. Replace it only when it does not allow it yet.
+        mode_check = connection.execute(text(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_maintenance_schedule_mode' "
+            "AND conrelid = 'nem_maintenance_schedules'::regclass")).scalar()
+        if mode_check is None or "'rule'" not in mode_check:
+            connection.execute(text("ALTER TABLE nem_maintenance_schedules DROP CONSTRAINT IF EXISTS ck_maintenance_schedule_mode"))
+            connection.execute(text("ALTER TABLE nem_maintenance_schedules ADD CONSTRAINT ck_maintenance_schedule_mode "
+                                    "CHECK (schedule_mode IN ('calendar', 'runtime', 'usage', 'rule'))"))
+        if not connection.execute(text(
+                "SELECT 1 FROM pg_constraint WHERE conname = 'ck_maintenance_schedule_eligibility'")).scalar():
+            connection.execute(text("ALTER TABLE nem_maintenance_schedules ADD CONSTRAINT ck_maintenance_schedule_eligibility "
+                                    "CHECK (eligibility IS NULL OR eligibility IN ('not_due', 'ready'))"))
+        connection.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_maintenance_schedule_open_rule_parameter "
+            "ON nem_maintenance_schedules (source_parameter_id) "
+            "WHERE source_parameter_id IS NOT NULL AND status = 'active'"))
+
+
+def downgrade_rule_maintenance(engine: Engine) -> None:
+    """Reverses `_upgrade_rule_maintenance`. Rule-created schedules must be removed first (their mode is
+    no longer allowed); history rows are not touched here."""
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as connection:
+        connection.execute(text("DROP INDEX IF EXISTS uq_maintenance_schedule_open_rule_parameter"))
+        connection.execute(text("ALTER TABLE nem_maintenance_schedules DROP CONSTRAINT IF EXISTS ck_maintenance_schedule_eligibility"))
+        connection.execute(text("ALTER TABLE nem_maintenance_schedules DROP CONSTRAINT IF EXISTS ck_maintenance_schedule_mode"))
+        connection.execute(text("ALTER TABLE nem_maintenance_schedules ADD CONSTRAINT ck_maintenance_schedule_mode "
+                                "CHECK (schedule_mode IN ('calendar', 'runtime', 'usage'))"))
+
+
 def downgrade_parameter_lifecycle(engine: Engine) -> None:
     """Reverses `_upgrade_parameter_lifecycle`. Suspended/deactivated parameters lose that setting, so
     re-suspend or remove them first if they must not start evaluating again."""
@@ -788,6 +902,7 @@ def _initialize_schema(engine: Engine) -> None:
         _reconcile_rule_type_constraint(engine)
     _upgrade_parameter_alerts(engine)
     _upgrade_parameter_lifecycle(engine)
+    _upgrade_rule_maintenance(engine)
     _migrate_legacy_rule_templates(engine)
     _migrate_boolean_duration_templates(engine)
     _migrate_existing_rule_counters(engine)

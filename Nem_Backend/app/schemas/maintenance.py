@@ -106,6 +106,12 @@ class MaintenanceRead(ORMModel):
     checklist: list[dict[str, object]] | None
     schedule_id: int | None = None
     planned_due_date: date | None = None
+    start_eligibility: str | None = None
+    rule_context: dict[str, Any] | None = None
+    started_by_id: int | None = None
+    started_by_name: str | None = None
+    completed_by_id: int | None = None
+    completed_by_name: str | None = None
     created_at: datetime
     updated_at: datetime | None = None
     created_by_id: int | None = None
@@ -376,6 +382,20 @@ class MaintenanceScheduleUpdate(ORMModel):
         return self
 
 #Returns schedule information , including due status and approval status, displaying the schedule
+class UnavailableScheduleCancellation(ORMModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=3, max_length=2000)
+
+    @field_validator("reason")
+    @classmethod
+    def strip_reason(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 3:
+            raise ValueError("Enter the reason for cancelling this schedule.")
+        return value
+
+
 class MaintenanceScheduleRead(ORMModel):
     id: int
     asset_id: int
@@ -403,6 +423,23 @@ class MaintenanceScheduleRead(ORMModel):
 
     # Shows the current progress toward the next maintenance due point.
     current_progress: float
+
+    # Rule-created schedules: the rule/parameter they belong to and their eligibility ('not_due' or 'ready').
+    source_rule_id: int | None = None
+    source_parameter_id: int | None = None
+    source_rule_name: str | None = None
+    source_parameter_name: str | None = None
+    source_rule_type: str | None = None
+    eligibility: str | None = None
+    due_threshold: float | None = None
+    overdue_threshold: float | None = None
+    threshold_unit: str | None = None
+    became_due_at: datetime | None = None
+    due_value: float | None = None
+    cancelled_at: datetime | None = None
+    cancelled_by_name: str | None = None
+    cancellation_reason: str | None = None
+    cancellation_kind: str | None = None
 
     # Defines the unit of progress, such as hours or cycles.
     progress_unit: str

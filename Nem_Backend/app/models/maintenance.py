@@ -37,8 +37,23 @@ class MaintenanceSchedule(AuditNamesMixin, Base):
 
         # Restricts maintenance schedules to supported scheduling modes.
         CheckConstraint(
-            "schedule_mode IN ('calendar', 'runtime', 'usage')",
+            "schedule_mode IN ('calendar', 'runtime', 'usage', 'rule')",
             name="ck_maintenance_schedule_mode",
+        ),
+
+        # Start eligibility of a schedule created from a monitoring rule: it waits at not_due until the rule
+        # reaches its Due limit, then becomes ready. Other schedules have no eligibility.
+        CheckConstraint(
+            "eligibility IS NULL OR eligibility IN ('not_due', 'ready')",
+            name="ck_maintenance_schedule_eligibility",
+        ),
+
+        # One open schedule per rule parameter: saving or evaluating a rule again can never add a second.
+        Index(
+            "uq_maintenance_schedule_open_rule_parameter",
+            "source_parameter_id",
+            unique=True,
+            postgresql_where=text("source_parameter_id IS NOT NULL AND status = 'active'"),
         ),
 
         # Ensures runtime maintenance interval is positive.
@@ -111,6 +126,28 @@ class MaintenanceSchedule(AuditNamesMixin, Base):
     approval_status: Mapped[str] = mapped_column(String(20), nullable=False, default="not_required", server_default=text("'not_required'"))
     last_completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     due_alerted_for: Mapped[date | None] = mapped_column(Date)
+    # --- Schedules created from a monitoring rule (schedule_mode 'rule') -----------------------------
+    # The links are SET NULL when the rule or parameter is deleted; the names and thresholds below keep the history readable.
+    source_rule_id: Mapped[int | None] = mapped_column(ForeignKey("nem_monitoring_rules.id", ondelete="SET NULL"), index=True)
+    source_parameter_id: Mapped[int | None] = mapped_column(ForeignKey("nem_rule_parameters.id", ondelete="SET NULL"), index=True)
+    source_parameter_key: Mapped[str | None] = mapped_column(String(36))
+    source_rule_name: Mapped[str | None] = mapped_column(String(200))
+    source_parameter_name: Mapped[str | None] = mapped_column(String(200))
+    source_rule_type: Mapped[str | None] = mapped_column(String(30))
+    # 'not_due' until the rule reaches its Due limit, then 'ready' (Start is allowed). NULL for other schedules.
+    eligibility: Mapped[str | None] = mapped_column(String(20))
+    due_threshold: Mapped[float | None] = mapped_column(Float)
+    overdue_threshold: Mapped[float | None] = mapped_column(Float)
+    threshold_unit: Mapped[str | None] = mapped_column(String(20))
+    became_due_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    due_value: Mapped[float | None] = mapped_column(Float)
+    # Set when an Administrator cancels a rule schedule whose rule or parameter no longer exists
+    # (cancellation_kind 'rule_unavailable'). The schedule and its job snapshot stay as they were.
+    cancelled_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    cancelled_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"))
+    cancelled_by_name: Mapped[str | None] = mapped_column(String(200))
+    cancellation_reason: Mapped[str | None] = mapped_column(Text)
+    cancellation_kind: Mapped[str | None] = mapped_column(String(30))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(),
@@ -156,6 +193,15 @@ class MaintenanceRecord(AuditNamesMixin, Base):
     checklist: Mapped[list[dict[str, object]] | None] = mapped_column(JSON)
     schedule_id: Mapped[int | None] = mapped_column(ForeignKey("nem_maintenance_schedules.id", ondelete="RESTRICT"), index=True)
     planned_due_date: Mapped[date | None] = mapped_column(Date)
+    # Only jobs created from a monitoring rule carry an eligibility: 'not_due' until the rule reaches Due, then 'ready'.
+    # NULL means "not rule-controlled" (calendar, runtime, usage and manual maintenance), which keeps their behaviour.
+    start_eligibility: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Rule, parameter, Due threshold and the value at the moment it became Due, kept with the job permanently.
+    rule_context: Mapped[dict | None] = mapped_column(JSON)
+    started_by_id: Mapped[int | None] = mapped_column(Integer)
+    started_by_name: Mapped[str | None] = mapped_column(String(200))
+    completed_by_id: Mapped[int | None] = mapped_column(Integer)
+    completed_by_name: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=lambda: datetime.now(timezone.utc), nullable=False)
     # Nullable and without onupdate: legacy rows stay NULL; the audit listener stamps it.
     updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime())

@@ -8,6 +8,7 @@ import {
 } from "react-router-dom";
 import { api } from "../../../services/api.js";
 import {
+  MAINTENANCE_LIFECYCLE_EVENTS,
   createLiveUpdateScheduler,
   subscribeLiveUpdates,
 } from "../../../services/liveUpdates.js";
@@ -260,20 +261,26 @@ export default function Home() {
         return;
       }
       const changedTables = new Set(update.changed_tables || []);
-      const liveTables = [
-        "assets",
-        "variables",
-        "readings",
-        "nem_readings",
-        "nem_monitoring_rules",
-        "nem_rule_states",
-        "nem_rule_counter_states",
-        "nem_rule_parameters",
-        "machine_monitoring_states",
-        "nem_alerts",
-      ];
+      // An alert row also changes when its message/value text is refreshed while it stays open; that does not change
+      // the summary counts, the evaluated-alert history or any machine state. Only an alert being raised, removed,
+      // acknowledged or changing status (or a rule changing status) does. An update with no named event is unknown,
+      // so it still refreshes.
+      const named = update.events || [];
+      const alertsChanged =
+        changedTables.has("nem_alerts") &&
+        (named.length === 0 ||
+          named.some((name) =>
+            ["alert.created", "alert.deleted", "alert.acknowledged", "alert.status_changed", "rule.status_changed"].includes(name)
+          ));
+      // The live status read (/plc/status + /monitoring/status) feeds the rule-status signature that keeps the summary
+      // current and the connection notice. It depends on which rules exist and on a rule changing STATUS, not on a
+      // rule's value text, a counter, a reading or the machine's running time, so those (nem_rule_states writes,
+      // counter and machine states, readings) are deliberately not triggers.
+      const ruleStatusChanged = named.includes("rule.status_changed");
+      const liveTables = ["assets", "variables", "nem_monitoring_rules", "nem_rule_parameters"];
       if (
         update.type === "opcua_status" ||
+        ruleStatusChanged ||
         liveTables.some((table) => changedTables.has(table))
       ) {
         refreshLiveScheduler();
@@ -283,17 +290,18 @@ export default function Home() {
           "assets",
           "variables",
           "nem_monitoring_rules",
-          "nem_alerts",
           "nem_rule_parameters",
           "nem_maintenance_records",
-          "nem_maintenance_schedules",
-        ].some((table) => changedTables.has(table))
+        ].some((table) => changedTables.has(table)) ||
+        alertsChanged ||
+        // A schedule row that only advanced its progress does not change any dashboard summary.
+        (update.events || []).some((name) => MAINTENANCE_LIFECYCLE_EVENTS.has(name))
       ) {
         summaryScheduler();
       }
       if (
         changedTables.has("nem_monitoring_events") ||
-        changedTables.has("nem_alerts")
+        alertsChanged
       ) {
         evaluatedAlertsScheduler();
       }

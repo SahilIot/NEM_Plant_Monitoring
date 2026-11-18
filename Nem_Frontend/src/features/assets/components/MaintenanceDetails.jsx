@@ -126,6 +126,31 @@ export default function MaintenanceDetails({ record, now = Date.now() }) {
           </div>
         </section>
 
+        {record.rule_context && (
+          <section className="maintenance-detail-section">
+            <h4>RULE &amp; DUE DETAILS</h4>
+            <div className="maintenance-detail-grid">
+              {[
+                ["Rule", record.rule_context.rule_name],
+                ["Parameter", record.rule_context.parameter_name],
+                ["Rule type", record.rule_context.rule_type === "interval_based" ? "Interval based" : record.rule_context.rule_type],
+                ["Due limit", record.rule_context.due_threshold != null ? `${record.rule_context.due_threshold} ${record.rule_context.threshold_unit || ""}` : null],
+                ["Overdue limit", record.rule_context.overdue_threshold != null ? `${record.rule_context.overdue_threshold} ${record.rule_context.threshold_unit || ""}` : null],
+                ["Value when Due", record.rule_context.due_value != null ? `${record.rule_context.due_value} ${record.rule_context.threshold_unit || ""}` : null],
+                ["Schedule created", record.rule_context.schedule_created_at ? formatTime(record.rule_context.schedule_created_at) : null],
+                ["Became Due", record.rule_context.became_due_at ? formatTime(record.rule_context.became_due_at) : null],
+                ["Started by", record.started_by_name],
+                ["Completed by", record.completed_by_name],
+              ].map(([label, value]) => (
+                <div className="maintenance-detail-field" key={label}>
+                  <span>{label}</span>
+                  <strong>{value || "—"}</strong>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         <section className="maintenance-detail-section">
           <h4>RECORD HISTORY</h4>
           <div className="maintenance-detail-grid">

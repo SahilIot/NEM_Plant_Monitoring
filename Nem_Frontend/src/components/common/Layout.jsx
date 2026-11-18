@@ -4,7 +4,7 @@ import { Link, NavLink, Outlet, useLocation, matchPath } from "react-router-dom"
 import { useTranslation } from "react-i18next";
 import { Languages, LogOut, Users } from "lucide-react";
 import { api } from "../../services/api.js";
-import { subscribeLiveUpdates } from "../../services/liveUpdates.js";
+import { shareInFlight, subscribeLiveUpdates } from "../../services/liveUpdates.js";
 import { APP_TITLE } from "../../utils/config.js";
 import Brand from "./Brand.jsx";
 import AssetTree from "../../features/assets/components/AssetTree.jsx";
@@ -291,7 +291,8 @@ export default function Layout() {
   }, []);
 
   const refreshRules = useCallback(async () => {
-    const result = await api.getAll("/rules");
+    // Live-triggered: simultaneous callers share one request that started after the event.
+    const result = await shareInFlight("rules:all", () => api.getAll("/rules"), { fresh: true });
     setRules(result);
   }, []);
 
@@ -364,15 +365,19 @@ export default function Layout() {
           console.error("Asset refresh after live update failed.", error);
         });
       }
-      if (changedTables.has("nem_monitoring_rules")) {
+      // The shared rule list also carries each rule's status, shown on the Rules pages: a status change
+      // (rule.status_changed) or a lifecycle change (rule.activated / suspended / deactivated) must refresh it too.
+      if (
+        changedTables.has("nem_monitoring_rules") ||
+        (update.events || []).some((name) => name.startsWith("rule."))
+      ) {
         refreshRules().catch((error) => {
           console.error("Rule refresh after live update failed.", error);
         });
       }
-      if (
-        changedTables.has("nem_alerts") ||
-        changedTables.has("nem_maintenance_schedules")
-      ) {
+      // Alerts (including maintenance-due alerts) are rows of nem_alerts; a schedule row changing on its own
+      // (progress) does not change any alert, so it does not re-read them.
+      if (changedTables.has("nem_alerts")) {
         refreshAlerts().catch((error) => {
           console.error("Alert refresh after live update failed.", error);
         });

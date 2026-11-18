@@ -15,6 +15,19 @@ let hasConnected = false;
 let lastEpoch = null;
 let lastSeq = 0;
 let lastStreamSeq = 0;
+// Maintenance events that change what a maintenance card or summary shows, as opposed to a schedule merely
+// advancing its progress (which is saved on the schedule row every evaluation).
+export const MAINTENANCE_LIFECYCLE_EVENTS = new Set([
+  "maintenance.created",
+  "maintenance.deleted",
+  "maintenance.schedule_created",
+  "maintenance.ready",
+  "maintenance.started",
+  "maintenance.completed",
+  "maintenance.cancelled",
+]);
+// When the newest live event arrived; used so a refresh never joins a request that began before that event.
+let lastEventAt = 0;
 
 function websocketUrl() {
   const apiUrl = new URL(API_BASE, window.location.href);
@@ -111,6 +124,7 @@ function connect() {
         hasConnected = true;
       }
     }
+    lastEventAt = Date.now();
     notifySubscribers(update);
   };
   connection.onerror = () => {
@@ -135,6 +149,40 @@ function connect() {
     }, reconnectDelay);
     reconnectDelay = Math.min(reconnectDelay * 2, 30000);
   };
+}
+
+// Several components may need the same GET at the same moment (for example the maintenance cards and the
+// maintenance list both read an asset's schedules). They share one request. A refresh caused by a live event
+// (`fresh`) may only share a request that started after that event, otherwise it could return data read before the
+// change was committed; if the running request is older, exactly one follow-up request is made and shared.
+const sharedRequests = new Map();
+export function shareInFlight(key, start, { fresh = false } = {}) {
+  let entry = sharedRequests.get(key);
+  if (!entry) {
+    entry = { running: null, startedAt: 0, queued: null };
+    sharedRequests.set(key, entry);
+  }
+  const run = () => {
+    const promise = Promise.resolve()
+      .then(start)
+      .finally(() => {
+        if (entry.running === promise) entry.running = null;
+      });
+    entry.running = promise;
+    entry.startedAt = Date.now();
+    return promise;
+  };
+  if (!entry.running) return entry.queued || run();
+  if (!fresh || entry.startedAt >= lastEventAt) return entry.running;
+  if (!entry.queued) {
+    entry.queued = entry.running
+      .catch(() => {})
+      .then(() => {
+        entry.queued = null;
+        return run();
+      });
+  }
+  return entry.queued;
 }
 
 export function createLiveUpdateScheduler(callback, delay = 200) {

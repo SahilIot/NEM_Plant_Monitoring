@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { api } from "../../../services/api.js";
+import { shareInFlight, subscribeLiveUpdates } from "../../../services/liveUpdates.js";
 import {
   EmptyState,
   LoadingIndicator,
@@ -29,18 +30,34 @@ export default function AlertRules() {
 
   useEffect(() => {
     let alive = true;
+    let timer = null;
+    const path = lifecycleStatus
+      ? `/rules/lifecycle/${lifecycleStatus}`
+      : `/rules/status/${kind}`;
+    const load = (live) =>
+      (live ? shareInFlight(`rules-page:${path}`, () => api.get(path), { fresh: true }) : api.get(path))
+        .then((items) => alive && setRules(Array.isArray(items) ? items : []))
+        .catch((err) => alive && !live && setError(err.message));
     setRules(null);
     setError("");
-    api
-      .get(
-        lifecycleStatus
-          ? `/rules/lifecycle/${lifecycleStatus}`
-          : `/rules/status/${kind}`
-      )
-      .then((items) => alive && setRules(Array.isArray(items) ? items : []))
-      .catch((err) => alive && setError(err.message));
+    load(false);
+    // Keep the list (rows, statuses, membership of this status group) current while the page is open. Only rule
+    // status / lifecycle events trigger it, coalesced, so a stream of readings does not cause a stream of requests.
+    const unsubscribe = subscribeLiveUpdates((update) => {
+      const tables = new Set(update.changed_tables || []);
+      const named = update.events || [];
+      if (
+        tables.has("nem_monitoring_rules") ||
+        named.some((name) => name.startsWith("rule."))
+      ) {
+        clearTimeout(timer);
+        timer = setTimeout(() => load(true), 250);
+      }
+    });
     return () => {
       alive = false;
+      clearTimeout(timer);
+      unsubscribe();
     };
   }, [kind, lifecycleStatus]);
 

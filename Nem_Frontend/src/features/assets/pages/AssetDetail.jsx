@@ -17,6 +17,7 @@ import RuleCollectionAssignmentModal from "../../rules/components/RuleCollection
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import {
+  MAINTENANCE_LIFECYCLE_EVENTS,
   createLiveUpdateScheduler,
   subscribeLiveUpdates,
 } from "../../../services/liveUpdates.js";
@@ -574,12 +575,11 @@ export default function AssetDetail() {
     () => createLiveUpdateScheduler(() => loadLive(), 200),
     [loadLive]
   );
+  // A rule or parameter changed its evaluated status (Normal / Due / Overdue / Warning / Alert ...): re-read the
+  // rule list, which carries each rule's status. (This used to be loadLive with both parts switched off, which made
+  // no request at all, so the rule cards kept their old status until the page was reloaded.)
   const statusScheduler = useMemo(
-    () =>
-      createLiveUpdateScheduler(
-        () => loadLive({ includeRuleList: false, includePlcStatus: false }),
-        250
-      ),
+    () => createLiveUpdateScheduler(() => loadLive({ includeRuleList: true, includePlcStatus: false }), 250),
     [loadLive]
   );
   const connectionScheduler = useMemo(
@@ -614,12 +614,15 @@ export default function AssetDetail() {
     }
   }, [assetId]);
 
+  // Latest request wins: a slow, older logbook response must never replace a newer one.
+  const logsRequest = useRef(0);
   const loadLogs = useCallback(() => {
     const generation = seq.current;
+    const request = ++logsRequest.current;
     return api
       .get(`/assets/${assetId}/logbook`)
       .then((items) => {
-        if (generation !== seq.current) return;
+        if (generation !== seq.current || request !== logsRequest.current) return;
         setLogs(Array.isArray(items) ? items : []);
       })
       .catch((error) => {
@@ -646,6 +649,40 @@ export default function AssetDetail() {
     () => createLiveUpdateScheduler(loadEvents, 250),
     [loadEvents]
   );
+
+  // Live maintenance changes are collected for a moment and applied once, and only for what actually changed:
+  // records -> logbook list (only while that tab is open), job list and current cards; schedules alone (progress
+  // saved by the evaluator or collector) -> the Logbook's schedule list (when open), nothing else.
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const logsStale = useRef(false);
+  const pendingMaintenance = useRef({ records: false, schedules: false, structural: false });
+  const maintenanceScheduler = useMemo(
+    () =>
+      createLiveUpdateScheduler(() => {
+        const pending = pendingMaintenance.current;
+        pendingMaintenance.current = { records: false, schedules: false, structural: false };
+        if (pending.records) {
+          if (tabRef.current === "logbook") loadLogs();
+          else logsStale.current = true;
+          setMaintenanceRecordsKey((current) => current + 1);
+          setMaintenanceRefreshKey((current) => current + 1);
+        } else if (pending.structural) {
+          setMaintenanceRefreshKey((current) => current + 1);
+        }
+        if (pending.schedules) {
+          setScheduleProgressKey((current) => current + 1);
+        }
+      }, 250),
+    [loadLogs]
+  );
+  useEffect(() => () => maintenanceScheduler.dispose(), [maintenanceScheduler]);
+  useEffect(() => {
+    if (tab === "logbook" && logsStale.current) {
+      logsStale.current = false;
+      loadLogs();
+    }
+  }, [tab, loadLogs]);
 
   const refreshMaintenanceData = useCallback(async () => {
     setMaintenanceRefreshKey((current) => current + 1);
@@ -874,7 +911,8 @@ export default function AssetDetail() {
       if (update.resync_required) {
         liveScheduler();
         loadVariables();
-        loadLogs();
+        if (tabRef.current === "logbook") loadLogs();
+        else logsStale.current = true;
         // Includes WebSocket reconnects: restore the latest schedule progress.
         setScheduleProgressKey((current) => current + 1);
         setMaintenanceRefreshKey((current) => current + 1);
@@ -937,38 +975,33 @@ export default function AssetDetail() {
       )) {
         liveScheduler();
       } else if (
-        [
-          "readings",
-          "nem_readings",
-          "nem_rule_states",
-          "nem_rule_counter_states",
-          "machine_monitoring_states",
-          "nem_alerts",
-        ].some((table) => changedTables.has(table))
+        // Named by the backend only when a rule's or parameter's status really changed (not for every reading or
+        // counter tick), so this stays a handful of requests per transition rather than one per event.
+        (update.events || []).some((name) => name.startsWith("rule.") || name.startsWith("parameter."))
       ) {
         statusScheduler();
       }
       if (changedTables.has("variables") || changedTables.has("assets")) {
         loadVariables();
       }
-      if (
-        changedTables.has("nem_maintenance_records") ||
-        changedTables.has("nem_maintenance_schedules")
-      ) {
-        loadLogs();
-        // Current maintenance cards and the history list follow records created or changed elsewhere.
-        setMaintenanceRefreshKey((current) => current + 1);
-        setMaintenanceRecordsKey((current) => current + 1);
+      const recordsChanged = changedTables.has("nem_maintenance_records");
+      const schedulesChanged = changedTables.has("nem_maintenance_schedules");
+      if (recordsChanged || schedulesChanged) {
+        const named = update.events || [];
+        // A schedule that only advanced its progress is not a lifecycle change: the cards need a full re-read only
+        // when a schedule was created, became ready, started, completed, cancelled or deleted.
+        const structural = named.some((name) => MAINTENANCE_LIFECYCLE_EVENTS.has(name));
+        const pending = pendingMaintenance.current;
+        pending.records = pending.records || recordsChanged;
+        pending.schedules = pending.schedules || schedulesChanged;
+        pending.structural = pending.structural || structural;
+        maintenanceScheduler();
       }
-      if (changedTables.has("nem_maintenance_schedules")) {
-        // Runtime/usage progress is saved on the schedule row by the collector.
-        setScheduleProgressKey((current) => current + 1);
-      }
-      if (changedTables.has("nem_monitoring_events") && tab === "events") {
+      if (changedTables.has("nem_monitoring_events") && tabRef.current === "events") {
         eventsScheduler();
       }
     });
-  }, [assetId, assets, children, loadLive, loadLogs, loadVariables]);
+  }, [assetId, assets, children, loadLive, loadLogs, loadVariables, maintenanceScheduler]);
 
  
 useEffect(() => {

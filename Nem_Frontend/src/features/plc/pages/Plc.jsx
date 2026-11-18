@@ -7,6 +7,7 @@ import {
   subscribeLiveUpdates,
 } from "../../../services/liveUpdates.js";
 import { formatDuration, timeAgo } from "../../../utils/format.js";
+import { useDisplayClock } from "../../rules/components/durationClock.js";
 import "../styles/Plc.css";
 
 
@@ -56,6 +57,11 @@ export default function Plc() {
   const [busy, setBusy] = useState("");
 
   const [monitoring, setMonitoring] = useState(null);
+  // When the monitoring status was received. The backend already counts a running machine's time up to the moment of
+  // the request but only a runtime checkpoint (about every 10 s) produces an event to ask again, so a running
+  // machine's time is advanced from this instant by the shared one-second display clock, with no extra request.
+  const monitoringReceivedAt = useRef(Date.now());
+  const displayClock = useDisplayClock();
   const [monitoringLoading, setMonitoringLoading] = useState(true);
   const [monitoringError, setMonitoringError] = useState("");
   const monitoringRequest = useRef(null);
@@ -117,6 +123,7 @@ export default function Plc() {
       try {
         const result = await api.get("/plc/status");
         if (monitoringMounted.current) {
+          monitoringReceivedAt.current = Date.now();
           setMonitoring(result);
           setMonitoringError("");
         }
@@ -704,7 +711,15 @@ export default function Plc() {
                       <div className="machine-fig">
                         <span>Running time</span>
                         <b>
-                          {formatDuration(machine.running_seconds)}
+                          {formatDuration(
+                            machine.running_seconds +
+                              (machine.status === "running"
+                                ? Math.min(
+                                    60,
+                                    Math.max(0, (displayClock - monitoringReceivedAt.current) / 1000)
+                                  )
+                                : 0)
+                          )}
                           {machine.runtime_limit_seconds ? (
                             <small>
                               {" "}

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Eye, Pencil, Trash2 } from "lucide-react";
 import { api } from "../../../services/api.js";
+import { shareInFlight } from "../../../services/liveUpdates.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { captureNavigationOrigin } from "../../../utils/navigation.js";
 import {
@@ -28,6 +29,14 @@ function displayDate(value) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
 }
 
+// A job created from a monitoring rule cannot be started until its rule reaches Due (the server enforces this too).
+const isLockedUntilDue = (record) => record?.start_eligibility === "not_due";
+const NOT_DUE_TITLE = "Not due yet. Start becomes available when the rule reaches its Due limit.";
+
+function formatNumber(value) {
+  return value == null || Number.isNaN(Number(value)) ? "—" : String(Number(Number(value).toFixed(2)));
+}
+
 export default function CurrentMaintenanceCards({
   assetId,
   refreshKey = 0,
@@ -46,6 +55,8 @@ export default function CurrentMaintenanceCards({
   const canOperateDueMaintenance = user?.role === "Operator";
   const [records, setRecords] = useState([]);
   const [completedRecords, setCompletedRecords] = useState([]);
+  // Rule-created schedules by id: their current value, Due limit and eligibility come from the schedule.
+  const [ruleSchedules, setRuleSchedules] = useState({});
   const [loading, setLoading] = useState(true);
   const [startingRecordId, setStartingRecordId] = useState(null);
   const [completingRecordId, setCompletingRecordId] = useState(null);
@@ -162,8 +173,8 @@ const openEdit = (record) => {
     setError("");
     try {
       const [schedules, maintenanceRecords] = await Promise.all([
-        api.getAll(`/maintenance/schedules?asset_id=${assetId}`),
-        api.getAll(`/maintenance?asset_id=${assetId}`),
+        shareInFlight(`maintenance-schedules:${assetId}`, () => api.getAll(`/maintenance/schedules?asset_id=${assetId}`), { fresh: true }),
+        shareInFlight(`maintenance-records:${assetId}`, () => api.getAll(`/maintenance?asset_id=${assetId}`), { fresh: true }),
       ]);
       const recordsById = new Map(
         maintenanceRecords.map((record) => [record.id, record])
@@ -175,11 +186,21 @@ const openEdit = (record) => {
           record.schedule_id != null && record.status === "completed"
       );
       setCompletedRecords(completedScheduledRecords);
+      setRuleSchedules(
+        Object.fromEntries(
+          schedules
+            .filter((schedule) => schedule.schedule_mode === "rule")
+            .map((schedule) => [schedule.id, schedule])
+        )
+      );
       onCompletedRecordsCount?.(completedScheduledRecords.length);
+      // Rule-generated schedules are not listed under the rules in Current Status any more: they are opened from the
+      // rule's parameter, and managed in the Maintenance Logbook. Calendar schedules keep their cards here.
       setRecords(
         schedules
           .filter(
             (schedule) =>
+              schedule.schedule_mode !== "rule" &&
               schedule.status === "active" &&
               schedule.approval_status !== "pending"
           )
@@ -299,6 +320,7 @@ const openEdit = (record) => {
   }, [selectedRecord?.id, selectedRecord?.status]);
 
   const startMaintenance = async (record) => {
+    if (isLockedUntilDue(record) || record.rule_context) return;
     if (
       !canManageMaintenance &&
       !(canOperateDueMaintenance && record.schedule_id != null &&
@@ -419,34 +441,77 @@ const openEdit = (record) => {
                     ? "Completed"
                     : inProgress
                       ? "In progress"
+                      : record.rule_context && (ruleSchedules[record.schedule_id] && ruleSchedules[record.schedule_id].source_parameter_id == null)
+                        ? "Unavailable — rule deleted"
+                      : isLockedUntilDue(record)
+                        ? "Not Due"
+                        : record.rule_context && record.start_eligibility === "ready"
+                          ? "Ready to Start"
                       : overdue
                         ? "Overdue"
                         : record.planned_due_date
                           ? "Due today"
                           : "Due"}
                 </span>
+                {(() => {
+                  const schedule = ruleSchedules[record.schedule_id];
+                  const context = record.rule_context || {};
+                  if (!schedule && !context.rule_name) return null;
+                  const unit = schedule?.threshold_unit || context.threshold_unit || "";
+                  return (
+                    <small className="rule-context">
+                      {schedule?.source_rule_name || context.rule_name} · {schedule?.source_parameter_name || context.parameter_name}
+                      {" · Current "}{formatNumber(schedule?.current_progress)} {unit}
+                      {" · Due at "}{formatNumber(schedule?.due_threshold ?? context.due_threshold)} {unit}
+                      {schedule?.created_at ? ` · Created ${new Date(schedule.created_at).toLocaleDateString()}` : ""}
+                    </small>
+                  );
+                })()}
                 <small>
-                  {displayDate(record.planned_due_date)}
+                  {record.planned_due_date ? displayDate(record.planned_due_date) : ""}
+                  {record.planned_due_date && record.assigned_technician ? " · " : ""}
                   {record.assigned_technician
                     ? ` · ${record.assigned_technician}`
                     : ""}
                 </small>
               </div>
               <div className="rule-card-actions current-maintenance-actions">
-                {!inProgress && !completed && (
+                {record.rule_context && record.schedule_id != null && !completed && (
+                  // Rule-created maintenance is started and completed only from Logbook -> Schedule Details.
+                  <button
+                    type="button"
+                    className="btn-outline"
+                    onClick={() => navigate(
+                      `/assets/${assetId}/maintenance/schedules/${record.schedule_id}/details`,
+                      { state: { from: captureNavigationOrigin(location, {
+                        ...(navigationState || location.state),
+                        activeTab: "status",
+                      }) } }
+                    )}
+                    title="Open the schedule in the Maintenance Logbook to start or complete it."
+                  >
+                    {inProgress ? "Open to complete"
+                      : isLockedUntilDue(record) || (ruleSchedules[record.schedule_id] && ruleSchedules[record.schedule_id].source_parameter_id == null) ? "View schedule"
+                      : "Open to start"}
+                  </button>
+                )}
+                {!record.rule_context && !inProgress && !completed && (
                   <button
                     type="button"
                     className="btn-primary"
                     onClick={() => startMaintenance(record)}
                     disabled={
                       startingRecordId !== null ||
+                      isLockedUntilDue(record) ||
                       (!canManageMaintenance &&
                         !(canOperateDueMaintenance &&
                           record.schedule_id != null &&
                           (!record.planned_due_date || record.planned_due_date <= todayDateInput())))
                     }
                     title={
-                      !canManageMaintenance &&
+                      isLockedUntilDue(record)
+                        ? NOT_DUE_TITLE
+                        : !canManageMaintenance &&
                       !(canOperateDueMaintenance &&
                         record.schedule_id != null &&
                         (!record.planned_due_date || record.planned_due_date <= todayDateInput()))
@@ -530,9 +595,11 @@ const openEdit = (record) => {
                               setActionMenuRecordId(null);
                               permanentlyDeleteRecord(record);
                             }}
-                            disabled={busy || inProgress}
+                            disabled={busy || inProgress || Boolean(record.rule_context)}
                             title={
-                              inProgress
+                              record.rule_context
+                                ? "Maintenance created from a monitoring rule cannot be deleted. It is controlled by its rule and its history is preserved; deactivate or edit the rule instead."
+                                : inProgress
                                 ? "In-progress maintenance cannot be deleted."
                                 : "Permanently delete maintenance"
                             }
@@ -558,7 +625,7 @@ const openEdit = (record) => {
         >          
           <MaintenanceDetails record={selectedRecord} now={clockNow} />
           <div className="modal-actions">
-            {selectedRecord.status === "in_progress" && (
+            {selectedRecord.status === "in_progress" && !selectedRecord.rule_context && (
               <button
                 type="button"
                 className="btn-primary"

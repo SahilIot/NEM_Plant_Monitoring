@@ -179,17 +179,18 @@ def enqueue_alert_notifications(
     asset: Asset,
     rule: MonitoringRule | None,
     settings: Settings | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> int:
-    # Queue one email per unique responsible recipient for this alert/severity.
     try:
         with session.begin_nested():
-            return _enqueue(session, alert, asset, rule, settings)
+            return _enqueue(session, alert, asset, rule, settings, extra)
     except Exception:
         LOGGER.exception("Could not queue email notification for alert %s", alert.id)
         return 0
 
 #Perfroms the actual preparation of email jobs
-def _enqueue(session: Session, alert: Alert, asset: Asset, rule: MonitoringRule | None, settings: Settings | None) -> int:
+def _enqueue(session: Session, alert: Alert, asset: Asset, rule: MonitoringRule | None, settings: Settings | None,
+             extra: dict[str, Any] | None = None) -> int:
     #check whether notifications are enabled 
     if settings is not None and not settings.email_notifications_enabled:
         return 0
@@ -217,6 +218,7 @@ def _enqueue(session: Session, alert: Alert, asset: Asset, rule: MonitoringRule 
         "event_time": (alert.last_updated_at or alert.started_at or _now()).astimezone(timezone.utc).isoformat(),
         "status": alert.status,
         "link": f"{base_url}/assets/{asset.id}" if base_url else None,
+        **(extra or {}),
     }
     queued_notifications: list[EmailNotification] = []
     existing_user_ids = set(
@@ -329,10 +331,34 @@ def _clean(value: Any) -> str:
     return re.sub(r"[\r\n]+", " ", str(value))
 
 #This function builds the actual warning or alert email
+def _maintenance_ready_rows(payload: dict[str, Any], settings: Settings) -> list[tuple[str, str]]:
+    # Details of a maintenance schedule that just became ready to start (its monitoring rule reached Due).
+    unit = _clean(payload.get("threshold_unit") or "")
+    amount = lambda value: "n/a" if value is None else f"{value:g} {unit}".strip()  # noqa: E731
+    rows = [
+        ("Event type", "Maintenance ready to start"),
+        ("Asset", f"{_clean(payload['asset_name'])} (ID {payload['asset_id']})"),
+        ("Location", _clean(payload.get("location") or payload["asset_name"])),
+        ("Rule", _clean(payload.get("rule_name") or "")),
+        ("Rule type", _clean(payload.get("rule_type") or "")),
+    ]
+    if payload.get("parameter_name"):
+        rows.append(("Parameter", _clean(payload["parameter_name"])))
+    rows += [
+        ("Current value", amount(payload.get("observed_value"))),
+        ("Due threshold", amount(payload.get("due_threshold"))),
+        ("Overdue threshold", amount(payload.get("overdue_threshold"))),
+        ("Became due", _format_time(payload["event_time"], settings)),
+        ("Maintenance schedule", f"#{payload['schedule_id']}"),
+    ]
+    return rows
+
+
 def build_message(payload: dict[str, Any], *, sender: str, recipient: str, settings: Settings) -> EmailMessage:
     kind = "Alert" if payload["severity"] == "alert" else "Warning"
     asset_name = _clean(payload["asset_name"])
-    rows = [
+    ready = payload.get("notification_kind") == "maintenance_ready"
+    rows = _maintenance_ready_rows(payload, settings) if ready else [
         ("Event type", kind),
         ("Asset", f"{asset_name} (ID {payload['asset_id']})"),
         ("Location", _clean(payload.get("location") or asset_name)),
@@ -347,7 +373,8 @@ def build_message(payload: dict[str, Any], *, sender: str, recipient: str, setti
     if payload.get("link"):
         rows.append(("Link", payload["link"]))
     message = EmailMessage()
-    message["Subject"] = f"[NEM Monitoring] {kind} – Asset: {asset_name}"
+    message["Subject"] = (f"[NEM Monitoring] Maintenance ready to start – Asset: {asset_name}" if ready
+                          else f"[NEM Monitoring] {kind} – Asset: {asset_name}")
     message["From"] = formataddr(("NEM Plant Monitoring", sender))
     message["To"] = recipient
     text = "NEM Plant Monitoring – automated notification\n\n" + "\n".join(f"{k}: {v}" for k, v in rows)

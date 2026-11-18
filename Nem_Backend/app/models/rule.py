@@ -475,6 +475,7 @@ class RuleParameter(Base):
     lifecycle_status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="active", server_default="active"
     )
+    maintenance_scheduled_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), default=lambda: datetime.now(timezone.utc), nullable=False
     )
@@ -490,7 +491,7 @@ class RuleParameter(Base):
 
 
 class RuleParameterState(Base):
-    """Latest evaluation of one rule parameter (the rule's own RuleState holds the combined result)."""
+    # Latest evaluation of one rule parameter (the rule's own RuleState holds the combined result).
 
     __tablename__ = "nem_rule_parameter_states"
     __table_args__ = (

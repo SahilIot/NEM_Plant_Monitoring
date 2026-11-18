@@ -29,7 +29,7 @@ from app.models import (Alert,Asset,
 from app.schemas.opcua import OpcUaMachineMapping, OpcUaTagMapping
 from app.schemas.reading import ReadingCreate
 from app.services.monitoring_engine import (acquire_scheduler_lease,
-    emit_event,evaluate_reading_rules,utc_now,OPCUA_SOURCE_ID,
+    emit_event,evaluate_reading_rules,evaluate_interval_parameter_rules,utc_now,OPCUA_SOURCE_ID,
 )
 from app.services.opcua_client import (OpcUaConfigurationError, OpcUaConnectionError,
     create_configured_opcua_client, opcua_security_summary,
@@ -999,8 +999,19 @@ class OpcUaCollector:
                             ),
                             runtime_gap_seconds=self.settings.runtime_freshness_seconds,
                         )
+                        # A valid cycle (rising edge, in order, not a repeat): bring multi-parameter rules that count
+                        # this variable up to date now, not at the next scheduler pass.
+                        evaluate_interval_parameter_rules(
+                            session,
+                            variable_id=variable_id,
+                            stale_after_seconds=(
+                                self.settings.monitoring_default_stale_after_seconds
+                            ),
+                            runtime_gap_seconds=self.settings.runtime_freshness_seconds,
+                        )
                 elif role == "running":
                     state.last_running_signal_at = recorded_at
+                    was_running = state.is_running
                     self._apply_running_signal(
                         session,
                         state,
@@ -1009,6 +1020,18 @@ class OpcUaCollector:
                         self.settings.runtime_freshness_seconds,
                         signal_at,
                     )
+                    if was_running is not notification.value:
+                        # The machine started or stopped: a running-time (usage) parameter must stop or start counting
+                        # at this edge, not at the next cycle or scheduler pass. Repeats of the same state (the periodic
+                        # re-read) are not an edge and cost nothing.
+                        evaluate_interval_parameter_rules(
+                            session,
+                            variable_id=variable_id,
+                            stale_after_seconds=(
+                                self.settings.monitoring_default_stale_after_seconds
+                            ),
+                            runtime_gap_seconds=self.settings.runtime_freshness_seconds,
+                        )
                 session.commit()
         except (HTTPException, ValidationError, ValueError) as error:
             LOGGER.warning(

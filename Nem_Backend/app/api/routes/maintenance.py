@@ -9,6 +9,7 @@ from sqlalchemy.sql import Executable
 
 from pydantic import ValidationError
 
+from app.services.rule_maintenance import cancel_unavailable, ensure_startable
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.api.routes.auth import get_current_user, require_roles
@@ -30,6 +31,7 @@ from app.schemas.maintenance import (
     MaintenanceScheduleConfirm,
     MaintenanceScheduleCreate,
     MaintenanceScheduleRead,
+    UnavailableScheduleCancellation,
     MaintenanceScheduleUpdate,
     MaintenanceUpdate,
 )
@@ -96,6 +98,16 @@ def _record_in_scope(
     return record
 
 # Important : restrict operators so they can only start or complete maintenance that is due today or overdue.
+RULE_MAINTENANCE_DELETE_MESSAGE = (
+    "Maintenance created from a monitoring rule cannot be deleted: it is controlled by its rule and its history is "
+    "preserved. Deactivate or edit the rule instead; an unstarted schedule is then cancelled automatically."
+)
+
+
+def _user_label(user: User) -> str:
+    return (getattr(user, "full_name", None) or getattr(user, "username", None) or getattr(user, "email", None) or f"User {user.id}")[:200]
+
+
 def _authorize_operator_due_occurrence(
     session: Session,
     record: MaintenanceRecord,
@@ -125,7 +137,7 @@ def _authorize_operator_due_occurrence(
         )
 
     # Runtime and usage-based schedules do not depend on calendar due dates.
-    if schedule.schedule_mode in {"runtime", "usage"}:
+    if schedule.schedule_mode in {"runtime", "usage", "rule"}:
 
         # Allow Operators only on the active occurrence of the schedule.
         if (
@@ -221,6 +233,8 @@ def _schedule_read(
         if is_calendar
         else "hours"
         if schedule.schedule_mode == "runtime"
+        else (schedule.threshold_unit or "hours")
+        if schedule.schedule_mode == "rule"
         else "cycles"
     )
 
@@ -797,6 +811,30 @@ def _delete_schedule_tree(session: Session, schedule: MaintenanceSchedule, user:
         logger.exception("Deleting maintenance schedule id=%s failed; rolled back", schedule_id)
         raise
 
+@router.post("/schedules/{schedule_id}/cancel-unavailable", response_model=MaintenanceScheduleRead)
+def cancel_unavailable_rule_schedule(
+    payload: UnavailableScheduleCancellation,
+    schedule_id: int = Path(gt=0),
+    session: Session = Depends(get_db),
+    user: User = Depends(require_roles("Administrator")),  # Supervisors and Operators are rejected with 403
+) -> MaintenanceScheduleRead:
+    """Cancel a rule schedule whose rule or parameter was deleted. History is kept; see rule_maintenance."""
+    existing = session.get(MaintenanceSchedule, schedule_id)
+    if existing is None or not access_scope(session).allows(existing.asset_id):
+        raise HTTPException(status_code=404, detail=f"Maintenance schedule {schedule_id} was not found",)
+    try:
+        schedule = cancel_unavailable(session, schedule_id, user_id=user.id, user_name=_user_label(user), reason=payload.reason)
+    except LookupError as exc:
+        session.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    session.commit()
+    session.refresh(schedule)
+    return _schedule_read(session, schedule)
+
+
 @router.delete("/schedules/{schedule_id}/permanent",status_code=status.HTTP_204_NO_CONTENT,)
 def permanently_delete_maintenance_schedule(
     schedule_id: int = Path(gt=0),
@@ -810,6 +848,8 @@ def permanently_delete_maintenance_schedule(
     )
     if schedule is None or not access_scope(session).allows(schedule.asset_id):
         raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
+    if schedule.schedule_mode == "rule":
+        raise HTTPException(status_code=409, detail=RULE_MAINTENANCE_DELETE_MESSAGE)
     # Refuse schedule deletion while any occurrence exists so linked and completed history is never erased.
     linked_record_id = session.scalar(
         select(MaintenanceRecord.id)
@@ -874,6 +914,15 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
             detail="Changing the maintenance schedule mode is not supported. Create a new schedule instead.",
         )
 
+    if schedule.schedule_mode == "rule":
+        # Created and controlled by its monitoring rule: only the job details may be edited here. The rule decides
+        # when it becomes ready and the lifecycle (cancel/deactivate) follows the rule, never a manual status change.
+        blocked = set(changes) - {"title", "priority", "assigned_technician", "description", "instruction_document_ids"}
+        if blocked:
+            raise HTTPException(
+                status_code=409,
+                detail="This schedule is controlled by its monitoring rule. Only its title, priority, assigned technician, description and documents can be edited here.",
+            )
     is_calendar = schedule.schedule_mode == "calendar"
     if not is_calendar and "status" in changes:
         allowed_runtime_statuses = {"active", "paused", "cancelled"}
@@ -1216,40 +1265,43 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
             if schedule.current_occurrence_id == current_occurrence.id:
                 schedule.current_occurrence_id = None
 
-    # Cancelled schedules must not retain proposals or active due alerts.
+    # Only cancelling the schedule cancels its job, resolves its due alerts and records the cancellation. An ordinary
+    # edit (title, priority, technician, documents...) must leave the planned job linked, otherwise a rule-created
+    # schedule is left Active with no job and can never become Ready to Start.
     if schedule.status == "cancelled":
+        # Cancelled schedules must not retain proposals or active due alerts.
         schedule.proposed_due_date = None
         schedule.approval_status = "declined"
 
-    # Cancel the current planned occurrence, but preserve historical records.
-    if current_occurrence is not None:
-        if current_occurrence.status == "planned":
-            current_occurrence.status = "cancelled"
+        # Cancel the current planned occurrence, but preserve historical records.
+        if current_occurrence is not None:
+            if current_occurrence.status == "planned":
+                current_occurrence.status = "cancelled"
 
-        # Clear the pointer so the schedule does not reference a cancelled occurrence.
-        if schedule.current_occurrence_id == current_occurrence.id:
-            schedule.current_occurrence_id = None
+            # Clear the pointer so the schedule does not reference a cancelled occurrence.
+            if schedule.current_occurrence_id == current_occurrence.id:
+                schedule.current_occurrence_id = None
 
-    now = utc_now()
+        now = utc_now()
 
-    active_due_alerts = session.scalars(
-        select(Alert).where(
-            Alert.maintenance_schedule_id == schedule.id,
-            Alert.status == "active",
+        active_due_alerts = session.scalars(
+            select(Alert).where(
+                Alert.maintenance_schedule_id == schedule.id,
+                Alert.status == "active",
+            )
+        ).all()
+
+        for alert in active_due_alerts:
+            alert.status = "resolved"
+            alert.resolved_at = now
+            alert.last_updated_at = now
+
+        _emit_schedule_event(
+            session,
+            schedule,
+            event_type="maintenance_schedule_cancelled",
+            message=f"Maintenance schedule cancelled: {schedule.title}.",
         )
-    ).all()
-
-    for alert in active_due_alerts:
-        alert.status = "resolved"
-        alert.resolved_at = now
-        alert.last_updated_at = now
-
-    _emit_schedule_event(
-        session,
-        schedule,
-        event_type="maintenance_schedule_cancelled",
-        message=f"Maintenance schedule cancelled: {schedule.title}.",
-    )
     session.commit()
     session.refresh(schedule)
     return _schedule_read(session, schedule)
@@ -1455,6 +1507,8 @@ def permanently_delete_maintenance_record(
         raise HTTPException(status_code=404,detail=f"Maintenance record {record_id} was not found",)
     if record.status == "in_progress":
         raise HTTPException(status_code=409,detail="Maintenance currently in progress cannot be permanently deleted.",)
+    if record.rule_context is not None:
+        raise HTTPException(status_code=409, detail=RULE_MAINTENANCE_DELETE_MESSAGE)
 
     if record.status == "planned" and record.schedule_id is not None:
         # Deleting a planned maintenance removes its whole series, records and alerts.
@@ -1551,6 +1605,11 @@ def update_maintenance_record(
 
     if record.status == "completed":
         raise HTTPException(status_code=409,detail="Completed maintenance cannot be edited",)
+    if record.rule_context is not None:
+        # A job created by a monitoring rule: its rule information, eligibility and timestamps are read-only.
+        blocked = set(changes) - {"title", "priority", "assigned_technician", "notes"}
+        if blocked:
+            raise HTTPException(status_code=409, detail="This maintenance is controlled by its monitoring rule. Only its title, priority, assigned technician and description can be edited.")
     if record.schedule_id is not None and {
         "planned_start_at",
         "planned_end_at",
@@ -1583,15 +1642,25 @@ def start_maintenance_record(
     user: User = Depends(get_current_user),
 ) -> MaintenanceRecord:
     record = _record_or_404(session, record_id)
-    # Lock and re-read the row so two simultaneous Start requests cannot both see "planned" and both start it.
+    # Lock the schedule first, then the record (the same order as Complete and the evaluator), so these paths can
+    # never deadlock; then re-read the row so two simultaneous Start requests cannot both see "planned".
+    if record.schedule_id is not None:
+        session.execute(select(MaintenanceSchedule.id).where(MaintenanceSchedule.id == record.schedule_id).with_for_update())
     session.refresh(record, with_for_update=True)
     _authorize_operator_due_occurrence(
         session, record, user, action="start"
     )
     if record.status != "planned":
         raise HTTPException(status_code=409,detail="Only planned maintenance can be started",)
+    # Server-side eligibility (every role): a disabled button in the browser is never the only protection.
+    try:
+        ensure_startable(session, record)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     record.status = "in_progress"
     record.actual_started_at = record.actual_started_at or utc_now()
+    record.started_by_id = user.id
+    record.started_by_name = _user_label(user)
     _emit_maintenance_event(
         session,
         record,
@@ -1657,6 +1726,8 @@ def complete_maintenance_record(
             status_code=409,
             detail="Completed or cancelled maintenance cannot be completed",
         )
+    if schedule is not None and schedule.schedule_mode == "rule" and record.status != "in_progress":
+        raise HTTPException(status_code=409, detail="Maintenance must be started before it can be completed.")
 
     # Persist submitted registration fields before running the existing completion workflow.
     if payload is not None and payload.model_fields_set:
@@ -1705,6 +1776,8 @@ def complete_maintenance_record(
 
     record.performed_at = completed_at
     record.status = "completed"
+    record.completed_by_id = user.id
+    record.completed_by_name = _user_label(user)
 
     actual_start = _normalized(record.actual_started_at)
     normalized_completed_at = _normalized(completed_at)
@@ -1712,7 +1785,7 @@ def complete_maintenance_record(
     if schedule is not None:
 
         # Resolve the alert associated with this occurrence.
-        if is_usage_based and record.alert_id is not None:
+        if (is_usage_based or schedule.schedule_mode == "rule") and record.alert_id is not None:
             due_alert = session.scalar(
                 select(Alert)
                 .where(

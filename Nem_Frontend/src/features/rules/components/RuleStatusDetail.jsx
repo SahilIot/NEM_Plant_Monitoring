@@ -1,6 +1,8 @@
 import React, { memo, useCallback, useEffect, useId, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../../../services/api.js";
-import { createLiveUpdateScheduler, subscribeLiveUpdates } from "../../../services/liveUpdates.js";
+import { createLiveUpdateScheduler, shareInFlight, subscribeLiveUpdates } from "../../../services/liveUpdates.js";
+import { captureNavigationOrigin } from "../../../utils/navigation.js";
 import { NUMBER_LIMITS, numberZone } from "./parameterRules.js";
 import { formatDuration, liveHours, useDisplayClock } from "./durationClock.js";
 import ParameterCardMenu from "./ParameterCardMenu.jsx";
@@ -253,7 +255,7 @@ function ClockedParameterCard({ p, getOffsetMs, ...rest }) {
   return <ParameterCardView p={{ ...p, value: hours }} {...rest} />;
 }
 
-function ParameterCardView({ p: source, rule, ruleId, determining, onEdit, onChanged }) {
+function ParameterCardView({ p: source, rule, ruleId, determining, onEdit, onChanged, onOpenSchedule }) {
   // A suspended/deactivated parameter keeps its preserved progress on screen but has no status.
   const paused = source.availability === "suspended" || source.availability === "deactivated";
   const p = paused ? { ...source, paused: true } : source;
@@ -263,14 +265,36 @@ function ParameterCardView({ p: source, rule, ruleId, determining, onEdit, onCha
   const hasValue = (p.status !== "unknown" || p.frozen || paused) && p.value !== null && p.value !== undefined;
   const valueText = p.kind === "boolean" ? null : hasValue ? amount(p.value, unit) : "—";
   const sched = p.schedule || {};
+  const [scheduleNote, setScheduleNote] = useState("");
+  const [openingSchedule, setOpeningSchedule] = useState(false);
+  // Opens this parameter's rule-generated maintenance schedule in the Maintenance Logbook; nothing is created here.
+  const openSchedule = async () => {
+    if (!onOpenSchedule || openingSchedule) return;
+    setOpeningSchedule(true);
+    setScheduleNote("");
+    try {
+      const message = await onOpenSchedule(p);
+      if (message) setScheduleNote(message);
+    } finally {
+      setOpeningSchedule(false);
+    }
+  };
   const stateWord = paused ? (p.availability === "suspended" ? "Suspended" : "Deactivated") : wordFor(p.status, interval);
   return (
     <article className={`rsd-param is-${p.status}${paused ? " is-paused" : ""}${determining ? " is-determining" : ""}`} aria-label={`${p.name}: ${stateWord}`}>
       <header>
-        <span className="rsd-param-title">
-          <strong>{p.name}</strong>
-          <small>{p.variable_name || (interval ? "Calendar based" : "")}</small>
-        </span>
+        {onOpenSchedule ? (
+          <button type="button" className="rsd-param-title rsd-param-link" onClick={openSchedule} disabled={openingSchedule}
+            title="Open this parameter's maintenance schedule" aria-label={`${p.name}: open maintenance schedule`}>
+            <strong>{p.name}</strong>
+            <small>{p.variable_name || (interval ? "Calendar based" : "")}</small>
+          </button>
+        ) : (
+          <span className="rsd-param-title">
+            <strong>{p.name}</strong>
+            <small>{p.variable_name || (interval ? "Calendar based" : "")}</small>
+          </span>
+        )}
         <span className="rsd-param-head-right">
           {p.availability === "stale" && <span className="rsd-badge is-stale">Stale</span>}
           {p.availability === "variable_inactive" && <span className="rsd-badge is-stale">Variable inactive</span>}
@@ -282,6 +306,7 @@ function ParameterCardView({ p: source, rule, ruleId, determining, onEdit, onCha
           )}
         </span>
       </header>
+      {scheduleNote && <p className="rsd-note" role="status">{scheduleNote}</p>}
       {valueText !== null && (
         <p className="rsd-value">
           {(interval || paused) && <span>{p.frozen ? "Last valid progress" : paused ? (interval ? "Progress when paused" : "Last value") : "Current progress"}</span>}
@@ -371,15 +396,47 @@ export default function RuleStatusDetail({ ruleId, refreshToken = 0, onEditParam
   const [error, setError] = useState("");
   const [lastSync, setLastSync] = useState(null);
   const [connected, setConnected] = useState(true);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const locationRef = useRef(location);
+  locationRef.current = location;
   const parameterIds = useRef(new Set());
   const ruleAssetId = useRef(null);
+  // Finds the schedule generated for one parameter and opens it in the existing Maintenance Logbook details page.
+  // Returns a message when there is nothing to open, so an unrelated schedule is never shown.
+  const openParameterSchedule = useCallback(async (parameter) => {
+    const assetId = ruleAssetId.current;
+    if (assetId === null || assetId === undefined) return "The asset of this rule is not loaded yet.";
+    let schedules;
+    try {
+      schedules = await shareInFlight(`maintenance-schedules:${assetId}`, () => api.getAll(`/maintenance/schedules?asset_id=${assetId}`), { fresh: true });
+    } catch (e) {
+      return e.message || "Could not load the maintenance schedules.";
+    }
+    const linked = (Array.isArray(schedules) ? schedules : []).filter(
+      (schedule) => schedule.schedule_mode === "rule" && Number(schedule.source_parameter_id) === Number(parameter.id)
+    );
+    // The live schedule is the one that is not cancelled/completed; fall back to the newest one so history stays reachable.
+    const target = linked.find((schedule) => schedule.status !== "cancelled" && schedule.status !== "completed")
+      || [...linked].sort((a, b) => b.id - a.id)[0];
+    if (!target) return "No maintenance schedule exists for this parameter.";
+    const here = locationRef.current;
+    navigate(`/assets/${target.asset_id ?? assetId}/maintenance/schedules/${target.id}/details`, {
+      state: { from: captureNavigationOrigin(here, { ...(here.state || {}), activeTab: "status" }) },
+    });
+    return "";
+  }, [navigate]);
   // Server-minus-browser clock offset, so live durations follow the backend's time, not a skewed local clock.
   const offsetRef = useRef(null);
   const getOffsetMs = useCallback(() => offsetRef.current ?? 0, []);
 
+  // Only the newest request may update the screen: a slower, older response never replaces newer data.
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    const mine = ++loadSeq.current;
     try {
       const next = await api.get(`/rules/${ruleId}/status-detail`);
+      if (mine !== loadSeq.current) return;
       parameterIds.current = new Set(next.parameters.map((p) => p.id));
       ruleAssetId.current = next.rule?.asset_id ?? null;
       const serverMs = Date.parse(next.server_time);
@@ -391,7 +448,7 @@ export default function RuleStatusDetail({ ruleId, refreshToken = 0, onEditParam
       setError("");
       setLastSync(Date.now());
     } catch (e) {
-      setError(e.message || "Could not load the rule status.");
+      if (mine === loadSeq.current) setError(e.message || "Could not load the rule status.");
     }
   }, [ruleId]);
 
@@ -460,7 +517,7 @@ export default function RuleStatusDetail({ ruleId, refreshToken = 0, onEditParam
                 <ParameterCard key={p.id} p={p} rule={detail.rule} ruleId={ruleId}
                   determining={overall.evaluating && overall.determined_by.includes(p.id) && p.status !== "normal"}
                   getOffsetMs={getOffsetMs}
-                  onEdit={onEditParameter} onChanged={load} />
+                  onEdit={onEditParameter} onChanged={load} onOpenSchedule={openParameterSchedule} />
               ))}
             </div>
           </div>

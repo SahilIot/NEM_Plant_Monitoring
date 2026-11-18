@@ -149,7 +149,7 @@ class PostgresEventBridge:
 
 
 def _changed(instance: object, attribute: str) -> bool:
-    """True when this attribute really has a pending change (not merely touched)."""
+    # True when this attribute really has a pending change (not merely touched).
     try:
         return bool(sa_inspect(instance).attrs[attribute].history.has_changes())
     except Exception:  # noqa: BLE001 - an unknown attribute simply means "no change"
@@ -157,7 +157,7 @@ def _changed(instance: object, attribute: str) -> bool:
 
 
 def _semantic_events(instance: object, table: str, operation: str) -> set[str]:
-    """Event names for one flushed row. `operation` is created, updated or deleted."""
+    # Event names for one flushed row. operation is created, updated or deleted.
     names: set[str] = set()
     domain = _DOMAINS.get(table)
     if domain:
@@ -189,11 +189,24 @@ def _semantic_events(instance: object, table: str, operation: str) -> set[str]:
             names.add("asset.status_changed")
         if _changed(instance, "last_seen_at") and not names:
             names.add("monitoring.status_changed")
-    elif table == "nem_alerts" and operation == "updated" and _changed(instance, "acknowledged_at"):
-        names.add("alert.acknowledged")
+    elif table == "nem_alerts" and operation == "updated" and (_changed(instance, "acknowledged_at") or _changed(instance, "status")):
+        if _changed(instance, "acknowledged_at"):
+            names.add("alert.acknowledged")
+        if _changed(instance, "status"):
+            names.add("alert.status_changed")  # raised -> resolved/completed; a changed message or value is only alert.updated
     elif table in {"nem_maintenance_records", "nem_maintenance_schedules"} and operation == "updated" and _changed(instance, "status"):
         if getattr(instance, "status", None) == "completed":
             names.add("maintenance.completed")
+        elif getattr(instance, "status", None) == "cancelled":
+            names.add("maintenance.cancelled")
+        elif table == "nem_maintenance_records" and getattr(instance, "status", None) == "in_progress":
+            names.add("maintenance.started")
+    elif table in {"nem_maintenance_records", "nem_maintenance_schedules"} and operation == "updated" and (
+        _changed(instance, "eligibility") or _changed(instance, "start_eligibility")
+    ):
+        names.add("maintenance.ready" if getattr(instance, "eligibility", getattr(instance, "start_eligibility", None)) == "ready" else "maintenance.updated")
+    elif table == "nem_maintenance_schedules" and operation == "created" and getattr(instance, "schedule_mode", None) == "rule":
+        names.add("maintenance.schedule_created")
     elif table == "rule_collections" and operation == "updated":
         names.add("collection.status_changed")
     return names
@@ -220,7 +233,7 @@ class LiveUpdateHub:
 
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
-#Connecting the frontend to live updates
+# Connecting the frontend to live updates
     def subscribe(self) -> asyncio.Queue[dict[str, Any]]:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=32)
         self._subscribers.add(queue)
@@ -282,8 +295,17 @@ class LiveUpdateHub:
         if not tables:
             return
 
+        # Listeners are optional extras (for example the OPC UA collector's configuration refresh). One that fails
+        # is logged with its traceback and skipped; it must never stop the other listeners or the publication below.
         for listener in tuple(self._database_change_listeners):
-            listener(set(tables))
+            try:
+                listener(set(tables))
+            except Exception:  # noqa: BLE001 - isolate a failing listener, but never hide it
+                LOGGER.exception(
+                    "Live-update change listener %s failed for tables %s; the update is still published",
+                    getattr(listener, "__qualname__", repr(listener)),
+                    sorted(tables),
+                )
 
         self._publish(
             self._event(
@@ -295,11 +317,6 @@ class LiveUpdateHub:
                 events=events,
             )
         )
-
-    # ---- Other server instances ---------------------------------------------------------------
-    # Several instances may run against one database (one of them owns the OPC UA collector and the
-    # evaluators). PostgreSQL LISTEN/NOTIFY carries each committed batch to the others, so a browser
-    # connected to any instance sees every change. Remote batches are never sent on again.
     def start_cross_process(self, dsn: str) -> None:
         if self._bridge is None:
             self._bridge = PostgresEventBridge(self, dsn)
@@ -338,7 +355,7 @@ class LiveUpdateHub:
         self._bridge.send(batch)
 
     def receive_remote(self, batch: dict[str, Any]) -> None:
-        """A batch published by another instance (called from the bridge's listener thread)."""
+        # A batch published by another instance (called from the bridge's listener thread).
         if batch.get("origin") == self.instance_id or self._loop is None or self._loop.is_closed():
             return
         self._loop.call_soon_threadsafe(self._apply_remote, batch)
@@ -365,10 +382,8 @@ class LiveUpdateHub:
         if self._bridge is not None:
             self._bridge.send({"origin": self.instance_id, "status": True,
                                "events": ["plc.status_changed", "monitoring.status_changed", "overview.updated"]})
-        self._loop.call_soon_threadsafe(
-            self._publish,
-            self._event("opcua_status", events={"plc.status_changed", "monitoring.status_changed", "overview.updated"}),
-        )
+        self._loop.call_soon_threadsafe(self._publish,
+            self._event("opcua_status", events={"plc.status_changed", "monitoring.status_changed", "overview.updated"}),)
 
     @staticmethod
     def _event(
@@ -441,7 +456,7 @@ class LiveUpdateHub:
         return merged
 
     def _stamp(self, update: dict[str, Any], *, advance: bool = True) -> dict[str, Any]:
-        """Number an event so clients can drop stale or repeated ones and notice a restarted server."""
+        # Number an event so clients can drop stale or repeated ones and notice a restarted server.
         if advance:
             self._seq += 1
         update["seq"], update["epoch"] = self._seq, self.epoch

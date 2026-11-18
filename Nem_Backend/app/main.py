@@ -44,6 +44,7 @@ from app.db.session import create_database_engine, create_session_factory
 from app.services.email_notifications import deliver_pending
 from app.services.maintenance_schedule import emit_due_schedule_events
 from app.services.maintenance_progress import expire_stale_runtime_schedules
+from app.services import rule_maintenance  # noqa: F401  (registers the rule -> maintenance schedule session hooks)
 from app.services.monitoring_engine import (
     acquire_scheduler_lease,
     release_scheduler_lease,

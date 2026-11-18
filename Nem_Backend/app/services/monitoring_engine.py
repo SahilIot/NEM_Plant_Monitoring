@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Callable
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -1119,6 +1119,7 @@ def evaluate_rule(
     evaluated_at: datetime | None = None,
     stale_after_seconds: int = 300,
     runtime_gap_seconds: int | None = None,
+    skip_unchanged: bool = False,
 ) -> RuleState | None:
     now = evaluated_at or utc_now()
     asset, variable = get_rule_asset(session, rule)
@@ -1173,7 +1174,7 @@ def evaluate_rule(
         # Several independently evaluated parameters; the rule shows the worst of them.
         from app.services.rule_parameters import evaluate_multi_parameter
 
-        return evaluate_multi_parameter(session, rule, asset, state, now, stale_after_seconds)
+        return evaluate_multi_parameter(session, rule, asset, state, now, stale_after_seconds, skip_unchanged)
 
     if rule.rule_type in UNEVALUATED_RULE_TYPES:
         # Allowed by the database constraint (so existing rows load) but no evaluator
@@ -1634,11 +1635,28 @@ def evaluate_reading_rules(
     stale_after_seconds: int = 300,
     runtime_gap_seconds: int | None = None,
 ) -> dict[str, int]:
+    # A multi-parameter rule keeps its variables on its parameters, not on the rule, so it is found through them:
+    # a new reading of a Number / Boolean parameter's variable re-evaluates that rule now (its Current Status value
+    # is the stored result of the last evaluation) instead of waiting for the next scheduler pass. Interval
+    # (cycle / usage) parameters are brought up to date per valid cycle by evaluate_interval_parameter_rules.
+    from app.models import RuleParameter
+
+    parameter_rule_ids = select(RuleParameter.rule_id).where(
+        RuleParameter.variable_id == variable_id,
+        RuleParameter.kind != "interval",
+        RuleParameter.lifecycle_status == "active",
+    )
     rules = session.scalars(
         select(MonitoringRule)
         .where(
             MonitoringRule.is_enabled.is_(True),
-            MonitoringRule.variable_id == variable_id,
+            or_(
+                MonitoringRule.variable_id == variable_id,
+                and_(
+                    MonitoringRule.rule_type == "multi_parameter",
+                    MonitoringRule.id.in_(parameter_rule_ids),
+                ),
+            ),
         )
         .order_by(MonitoringRule.id)
     ).all()
@@ -1666,6 +1684,7 @@ def evaluate_reading_rules(
                     evaluated_at=evaluated_at,
                     stale_after_seconds=stale_after_seconds,
                     runtime_gap_seconds=runtime_gap_seconds,
+                    skip_unchanged=True,
                 )
         except Exception:
             LOGGER.exception("Evaluation of rule %s failed; continuing with the remaining rules", rule.id)
@@ -1679,6 +1698,55 @@ def evaluate_reading_rules(
 
     session.flush()
     return counts
+
+def evaluate_interval_parameter_rules(
+    session: Session,
+    *,
+    variable_id: int,
+    stale_after_seconds: int = 300,
+    runtime_gap_seconds: int | None = None,
+) -> int:
+    """Re-evaluate the multi-parameter rules that count this variable with an interval (cycle / usage) parameter.
+
+    evaluate_reading_rules only finds rules that name the variable themselves; a multi-parameter rule keeps its
+    variables on its parameters, so before this its counters only moved when the scheduler pass ran (every
+    MONITORING_EVALUATION_INTERVAL_SECONDS). The collector calls this once per valid, de-duplicated cycle increment,
+    so a counter parameter shows the new cycle as soon as it is committed. It is the same evaluate_rule the
+    scheduler runs - nothing about how a rule or its maintenance eligibility is decided changes, only when.
+    """
+    from app.models import RuleParameter
+
+    rules = session.scalars(
+        select(MonitoringRule)
+        .where(
+            MonitoringRule.is_enabled.is_(True),
+            MonitoringRule.rule_type == "multi_parameter",
+            MonitoringRule.id.in_(
+                select(RuleParameter.rule_id).where(
+                    RuleParameter.variable_id == variable_id,
+                    RuleParameter.kind == "interval",
+                    RuleParameter.lifecycle_status == "active",
+                )
+            ),
+        )
+        .order_by(MonitoringRule.id)
+    ).all()
+    evaluated = 0
+    for rule in rules:
+        try:
+            with session.begin_nested():
+                evaluate_rule(
+                    session,
+                    rule,
+                    stale_after_seconds=stale_after_seconds,
+                    runtime_gap_seconds=runtime_gap_seconds,
+                    skip_unchanged=True,
+                )
+            evaluated += 1
+        except Exception:
+            LOGGER.exception("Evaluation of rule %s failed; continuing with the remaining rules", rule.id)
+    session.flush()
+    return evaluated
 
 # Reset the running-signal baseline when runtime monitoring is toggled.
 def set_rule_enabled_state(

@@ -12,6 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { api, getAuthToken } from "../../../services/api.js";
+import { shareInFlight } from "../../../services/liveUpdates.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { captureNavigationOrigin } from "../../../utils/navigation.js";
 import {
@@ -250,6 +251,8 @@ export default function MaintenancePanel({
   const isSupervisor = user?.role === "Supervisor";
   const canAddMaintenance = user?.role === "Administrator";
   const canManageMaintenance = ["Administrator", "Supervisor"].includes(user?.role);
+  // Operators may start/complete rule-created maintenance once it is ready (the server decides, this only shows the buttons).
+  const isOperator = user?.role === "Operator";
   const navigate = useNavigate();
   const location = useLocation();
   const [records, setRecords] = useState([]);
@@ -314,25 +317,19 @@ export default function MaintenancePanel({
   }, [assetId]);
 
   // Live progress refresh: re-read schedules without the loading state so values update in place.
-  const progressRequestRef = useRef(false);
+  // A newer event cancels the older response (it is ignored), and simultaneous readers share one request.
   useEffect(() => {
-    if (!progressRefreshKey || progressRequestRef.current) return undefined;
+    if (!progressRefreshKey) return undefined;
     let cancelled = false;
-    progressRequestRef.current = true;
-    api
-      .getAll(`/maintenance/schedules?asset_id=${assetId}`)
+    shareInFlight(`maintenance-schedules:${assetId}`, () => api.getAll(`/maintenance/schedules?asset_id=${assetId}`), { fresh: true })
       .then((result) => {
         if (!cancelled && Array.isArray(result)) setSchedules(result);
       })
       .catch(() => {
         // A failed background refresh keeps the last values; the next live event retries.
-      })
-      .finally(() => {
-        progressRequestRef.current = false;
       });
     return () => {
       cancelled = true;
-      progressRequestRef.current = false;
     };
   }, [progressRefreshKey, assetId]);
 
@@ -340,8 +337,7 @@ export default function MaintenancePanel({
   useEffect(() => {
     if (!recordsRefreshKey) return undefined;
     let cancelled = false;
-    api
-      .getAll(`/maintenance?asset_id=${assetId}`)
+    shareInFlight(`maintenance-records:${assetId}`, () => api.getAll(`/maintenance?asset_id=${assetId}`), { fresh: true })
       .then((result) => {
         if (!cancelled && Array.isArray(result)) setRecords(result);
       })
@@ -355,6 +351,36 @@ export default function MaintenancePanel({
 
   // One delete at a time, including while the confirmation dialog is open.
   const deleteGuard = useRef(false);
+
+  // Rule schedules whose rule or parameter no longer exists. An Administrator can cancel an unstarted one.
+  const isRuleUnavailable = (schedule) =>
+    schedule?.schedule_mode === "rule" &&
+    schedule.status === "active" &&
+    (schedule.source_rule_id == null || schedule.source_parameter_id == null) &&
+    !records.some((record) => record.schedule_id === schedule.id && record.status === "in_progress");
+  const isCancelledUnavailable = (schedule) =>
+    schedule?.status === "cancelled" && schedule.cancellation_kind === "rule_unavailable";
+  const [cancelDialog, setCancelDialog] = useState(null);
+
+  const submitCancelUnavailable = async () => {
+    if (!cancelDialog || !isAdministrator || cancelDialog.saving) return;
+    const reason = cancelDialog.reason.trim();
+    if (reason.length < 3) {
+      setCancelDialog((current) => ({ ...current, error: "Enter the reason for cancelling this schedule." }));
+      return;
+    }
+    setCancelDialog((current) => ({ ...current, saving: true, error: "" }));
+    try {
+      await api.post(`/maintenance/schedules/${cancelDialog.schedule.id}/cancel-unavailable`, { reason });
+      const title = cancelDialog.schedule.title;
+      setCancelDialog(null);
+      setNotice(`Maintenance schedule "${title}" was cancelled.`);
+      onActionNotification?.(`Maintenance schedule "${title}" was cancelled.`, "success", assetId);
+      await Promise.all([loadSchedules(), loadRecords(), onChanged?.()]);
+    } catch (requestError) {
+      setCancelDialog((current) => ({ ...current, saving: false, error: requestError.message || "Could not cancel the schedule." }));
+    }
+  };
 
   const runPermanentDeleteRecord = async (record) => {
     if (!isAdministrator || busy) return;
@@ -830,7 +856,12 @@ export default function MaintenancePanel({
   };
 
   const changeMaintenanceStatus = async (record, completionPayload = null) => {
-    if (!record || !canManageMaintenance || busy) return;
+    const ownSchedule = record?.schedule_id != null
+      ? schedules.find((item) => item.id === record.schedule_id)
+      : null;
+    const isRuleJob = ownSchedule?.schedule_mode === "rule";
+    if (!record || (!canManageMaintenance && !(isOperator && isRuleJob)) || busy) return;
+    if (isRuleJob && record.status === "planned" && ownSchedule.eligibility !== "ready") return;
     const isStarting = record.status === "planned";
     if (!isStarting && record.status !== "in_progress") return;
     if (!isStarting && record.schedule_id != null) {
@@ -842,6 +873,7 @@ export default function MaintenancePanel({
         (linkedSchedule.current_occurrence_id !== record.id ||
           (linkedSchedule.schedule_mode !== "runtime" &&
             linkedSchedule.schedule_mode !== "usage" &&
+            linkedSchedule.schedule_mode !== "rule" &&
             String(linkedSchedule.current_due_date || "") !==
               String(record.planned_due_date || "")))
       ) {
@@ -900,6 +932,9 @@ export default function MaintenancePanel({
       if (!isStarting) {
         // Finished work is kept in Jobs & History so it can be reviewed there.
         setActiveMaintenanceTab("jobs");
+      } else if (isRuleJob) {
+        // A started rule job stays on its schedule details, which now show In Progress and Complete maintenance.
+        await loadSchedules();
       } else if (updatedRecord.schedule_id != null) {
         // A started scheduled job now lives under Current status, so take the user there.
         navigate(`/assets/${assetId}`, { state: { activeTab: "status" } });
@@ -995,6 +1030,8 @@ export default function MaintenancePanel({
       : new Date(`${String(schedule.current_due_date).slice(0, 10)}T00:00:00`).getTime();
   const activeSchedules = schedules
     .filter((schedule) => schedule.approval_status !== "pending")
+    // Cancelled because the rule is gone: no longer active work; kept in Jobs & History and reachable by link.
+    .filter((schedule) => !isCancelledUnavailable(schedule))
     .sort((a, b) => {
       const first = dueTime(a);
       const second = dueTime(b);
@@ -1022,6 +1059,8 @@ export default function MaintenancePanel({
             <>
               <Timer size={13} aria-hidden="true" /> Started
             </>
+          ) : record.status === "cancelled" && record.rule_context ? (
+            "Cancelled – Rule unavailable"
           ) : (
             String(record.status || "planned").replaceAll("_", " ")
           )}
@@ -1131,9 +1170,11 @@ export default function MaintenancePanel({
                   setActionMenuRecordId(null);
                   permanentlyDeleteRecord(record);
                 }}
-                disabled={busy || record.status === "in_progress"}
+                disabled={busy || record.status === "in_progress" || Boolean(record.rule_context)}
                 title={
-                  record.status === "in_progress"
+                  record.rule_context
+                    ? "Maintenance created from a monitoring rule cannot be deleted. It is controlled by its rule and its history is preserved; deactivate or edit the rule instead."
+                    : record.status === "in_progress"
                     ? "In-progress maintenance cannot be deleted."
                     : "Permanently delete this maintenance"
                 }
@@ -1152,17 +1193,21 @@ export default function MaintenancePanel({
     const mode = schedule.schedule_mode || "calendar";
     const isRuntime = mode === "runtime";
     const isUsage = mode === "usage";
+    // A schedule created from a monitoring rule: progress runs toward the rule's Due limit.
+    const isRule = mode === "rule";
 
     const threshold = isRuntime
       ? Number(schedule.runtime_interval_hours || 0)
       : isUsage
         ? Number(schedule.usage_interval_count || 0)
-        : 0;
+        : isRule
+          ? Number(schedule.due_threshold || 0)
+          : 0;
     const progress = isRuntime
       ? runtimeDisplayHours(schedule, runtimeBaselines.get(schedule.id), clockNow)
       : Number(schedule.current_progress || 0);
     const progressUnit =
-      schedule.progress_unit || (isRuntime ? "hours" : isUsage ? "cycles" : "days");
+      schedule.progress_unit || (isRuntime ? "hours" : isUsage ? "cycles" : isRule ? "hours" : "days");
     const progressPercent =
       threshold > 0 && Number.isFinite(progress)
         ? Math.min(100, Math.max(0, (progress / threshold) * 100))
@@ -1199,7 +1244,9 @@ export default function MaintenancePanel({
                 ? "Runtime"
                 : mode === "usage"
                   ? "Usage"
-                  : "Calendar"}
+                  : mode === "rule"
+                    ? "Rule"
+                    : "Calendar"}
             </span>
             {" "}
             {schedule.maintenance_type || "Maintenance"}
@@ -1212,7 +1259,7 @@ export default function MaintenancePanel({
           <span
             className={`maintenance-schedule-status-badge ${schedule.status || "active"}`}
           >
-            {String(schedule.status || "active").replaceAll("_", " ")}
+            {isCancelledUnavailable(schedule) ? "Cancelled – Rule unavailable" : String(schedule.status || "active").replaceAll("_", " ")}
           </span>
           <small
             className={
@@ -1223,7 +1270,9 @@ export default function MaintenancePanel({
                   : undefined
             }
           >
-            {isRuntime || isUsage
+            {isRule
+              ? `${schedule.source_rule_name || "Rule"} · ${schedule.source_parameter_name || "Parameter"} · ${schedule.status === "active" ? (schedule.source_parameter_id == null ? "Unavailable — rule deleted" : schedule.eligibility === "ready" ? "Ready to Start" : "Not Due") : String(schedule.status).replaceAll("_", " ")}`
+              : isRuntime || isUsage
               ? `PLC Variable: #${schedule.signal_variable_id}`
               : `Next due: ${displayDate(schedule.current_due_date)}${
                   schedule.status === "active" && dueLabel(schedule.current_due_date)
@@ -1235,17 +1284,17 @@ export default function MaintenancePanel({
 
         <div className="maintenance-schedule-meta">
           <span>
-            <small>{isRuntime || isUsage ? "Progress" : "Recurrence"}</small>
+            <small>{isRuntime || isUsage || isRule ? "Progress" : "Recurrence"}</small>
             <strong>
               {isRuntime
                 ? `${formatRuntimeHours(progress)} / ${formatRuntimeHours(threshold)}`
-                : isUsage
+                : isUsage || isRule
                   ? `${progress.toFixed(1)} / ${threshold} ${progressUnit}`
                 : schedule.recurrence_enabled
                   ? `Every ${schedule.recurrence_interval} ${schedule.recurrence_unit}`
                   : "Disabled"}
             </strong>
-            {(isRuntime || isUsage) && threshold > 0 && (
+            {(isRuntime || isUsage || isRule) && threshold > 0 && (
               <span
                 className={`maintenance-progress ${progressTone}`}
                 role="progressbar"
@@ -1349,6 +1398,21 @@ export default function MaintenancePanel({
           )}
         </>
       )}
+      {isAdministrator && isRuleUnavailable(schedule) && (
+        <button
+          type="button"
+          className="maintenance-action-menu-item"
+          role="menuitem"
+          onClick={() => {
+            setActionMenuRecordId(null);
+            setCancelDialog({ schedule, reason: "", saving: false, error: "" });
+          }}
+          disabled={busy}
+          title="The rule or parameter was deleted. Cancel this schedule and keep its history."
+        >
+          <span>Cancel schedule</span>
+        </button>
+      )}
       {isAdministrator && (
         <button
           type="button"
@@ -1358,8 +1422,8 @@ export default function MaintenancePanel({
             setActionMenuRecordId(null);
             deleteSchedule(schedule);
           }}
-          disabled={busy}
-          title="Delete schedule"
+          disabled={busy || schedule.schedule_mode === "rule"}
+          title={schedule.schedule_mode === "rule" ? "Maintenance created from a monitoring rule cannot be deleted. It is controlled by its rule and its history is preserved; deactivate or edit the rule instead." : "Delete schedule"}
         >
           <Trash2 size={16} aria-hidden="true" />
           <span>Delete schedule</span>
@@ -1393,7 +1457,8 @@ export default function MaintenancePanel({
         record.status === "in_progress" &&
         record.id === schedule.current_occurrence_id &&
         ((schedule.schedule_mode === "runtime" ||
-          schedule.schedule_mode === "usage") ||
+          schedule.schedule_mode === "usage" ||
+          schedule.schedule_mode === "rule") ||
           String(schedule.current_due_date || "") ===
             String(record.planned_due_date || ""))
     );
@@ -1411,8 +1476,30 @@ export default function MaintenancePanel({
     const fileDocuments = documents.filter((item) => item.files?.length > 0);
 
     const scheduleClosed = ["cancelled", "completed"].includes(schedule.status);
-    const startBlockedReason = !canManageMaintenance
-      ? "You do not have permission to manage maintenance."
+    const isRule = schedule.schedule_mode === "rule";
+    const canAct = canManageMaintenance || (isOperator && isRule);
+    // The rule or parameter was deleted: the unstarted job is kept for its history but can no longer be started.
+    const ruleDeleted = isRule && schedule.status === "active" && !runningRecord &&
+      (schedule.source_rule_id == null || schedule.source_parameter_id == null);
+    const ruleState = !isRule
+      ? null
+      : isCancelledUnavailable(schedule)
+        ? "Cancelled – Rule unavailable"
+      : runningRecord
+        ? "In Progress"
+        : ruleDeleted
+          ? "Unavailable — rule deleted"
+        : schedule.status !== "active"
+          ? String(schedule.status).replaceAll("_", " ")
+          : schedule.eligibility === "ready"
+            ? "Ready to Start"
+            : "Not Due";
+    const startBlockedReason = !canAct
+      ? "You do not have permission to start maintenance."
+      : ruleDeleted
+        ? "The monitoring rule or parameter this maintenance was created from was deleted, so it can no longer be started. Its history is kept."
+      : isRule && !runningRecord && schedule.status === "active" && schedule.eligibility !== "ready"
+        ? "Not due yet. Start Maintenance becomes available when the rule reaches its Due limit."
       : runningRecord
         ? "A maintenance for this schedule is already in progress."
         : scheduleClosed
@@ -1420,8 +1507,8 @@ export default function MaintenancePanel({
           : !nextRecord
             ? "There is no planned maintenance to start yet."
             : "";
-    const registerBlockedReason = !canManageMaintenance
-      ? "You do not have permission to manage maintenance."
+    const registerBlockedReason = !canAct
+      ? "You do not have permission to complete maintenance."
       : !runningRecord
         ? "Start the maintenance first, then register it when the work is done."
         : !completableRecord
@@ -1452,7 +1539,7 @@ export default function MaintenancePanel({
                   {String(schedule.status || "active").replaceAll("_", " ")}
                 </span>
                 <span className={`schedule-page-due schedule-page-due--${String(dueState).replaceAll("_", "-")}`}>
-                  {String(dueState || "not scheduled").replaceAll("_", " ")}
+                  {ruleState || String(dueState || "not scheduled").replaceAll("_", " ")}
                 </span>
               </div>
             </div>
@@ -1461,6 +1548,28 @@ export default function MaintenancePanel({
         {error && (
           <p className="notice error" role="alert">
             {error}
+          </p>
+        )}
+
+        {ruleDeleted && (
+          <p className="notice" role="status" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+            <span>
+              The monitoring rule or parameter this maintenance was created from was deleted. This schedule can no longer
+              be started; its history is kept.
+            </span>
+            {isAdministrator && isRuleUnavailable(schedule) && (
+              <button type="button" className="btn-outline" disabled={busy}
+                onClick={() => setCancelDialog({ schedule, reason: "", saving: false, error: "" })}>
+                Cancel schedule
+              </button>
+            )}
+          </p>
+        )}
+        {isCancelledUnavailable(schedule) && (
+          <p className="notice" role="status">
+            Cancelled – Rule unavailable. Cancelled by {schedule.cancelled_by_name || "an administrator"}
+            {schedule.cancelled_at ? ` on ${formatTime(schedule.cancelled_at)}` : ""}.
+            {schedule.cancellation_reason ? ` Reason: ${schedule.cancellation_reason}` : ""}
           </p>
         )}
 
@@ -1489,6 +1598,34 @@ export default function MaintenancePanel({
             <small style={{ display: "block" }}>Status</small>
             <strong>{String(schedule.status || "active").replaceAll("_", " ")}</strong>
           </div>
+          {isRule ? (
+            <>
+              <div>
+                <small style={{ display: "block" }}>Rule · Parameter</small>
+                <strong>{schedule.source_rule_name || "—"} · {schedule.source_parameter_name || "—"}</strong>
+              </div>
+              <div>
+                <small style={{ display: "block" }}>Current value / Due limit</small>
+                <strong>
+                  {Number(schedule.current_progress || 0).toFixed(1)} / {schedule.due_threshold ?? "—"} {schedule.threshold_unit || ""}
+                  {schedule.overdue_threshold != null ? ` (Overdue at ${schedule.overdue_threshold})` : ""}
+                </strong>
+              </div>
+              <div>
+                <small style={{ display: "block" }}>Eligibility</small>
+                <strong>{ruleState}</strong>
+              </div>
+              <div>
+                <small style={{ display: "block" }}>Schedule created</small>
+                <strong>{formatTime(schedule.created_at)}</strong>
+              </div>
+              <div>
+                <small style={{ display: "block" }}>Became Due</small>
+                <strong>{schedule.became_due_at ? `${formatTime(schedule.became_due_at)} (${schedule.due_value ?? "—"} ${schedule.threshold_unit || ""})` : "—"}</strong>
+              </div>
+            </>
+          ) : (
+            <>
           <div>
             <small style={{ display: "block" }}>Next due</small>
             <strong>
@@ -1506,10 +1643,14 @@ export default function MaintenancePanel({
                 : "Disabled"}
             </strong>
           </div>
+            </>
+          )}
           <div>
             <small style={{ display: "block" }}>Technician</small>
             <strong>{schedule.assigned_technician || "—"}</strong>
           </div>
+          {!isRule && (
+            <>
           {/* Surface the requested approval and completion milestones in the overview as well as the full details list. */}
           <div>
             <small style={{ display: "block" }}>Approval</small>
@@ -1519,6 +1660,8 @@ export default function MaintenancePanel({
             <small style={{ display: "block" }}>Proposed next due</small>
             <strong>{displayDate(schedule.proposed_due_date)}</strong>
           </div>
+            </>
+          )}
           <div>
             <small style={{ display: "block" }}>Last completed</small>
             <strong>{schedule.last_completed_at ? formatTime(schedule.last_completed_at) : "—"}</strong>
@@ -1528,15 +1671,17 @@ export default function MaintenancePanel({
         <div className="schedule-run-head">
           <div>
             <h3 className="schedule-run-title">Instructions</h3>
-            <button
-              type="button"
-              className="btn-outline schedule-start-btn"
-              onClick={() => changeMaintenanceStatus(nextRecord)}
-              disabled={busy || Boolean(startBlockedReason)}
-              title={startBlockedReason || "Start this maintenance"}
-            >
-              <Play size={15} aria-hidden="true" /> {busy ? "Please wait…" : "Start maintenance"}
-            </button>
+            {!(isRule && runningRecord) && (
+              <button
+                type="button"
+                className={isRule ? "btn-primary schedule-start-btn" : "btn-outline schedule-start-btn"}
+                onClick={() => changeMaintenanceStatus(nextRecord)}
+                disabled={busy || Boolean(startBlockedReason)}
+                title={startBlockedReason || "Start this maintenance"}
+              >
+                <Play size={15} aria-hidden="true" /> {busy ? "Please wait…" : "Start Maintenance"}
+              </button>
+            )}
             {runningRecord && (
               <p className="muted">
                 Maintenance in progress since{" "}
@@ -1548,21 +1693,25 @@ export default function MaintenancePanel({
             )}
             {!runningRecord && !nextRecord && canManageMaintenance && !scheduleClosed && (
               <p className="muted">
-                {schedule.schedule_mode === "runtime" || schedule.schedule_mode === "usage"
+                {schedule.schedule_mode === "rule"
+                  ? "Created from a monitoring rule. Start becomes available when the rule reaches its Due limit; the job is then listed under Current status."
+                  : schedule.schedule_mode === "runtime" || schedule.schedule_mode === "usage"
                   ? "Maintenance can be started once the running-hour or cycle limit is reached; it is then listed under Current status."
                   : "No maintenance is planned for this schedule yet. Confirm the next date to plan it."}
               </p>
             )}
           </div>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => changeMaintenanceStatus(completableRecord)}
-            disabled={busy || Boolean(registerBlockedReason)}
-            title={registerBlockedReason || "Finish and register this maintenance"}
-          >
-            <ClipboardCheck size={16} aria-hidden="true" /> Register maintenance
-          </button>
+          {!(isRule && !runningRecord) && (
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => changeMaintenanceStatus(completableRecord)}
+              disabled={busy || Boolean(registerBlockedReason)}
+              title={registerBlockedReason || "Finish and register this maintenance"}
+            >
+              <ClipboardCheck size={16} aria-hidden="true" /> {isRule ? "Complete Maintenance" : "Register maintenance"}
+            </button>
+          )}
         </div>
 
         {steps.length === 0 ? (
@@ -2223,6 +2372,36 @@ export default function MaintenancePanel({
       )}
 
       {dialog?.kind === "schedule-details" && renderScheduleDetails()}
+
+      {cancelDialog && (
+        <Modal title="Cancel maintenance schedule?" onClose={() => !cancelDialog.saving && setCancelDialog(null)}>
+          <p>
+            The monitoring rule or parameter that created <strong>{cancelDialog.schedule.title}</strong> is no longer
+            available, so this maintenance can never become ready to start. Cancelling keeps the schedule, its job and
+            its Due information as history; it cannot be undone and the schedule will not be recreated.
+          </p>
+          <label className="field">
+            <span className="field-label">Reason for cancelling <span className="req" aria-hidden="true">*</span></span>
+            <textarea
+              rows={3}
+              maxLength={2000}
+              value={cancelDialog.reason}
+              onChange={(event) => setCancelDialog((current) => ({ ...current, reason: event.target.value }))}
+              placeholder="e.g. Rule was deleted during plant reconfiguration"
+            />
+          </label>
+          {cancelDialog.error && <p className="notice error" role="alert">{cancelDialog.error}</p>}
+          <div className="modal-actions">
+            <button type="button" className="btn-outline" onClick={() => setCancelDialog(null)} disabled={cancelDialog.saving}>
+              Keep schedule
+            </button>
+            <button type="button" className="btn-primary" onClick={submitCancelUnavailable}
+              disabled={cancelDialog.saving || cancelDialog.reason.trim().length < 3}>
+              {cancelDialog.saving ? "Cancelling…" : "Cancel schedule"}
+            </button>
+          </div>
+        </Modal>
+      )}
 
       {materialViewer && (
         <Modal
