@@ -36,6 +36,7 @@ import { ruleCategoryLabel } from "../../rules/ruleCategories.js";
 import "./RuleLibrary.css";
 import CopyRuleModal from "./CopyRuleModal.jsx";
 import "./CopyRuleModal.css";
+import { useLiveRefresh } from "../../../services/useLiveRefresh.js";
 
 function formatInterval(seconds) {
   for (const [unit, divisor] of [
@@ -412,6 +413,10 @@ useEffect(() => {
       templateLoadGeneration.current += 1;
     };
   }, [load]);
+
+  // Shared rules change from other tabs and users: refetch the library when they do.
+  useLiveRefresh(load, { tables: ["nem_monitoring_rule_templates"], events: ["rule_template."] });
+  useLiveRefresh(() => loadPendingRequests(requestStatus), { tables: ["nem_monitoring_rule_template_requests"], enabled: isAdministrator });
 
   const visible = useMemo(() => {
     const query = search.trim().toLowerCase();

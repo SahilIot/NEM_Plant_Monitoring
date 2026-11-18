@@ -61,6 +61,8 @@ export default function CurrentMaintenanceCards({
   const startRequestRef = useRef(false);
   const lastLoadedDate = useRef("");
   const loadingRef = useRef(false);
+  const reloadPending = useRef(false);
+  const [reloadTick, setReloadTick] = useState(0);
   const busy =
     startingRecordId !== null ||
     completingRecordId !== null ||
@@ -152,7 +154,10 @@ const openEdit = (record) => {
   };
 
   const loadCurrentMaintenance = useCallback(async () => {
-    if (loadingRef.current) return false;
+    if (loadingRef.current) {
+      reloadPending.current = true; // a change arrived mid-load: read again once this load ends
+      return false;
+    }
     loadingRef.current = true;
     setError("");
     try {
@@ -195,12 +200,16 @@ const openEdit = (record) => {
     } finally {
       loadingRef.current = false;
       setLoading(false);
+      if (reloadPending.current) {
+        reloadPending.current = false;
+        setReloadTick((current) => current + 1);
+      }
     }
   }, [assetId, onCompletedRecordsCount]);
 
   useEffect(() => {
     loadCurrentMaintenance();
-  }, [loadCurrentMaintenance, refreshKey]);
+  }, [loadCurrentMaintenance, refreshKey, reloadTick]);
 
   useEffect(() => {
     if (actionMenuRecordId === null) return undefined;

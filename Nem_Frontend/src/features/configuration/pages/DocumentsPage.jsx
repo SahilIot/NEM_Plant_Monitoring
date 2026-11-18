@@ -19,6 +19,7 @@ import LabelsField from "../../../components/common/LabelsField.jsx";
 import { BackIcon } from "../../../components/common/Icons.jsx";
 import { LoadingIndicator, Modal, useConfirmation } from "../../../components/common/UI.jsx";
 import { auditUser } from "../../../utils/format.js";
+import { useLiveRefresh } from "../../../services/useLiveRefresh.js";
 import {
   DOCUMENT_CATEGORIES,
   STATUS_LABELS,
@@ -316,6 +317,7 @@ export default function DocumentsPage() {
   }, [labelQuery]);
 
   useEffect(() => { load(); }, [load]);
+  useLiveRefresh(load, { tables: ["instruction_documents"], events: ["document."] });
 
   useEffect(() => {
     let active = true;

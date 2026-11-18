@@ -268,6 +268,7 @@ export default function Home() {
         "nem_monitoring_rules",
         "nem_rule_states",
         "nem_rule_counter_states",
+        "nem_rule_parameters",
         "machine_monitoring_states",
         "nem_alerts",
       ];
@@ -283,6 +284,8 @@ export default function Home() {
           "variables",
           "nem_monitoring_rules",
           "nem_alerts",
+          "nem_rule_parameters",
+          "nem_maintenance_records",
           "nem_maintenance_schedules",
         ].some((table) => changedTables.has(table))
       ) {

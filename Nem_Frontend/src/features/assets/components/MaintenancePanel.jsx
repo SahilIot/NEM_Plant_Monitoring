@@ -239,6 +239,7 @@ export default function MaintenancePanel({
   assetId,
   scheduleId,
   progressRefreshKey = 0,
+  recordsRefreshKey = 0,
   onChanged,
   onActionNotification,
   navigationState,
@@ -334,6 +335,23 @@ export default function MaintenancePanel({
       progressRequestRef.current = false;
     };
   }, [progressRefreshKey, assetId]);
+
+  // Maintenance records changed elsewhere (another tab, a user, an automatic job): re-read them in place.
+  useEffect(() => {
+    if (!recordsRefreshKey) return undefined;
+    let cancelled = false;
+    api
+      .getAll(`/maintenance?asset_id=${assetId}`)
+      .then((result) => {
+        if (!cancelled && Array.isArray(result)) setRecords(result);
+      })
+      .catch(() => {
+        // Keep the last values; the next live event or reconnect retries.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [recordsRefreshKey, assetId]);
 
   // One delete at a time, including while the confirmation dialog is open.
   const deleteGuard = useRef(false);

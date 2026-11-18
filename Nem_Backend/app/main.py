@@ -194,6 +194,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(application: FastAPI):
         live_updates.bind_loop(asyncio.get_running_loop())
         initialize_database(engine)
+        # Deliver committed changes to browsers connected to any server instance (PostgreSQL LISTEN/NOTIFY).
+        live_updates.start_cross_process(
+            engine.url.render_as_string(hide_password=False).replace("postgresql+psycopg://", "postgresql://", 1)
+        )
         opcua_collector.start()
         monitoring_task = None
         if selected_settings.monitoring_scheduler_enabled:
@@ -242,6 +246,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             try:
                 await opcua_collector.stop()
             finally:
+                live_updates.stop_cross_process()
                 engine.dispose()
 
 #Creating the FastAPI application

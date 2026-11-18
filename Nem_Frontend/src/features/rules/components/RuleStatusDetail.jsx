@@ -372,6 +372,7 @@ export default function RuleStatusDetail({ ruleId, refreshToken = 0, onEditParam
   const [lastSync, setLastSync] = useState(null);
   const [connected, setConnected] = useState(true);
   const parameterIds = useRef(new Set());
+  const ruleAssetId = useRef(null);
   // Server-minus-browser clock offset, so live durations follow the backend's time, not a skewed local clock.
   const offsetRef = useRef(null);
   const getOffsetMs = useCallback(() => offsetRef.current ?? 0, []);
@@ -380,6 +381,7 @@ export default function RuleStatusDetail({ ruleId, refreshToken = 0, onEditParam
     try {
       const next = await api.get(`/rules/${ruleId}/status-detail`);
       parameterIds.current = new Set(next.parameters.map((p) => p.id));
+      ruleAssetId.current = next.rule?.asset_id ?? null;
       const serverMs = Date.parse(next.server_time);
       if (Number.isFinite(serverMs)) {
         const offset = serverMs - Date.now();
@@ -403,7 +405,10 @@ export default function RuleStatusDetail({ ruleId, refreshToken = 0, onEditParam
       const tables = update.changed_tables || [];
       if (!tables.some((t) => RELEVANT_TABLES.has(t))) return;
       const ids = update.entity_ids || {};
-      const mine = update.resync_required
+      // Users limited to some assets get no row identifiers, only the asset the change belongs to.
+      const byAsset = Object.keys(ids).length === 0 && ruleAssetId.current !== null
+        && (update.asset_ids || []).includes(ruleAssetId.current);
+      const mine = update.resync_required || byAsset
         || (ids.nem_rule_states || []).includes(ruleId) || (ids.nem_alerts || []).includes(ruleId)
         || (ids.nem_monitoring_rules || []).includes(ruleId)
         || (ids.nem_rule_parameter_states || []).some((id) => parameterIds.current.has(id))

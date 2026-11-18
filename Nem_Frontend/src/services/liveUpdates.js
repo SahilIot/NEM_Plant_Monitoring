@@ -10,6 +10,11 @@ let reconnectTimer = null;
 let staleTimer = null;
 let reconnectDelay = 500;
 let hasConnected = false;
+// Ordering state. `epoch` changes when the server restarts; `seq` grows with every event the server
+// publishes; `stream_seq` counts the messages sent on this one connection, so a gap means one was lost.
+let lastEpoch = null;
+let lastSeq = 0;
+let lastStreamSeq = 0;
 
 function websocketUrl() {
   const apiUrl = new URL(API_BASE, window.location.href);
@@ -53,6 +58,7 @@ function connect() {
   };
 
   connection.onopen = () => {
+    lastStreamSeq = 0;
     resetStaleTimer();
   };
   connection.onmessage = (message) => {
@@ -65,8 +71,29 @@ function connect() {
     }
     reconnectDelay = 500;
     resetStaleTimer();
+    // A missing connection-level message means something was lost: resynchronise instead of guessing.
+    let gap = false;
+    if (typeof update.stream_seq === "number") {
+      gap = lastStreamSeq !== 0 && update.stream_seq !== lastStreamSeq + 1;
+      lastStreamSeq = update.stream_seq;
+    }
+    if (update.epoch) {
+      if (lastEpoch !== null && update.epoch !== lastEpoch) {
+        gap = true; // the server restarted: its sequence numbers started over
+        lastSeq = 0;
+      }
+      lastEpoch = update.epoch;
+      if (typeof update.seq === "number" && update.type !== "connected" && update.type !== "heartbeat") {
+        // An event older than one already applied must never overwrite newer state.
+        if (update.seq <= lastSeq && !gap) return;
+        lastSeq = Math.max(lastSeq, update.seq);
+      }
+    }
     if (update.type === "heartbeat") {
       return;
+    }
+    if (gap && update.type !== "connected") {
+      update = { ...update, resync_required: true };
     }
     if (update.event_id) {
       if (seenEventIds.has(update.event_id)) {
@@ -176,6 +203,9 @@ export function resetLiveUpdates() {
   }
   seenEventIds.clear();
   hasConnected = false;
+  lastEpoch = null;
+  lastSeq = 0;
+  lastStreamSeq = 0;
   reconnectDelay = 500;
 }
 

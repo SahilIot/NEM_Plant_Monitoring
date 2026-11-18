@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../services/api.js";
+import { useLiveRefresh } from "../../../services/useLiveRefresh.js";
 import LabelsField from "../../../components/common/LabelsField.jsx";
 import { useConfirmation } from "../../../components/common/UI.jsx";
 import { RuleField, UnitInput } from "./RuleFormParts.jsx";
@@ -27,7 +28,6 @@ const STEPS = {
   parameter_threshold: ["General", "Parameters", "Instructions", "Review"],
   interval_based: ["General", "Variables", "Limits", "Instructions", "Review"],
 };
-const POLL_MS = 5000;
 const FRESH_SECONDS = 300;
 
 const truthy = (value) => {
@@ -110,22 +110,21 @@ export default function ParameterRuleWizard({
   const headingRef = useRef(null);
   const stepName = steps[step];
 
-  // Live values for every variable of the asset, refreshed while the wizard is open.
+  // Live values for every variable of the asset: one read when the wizard opens, then a re-read
+  // whenever the shared live connection reports new readings for this asset (no timer polling).
+  const readLatest = useCallback(async () => {
+    try {
+      const rows = await api.get(`/readings/assets/${assetId}/latest`);
+      setReadings(Object.fromEntries((Array.isArray(rows) ? rows : []).map((row) => [row.variable_id, row])));
+    } catch {
+      setReadings({});
+    }
+  }, [assetId]);
+  useLiveRefresh(readLatest, { tables: ["readings", "nem_readings", "variables"], delay: 1000, assetId, enabled: !templateMode });
   useEffect(() => {
     if (templateMode) return undefined;
-    let alive = true;
-    let timer;
-    const read = async () => {
-      try {
-        const rows = await api.get(`/readings/assets/${assetId}/latest`);
-        if (alive) setReadings(Object.fromEntries((Array.isArray(rows) ? rows : []).map((row) => [row.variable_id, row])));
-      } catch {
-        if (alive) setReadings({});
-      }
-      if (alive) timer = setTimeout(read, POLL_MS);
-    };
-    read();
-    return () => { alive = false; clearTimeout(timer); };
+    readLatest();
+    return undefined;
   }, [assetId]);
 
   useEffect(() => {

@@ -13,6 +13,7 @@ import { MAX_COLLECTION_RULES } from "./collectionLimits.js";
 import { captureNavigationOrigin, consumeNavigationFlash } from "../../../utils/navigation.js";
 import { RuleViewModal, displayType, ruleKind, templateSummary } from "./RuleLibrary.jsx";
 import "./RuleLibrary.css";
+import { useLiveRefresh } from "../../../services/useLiveRefresh.js";
 
 
 const labelName = (label) => (typeof label === "string" ? label : label?.name);
@@ -62,6 +63,8 @@ export default function CollectionLibrary() {
   }, [labelQuery]);
 
   useEffect(() => { load(); }, [load]);
+  // Collections and their rules change from other tabs and users: refetch when they do.
+  useLiveRefresh(load, { tables: ["rule_collections", "nem_monitoring_rule_templates"], events: ["collection.", "rule_template."] });
 
   // Coming back from the full-page Add Rule workflow: show its result, or open the rule modal
   // when "Other rule types" was chosen there.
