@@ -1,120 +1,0 @@
-warning: in the working copy of 'Nem_Backend/app/api/routes/maintenance.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'Nem_Backend/app/core/constants.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'Nem_Backend/app/db/init_db.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'Nem_Backend/app/models/maintenance.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'Nem_Backend/app/models/rule.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'Nem_Backend/app/schemas/maintenance.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'Nem_Backend/app/services/rule_maintenance.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'Nem_Backend/app/services/rule_parameters.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'Nem_Frontend/src/features/assets/components/MaintenancePanel.jsx', LF will be replaced by CRLF the next time Git touches it
-Nem_Backend/app/api/routes/rules.py:1: trailing whitespace.
-[32m+[m[32m# create,view,update and filter machine monitoring rules[m[41m[m
-Nem_Backend/app/api/routes/rules.py:2: trailing whitespace.
-[32m+[m[32mfrom decimal import Decimal[m[41m[m
-Nem_Backend/app/api/routes/rules.py:3: trailing whitespace.
-[32m+[m[41m[m
-Nem_Backend/app/api/routes/rules.py:4: trailing whitespace.
-[32m+[m[32mfrom fastapi import APIRouter, Depends, HTTPException, Query, Request, status[m[41m[m
-Nem_Backend/app/api/routes/rules.py:5: trailing whitespace.
-[32m+[m[32mfrom pydantic import ValidationError[m[41m[m
-Nem_Backend/app/api/routes/rules.py:6: trailing whitespace.
-[32m+[m[32mfrom asyncua import ua[m[41m[m
-Nem_Backend/app/api/routes/rules.py:7: trailing whitespace.
-[32m+[m[32mfrom asyncua.ua.uaerrors import UaStringParsingError[m[41m[m
-Nem_Backend/app/api/routes/rules.py:8: trailing whitespace.
-[32m+[m[32mfrom sqlalchemy import func, select[m[41m[m
-Nem_Backend/app/api/routes/rules.py:9: trailing whitespace.
-[32m+[m[32mfrom sqlalchemy.orm import Session[m[41m[m
-Nem_Backend/app/api/routes/rules.py:10: trailing whitespace.
-[32m+[m[41m[m
-Nem_Backend/app/api/routes/rules.py:11: trailing whitespace.
-[32m+[m[32mfrom app.api.routes.auth import get_current_user[m[41m[m
-Nem_Backend/app/api/routes/rules.py:12: trailing whitespace.
-[32m+[m[32mfrom app.db.session import get_db[m[41m[m
-Nem_Backend/app/api/routes/rules.py:13: trailing whitespace.
-[32m+[m[32mfrom app.models import Asset, Alert, MonitoringRule, MonitoringRuleTemplate, RuleState, Variable, User[m[41m[m
-Nem_Backend/app/api/routes/rules.py:14: trailing whitespace.
-[32m+[m[32mfrom app.schemas.rule import RuleCreate, RuleRead, RuleTemplateCreate, RuleUpdate[m[41m[m
-Nem_Backend/app/api/routes/rules.py:15: trailing whitespace.
-[32m+[m[32mfrom app.services.rule_visibility import can_view_template, request_user[m[41m[m
-Nem_Backend/app/api/routes/rules.py:16: trailing whitespace.
-[32m+[m[32mfrom app.services.access_scope import access_scope, rule_asset_id[m[41m[m
-Nem_Backend/app/api/routes/rules.py:17: trailing whitespace.
-[32m+[m[32mfrom app.services.labels import apply_label_filter, assign_labels[m[41m[m
-Nem_Backend/app/api/routes/rules.py:18: trailing whitespace.
-[32m+[m[32mfrom app.services.monitoring_engine import emit_event, evaluate_rules, set_rule_enabled_state[m[41m[m
-Nem_Backend/app/api/routes/rules.py:19: trailing whitespace.
-[32m+[m[32mfrom app.services.monitoring_engine import utc_now[m[41m[m
-Nem_Backend/app/api/routes/rules.py:20: trailing whitespace.
-[32m+[m[32mfrom app.services.rule_parameters import ParameterConfigError[m[41m[m
-Nem_Backend/app/api/routes/rules.py:21: trailing whitespace.
-[32m+[m[32mfrom app.core.constants import ([m[41m[m
-Nem_Backend/app/api/routes/rules.py:22: trailing whitespace.
-[32m+[m[32m    BOOLEAN,[m[41m[m
-Nem_Backend/app/api/routes/rules.py:23: trailing whitespace.
-[32m+[m[32m    CYCLE,[m[41m[m
-Nem_Backend/app/api/routes/rules.py:24: trailing whitespace.
-[32m+[m[32m    LIFECYCLE_STATUS,[m[41m[m
-Nem_Backend/app/api/routes/rules.py:25: trailing whitespace.
-[32m+[m[32m    NUMBER,[m[41m[m
-Nem_Backend/app/api/routes/rules.py:26: trailing whitespace.
-[32m+[m[32m    RULE_BOOLEAN_COUNT_THRESHOLD,[m[41m[m
-Nem_Backend/app/api/routes/rules.py:27: trailing whitespace.
-[32m+[m[32m    RULE_PARAMETER_THRESHOLD,[m[41m[m
-Nem_Backend/app/api/routes/rules.py:28: trailing whitespace.
-[32m+[m[32m    RULE_RUNTIME_DURATION,[m[41m[m
-Nem_Backend/app/api/routes/rules.py:29: trailing whitespace.
-[32m+[m[32m    RULE_TYPE,[m[41m[m
-Nem_Backend/app/api/routes/rules.py:30: trailing whitespace.
-[32m+[m[32m    RUNNING,[m[41m[m
-Nem_Backend/app/api/routes/rules.py:31: trailing whitespace.
-[32m+[m[32m    STATUS_ACTIVE,[m[41m[m
-Nem_Backend/app/api/routes/rules.py:32: trailing whitespace.
-[32m+[m[32m    STATUS_COMPLETED,[m[41m[m
-Nem_Backend/app/api/routes/rules.py:33: trailing whitespace.
-[32m+[m[32m    STATUS_DEACTIVATED,[m[41m[m
-Nem_Backend/app/api/routes/rules.py:34: trailing whitespace.
-[32m+[m[32m    STATUS_IN_PROGRESS,[m[41m[m
-Nem_Backend/app/api/routes/rules.py:35: trailing whitespace.
-[32m+[m[32m)[m[41m[m
-Nem_Backend/app/api/routes/rules.py:36: trailing whitespace.
-[32m+[m[41m[m
-Nem_Backend/app/api/routes/rules.py:37: trailing whitespace.
-[32m+[m[32mrouter = APIRouter(prefix="/rules", tags=["monitoring rules"])[m[41m[m
-Nem_Backend/app/api/routes/rules.py:38: trailing whitespace.
-[32m+[m[41m[m
-Nem_Backend/app/api/routes/rules.py:39: trailing whitespace.
-[32m+[m[32m# Threshold keys inside `parameters` that a Supervisor may change, per rule type.[m[41m[m
-Nem_Backend/app/api/routes/rules.py:40: trailing whitespace.
-[32m+[m[32mSUPERVISOR_PARAMETER_KEYS: dict[str, frozenset[str]] = {[m[41m[m
-Nem_Backend/app/api/routes/rules.py:41: trailing whitespace.
-[32m+[m[32m    RULE_RUNTIME_DURATION: frozenset({"warning_thresholds_seconds", "alert_threshold_seconds"}),[m[41m[m
-Nem_Backend/app/api/routes/rules.py:42: trailing whitespace.
-[32m+[m[32m    RULE_BOOLEAN_COUNT_THRESHOLD: frozenset({"warning_thresholds", "alert_threshold"}),[m[41m[m
-Nem_Backend/app/api/routes/rules.py:43: trailing whitespace.
-[32m+[m[32m}[m[41m[m
-Nem_Backend/app/api/routes/rules.py:44: trailing whitespace.
-[32m+[m[41m[m
-Nem_Backend/app/api/routes/rules.py:45: trailing whitespace.
-[32m+[m[32m# Fields that live on the shared rule (template) for rules created from one.[m[41m[m
-Nem_Backend/app/api/routes/rules.py:46: trailing whitespace.
-[32m+[m[32mSHARED_RULE_FIELDS = frozenset({[m[41m[m
-Nem_Backend/app/api/routes/rules.py:47: trailing whitespace.
-[32m+[m[32m    "name", "description", RULE_TYPE, "operator", "threshold", "parameters", "severity",[m[41m[m
-Nem_Backend/app/api/routes/rules.py:48: trailing whitespace.
-[32m+[m[32m    "evaluation_interval_seconds", "stale_after_seconds",[m[41m[m
-Nem_Backend/app/api/routes/rules.py:49: trailing whitespace.
-[32m+[m[32m})[m[41m[m
-Nem_Backend/app/api/routes/rules.py:50: trailing whitespace.
-[32m+[m[32mTEMPLATE_VALUE_FIELDS = ([m[41m[m
-Nem_Backend/app/api/routes/rules.py:51: trailing whitespace.
-[32m+[m[32m    "name", "description", "collection_id", RULE_TYPE, "required_variable_types", "variable_key",[m[41m[m
-Nem_Backend/app/api/routes/rules.py:52: trailing whitespace.
-[32m+[m[32m    "operator", "threshold", "parameters", "severity", "is_enabled",[m[41m[m
-Nem_Backend/app/api/routes/rules.py:53: trailing whitespace.
-[32m+[m[32m    "evaluation_interval_seconds", "stale_after_seconds",[m[41m[m
-Nem_Backend/app/api/routes/rules.py:54: trailing whitespace.
-[32m+[m[32m)[m[41m[m
-Nem_Backend/app/api/routes/rules.py:55: trailing whitespace.
-[32m+[m[41m[m
-Nem_Backend/app/api/routes/rules
