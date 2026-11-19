@@ -4,6 +4,7 @@ import { Check, Download, FileText, Upload, X } from "lucide-react";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import "./ConfigTransfer.css";
+import { BackButton, ForwardButton } from "../../../components/common/NavButtons.jsx";
 
 const MAX_BYTES = 5 * 1024 * 1024; // matches the server limit for configuration packages
 
@@ -478,7 +479,7 @@ export default function ImportConfigurationPanel() {
           <ItemsTable items={toImport} caption="Records to be created" />
           <p className="xfer-muted" style={{ marginTop: 10 }}>The import is all-or-nothing: if anything fails, nothing is created.</p>
           <div className="xfer-actions">
-            <button type="button" className="btn-outline" disabled={busy} onClick={() => setConfirming(false)}>Back</button>
+            <BackButton inline className="btn-outline" label="Back" disabled={busy} onClick={() => setConfirming(false)} />
             <button type="button" className="btn-primary" disabled={busy} onClick={runImport}>
               {busy ? "Importing…" : `Confirm and import ${preview.totals.to_import}`}
             </button>

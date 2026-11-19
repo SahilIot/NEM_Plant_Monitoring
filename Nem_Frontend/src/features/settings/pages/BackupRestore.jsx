@@ -11,6 +11,7 @@ import {
   useConfirmation,
 } from "../../../components/common/UI.jsx";
 import "./BackupRestore.css";
+import { BackButton, ForwardButton } from "../../../components/common/NavButtons.jsx";
 
 const formatBytes = (value) => {
   if (value === null || value === undefined) return "—";
@@ -359,7 +360,7 @@ function RestoreWizard({ backup, onClose, onDone }) {
           <ImpactView preview={preview} />
           <div className="modal-actions">
             <button type="button" className="btn-outline" onClick={onClose}>Cancel</button>
-            <button type="button" className="btn-primary" disabled={!preview.can_restore} onClick={() => setStep(4)}>Continue to confirmation</button>
+            <ForwardButton inline className="btn-primary" label="Continue to confirmation" disabled={!preview.can_restore} onClick={() => setStep(4)} />
           </div>
         </>
       )}
@@ -381,7 +382,7 @@ function RestoreWizard({ backup, onClose, onDone }) {
           <div className="field"><label htmlFor="bk-type">Type RESTORE to continue</label>
             <input id="bk-type" value={typed} autoComplete="off" onChange={(e) => setTyped(e.target.value)} /></div>
           <div className="modal-actions">
-            <button type="button" className="btn-outline" onClick={() => setStep(3)}>Back</button>
+            <BackButton inline className="btn-outline" label="Back" onClick={() => setStep(3)} />
             <button type="button" className="btn-danger" disabled={!confirmReady} onClick={run}><RotateCcw size={16} /> Restore database</button>
           </div>
         </>

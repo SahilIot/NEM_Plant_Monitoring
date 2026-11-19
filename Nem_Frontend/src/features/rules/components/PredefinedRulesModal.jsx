@@ -17,6 +17,7 @@ import {
   AlertTriangle,
   CircleAlert,
 } from "lucide-react";
+import { BackButton, ForwardButton } from "../../../components/common/NavButtons.jsx";
 
 export default function PredefinedRulesModal({
   assetId,
@@ -315,14 +316,7 @@ export default function PredefinedRulesModal({
               : "Rules requiring missing variables or unsupported evaluators cannot be assigned."}
           </span>
           {reviewing && (
-            <button
-              type="button"
-              className="btn-outline"
-              onClick={() => setReviewing(false)}
-              disabled={saving}
-            >
-              Back
-            </button>
+            <BackButton inline className="btn-outline" label="Back" onClick={() => setReviewing(false)} disabled={saving} />
           )}
           <button
             type="button"

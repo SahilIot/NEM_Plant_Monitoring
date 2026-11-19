@@ -13,6 +13,7 @@ import { api } from "../../../services/api.js";
 import { LoadingIndicator } from "../../../components/common/UI.jsx";
 import "./CopyRulesModal.css";
 import { ruleCategoryLabel } from "../../rules/ruleCategories.js";
+import { BackButton, ForwardButton } from "../../../components/common/NavButtons.jsx";
 
 // Display category only; the rule's stored type is not touched.
 const RULE_TYPE_LABELS = {
@@ -873,14 +874,13 @@ export default function CopyRulesModal({
           )}
 
           <div className="cr-actions">
-            <button
-              type="button"
-              className="btn-outline"
-              onClick={() => (reviewing ? setReviewing(false) : onClose())}
-              disabled={saving}
-            >
-              {reviewing ? "Back" : results ? "Close" : "Cancel"}
-            </button>
+            {reviewing ? (
+              <BackButton inline className="btn-outline" label="Back" onClick={() => setReviewing(false)} disabled={saving} />
+            ) : (
+              <button type="button" className="btn-outline" onClick={onClose} disabled={saving}>
+                {results ? "Close" : "Cancel"}
+              </button>
+            )}
 
             <button
               type="button"

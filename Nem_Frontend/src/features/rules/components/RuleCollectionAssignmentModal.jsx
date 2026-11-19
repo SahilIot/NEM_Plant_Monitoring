@@ -21,6 +21,7 @@ import {
 import "./RuleCollectionAssignmentModal.css";
 import TemplateParameterMapping, { isMultiTemplate, mappingIncomplete, parameterMappingsPayload } from "./TemplateParameterMapping.jsx";
 import "./TemplateParameterMapping.css";
+import { BackButton, ForwardButton } from "../../../components/common/NavButtons.jsx";
 
 export default function RuleCollectionAssignmentModal({
   assetId,
@@ -472,14 +473,7 @@ export default function RuleCollectionAssignmentModal({
           </span>
           <div>
             {reviewing && (
-              <button
-                type="button"
-                className="btn-outline"
-                onClick={() => setReviewing(false)}
-                disabled={saving}
-              >
-                Back
-              </button>
+              <BackButton inline className="btn-outline" label="Back" onClick={() => setReviewing(false)} disabled={saving} />
             )}
             <button
               type="button"

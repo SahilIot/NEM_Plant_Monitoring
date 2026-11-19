@@ -23,7 +23,7 @@ import {
 } from "./parameterRules.js";
 import "./IntervalRuleWizard.css";
 import "./ParameterRuleWizard.css";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { BackButton, ForwardButton } from "../../../components/common/NavButtons.jsx";
 
 const STEPS = {
   parameter_threshold: ["General", "Parameters", "Instructions", "Review"],
@@ -561,9 +561,9 @@ export default function ParameterRuleWizard({
       <div className="form-actions rule-form-actions iw-actions">
         <button type="button" className="btn-outline" onClick={onCancel} disabled={saving}>Cancel</button>
         <span className="iw-actions-spacer" />
-        {step > 0 && <button type="button" className="btn-outline" onClick={() => goTo(step - 1)} disabled={saving}><ArrowLeft className="nav-btn-icon" size={16} aria-hidden="true" /> Back</button>}
+        {step > 0 && <BackButton inline className="btn-outline" label="Back" onClick={() => goTo(step - 1)} disabled={saving} />}
         {step < steps.length - 1
-          ? <button type="button" className="btn-primary" onClick={() => goTo(step + 1)} disabled={saving || !canEdit}>Next <ArrowRight className="nav-btn-icon" size={16} aria-hidden="true" /></button>
+          ? <ForwardButton inline className="btn-primary" label="Next" onClick={() => goTo(step + 1)} disabled={saving || !canEdit} />
           : <button type="button" className="btn-primary" onClick={create} disabled={saving || !canEdit}>{saving ? savingLabel : submitLabel}</button>}
       </div>
     </div>
