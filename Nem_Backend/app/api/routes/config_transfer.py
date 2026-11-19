@@ -1,8 +1,5 @@
-"""Administrator-only export / import of reusable configuration packages.
+# Administrator-only export / import of reusable configuration packages.
 
-The only endpoints that expose or accept a configuration package. Every handler re-checks the
-Administrator role (the middleware also gates the ``/config-transfer`` prefix).
-"""
 from __future__ import annotations
 
 import logging

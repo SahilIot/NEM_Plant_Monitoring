@@ -20,10 +20,7 @@ Db = Annotated[Session, Depends(get_db)]
 class SupervisorAssignment(BaseModel):
     user_ids: list[int] = Field(default_factory=list, max_length=50)
 
-#Retrives the users currently assigned to an asset.
-# An assignment grants a Supervisor or Operator access to the asset and its child
-# assets; Supervisor assignments also select the email recipients (see
-# services/email_notifications.py). Operators never receive alert emails.
+# Retrives the users currently assigned to an asset.
 def _assignment(session: Session, asset_id: int) -> dict:
     users = session.scalars(
         select(User).join(AssetSupervisor, AssetSupervisor.user_id == User.id)

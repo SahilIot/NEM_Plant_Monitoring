@@ -157,7 +157,6 @@ _REQUEST_COLUMN = "request_id"
 
 
 def _ident(engine: Engine, name: str) -> str:
-    """Quote a fixed, code-defined table/column/index name; refuse anything else."""
     if not _SAFE_IDENTIFIER.match(name) or len(name) > _POSTGRES_MAX_IDENTIFIER:
         raise ValueError(f"Unsafe database identifier: {name!r}")
     return engine.dialect.identifier_preparer.quote(name)
@@ -171,7 +170,6 @@ def _is_postgresql(engine: Engine, step: str) -> bool:
 
 
 def _index_name_taken(connection, name: str) -> bool:
-    """True when any index with this name exists in the current schema (any table)."""
     return connection.execute(
         text("SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = :name"),
         {"name": name},
@@ -179,7 +177,6 @@ def _index_name_taken(connection, name: str) -> bool:
 
 
 def _is_plain_index_on(index: dict, column: str) -> bool:
-    """A usable audit index: single column, non-unique, not partial, not an expression."""
     options = index.get("dialect_options") or {}
     return (
         index.get("column_names") == [column]
@@ -190,7 +187,6 @@ def _is_plain_index_on(index: dict, column: str) -> bool:
 
 
 def _ensure_single_column_index(connection, table: str, column: str) -> None:
-    """Make sure a plain index on ``table(column)`` exists, judged by its definition, not its name."""
     if any(_is_plain_index_on(index, column) for index in inspect(connection).get_indexes(table)):
         return
     base = f"ix_{table}_{column}"
@@ -206,7 +202,6 @@ def _ensure_single_column_index(connection, table: str, column: str) -> None:
 
 
 def _ensure_user_foreign_key(connection, table: str, column: str) -> None:
-    """Check ``table.column`` references auth_users(id); repair it only where that is lossless."""
     foreign_keys = [
         fk for fk in inspect(connection).get_foreign_keys(table)
         if fk["constrained_columns"] == [column]
@@ -243,11 +238,6 @@ def _ensure_user_foreign_key(connection, table: str, column: str) -> None:
 
 
 def _ensure_user_reference_column(engine: Engine, table: str, column: str) -> None:
-    """Ensure ``table.column`` is a nullable INTEGER FK to auth_users(id) ON DELETE SET NULL with an index.
-
-    Missing pieces are added; existing columns and their data are never altered or deleted.
-    One transaction per column, so a failure leaves nothing half-applied.
-    """
     quoted_table, quoted_column = _ident(engine, table), _ident(engine, column)
     with engine.begin() as connection:
         columns = {col["name"]: col for col in inspect(connection).get_columns(table)}
@@ -286,7 +276,6 @@ def _ensure_entry_type_column(engine: Engine, table: str) -> None:
                 "VARCHAR(20) NOT NULL DEFAULT 'document'"
             ))
 
-
 def _ensure_asset_reference_column(engine: Engine, table: str, column: str) -> None:
     # Add a nullable INTEGER FK to assets(id) ON DELETE SET NULL with an index when missing; never alters data.
     with engine.begin() as connection:
@@ -301,9 +290,6 @@ def _ensure_asset_reference_column(engine: Engine, table: str, column: str) -> N
 
 # add missing audit columns to tables that should have them, and create indexes on those columns
 def _upgrade_audit_columns(engine: Engine) -> None:
-    """Add/verify created_by_id, updated_by_id (FK to auth_users, indexed) and records.updated_at.
-    Additive and idempotent: existing rows keep their values (NULL where history is unknown).
-    """
     if not _is_postgresql(engine, "audit column upgrade"):
         return
     table_names = set(inspect(engine).get_table_names())
@@ -368,12 +354,6 @@ def _normalise_invalid_visibility(connection) -> None:
 
 
 def _convert_obsolete_all_supervisors(connection) -> None:
-    """Retire the removed "all_supervisors" visibility without changing who can see a rule.
-    Each affected shared rule becomes ``specific_supervisors`` listing the Supervisors that are
-    active right now (exactly the people who could see it before), or admin_only when there is
-    none. A history row records the conversion. Idempotent: once converted
-    no row carries the obsolete value.
-    """
     names = set(inspect(connection).get_table_names())
     needed = {_TEMPLATES_TABLE, "nem_rule_template_supervisors", "nem_rule_visibility_changes", "auth_users"}
     templates = _ident(connection.engine, _TEMPLATES_TABLE)
@@ -451,14 +431,8 @@ def _ensure_visibility_check(connection) -> None:
         f"CHECK (visibility_type IN ({values}))"
     ))
 
-
 # Adds visibility_type default is admin only can change to specific supervisors or all supervisors.
 def _upgrade_rule_visibility(engine: Engine) -> None:
-    """Add shared-rule visibility and template audit columns (idempotent, additive).
-    Existing shared rules default to ``admin_only``; valid existing values are preserved and no
-    historical permission is invented. Invalid values are reset to ``admin_only`` (fail closed)
-    before the allowed-values constraint is enforced.
-    """
     if not _is_postgresql(engine, "rule visibility upgrade"):
         return
     table_names = set(inspect(engine).get_table_names())
@@ -477,7 +451,6 @@ def _upgrade_rule_visibility(engine: Engine) -> None:
 
 
 def _request_cleanup_blockers(connection) -> list[str]:
-    """Reasons the obsolete request structures must be kept (empty list = safe to remove)."""
     inspector = inspect(connection)
     names = set(inspector.get_table_names())
     blockers: list[str] = []
@@ -503,13 +476,6 @@ def _request_cleanup_blockers(connection) -> list[str]:
 
 # Remove the discontinued visibility-request structures, but only when that loses nothing.
 def _remove_visibility_requests(engine: Engine) -> None:
-    """Drop ``nem_rule_visibility_requests`` and ``nem_rule_visibility_changes.request_id``.
-
-    Both are removed together, atomically, and only when the request table is empty, nothing
-    else references it, and no change row still points at a request. Otherwise everything is kept
-    and a warning explains why. Re-running is harmless, and each structure is handled
-    independently, so a database left half-migrated converges on the next start.
-    """
     if not _is_postgresql(engine, "visibility-request removal"):
         return
     inspector = inspect(engine)
@@ -550,11 +516,6 @@ def _remove_visibility_requests(engine: Engine) -> None:
 
 # Largest and important function this creates missing tables and other supported objects described in the SQLAlchemy models.
 def _upgrade_parameter_alerts(engine: Engine) -> None:
-    """Additive upgrade for per-parameter alerts on multi-parameter rules (PostgreSQL only).
-
-    Existing alerts keep parameter_id NULL, so they satisfy the narrowed one-active-alert-per-rule
-    index unchanged. The new per-parameter index is created by create_all on fresh databases.
-    """
     if engine.dialect.name != "postgresql":
         return
     tables = set(inspect(engine).get_table_names())
@@ -585,11 +546,6 @@ def _upgrade_parameter_alerts(engine: Engine) -> None:
 
 
 def _upgrade_parameter_lifecycle(engine: Engine) -> None:
-    """Additive upgrade: per-parameter lifecycle (PostgreSQL only, idempotent).
-
-    Every existing parameter becomes 'active', so existing multi-parameter rules behave exactly as before.
-    Reverse it with `downgrade_parameter_lifecycle` (not run automatically).
-    """
     if engine.dialect.name != "postgresql":
         return
     if "nem_rule_parameters" not in set(inspect(engine).get_table_names()):
@@ -607,12 +563,6 @@ def _upgrade_parameter_lifecycle(engine: Engine) -> None:
 
 
 def _upgrade_rule_maintenance(engine: Engine) -> None:
-    """Additive upgrade: maintenance schedules created from monitoring rules (PostgreSQL only, idempotent).
-
-    Existing non-rule schedules and jobs keep working unchanged: eligibility is NULL ("not rule-controlled"), which
-    never gates Start. Only rule-created jobs carry 'not_due'/'ready', set from the actual rule and parameter state.
-    Nothing is deleted. Reverse with `downgrade_rule_maintenance` (not run automatically).
-    """
     if engine.dialect.name != "postgresql":
         return
     tables = set(inspect(engine).get_table_names())
@@ -648,8 +598,6 @@ def _upgrade_rule_maintenance(engine: Engine) -> None:
         "completed_by_name": "VARCHAR(200)",
     }
     with engine.begin() as connection:
-        # Marks that a parameter has had its maintenance schedule created, so a schedule removed behind the
-        # application's back is never silently recreated. Parameters that already have a schedule are backfilled.
         if "nem_rule_parameters" in tables:
             connection.execute(text("ALTER TABLE nem_rule_parameters ADD COLUMN IF NOT EXISTS maintenance_scheduled_at TIMESTAMP"))
             # Start of the current maintenance cycle (set only by a user-confirmed progress reset); NULL for every existing row.
@@ -664,20 +612,12 @@ def _upgrade_rule_maintenance(engine: Engine) -> None:
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_nem_maintenance_schedules_source_parameter_id "
                                 "ON nem_maintenance_schedules (source_parameter_id)"))
         if "nem_maintenance_records" in tables:
-            # An earlier revision added this column as NOT NULL DEFAULT 'ready'. Make it nullable without a default
-            # (same as a fresh database), and clear the placeholder value on everything that is not rule-created.
             connection.execute(text("ALTER TABLE nem_maintenance_records ALTER COLUMN start_eligibility DROP NOT NULL"))
             connection.execute(text("ALTER TABLE nem_maintenance_records ALTER COLUMN start_eligibility DROP DEFAULT"))
             connection.execute(text(
                 "UPDATE nem_maintenance_records SET start_eligibility = NULL "
                 "WHERE start_eligibility IS NOT NULL AND rule_context IS NULL AND (schedule_id IS NULL OR schedule_id NOT IN "
                 "(SELECT id FROM nem_maintenance_schedules WHERE schedule_mode = 'rule'))"))
-            # Rule-created schedules that never got an eligibility: Ready only when the originating rule and parameter
-            # still exist, are eligible and active, AND the saved evaluation is a Due/Overdue result that is still fresh by
-            # the same policy runtime Start uses (effective_stale_after: the rule's own limit, else the global default; the
-            # evaluation may be as old as the rule's evaluation cadence). A PLC-signal parameter also needs a fresh reading
-            # time; a calendar parameter has no reading. Missing or implausible timestamps, or anything unclear, give
-            # Not Due - the next real evaluation promotes it to Ready, so this can only be too cautious, never too eager.
             from app.core.config import get_settings
             settings = get_settings()
             connection.execute(text(
@@ -726,8 +666,6 @@ def _upgrade_rule_maintenance(engine: Engine) -> None:
                 "SELECT 1 FROM pg_constraint WHERE conname = 'ck_maintenance_schedule_eligibility'")).scalar():
             connection.execute(text("ALTER TABLE nem_maintenance_schedules ADD CONSTRAINT ck_maintenance_schedule_eligibility "
                                     "CHECK (eligibility IS NULL OR eligibility IN ('not_due', 'ready'))"))
-        # The index allows one open schedule per parameter. If the data already breaks that, stop with a precise message
-        # instead of deleting or choosing a record: the whole upgrade transaction is rolled back and nothing is changed.
         duplicates = connection.execute(text(
             "SELECT source_parameter_id, array_agg(id ORDER BY id) FROM nem_maintenance_schedules "
             "WHERE source_parameter_id IS NOT NULL AND status = 'active' "
@@ -748,8 +686,6 @@ def _upgrade_rule_maintenance(engine: Engine) -> None:
 
 
 def downgrade_rule_maintenance(engine: Engine) -> None:
-    """Reverses `_upgrade_rule_maintenance`. Rule-created schedules must be removed first (their mode is
-    no longer allowed); history rows are not touched here."""
     if engine.dialect.name != "postgresql":
         return
     with engine.begin() as connection:
@@ -761,14 +697,11 @@ def downgrade_rule_maintenance(engine: Engine) -> None:
 
 
 def downgrade_parameter_lifecycle(engine: Engine) -> None:
-    """Reverses `_upgrade_parameter_lifecycle`. Suspended/deactivated parameters lose that setting, so
-    re-suspend or remove them first if they must not start evaluating again."""
     if engine.dialect.name != "postgresql":
         return
     with engine.begin() as connection:
         connection.execute(text("ALTER TABLE nem_rule_parameters DROP CONSTRAINT IF EXISTS ck_nem_rule_parameters_lifecycle"))
         connection.execute(text("ALTER TABLE nem_rule_parameters DROP COLUMN IF EXISTS lifecycle_status"))
-
 
 def _initialize_schema(engine: Engine) -> None:
     Base.metadata.create_all(bind=engine)

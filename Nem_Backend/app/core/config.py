@@ -36,8 +36,6 @@ class Settings(BaseSettings):
     opcua_endpoint: str = ""
     opcua_username: str = ""
     opcua_password: SecretStr = SecretStr("")
-    # Transport security. "None" keeps existing deployments working; Sign/SignAndEncrypt
-    # require the certificate settings below and never fall back to an insecure channel.
     opcua_security_mode: Literal["None", "Sign", "SignAndEncrypt"] = "None"
     opcua_security_policy: Literal["Basic256Sha256", "Aes128Sha256RsaOaep", "Aes256Sha256RsaPss"] = "Basic256Sha256"
     opcua_require_secure_transport: bool = False
@@ -52,9 +50,6 @@ class Settings(BaseSettings):
     opcua_machine_mappings: str = ""
     opcua_reconnect_delay_seconds: int = Field(default=5, ge=1, le=300)
     opcua_runtime_checkpoint_seconds: int = Field(default=10, ge=1, le=300)
-    # Longest gap after the last valid OPC UA running-signal sample that still counts as running time.
-    # It applies only to running signals (never to cycle, reading or communication settings) and must
-    # exceed the checkpoint interval, because the collector re-reads running signals at that interval.
     opcua_running_signal_timeout_seconds: int = Field(default=15, ge=1, le=300)
     opcua_subscription_publishing_interval_ms: int = Field(default=1000, ge=1)
 
@@ -99,22 +94,12 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_running_signal_timeout(self) -> "Settings":
         if self.opcua_running_signal_timeout_seconds <= self.opcua_runtime_checkpoint_seconds:
-            raise ValueError(
-                "OPCUA_RUNNING_SIGNAL_TIMEOUT_SECONDS must be greater than OPCUA_RUNTIME_CHECKPOINT_SECONDS, "
-                "otherwise a healthy running signal would be treated as stale between two re-reads"
-            )
+            raise ValueError("OPCUA_RUNNING_SIGNAL_TIMEOUT_SECONDS must be greater than OPCUA_RUNTIME_CHECKPOINT_SECONDS, "
+                "otherwise a healthy running signal would be treated as stale between two re-reads")
         return self
 
     @property
     def runtime_freshness_seconds(self) -> int:
-        """Longest gap between two confirmed samples that may be counted as running time.
-
-        This is the single running-signal timeout (``opcua_running_signal_timeout_seconds``, default 15 s),
-        used by the collector, the legacy runtime counters, multi-parameter timers and the live timer
-        shown in the browser. The collector re-reads running signals every ``opcua_runtime_checkpoint_seconds``,
-        so a healthy signal is never this old, while a PLC outage or a run of bad-quality reads is never
-        added to runtime. It is never longer than the general stale limit.
-        """
         return min(
             self.monitoring_default_stale_after_seconds,
             self.opcua_running_signal_timeout_seconds,

@@ -36,8 +36,6 @@ class UTCDateTime(TypeDecorator[datetime]):
 def create_database_engine(database_url: str | None = None) -> Engine:
     url = get_settings().database_url if database_url is None else database_url
     validate_postgresql_database_url(url)
-    # Timestamps are stored as naive UTC. Pin every connection to UTC so that the value is also read and
-    # written as UTC when a column is TIMESTAMP WITH TIME ZONE, whatever the server's own time zone is.
     return create_engine(url, pool_pre_ping=True, connect_args={"options": "-c timezone=UTC"})
 
 # manage db connectivity. A session is the object through which your application queries and modifies db records
@@ -56,10 +54,6 @@ def create_session_factory(
 # this function provides a db session to FastAPI endpoints
 def get_db(request: Request) -> Generator[Session, None, None]:
     with request.app.state.session_factory() as session:
-        # Marks this as an API-request session so asset-assignment scoping
-        # (app.services.access_scope) applies; background sessions lack the flag.
-        # The literal key matches access_scope.REQUEST_SESSION_KEY (importing it
-        # here would be circular).
         session.info["access_scope_required"] = True
         user_id = getattr(request.state, "auth_user_id", None)
         if user_id is not None:

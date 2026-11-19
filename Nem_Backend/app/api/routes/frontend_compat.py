@@ -138,13 +138,8 @@ class CollectionCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str | None = None
     labels: list[str] = Field(default_factory=list, max_length=10)
-    # New rule definitions created together with the collection.
     rules: list[RuleTemplateCreate] | None = Field(default=None, max_length=5)
-    # Existing standalone reusable rules (collection_id is NULL) that become members of the new collection.
-    # Inline and existing rules share one limit: between 1 and 5 in total.
     existing_template_ids: list[Annotated[int, Field(ge=1)]] = Field(default_factory=list, max_length=5)
-    # Required whenever new rules are created together with the collection; no default. It applies to the
-    # new rules only: existing rules keep their own visibility.
     visibility_type: Literal["admin_only", "specific_supervisors"] | None = None
     visibility_supervisor_ids: list[int] = Field(default_factory=list, max_length=200)
 
@@ -540,10 +535,9 @@ def _mapped_variable(
     return matches[0]
 
 def _multi_copy_definition(session: Session, request: Request, source: MonitoringRule, target_asset_id: int) -> dict[str, Any]:
-    """Copy of a multi-parameter rule: every parameter is connected to the same-key variable on the target asset.
-
-    Lifecycle, progress and alerts are not copied; parameter keys are kept so a copy of a shared rule stays in step with it.
-    """
+    # Copy of a multi-parameter rule: every parameter is connected to the same-key variable on the target asset.
+    # Lifecycle, progress and alerts are not copied; parameter keys are kept so a copy of a shared rule stays in step with it.
+    
     from app.api.routes.rule_parameters import _check_parameters
     from app.schemas.rule_parameters import RuleParameterIn
 
@@ -1137,11 +1131,7 @@ def apply_template_update(
     values: dict[str, Any],
     labels: list[str] | None,
 ) -> None:
-    """Apply an edit to a shared rule: permission check, audit rows, and propagation.
 
-    The shared template is the single source of truth; every asset rule created from it is
-    updated here. Does not commit.
-    """
     enforce_template_edit_permission(session, template, values,labels,)
     if values["collection_id"] != template.collection_id:
         _ensure_collection_keeps_rule(session, template.collection_id, template.id)
@@ -1195,7 +1185,6 @@ def apply_template_update(
                 except HTTPException:
                     if is_admin:
                         raise
-                    # Never describe assets the editor cannot reach.
                     raise HTTPException(status_code=409,detail="The change could not be applied to every asset using this shared rule. Contact an Administrator.",) from None
                 for field in (
                     "name",
@@ -1209,9 +1198,6 @@ def apply_template_update(
                     "stale_after_seconds",
                 ):
                     setattr(rule, field, definition[field])
-
-        # Re-evaluate every rule that uses this shared rule right away with its new thresholds, so
-        # statuses and alerts are corrected now rather than after the next PLC value or evaluation cycle.
         session.flush()
         settings = request.app.state.settings
         for rule in assigned_rules:
@@ -2419,8 +2405,6 @@ def _claim_existing_templates(session: Session, template_ids: list[int]) -> list
 def create_collection(payload: CollectionCreate, session: Session = Depends(get_db)) -> dict[str, Any]:
     # Defence in depth behind the middleware: only Administrators create collections.
     require_session_roles(session, "Administrator")
-    # One transaction: the collection, its new rules and the move of existing rules are committed together
-    # (a single commit at the end) or not at all. No helper used below commits.
     try:
         existing = _claim_existing_templates(session, payload.existing_template_ids)
         collection = RuleCollection(name=payload.name.strip(), description=payload.description)
@@ -2519,8 +2503,6 @@ def delete_collection(
         )
     ).all()
     if delete_rules:
-        # The collection and its own rule definitions go together in one transaction. Rules that still have
-        # assigned asset rules cannot be deleted, exactly as for a single rule, and nothing is changed then.
         for template in templates:
             assigned = session.scalar(
                 select(func.count()).select_from(MonitoringRule).where(MonitoringRule.source_template_id == template.id)

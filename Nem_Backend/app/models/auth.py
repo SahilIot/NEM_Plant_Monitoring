@@ -1,4 +1,4 @@
-"""Local users and revocable login sessions."""
+# Local users and revocable login sessions.
 from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import Boolean, CheckConstraint, ForeignKey, String

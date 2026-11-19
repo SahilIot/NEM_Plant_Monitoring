@@ -438,12 +438,6 @@ class SchedulerLease(Base):
 
 
 class RuleParameter(Base):
-    """One independently configured parameter of a 'multi_parameter' rule.
-
-    `key` is the stable identity (never the position), so editing, reordering or removing other
-    parameters cannot change which parameter this row is.
-    """
-
     __tablename__ = "nem_rule_parameters"
     __table_args__ = (
         UniqueConstraint("rule_id", "key", name="uq_nem_rule_parameters_rule_key"),

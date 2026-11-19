@@ -1,4 +1,5 @@
 # Administrator-controlled visibility of shared rules, plus their history and assignments.
+# This file manages who can see shared rule templates, who those templates are assigned to, and the history of changes moade to them
 from datetime import datetime
 from typing import Any
 
@@ -19,7 +20,7 @@ from app.services.rule_visibility import (
 
 router = APIRouter(tags=["rule visibility"])
 
-
+# Check whether the current user is authenticated and has allowed role.
 def _require_user(session: Session, *roles: str) -> User:
     user = request_user(session)
     if user is None:
@@ -28,18 +29,18 @@ def _require_user(session: Session, *roles: str) -> User:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     return user
 
-
+# Receives a list of user IDs and returns their usernames.
 def _names(session: Session, ids: list[int]) -> list[dict[str, Any]]:
     if not ids:
         return []
     users = session.scalars(select(User).where(User.id.in_(ids)).order_by(User.username)).all()
     return [{"id": user.id, "username": user.username} for user in users]
 
-
+# Converting timestamps.
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
-
+# Buids the visibility information for one shared rule template
 def _visibility_detail(session: Session, template: MonitoringRuleTemplate) -> dict[str, Any]:
     history = session.scalars(
         select(RuleVisibilityChange)
@@ -66,7 +67,7 @@ def _visibility_detail(session: Session, template: MonitoringRuleTemplate) -> di
         ],
     }
 
-
+# ONly admin can access it 
 @router.get("/rule-visibility/supervisors")
 def list_selectable_supervisors(session: Session = Depends(get_db)) -> list[dict[str, Any]]:
     _require_user(session, "Administrator")
@@ -77,7 +78,7 @@ def list_selectable_supervisors(session: Session = Depends(get_db)) -> list[dict
     ).all()
     return [{"id": user.id, "username": user.username} for user in users]
 
-
+# Requires admin permission , find the requested template.
 @router.get("/rule-templates/{template_id}/visibility")
 def get_template_visibility(template_id: int, session: Session = Depends(get_db)) -> dict[str, Any]:
     _require_user(session, "Administrator")
@@ -86,7 +87,7 @@ def get_template_visibility(template_id: int, session: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="Rule template was not found")
     return _visibility_detail(session, template)
 
-
+# Changes the visibility
 @router.put("/rule-templates/{template_id}/visibility")
 def set_template_visibility(
     template_id: int,
@@ -103,14 +104,12 @@ def set_template_visibility(
     session.refresh(template)
     return _visibility_detail(session, template)
 
-
+# Provides a combined history of changes made to a shared rule template.
 @router.get("/rule-templates/{template_id}/history")
 def get_template_history(
     template_id: int = Path(gt=0),
     session: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    """Timeline for a shared rule. Everyone who may see the rule gets its configuration
-    changes; visibility changes are Administrator-only."""
     template = get_visible_template(session, template_id)
     user = request_user(session)
     entries: list[dict[str, Any]] = []
@@ -147,13 +146,12 @@ def get_template_history(
     entries.sort(key=lambda entry: entry["at"] or "", reverse=True)
     return entries[:200]
 
-
+# This answers an imp operational question -> which plant asset are currently using rules created from this shared template.
 @router.get("/rule-templates/{template_id}/assignments")
 def get_template_assignments(
     template_id: int = Path(gt=0),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """Assets using this shared rule, limited to the caller's asset scope."""
     template = get_visible_template(session, template_id)
     user = request_user(session)
     scope = access_scope(session)

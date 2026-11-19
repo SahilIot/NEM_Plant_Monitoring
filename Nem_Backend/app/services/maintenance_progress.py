@@ -1,6 +1,7 @@
 # Implement runtime- and usage-based maintenance progress tracking from machine Boolean signals,
 # including running-hour accumulation, cycle counting through False-to-True transitions,
-# stale and out-of-order reading protection, signal baseline management, maintenance threshold detection, duplicate alert and occurrence prevention, automatic maintenance record creation, email notifications, and maintenance event generation within the existing database transaction.from __future__ import annotations
+# stale and out-of-order reading protection, signal baseline management, maintenance threshold detection, 
+# duplicate alert and occurrence prevention, automatic maintenance record creation, email notifications, and maintenance event generation within the existing database transaction.from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -131,9 +132,6 @@ def update_maintenance_progress(
             )
 
             if schedule.schedule_mode == RUNTIME:
-                # Count only the interval during which the previous sample confirmed that the machine
-                # was running, and only across a short gap: an outage or a run of bad-quality reads
-                # must never be added to runtime (cycles keep the general stale limit).
                 runtime_gap = runtime_gap_seconds or stale_after_seconds
                 if (
                     schedule.last_signal_value is True

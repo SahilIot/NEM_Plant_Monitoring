@@ -142,8 +142,6 @@ def _user_read(user: User) -> dict:
     }
 
 #Identifying the loggin-in user
-# Plain `def` on purpose: it performs a synchronous database lookup, so FastAPI runs it in its
-# thread pool instead of blocking the event loop on every authenticated request.
 def get_current_user(request: Request, db: Db) -> User:
     user_id = getattr(request.state, "auth_user_id", None)
     if user_id is None:

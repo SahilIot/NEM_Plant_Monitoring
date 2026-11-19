@@ -1,11 +1,4 @@
 # Automatic audit stamping for monitoring rules and maintenance records.
-"""
-The authenticated user comes only from ``session.info["auth_user_id"]``, which
-``get_db`` fills from the verified bearer session. Request bodies can never set
-it. Sessions without an authenticated user (workers, schedulers) never claim a
-user and leave the existing modification stamp untouched.
-"""
-
 # This code actually records who created or modified a db record and when
 from datetime import datetime, timezone
 
@@ -47,8 +40,6 @@ def stamp_audit_fields(session, flush_context, instances) -> None:
             obj.updated_by_id = user_id
             obj.updated_at = now
         elif obj.updated_at is not None:
-            # System change: re-submit the stored value so the column's onupdate
-            # default does not overwrite the last human modification time.
             flag_modified(obj, "updated_at")
 
 

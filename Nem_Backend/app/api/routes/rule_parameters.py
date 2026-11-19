@@ -1,5 +1,4 @@
-# Create and edit rules that hold several parameters ('multi_parameter').
-# Existing single-parameter rule endpoints are untouched; this router only adds new URLs.
+# Api router responsible for creating, viewing, editing, replacing and managing the lifecycle of multi-parameter monitoring rules.
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -63,24 +62,18 @@ NUMERIC_TYPES = {NUMBER, "integer"}
 # never discards accumulated progress; every other key (interval type, start time) changes what is measured.
 LIMIT_CONFIG_KEYS = {"lower_alert", "lower_warning", "upper_warning", "upper_alert", "unit", "due", "overdue", "expected", "severity"}
 
-
+# It creates a representation of the measurement configuration
 def _measured_source(variable_id: int | None, aggregation: str, config: dict[str, Any]) -> tuple:
     return (variable_id, aggregation, {key: value for key, value in (config or {}).items() if key not in LIMIT_CONFIG_KEYS})
 
-
+# Compare the existing parameter with the incoming parameter
 def _measurement_changed(parameter: RuleParameter, item: RuleParameterIn) -> bool:
-    """True when what the parameter MEASURES changed (type, variable, aggregation, interval type or start time).
-
-    Names and limits (including Due/Overdue, expected state, severity and unit) never count, so renames and
-    threshold-only edits keep accumulated progress. Used by the full replacement, the single edit and the shared
-    rule propagation, so all three decide identically.
-    """
     return (parameter.kind, *_measured_source(parameter.variable_id, parameter.aggregation, parameter.config)) != (
         item.kind, *_measured_source(item.variable_id, item.aggregation, item.config))
 
-
+# Converts an existing db params into a RuleParamIN schema object
 def _stored_definition(parameter: RuleParameter) -> RuleParameterIn:
-    """A stored parameter in the same normalised form as an incoming one, so the two compare fairly."""
+    # A stored parameter in the same normalised form as an incoming one, so the two compare fairly
     try:
         return RuleParameterIn(key=parameter.key, name=parameter.name, kind=parameter.kind,
                                variable_id=parameter.variable_id, aggregation=parameter.aggregation,
@@ -90,11 +83,8 @@ def _stored_definition(parameter: RuleParameter) -> RuleParameterIn:
                                                variable_id=parameter.variable_id, aggregation=parameter.aggregation,
                                                config=dict(parameter.config or {}))
 
-
+# Controls what a supervisor can edit.
 def _enforce_supervisor_edit(user: User, parameter: RuleParameter, item: RuleParameterIn) -> None:
-    """Supervisors may change only the Due and Overdue values of an interval parameter.
-
-    Name, type, variable, aggregation, start time, other limits, expected state, severity and unit stay Administrator-only."""
     if user.role != "Supervisor":
         return
     old = _stored_definition(parameter)
@@ -103,12 +93,9 @@ def _enforce_supervisor_edit(user: User, parameter: RuleParameter, item: RulePar
             item.name, item.kind, item.variable_id, item.aggregation, strip(item.config)):
         raise HTTPException(status_code=403, detail="Supervisors may only change the Due and Overdue values of a parameter")
 
-
+# Imp -> Its responsibility is to ensure that every param references a valid var and that the var is suitable for the param config.
 def _check_parameters(session: Session,request: Request,asset: Asset,items: list[RuleParameterIn],category: str,
                       current: dict[str, int | None] | None = None) -> None:
-    # Checks that need the database; each error names the parameter it belongs to.
-    # `current` maps stable keys to the variable each existing parameter is already connected to: keeping that
-    # connection stays valid while the variable is temporarily inactive (a new choice must be active).
     bypass = is_mapping_bypass_enabled(request)
     seen: dict[tuple[int, str], str] = {}
     for item in items:
@@ -149,10 +136,8 @@ def _check_parameters(session: Session,request: Request,asset: Asset,items: list
             raise HTTPException(status_code=422, detail=f"{label}: the same variable and aggregation are already used by '{seen[pair]}'")
         seen[pair] = item.name
 
-
+# This func handles a special case for Time-Based interval params.
 def _require_time_start(items: list[RuleParameterIn], existing: dict[str, RuleParameter] | None = None) -> None:
-    # A Time interval counted from a PLC variable needs its start time. A stored parameter that never had one (older
-    # configuration) stays editable as it is: its baseline is not rewritten or invented here.
     for item in items:
         if item.kind != INTERVAL or item.variable_id is None or item.config.get(INTERVAL_PARAMETER) != "time":
             continue
@@ -163,7 +148,7 @@ def _require_time_start(items: list[RuleParameterIn], existing: dict[str, RulePa
             continue
         raise HTTPException(status_code=422, detail=f"Parameter '{item.name}': a start time is required for Time intervals")
 
-
+# This func actually updates the rule`s param collection.
 def _apply(rule: MonitoringRule, items: list[RuleParameterIn]) -> None:
     # Replace the rule's parameters, matching existing rows by stable key (never by position)
     existing = {parameter.key: parameter for parameter in rule.parameter_items}
@@ -199,28 +184,30 @@ def _apply(rule: MonitoringRule, items: list[RuleParameterIn]) -> None:
         if changed:
             reset_parameter_baseline(object_session(rule), parameter)
 
-
+# Collects the parameter states that were actually reset during the current request.
 def _reset_report(session: Session, rule_id: int | None = None) -> list[tuple[int, int]]:
-    """(rule_id, parameter_id) of every parameter whose stored state this request really reset (de-duplicated)."""
+    # (rule_id, parameter_id) of every parameter whose stored state this request really reset (de-duplicated).
     seen = list(dict.fromkeys(session.info.get("parameter_state_resets", [])))
     return [item for item in seen if rule_id is None or item[0] == rule_id]
 
 
 def _commit(session: Session) -> None:
-    """One commit for the whole change. A database conflict (for example a concurrent edit) rolls EVERYTHING back."""
+    # One commit for the whole change. A database conflict (for example a concurrent edit) rolls EVERYTHING back.
     try:
         session.commit()
     except IntegrityError as error:
         session.rollback()
         raise HTTPException(status_code=409, detail="The change conflicted with another update and was not saved. Nothing was changed; try again.") from error
 
-
+# Only admin and supervisor can configure theser rules.
 def _require_editor(user: User) -> None:
     if user.role not in {"Administrator", "Supervisor"}:
         raise HTTPException(status_code=403, detail="You are not allowed to configure monitoring rules")
 
-
+# Below now are the functions that the frontend calls
+ 
 @router.post("/assets/{asset_id}/multi-parameter-rules", status_code=201)
+# This creates anew rule under certains asset id
 def create_multi_parameter_rule(
     asset_id: int,
     payload: MultiParameterRuleCreate,
@@ -274,7 +261,7 @@ def create_multi_parameter_rule(
 
     return _rule_row(session, rule)
 
-
+# Returns all parameters associated with a rule.
 @router.get("/rules/{rule_id}/parameters")
 def list_rule_parameters(rule_id: int, session: Session = Depends(get_db)) -> dict[str, Any]:
     rule = rule_or_404(session, rule_id)
@@ -289,7 +276,7 @@ def list_rule_parameters(rule_id: int, session: Session = Depends(get_db)) -> di
         "parameters": serialize_parameters(rule),
     }
 
-
+# This returns the current monitoring information
 @router.get("/rules/{rule_id}/status-detail")
 def rule_status_detail(rule_id: int, session: Session = Depends(get_db)) -> dict[str, Any]:
    # Current Status detail for one parent multi-parameter rule (all values computed by the backend).
@@ -299,7 +286,7 @@ def rule_status_detail(rule_id: int, session: Session = Depends(get_db)) -> dict
         return build_legacy_status_detail(session, rule)
     return build_status_detail(session, rule)
 
-
+# Replace all parameters , complicated endpoints , allows the frontend to submit an entire parameter collection.
 @router.put("/rules/{rule_id}/parameters")
 def replace_rule_parameters(
     rule_id: int,
@@ -352,10 +339,9 @@ def replace_rule_parameters(
     resets = _reset_report(session, rule.id)
     _commit(session)  # removals (snapshot event, alert resolution, row deletion) and edits succeed or fail together
     session.refresh(rule)
-    return {"rule_id": rule.id, "parameters": serialize_parameters(rule),
-            "state_reset": bool(resets), "reset_parameter_ids": [parameter_id for _rule, parameter_id in resets]}
+    return {"rule_id": rule.id, "parameters": serialize_parameters(rule),"state_reset": bool(resets), "reset_parameter_ids": [parameter_id for _rule, parameter_id in resets]}
 
-
+# Edit only one param
 @router.patch("/rules/{rule_id}/parameters/{parameter_id}")
 def update_rule_parameter(
     rule_id: int,
@@ -365,10 +351,6 @@ def update_rule_parameter(
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    # Edit ONE parameter of a multi-parameter rule.
-
-    # Only this parameter's row (and, if what it measures changed, its own evaluation state) is written. The
-    # parent rule, the other parameters, their progress and every alert or history row are left as they are.
 
     _require_editor(user)
     rule = rule_or_404(session, rule_id)
@@ -397,8 +379,7 @@ def update_rule_parameter(
     clash = next((item for item in others if payload.variable_id is not None
                   and (item.variable_id, item.aggregation) == (payload.variable_id, payload.aggregation)), None)
     if clash is not None:
-        raise HTTPException(status_code=422, detail=(
-            f"Parameter '{payload.name}': the same variable and aggregation are already used by '{clash.name}'"))
+        raise HTTPException(status_code=422, detail=(f"Parameter '{payload.name}': the same variable and aggregation are already used by '{clash.name}'"))
 
     # Only a change to what is measured restarts this parameter's own progress. A rename or new limits keep it.
     changed = _measurement_changed(parameter, payload)
@@ -423,13 +404,9 @@ def update_rule_parameter(
         "propagated_resets": [{"rule_id": r, "parameter_id": p} for r, p in resets if (r, p) != (rule.id, parameter.id)],
     }
 
-
+# This func retrieves shared temp , check if temp exist , check access to template , finding matching params definition , validates the resulting template ,
+# Checks template edit permissions , applies the template updates.
 def _apply_shared_parameter_edit(rule, parameter, payload, request, session) -> None:
-    """Edit one parameter of a rule that belongs to a shared rule (template).
-    The changed definition is written to the template, which propagates it to every asset using it, exactly as an
-    edit of the shared rule does (permissions, audit rows, other parameters and their progress untouched). Only the
-    variable choice is kept on this asset's own parameter.
-    """
     from app.api.routes import rules as rules_module
     from app.api.routes.frontend_compat import apply_template_update
     from app.models import MonitoringRuleTemplate
@@ -460,12 +437,9 @@ def _apply_shared_parameter_edit(rule, parameter, payload, request, session) -> 
     session.flush()
     apply_template_update(session, request, template, new_values, None)
 
-
+# This handles requests involving order single-param rules.
+# Instead of converting them into multi-param rules, it transalte the param edit into the existing RuleUpdate format and delegates to the original rule endpoint
 def _update_legacy_parameter(rule, parameter_id, payload, request, session, user) -> dict[str, Any]:
-    """Edit the single parameter of a rule created before the parameter system.
-    The change is applied through the existing rule update (same validation, roles, shared-rule propagation and
-    immediate re-evaluation); thresholds, progress, alerts and history are never reset.
-    """
     from app.api.routes.rules import update_rule
     from app.schemas.rule import RuleUpdate
 
@@ -482,7 +456,7 @@ def _update_legacy_parameter(rule, parameter_id, payload, request, session, user
         session.refresh(rule)
     return {"rule_id": rule.id, "parameter": serialize_legacy_parameters(session, rule)[0], "state_reset": False}
 
-
+# Param lifecycle such as activation or deactivation
 @router.post("/rules/{rule_id}/parameters/{parameter_id}/lifecycle")
 def update_parameter_lifecycle(
     rule_id: int,
@@ -495,8 +469,7 @@ def update_parameter_lifecycle(
 
     allowed = {"Administrator", "Supervisor"} if payload.action == "activate" else {"Administrator"}
     if user.role not in allowed:
-        raise HTTPException(status_code=403, detail=(
-            "Only Administrators and Supervisors can activate parameters." if payload.action == "activate"
+        raise HTTPException(status_code=403, detail=("Only Administrators and Supervisors can activate parameters." if payload.action == "activate"
             else "Only Administrators can change a parameter's state."))
     rule = session.get(MonitoringRule, rule_id)  # no lock yet: the legacy transition takes its own
     if rule is None:
@@ -526,7 +499,4 @@ def update_parameter_lifecycle(
         raise HTTPException(status_code=409, detail=str(error)) from error
     session.commit()
     session.refresh(rule)
-    return {
-        "rule_id": rule.id,
-        "parameter": next(item for item in serialize_parameters(rule) if item["id"] == parameter_id),
-    }
+    return {"rule_id": rule.id,"parameter": next(item for item in serialize_parameters(rule) if item["id"] == parameter_id),}

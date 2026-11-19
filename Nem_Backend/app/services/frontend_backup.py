@@ -81,10 +81,6 @@ _LEGACY_TABLE_NAMES = tuple(model.__tablename__ for model in SNAPSHOT_MODELS)
 # Absent from very old version-1 files; restored as empty then.
 _LEGACY_OPTIONAL = frozenset({MonitoringRuleTemplate.__tablename__, RuleCounterState.__tablename__})
 
-# Everything a version-2 backup replaces. Besides the version-1 tables this adds the tables that either
-# block deleting an asset (maintenance schedules and machine states reference assets with RESTRICT) or
-# are silently removed by ON DELETE CASCADE when their parent is replaced (labels and label links, document
-# attachment metadata, asset supervisor assignments, shared-rule history and visibility grants).
 _SCOPE_TABLES = frozenset(
     {model.__table__ for model in SNAPSHOT_MODELS}
     | {model.__table__ for model in (
@@ -94,9 +90,7 @@ _SCOPE_TABLES = frozenset(
     | {rule_labels, rule_template_labels, rule_collection_labels, instruction_document_labels,
        rule_template_visibility_supervisors}
 )
-# Tables that are deliberately NOT backed up: users and sessions (accounts are not part of the backup),
-# rule suggestions, configuration-import log, email outbox (replaying queued emails for restored alerts
-# would be wrong), scheduler leases and the backup history itself.
+
 
 _BATCH = 1000
 _MAX_LINE_BYTES = 16 * 1024 * 1024
@@ -321,9 +315,7 @@ def _write_archive(engine: Engine, path: Path) -> dict[str, Any]:
         "missing_details": [],
         "inconsistent_details": [],
     }
-    stored_names: dict[str, tuple[int, Any, str]] = {}  # stored name -> (recorded size, document id, original name)
-    # One snapshot for every table: the transaction keeps seeing the database as it was when it started,
-    # whatever other users commit while the (possibly long) export runs. Read-only, so it blocks nobody.
+    stored_names: dict[str, tuple[int, Any, str]] = {}  
     connection = engine.connect().execution_options(isolation_level="REPEATABLE READ", postgresql_readonly=True)
     try:
         with connection.begin(), zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
@@ -351,8 +343,7 @@ def _write_archive(engine: Engine, path: Path) -> dict[str, Any]:
                 manifest["tables"][table.name] = {
                     "rows": count, "sha256": digest.hexdigest(), "columns": [column.name for column in columns],
                 }
-            # The files are copied after the rows; rows and files may therefore differ if a file is removed
-            # meanwhile, which is reported as a missing file rather than hidden.
+
             for stored_name, (recorded_size, document_id, original_name) in stored_names.items():
                 source = DOCUMENT_UPLOAD_DIR / stored_name
                 detail = {"stored_name": stored_name, "document_id": document_id, "original_name": original_name}
@@ -409,8 +400,7 @@ def create_backup_with_report(session: Session, settings: Settings, name: str, n
         if temporary is not None:
             temporary.unlink(missing_ok=True)
 
-    # The history row is written with its OWN session and transaction: the caller's session is never committed,
-    # rolled back or flushed here, so unrelated pending changes in it can neither be saved nor lost by a backup.
+
     try:
         with Session(engine, expire_on_commit=False) as own:
             record = BackupRecord(name=name, note=note, file_name=filename)
@@ -733,9 +723,7 @@ class _Context:
             if is_self:
                 self.parents[key[0]] = value  # may point forward in the file: checked in end_table
             elif value not in self.ids[(target.table.name, target.name)]:
-                raise BackupError(f"Table {name}, row {number}: {column.name}={value} refers to a {target.table.name} row that "
-                    "is not in the backup."
-                )
+                raise BackupError(f"Table {name}, row {number}: {column.name}={value} refers to a {target.table.name} row that is not in the backup.")
         for table_name, column_name in self.watched:
             if table_name == name:
                 self.ids[(table_name, column_name)].add(row[column_name])
@@ -832,11 +820,6 @@ def _classify_attachments(source: _Source, names: list[str]) -> tuple[list[str],
 
 
 def _stage_attachments(source: _Source, names: list[str]) -> tuple[Path | None, dict[str, str], list[str]]:
-    # Copy and verify the attachments in a staging folder beside the upload folder.
-
-    # Returns (folder, {name in backup: name to store under}, names that were already missing when the backup
-    # was made). If the upload folder already holds a DIFFERENT file with a restored attachment's name, the
-    # restored file gets a new unique name (the database rows are rewritten to match); the existing file is kept.
     staged, missing = _classify_attachments(source, names)
     if not staged:
         return None, {}, missing
@@ -870,9 +853,6 @@ def _sha256(path: Path) -> str:
 
 
 def _place_file(source: Path, destination: Path) -> None:
-    # Exclusive create: never overwrites a file that exists or appears meanwhile. Only a destination that THIS call
-    # created is cleaned up after a failure, so a failed exclusive create (FileExistsError, because someone else
-    # made the file) can never delete another user's file.
     created = False
     try:
         with source.open("rb") as reader, destination.open("xb") as writer:
@@ -1166,14 +1146,6 @@ def _database_error(error: DBAPIError) -> HTTPException:
 
 def restore_backup(session: Session, engine: Engine, settings: Settings, filename: str,
                    confirmation_token: str | None = None, user_id: Any = None) -> dict[str, Any]:
-    # Replace the data in scope with the backup. Returns a report; raises HTTPException on failure.
-
-   # The database part (locks, impact check, delete, insert, sequence reset) is ONE transaction on its own
-   # connection: if any of it fails it is rolled back and the existing data is unchanged. The caller's session is
-   # never committed, rolled back or flushed (it is only expired afterwards, so it cannot return stale objects).
-   # Attachment files are moved into place and the follow-up migrations run only after that transaction has
-   # committed; they are reported separately (outcome 'partial' if files could not be placed) and cannot undo the restore.
-
     target = resolve_backup_path(settings, filename)
     # Policy: refuse while the caller's session has unsaved changes, which the restore would otherwise bypass.
     if session.new or session.dirty or session.deleted:
@@ -1385,9 +1357,7 @@ def _report_warnings(context: _Context, missing_attachments: list[str], failed_f
 
 
 def _post_restore_migrations(engine: Engine) -> list[str]:
-    # Start-up migrations that normalise legacy rows. They are not needed for the restore to be correct (they
-    # run again at every application start), so a failure here is reported but never turns a committed
-    # restore into a failed one.
+
     from app.db.init_db import _migrate_existing_rule_counters, _migrate_legacy_rule_templates
 
     warnings = []
