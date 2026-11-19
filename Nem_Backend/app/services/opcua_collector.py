@@ -35,6 +35,16 @@ from app.services.opcua_client import (OpcUaConfigurationError, OpcUaConnectionE
     create_configured_opcua_client, opcua_security_summary,
 )
 from app.services.reading_ingestion import ingest_reading
+from app.core.constants import (
+    BOOLEAN,
+    CYCLE,
+    RULE_BOOLEAN_COUNT_THRESHOLD,
+    RULE_RUNTIME_DURATION,
+    RUNNING,
+    RUNTIME,
+    STATUS_ACTIVE,
+    STATUS_UNKNOWN,
+)
 
 LOGGER = logging.getLogger("nem_backend.opcua.collector")
 LEASE_NAME = "opcua-subscription-collector"
@@ -243,11 +253,11 @@ class OpcUaCollector:
             if mapping.cycle_signal is not None:
                 self._node_mappings.setdefault(
                     mapping.cycle_signal.node_id, []
-                ).append((mapping,"cycle",mapping.cycle_signal.variable_id,))
+                ).append((mapping,CYCLE,mapping.cycle_signal.variable_id,))
             if mapping.running_signal is not None:
                 self._node_mappings.setdefault(
                     mapping.running_signal.node_id, []
-                ).append((mapping,"running", mapping.running_signal.variable_id,))
+                ).append((mapping,RUNNING, mapping.running_signal.variable_id,))
             for signal in mapping.readings:
                 self._node_mappings.setdefault(signal.node_id, []).append((
                     mapping,
@@ -295,7 +305,7 @@ class OpcUaCollector:
                     and variable.is_active
                     and (
                         role == "reading"
-                        or variable.data_type == "boolean"
+                        or variable.data_type == BOOLEAN
                     )
                 )
                 rows.append(
@@ -353,8 +363,8 @@ class OpcUaCollector:
                     continue
                 role = (
                     f"{variable.signal_role}_signal"
-                    if variable.data_type == "boolean"
-                    and variable.signal_role in {"cycle", "running"}
+                    if variable.data_type == BOOLEAN
+                    and variable.signal_role in {CYCLE, RUNNING}
                     else "declared_variable"
                 )
                 rows.append(
@@ -427,7 +437,7 @@ class OpcUaCollector:
             select(MaintenanceSchedule)
             .where(
                 MaintenanceSchedule.asset_id.in_(asset_ids),
-                MaintenanceSchedule.schedule_mode == "runtime",
+                MaintenanceSchedule.schedule_mode == RUNTIME,
                 MaintenanceSchedule.last_signal_at.is_not(None),
             )
             .with_for_update()
@@ -661,7 +671,7 @@ class OpcUaCollector:
         sampled_at: datetime | None = None,
     ) -> None:
         signals = [
-            (mapping, mapping.running_signal, "running")
+            (mapping, mapping.running_signal, RUNNING)
             for mapping in self.mappings
             if mapping.running_signal is not None
         ]
@@ -672,7 +682,7 @@ class OpcUaCollector:
             (mapping, signal, role)
             for mapping in self.mappings
             for signal, role in (
-                (mapping.cycle_signal, "cycle"),
+                (mapping.cycle_signal, CYCLE),
                 *((reading, "reading") for reading in mapping.readings),
             )
             if signal is not None
@@ -690,9 +700,9 @@ class OpcUaCollector:
                             Variable.id == MonitoringRule.variable_id,
                         )
                         .where(
-                            MonitoringRule.rule_type == "boolean_count_threshold",
+                            MonitoringRule.rule_type == RULE_BOOLEAN_COUNT_THRESHOLD,
                             MonitoringRule.is_enabled.is_(True),
-                            Variable.data_type == "boolean",
+                            Variable.data_type == BOOLEAN,
                             Variable.id.in_(
                                 [signal.variable_id for _, signal, _ in legacy_candidates]
                             ),
@@ -715,10 +725,10 @@ class OpcUaCollector:
                         )
                         .where(
                             MonitoringRule.rule_type.in_(
-                                {"runtime_duration", "boolean_count_threshold"}
+                                {RULE_RUNTIME_DURATION, RULE_BOOLEAN_COUNT_THRESHOLD}
                             ),
                             MonitoringRule.is_enabled.is_(True),
-                            Variable.data_type == "boolean",
+                            Variable.data_type == BOOLEAN,
                             Variable.id.in_(declared_variable_ids),
                         )
                     ).all()
@@ -726,7 +736,7 @@ class OpcUaCollector:
             signals.extend(
                 (mapping, signal, role)
                 for mapping, signal, role in self._declared_variable_mappings
-                if role in {"cycle", "running"}
+                if role in {CYCLE, RUNNING}
                 or signal.variable_id in monitored_variable_ids
             )
 
@@ -796,8 +806,8 @@ class OpcUaCollector:
                     .join(Asset, Asset.id == Variable.asset_id)
                     .where(
                         Variable.is_active.is_(True),
-                        Variable.data_type == "boolean",
-                        Variable.signal_role.in_({"cycle", "running"}),
+                        Variable.data_type == BOOLEAN,
+                        Variable.signal_role.in_({CYCLE, RUNNING}),
                         Asset.is_active.is_(True),
                     )
                 ).all()
@@ -810,8 +820,8 @@ class OpcUaCollector:
             if not asset.is_active:
                 continue  # deactivated asset: stop polling it, keep the mapping for reactivation
             signals = [
-                (mapping.cycle_signal, True, "cycle"),
-                (mapping.running_signal, True, "running"),
+                (mapping.cycle_signal, True, CYCLE),
+                (mapping.running_signal, True, RUNNING),
                 *((signal, False, "reading") for signal in mapping.readings),
             ]
             for signal, is_state_signal, role in signals:
@@ -821,7 +831,7 @@ class OpcUaCollector:
                 if (
                     variable is None
                     or variable.asset_id != mapping.asset_id
-                    or (is_state_signal and variable.data_type != "boolean")
+                    or (is_state_signal and variable.data_type != BOOLEAN)
                 ):
                     raise OpcUaConfigurationError("OPC UA NodeIds must map to variables belonging to their configured asset; cycle and running signals must be boolean.")
                 if not variable.is_active:
@@ -864,8 +874,8 @@ class OpcUaCollector:
                 )
                 role = (
                     variable.signal_role
-                    if variable.data_type == "boolean"
-                    and variable.signal_role in {"cycle", "running"}
+                    if variable.data_type == BOOLEAN
+                    and variable.signal_role in {CYCLE, RUNNING}
                     else "reading"
                 )
                 declared_mappings.append((mapping, tag, role))
@@ -897,7 +907,7 @@ class OpcUaCollector:
         role: str,
         variable_id: int,
     ) -> None:
-        if role in {"cycle", "running"} and not isinstance(
+        if role in {CYCLE, RUNNING} and not isinstance(
             notification.value, bool
         ):
             LOGGER.warning("Ignoring non-boolean OPC UA %s signal for asset %s",role,mapping.asset_id,)
@@ -906,10 +916,10 @@ class OpcUaCollector:
         # Running signals must be fresh within the running-signal timeout; other Boolean readings keep the general limit.
         stale_after = (
             self.settings.runtime_freshness_seconds
-            if role == "running"
+            if role == RUNNING
             else self.settings.monitoring_default_stale_after_seconds
         )
-        if role in {"running", "reading"} and isinstance(
+        if role in {RUNNING, "reading"} and isinstance(
             notification.value, bool
         ):
             if notification.recorded_at is None:
@@ -917,7 +927,7 @@ class OpcUaCollector:
                     mapping.asset_id,)
                 return
             sample_age = utc_now() - _normalize_notification_timestamp(notification.recorded_at, notification.node_id)
-            if role == "running" and sample_age < -timedelta(seconds=stale_after):
+            if role == RUNNING and sample_age < -timedelta(seconds=stale_after):
                 LOGGER.warning(
                     "Ignoring OPC UA running sample stamped in the future for asset %s (%.0f s ahead)",
                     mapping.asset_id,
@@ -960,9 +970,9 @@ class OpcUaCollector:
                     session.flush()
                 signal_at = (
                     state.last_cycle_signal_at
-                    if role == "cycle"
+                    if role == CYCLE
                     else state.last_running_signal_at
-                    if role == "running"
+                    if role == RUNNING
                     else None
                 )
                 if signal_at is not None and recorded_at < signal_at:
@@ -994,7 +1004,7 @@ class OpcUaCollector:
                 )
                 state.updated_at = recorded_at
 
-                if role == "cycle":
+                if role == CYCLE:
                     previous_cycle_count = state.cycle_count
                     state.last_cycle_signal_at = recorded_at
                     self._apply_cycle_signal(
@@ -1021,7 +1031,7 @@ class OpcUaCollector:
                             ),
                             runtime_gap_seconds=self.settings.runtime_freshness_seconds,
                         )
-                elif role == "running":
+                elif role == RUNNING:
                     state.last_running_signal_at = recorded_at
                     was_running = state.is_running
                     self._apply_running_signal(
@@ -1236,7 +1246,7 @@ def machine_status_rows(
             mapping.asset_id
             for node_mappings in collector._node_mappings.values()
             for mapping, role, _ in node_mappings
-            if role in {"cycle", "running"}
+            if role in {CYCLE, RUNNING}
         }
         if collector is not None
         else set()
@@ -1268,7 +1278,7 @@ def machine_status_rows(
         .outerjoin(MonitoringRule, MonitoringRule.id == Alert.rule_id)
         .where(
             Alert.target_asset_id.in_(asset_ids),
-            Alert.status == "active",
+            Alert.status == STATUS_ACTIVE,
             or_(
                 Alert.maintenance_schedule_id.is_not(None),
                 and_(
@@ -1313,9 +1323,9 @@ def machine_status_rows(
                 "asset_id": mapping.asset_id,
                 "asset_name": asset.name if asset else None,
                 "status": (
-                    "running" if state and state.is_running is True and signal_fresh
+                    RUNNING if state and state.is_running is True and signal_fresh
                     else "stopped" if state and state.is_running is False
-                    else "unknown"
+                    else STATUS_UNKNOWN
                 ),
                 "is_running": (state.is_running if signal_fresh or (state and state.is_running is False) else None) if state else None,
                 "cycle_count": state.cycle_count if state else 0,

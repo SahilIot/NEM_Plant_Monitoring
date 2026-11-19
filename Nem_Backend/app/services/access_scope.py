@@ -1,23 +1,5 @@
-"""Asset-assignment access scope shared by the REST routes and live updates.
 
-Rules
-  Administrators are unrestricted.
-  Assignment is parent-only: access is granted by assigning a top-level (root)
-  asset, which gives the user that asset and every descendant beneath it. A row in
-  nem_asset_supervisors that points at a child asset (one that has a parent) is
-  not valid, grants nothing and is ignored: there is no independent child access and
-  no fallback. Access never flows upward or sideways.
-  An active non-administrator with no assignments reaches nothing.
-  Sessions that were not opened for an authenticated API request (background
-  workers, the OPC UA collector, the email worker) are system sessions and are
-  not restricted. Request sessions are marked by ``get_db``; a request session
-  without a resolvable active user is denied everything (fail closed).
-
-Callers answer "not found" (404) for an asset outside the scope so that the
-response is identical to a missing asset and does not reveal that it exists.
-"""
 from __future__ import annotations
-
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Iterable
@@ -62,12 +44,6 @@ NO_ACCESS = AccessScope(unrestricted=False)
 
 
 def _descendants_of(session: Session, roots: set[int]) -> frozenset[int]:
-    """Return the existing roots plus all of their descendants.
-    Starts from the explicitly assigned roots only and expands one level at a time
-    (children of the current frontier), so the whole asset table is never scanned and
-    an unassigned parent never leads to its children. Stale root ids are dropped.
-    Cycle-safe.
-    """
     if not roots:
         return frozenset()
     visible: set[int] = set(session.scalars(select(Asset.id).where(Asset.id.in_(sorted(roots)))).all())
@@ -118,13 +94,7 @@ def access_scope(session: Session) -> AccessScope:
 # Controlled internal access -> purpose to allow a specific internal operation to bypass the caller`s asset restrictions.`
 @contextmanager
 def internal_propagation_scope(session: Session):
-    """Run internal propagation of a shared-rule edit without the caller's asset filter.
-    Editing a shared rule updates every asset rule created from it, including assets
-    the editing Supervisor cannot reach. The affected rows are selected by the rule's
-    own assignments (source_template_id), never by the caller's scope, and
-    nothing about those assets is returned to the caller. Use only around that
-    internal loop; request-level asset checks stay in force everywhere else.
-    """
+
     previous = session.info.get(_CACHE_KEY)
     session.info[_CACHE_KEY] = UNRESTRICTED
     try:
@@ -177,13 +147,7 @@ def require_rule_access(session: Session, rule, detail: str | None = None) -> No
 
 # This function applies asset scope to INstruction & Document.
 def hidden_document_ids(session: Session) -> set[int]:
-    """Instruction documents a restricted caller must not see.
-    A document attached to maintenance schedules is visible when at least one of
-    those schedules is on an asset inside the scope. Otherwise a document linked
-    to an asset (``asset_id``) is visible only when that asset is in scope.
-    Documents with neither link form a shared library and stay visible to every
-    signed-in user.
-    """
+
     scope = access_scope(session)
     if scope.unrestricted:
         return set()

@@ -15,6 +15,17 @@ from app.models.rule import Alert
 from app.models.variable import Variable
 from app.services.email_notifications import enqueue_alert_notifications
 from app.services.monitoring_engine import emit_event
+from app.core.constants import (
+    BOOLEAN,
+    CYCLE,
+    RUNNING,
+    RUNTIME,
+    STATUS_ACTIVE,
+    STATUS_IN_PROGRESS,
+    STATUS_PLANNED,
+    STATUS_WARNING,
+    USAGE,
+)
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -30,23 +41,15 @@ def expire_stale_runtime_schedules(
     now: datetime,
     freshness_seconds: int,
 ) -> int:
-    """Mark runtime schedules whose running signal is no longer confirmed as not running.
 
-    Running-hours rules notice a stale signal on every evaluation pass. A schedule only changes when a
-    sample arrives, so without this a stopped or silent signal would leave it looking live until the
-    next unrelated refresh. Once the last confirmed sample is older than the runtime freshness limit the
-    running flag is cleared (progress and ``last_signal_at`` are kept, nothing is credited), which also
-    tells connected clients to stop extending the value. The next fresh sample only re-sets the baseline,
-    exactly like after a reconnect. This does not commit.
-    """
     if freshness_seconds < 1:
         return 0
     cutoff = _as_utc(now) - timedelta(seconds=freshness_seconds)
     schedules = session.scalars(
         select(MaintenanceSchedule)
         .where(
-            MaintenanceSchedule.schedule_mode == "runtime",
-            MaintenanceSchedule.status == "active",
+            MaintenanceSchedule.schedule_mode == RUNTIME,
+            MaintenanceSchedule.status == STATUS_ACTIVE,
             MaintenanceSchedule.last_signal_value.is_(True),
             MaintenanceSchedule.last_signal_at.is_not(None),
             MaintenanceSchedule.last_signal_at < cutoff,
@@ -65,12 +68,7 @@ def update_maintenance_progress(
     stale_after_seconds: int,
     runtime_gap_seconds: int | None = None,
 ) -> int:
-    """
-    Update runtime- and usage-based maintenance progress.
 
-    This function does not commit. The calling reading-ingestion
-    transaction owns the commit or rollback.
-    """
     if not readings:
         return 0
 
@@ -94,8 +92,8 @@ def update_maintenance_progress(
             .where(
                 MaintenanceSchedule.signal_variable_id == reading.variable_id,
                 MaintenanceSchedule.asset_id == reading.asset_id,
-                MaintenanceSchedule.schedule_mode.in_(("runtime", "usage")),
-                MaintenanceSchedule.status == "active",
+                MaintenanceSchedule.schedule_mode.in_((RUNTIME, USAGE)),
+                MaintenanceSchedule.status == STATUS_ACTIVE,
             )
             .with_for_update()
         ).all()
@@ -109,8 +107,8 @@ def update_maintenance_progress(
             if variable is None or not variable.is_active:
                 continue
 
-            expected_role = ("running" if schedule.schedule_mode == "runtime" else "cycle")
-            if variable.data_type != "boolean" or variable.signal_role != expected_role:
+            expected_role = (RUNNING if schedule.schedule_mode == RUNTIME else CYCLE)
+            if variable.data_type != BOOLEAN or variable.signal_role != expected_role:
                 continue
 
             current_at = _as_utc(reading.recorded_at)
@@ -132,7 +130,7 @@ def update_maintenance_progress(
                 and 0 < elapsed_seconds <= stale_after_seconds
             )
 
-            if schedule.schedule_mode == "runtime":
+            if schedule.schedule_mode == RUNTIME:
                 # Count only the interval during which the previous sample confirmed that the machine
                 # was running, and only across a short gap: an outage or a run of bad-quality reads
                 # must never be added to runtime (cycles keep the general stale limit).
@@ -171,7 +169,7 @@ def update_maintenance_progress(
                 select(Alert)
                 .where(
                     Alert.maintenance_schedule_id == schedule.id,
-                    Alert.status == "active",
+                    Alert.status == STATUS_ACTIVE,
                 )
                 .order_by(Alert.id)
                 .with_for_update()
@@ -182,7 +180,7 @@ def update_maintenance_progress(
                 select(MaintenanceRecord)
                 .where(
                     MaintenanceRecord.schedule_id == schedule.id,
-                    MaintenanceRecord.status.in_(("planned", "in_progress")),
+                    MaintenanceRecord.status.in_((STATUS_PLANNED, STATUS_IN_PROGRESS)),
                 )
                 .order_by(MaintenanceRecord.id)
                 .with_for_update()
@@ -230,20 +228,20 @@ def update_maintenance_progress(
                     maintenance_due_date=occurrence_date,
                     target_asset_id=schedule.asset_id,
                     target_variable_id=schedule.signal_variable_id,
-                    severity="warning",
+                    severity=STATUS_WARNING,
                     title=(
                         "Runtime maintenance due"
-                        if schedule.schedule_mode == "runtime"
+                        if schedule.schedule_mode == RUNTIME
                         else "Usage maintenance due"
                     ),
                     message=(
                         f"{schedule.title} reached its "
-                        f"{threshold} {'running hours' if schedule.schedule_mode == 'runtime' else 'cycles'} "
+                        f"{threshold} {'running hours' if schedule.schedule_mode == RUNTIME else 'cycles'} "
                         f"maintenance interval."
                     ),
                     trigger_value=schedule.current_progress,
                     threshold=Decimal(str(threshold)),
-                    status="active",
+                    status=STATUS_ACTIVE,
                     started_at=current_at,
                     last_updated_at=current_at,
                 )
@@ -258,7 +256,7 @@ def update_maintenance_progress(
                 notes=schedule.description,
                 performed_by=schedule.assigned_technician or "Unassigned",
                 maintenance_type=schedule.maintenance_type,
-                status="planned",
+                status=STATUS_PLANNED,
                 planned_start_at=current_at,
                 planned_end_at=current_at,
                 planned_due_date=None,
@@ -282,14 +280,14 @@ def update_maintenance_progress(
                 session,
                 event_type=(
                     "maintenance_runtime_due"
-                    if schedule.schedule_mode == "runtime"
+                    if schedule.schedule_mode == RUNTIME
                     else "maintenance_usage_due"
                 ),
                 message=alert.message,
                 occurred_at=current_at,
                 asset_id=schedule.asset_id,
                 alert_id=alert.id,
-                severity="warning",
+                severity=STATUS_WARNING,
                 metadata={
                     "maintenance_schedule_id": schedule.id,
                     "maintenance_record_id": record.id,
@@ -297,7 +295,7 @@ def update_maintenance_progress(
                     "progress": schedule.current_progress,
                     "threshold": threshold,
                     "progress_unit": (
-                        "hours" if schedule.schedule_mode == "runtime" else "cycles"
+                        "hours" if schedule.schedule_mode == RUNTIME else "cycles"
                     ),
                     "signal_variable_id": schedule.signal_variable_id,
                 },

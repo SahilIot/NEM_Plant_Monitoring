@@ -12,6 +12,17 @@ from sqlalchemy.orm import Session
 from app.models import Alert, Asset, MaintenanceRecord, MaintenanceSchedule
 from app.services.email_notifications import enqueue_alert_notifications
 from app.services.monitoring_engine import emit_event
+from app.core.constants import (
+    CALENDAR,
+    RUNTIME,
+    STATUS_ACTIVE,
+    STATUS_COMPLETED,
+    STATUS_IN_PROGRESS,
+    STATUS_PLANNED,
+    STATUS_RESOLVED,
+    STATUS_WARNING,
+    USAGE,
+)
 
 RECURRENCE_UNITS = {"days", "weeks", "months", "years"}
 # Determine the maintenance status
@@ -24,7 +35,7 @@ def due_status(
     awaiting_approval: bool = False,
 ) -> str:
     if completed:
-        return "completed"
+        return STATUS_COMPLETED
     if awaiting_approval:
         return "awaiting_approval"
     if cancelled or due_date is None:
@@ -69,7 +80,7 @@ def _live_occurrence_exists(schedule_id, due_date):
     return exists().where(
         MaintenanceRecord.schedule_id == schedule_id,
         MaintenanceRecord.planned_due_date == due_date,
-        MaintenanceRecord.status.in_(("planned", "in_progress")),
+        MaintenanceRecord.status.in_((STATUS_PLANNED, STATUS_IN_PROGRESS)),
     )
 
 # Resolve orphaned maintenance due alerts.
@@ -80,7 +91,7 @@ def resolve_orphaned_due_alerts(session: Session) -> int:
         select(Alert)
         .where(
             Alert.maintenance_schedule_id.is_not(None),
-            Alert.status == "active",
+            Alert.status == STATUS_ACTIVE,
         )
         .with_for_update()
     ).all()
@@ -99,13 +110,13 @@ def resolve_orphaned_due_alerts(session: Session) -> int:
 
         # Runtime and usage schedules are linked through alert_id
         # because their planned_due_date is NULL.
-        elif schedule.schedule_mode in {"runtime", "usage"}:
+        elif schedule.schedule_mode in {RUNTIME, USAGE}:
             linked_records = session.scalars(
                 select(MaintenanceRecord)
                 .where(
                     MaintenanceRecord.schedule_id == schedule.id,
                     MaintenanceRecord.alert_id == alert.id,
-                    MaintenanceRecord.status.in_(("planned", "in_progress")),
+                    MaintenanceRecord.status.in_((STATUS_PLANNED, STATUS_IN_PROGRESS)),
                 )
                 .order_by(MaintenanceRecord.id)
                 .limit(2)
@@ -135,7 +146,7 @@ def resolve_orphaned_due_alerts(session: Session) -> int:
                         select(MaintenanceRecord.id).where(
                             MaintenanceRecord.id == schedule.current_occurrence_id,
                             MaintenanceRecord.schedule_id == schedule.id,
-                            MaintenanceRecord.status.in_(("planned", "in_progress")),
+                            MaintenanceRecord.status.in_((STATUS_PLANNED, STATUS_IN_PROGRESS)),
                         )
                     ) is not None
                 )
@@ -145,14 +156,14 @@ def resolve_orphaned_due_alerts(session: Session) -> int:
                     select(MaintenanceRecord.id).where(
                         MaintenanceRecord.schedule_id == schedule.id,
                         MaintenanceRecord.planned_due_date == alert.maintenance_due_date,
-                        MaintenanceRecord.status.in_(("planned", "in_progress")),
+                        MaintenanceRecord.status.in_((STATUS_PLANNED, STATUS_IN_PROGRESS)),
                     ).limit(1)
                 )
                 is not None
             )
 
         if not has_live_occurrence:
-            alert.status = "resolved"
+            alert.status = STATUS_RESOLVED
             alert.resolved_at = now
             alert.last_updated_at = now
             resolved_count += 1
@@ -167,8 +178,8 @@ def emit_due_schedule_events(session: Session, *, today: date) -> int:
         .where(
             # No pending occurrence (e.g. it was deleted) means nothing is due.
             _live_occurrence_exists(MaintenanceSchedule.id, MaintenanceSchedule.current_due_date),
-            MaintenanceSchedule.schedule_mode == "calendar",
-            MaintenanceSchedule.status == "active",
+            MaintenanceSchedule.schedule_mode == CALENDAR,
+            MaintenanceSchedule.status == STATUS_ACTIVE,
             MaintenanceSchedule.current_due_date <= today,
             MaintenanceSchedule.approval_status.in_(("not_required", "approved")),
         )
@@ -183,7 +194,7 @@ def emit_due_schedule_events(session: Session, *, today: date) -> int:
             select(Alert).where(
                 Alert.maintenance_schedule_id == schedule.id,
                 Alert.maintenance_due_date == schedule.current_due_date,
-                Alert.status == "active",
+                Alert.status == STATUS_ACTIVE,
             )
         )
         alert_title = f"Maintenance {state.replace('_', ' ')}"
@@ -202,12 +213,12 @@ def emit_due_schedule_events(session: Session, *, today: date) -> int:
                 maintenance_schedule_id=schedule.id,
                 maintenance_due_date=schedule.current_due_date,
                 target_asset_id=schedule.asset_id,
-                severity="warning",
+                severity=STATUS_WARNING,
                 title=alert_title,
                 message=alert_message,
                 trigger_value=None,
                 threshold=None,
-                status="active",
+                status=STATUS_ACTIVE,
                 started_at=now,
                 last_updated_at=now,
             )
@@ -226,7 +237,7 @@ def emit_due_schedule_events(session: Session, *, today: date) -> int:
             occurred_at=now,
             asset_id=schedule.asset_id,
             alert_id=alert.id,
-            severity="warning",
+            severity=STATUS_WARNING,
             metadata={
                 "maintenance_schedule_id": schedule.id,
                 "due_date": schedule.current_due_date.isoformat(),

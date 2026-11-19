@@ -1,26 +1,5 @@
-"""Database backup and restore (dashboard data).
 
-A backup is one ZIP archive (format version 2) written from a single PostgreSQL REPEATABLE READ
-snapshot, so every table shows the same moment in time:
-
-    manifest.json                    format, version, row counts, SHA-256 of every member
-    tables/<table>.jsonl             one JSON object per row, ordered by primary key
-    files/<stored_name>              the uploaded document attachments referenced by the backup
-
-Older backups (format version 1) are a single ``.json`` file holding thirteen tables; they can still be
-restored (see ``_LegacySource``).
-
-Restore is a full replacement of the tables in scope, in two steps. ``analyze_restore`` validates the whole
-archive and reports the impact (including rows OUTSIDE the backup that foreign keys would delete or
-change) without touching anything, and issues a signed confirmation bound to that backup and that exact
-impact. ``restore_backup`` validates again, stages the attachments, and then runs all deletes, inserts and
-sequence resets in ONE database transaction on its own connection (never the caller's session): the impact
-is recomputed under exclusive locks and must still match the confirmation, otherwise the restore is refused;
-any failure rolls back and leaves the data untouched. Files are moved into the upload folder only after the
-commit, and existing upload files are never overwritten or deleted.
-"""
-from __future__ import annotations
-
+from __future__ import annotation
 import base64
 import hashlib
 import hmac
@@ -923,13 +902,7 @@ def _install_file(source: Path, destination: Path) -> None:
 
 
 def _promote_attachments(folder: Path | None, names: list[str], owners: dict[str, tuple[Any, str]]) -> tuple[list[dict[str, Any]], str | None]:
-    """After the commit, put the staged files into the upload folder. Existing files are never overwritten or deleted.
 
-    Names are collision-free after staging, so a failure means the folder is not writable or a different file
-    appeared under that name since. Returns (failures, recovery folder name). On failure the staging folder is kept
-    under a name that is never auto-cleaned, with a recovery.json listing each affected document, so the files
-    can be copied into place later.
-    """
     if folder is None:
         return [], None
     failures: list[dict[str, Any]] = []
@@ -1023,14 +996,6 @@ def _lock_external_tables(connection: Connection, tables: list) -> None:
 
 
 def _external_impact(connection: Connection, tables: list, restored_ids: dict) -> tuple[dict[str, list], list]:
-    """What replacing ``tables`` does to rows outside the backup, by the foreign keys' ON DELETE rules.
-
-    cascade      rows are DELETED together with their parent (outside the backup scope);
-    set_null     the link is cleared; it is put back afterwards when the parent exists in the backup ('relinked');
-    set_default  the column falls back to its default;
-    blockers     RESTRICT / NO ACTION: these rows would make the delete fail, so the restore is refused.
-    Returns (impact, captured links to re-apply after the insert).
-    """
     impact: dict[str, list] = {"cascade": [], "set_null": [], "set_default": [], "blockers": []}
     captured = []
     for table, foreign_key, action in _external_references(tables):
@@ -1455,10 +1420,7 @@ def _safe_backup_file(settings: Settings, filename: str) -> Path | None:
 
 
 def backup_summary(settings: Settings, filename: str, detailed: bool = False) -> dict[str, Any]:
-    """Facts about one stored backup read from its manifest (no database access, no full validation).
-    status: 'ok' | 'warning' (attachment problems or old format) | 'file_missing' | 'unreadable'.
-    Full checksum validation happens in the restore preview.
-    """
+
     path = _safe_backup_file(settings, filename)
     if path is None:
         return {"status": "file_missing", "size_bytes": None, "format_version": None, "warnings": ["The backup file is missing from the server."]}

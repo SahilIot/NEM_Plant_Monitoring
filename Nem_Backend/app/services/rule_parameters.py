@@ -10,10 +10,38 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import Alert, Asset, MonitoringRule, Reading, RuleParameter, RuleParameterState, RuleState, Variable
+from app.core.constants import (
+    ACTIVATION_AT,
+    AGGREGATION,
+    BOOLEAN,
+    CALENDAR,
+    COUNTER,
+    INTERVAL,
+    INTERVAL_PARAMETER,
+    KIND,
+    LIFECYCLE_STATUS,
+    NUMBER,
+    RULE_PARAMETER_THRESHOLD,
+    RULE_TYPE,
+    SCHEDULE,
+    STATUS_ACTIVE,
+    STATUS_ALERT,
+    STATUS_COMPLETED,
+    STATUS_DEACTIVATED,
+    STATUS_IN_PROGRESS,
+    STATUS_NORMAL,
+    STATUS_RESOLVED,
+    STATUS_SUSPENDED,
+    STATUS_UNKNOWN,
+    STATUS_WARNING,
+    TIME,
+    TIMER,
+    USAGE,
+)
 
 LOGGER = logging.getLogger("nem_backend.monitoring")
 
-SEVERITY_ORDER = {"normal": 0, "unknown": 1, "warning": 2, "alert": 3}
+SEVERITY_ORDER = {STATUS_NORMAL: 0, STATUS_UNKNOWN: 1, STATUS_WARNING: 2, STATUS_ALERT: 3}
 SECONDS_PER_HOUR = 3600.0
 # Largest reading id the database accepts as a query parameter (INTEGER). A paused/resumed checkpoint uses it as
 # "skip everything recorded at or before the resume instant"; larger values make PostgreSQL reject the query.
@@ -80,23 +108,23 @@ def number_status(value: float, config: dict[str, Any]) -> tuple[str, str]:
     upper_alert, upper_warning = config.get("upper_alert"), config.get("upper_warning")
     lower_alert, lower_warning = config.get("lower_alert"), config.get("lower_warning")
     if upper_alert is not None and value >= upper_alert:
-        return "alert", f"Upper alert limit {upper_alert:g} reached (value {value:g})."
+        return STATUS_ALERT, f"Upper alert limit {upper_alert:g} reached (value {value:g})."
     if lower_alert is not None and value <= lower_alert:
-        return "alert", f"Lower alert limit {lower_alert:g} reached (value {value:g})."
+        return STATUS_ALERT, f"Lower alert limit {lower_alert:g} reached (value {value:g})."
     if upper_warning is not None and value >= upper_warning:
-        return "warning", f"Upper warning limit {upper_warning:g} reached (value {value:g})."
+        return STATUS_WARNING, f"Upper warning limit {upper_warning:g} reached (value {value:g})."
     if lower_warning is not None and value <= lower_warning:
-        return "warning", f"Lower warning limit {lower_warning:g} reached (value {value:g})."
-    return "normal", f"Within limits (value {value:g})."
+        return STATUS_WARNING, f"Lower warning limit {lower_warning:g} reached (value {value:g})."
+    return STATUS_NORMAL, f"Within limits (value {value:g})."
 
 # Evaluates Due and overdue limits.
 def interval_status(value: float, config: dict[str, Any], unit: str) -> tuple[str, str]:
     due, overdue = config["due"], config["overdue"]
     if value >= overdue:
-        return "alert", f"Overdue: {value:g} {unit} reached the Overdue limit {overdue:g}."
+        return STATUS_ALERT, f"Overdue: {value:g} {unit} reached the Overdue limit {overdue:g}."
     if value >= due:
-        return "warning", f"Due: {value:g} {unit} reached the Due limit {due:g}."
-    return "normal", f"Normal: {value:g} {unit} (Due at {due:g})."
+        return STATUS_WARNING, f"Due: {value:g} {unit} reached the Due limit {due:g}."
+    return STATUS_NORMAL, f"Normal: {value:g} {unit} (Due at {due:g})."
 
 # Fetches the latest variable reading.
 def _latest_reading(session: Session, variable: Variable, not_after: datetime | None = None) -> Reading | None:
@@ -229,12 +257,12 @@ def _evaluate_parameter(
     config = parameter.config or {}
     rule_parameters = rule.parameters or {}
     period = rule_parameters.get("calculation_period_seconds")
-    unknown = lambda message, code, value=None, raw=None: ("unknown", value, raw, message, code)  # noqa: E731
+    unknown = lambda message, code, value=None, raw=None: (STATUS_UNKNOWN, value, raw, message, code)  # noqa: E731
 
-    if parameter.kind == "interval":
-        interval = config.get("interval_parameter")
-        unit = "cycles" if interval == "counter" else "hours"
-        activation = config.get("activation_at")
+    if parameter.kind == INTERVAL:
+        interval = config.get(INTERVAL_PARAMETER)
+        unit = "cycles" if interval == COUNTER else "hours"
+        activation = config.get(ACTIVATION_AT)
         start = _aware(rule.created_at)
         if activation:
             try:
@@ -242,7 +270,7 @@ def _evaluate_parameter(
             except ValueError:
                 return unknown("Scheduled start time is invalid.", "invalid_activation")
         if now < start:
-            return "normal", 0, None, f"Counting starts at {start.isoformat()}.", None
+            return STATUS_NORMAL, 0, None, f"Counting starts at {start.isoformat()}.", None
         if parameter.variable_id is None:  # calendar-based Time interval: no PLC variable
             value = (now - start).total_seconds() / SECONDS_PER_HOUR
             status, message = interval_status(value, config, unit)
@@ -270,7 +298,7 @@ def _evaluate_parameter(
 
     aggregation = parameter.aggregation
     credit_limit = runtime_credit_limit(stale_after, latest.source_id)
-    if parameter.kind == "boolean":
+    if parameter.kind == BOOLEAN:
         if aggregation == "last" and period:
             window_start = now - timedelta(seconds=period)
             reading = _latest_reading(session, variable, not_after=now)
@@ -281,11 +309,11 @@ def _evaluate_parameter(
             return unknown("The latest value is not a valid Boolean.", "invalid_value", raw=raw)
         expected = config["expected"]
         if state == expected:
-            return "normal", state, raw, f"State is {str(state).upper()} as expected.", None
-        return (config.get("severity", "alert"), state, raw,
+            return STATUS_NORMAL, state, raw, f"State is {str(state).upper()} as expected.", None
+        return (config.get("severity", STATUS_ALERT), state, raw,
                 f"State is {str(state).upper()}, expected {str(expected).upper()}.", None)
 
-    if parameter.kind == "number":
+    if parameter.kind == NUMBER:
         if aggregation in {"none", "last"}:
             if aggregation == "last" and period and _aware(latest.recorded_at) < now - timedelta(seconds=period):
                 return unknown("No reading inside the calculation period.", "no_reading_in_period", raw=raw)
@@ -298,19 +326,19 @@ def _evaluate_parameter(
             return unknown("The latest value is not a valid Boolean.", "invalid_value", raw=raw)
         window = period or 3600
         seconds, count = _window_aggregate(session, variable, now - timedelta(seconds=window), now, credit_limit)
-        value = seconds if aggregation == "timer" else float(count)
+        value = seconds if aggregation == TIMER else float(count)
         status, message = number_status(value, config)
         return status, value, raw, f"{aggregation.capitalize()} over the period: " + message, None
 
     # interval parameter with a variable
     if _as_bool(raw) is None:
         return unknown("The latest value is not a valid Boolean.", "invalid_value", raw=raw)
-    interval = config["interval_parameter"]
+    interval = config[INTERVAL_PARAMETER]
     start = _aware(rule.created_at)
-    if config.get("activation_at"):
-        start = max(start, _aware(datetime.fromisoformat(str(config["activation_at"]).replace("Z", "+00:00"))))
+    if config.get(ACTIVATION_AT):
+        start = max(start, _aware(datetime.fromisoformat(str(config[ACTIVATION_AT]).replace("Z", "+00:00"))))
     seconds, count = _cumulative_aggregate(session, parameter_state, variable, start, now, credit_limit)
-    if interval == "counter":
+    if interval == COUNTER:
         value, unit = float(count), "cycles"
     else:
         value, unit = seconds / SECONDS_PER_HOUR, "hours"
@@ -321,12 +349,12 @@ def _evaluate_parameter(
 def triggered_limit(parameter: RuleParameter, status: str, value: Any) -> tuple[float | None, str | None]:
     # The limit a Warning/Alert status crossed, and a short label for it (None for Boolean)
     config = parameter.config or {}
-    if status not in {"warning", "alert"} or not isinstance(value, (int, float)) or isinstance(value, bool):
+    if status not in {STATUS_WARNING, STATUS_ALERT} or not isinstance(value, (int, float)) or isinstance(value, bool):
         return None, None
-    if parameter.kind == "interval":
-        key = "overdue" if status == "alert" else "due"
+    if parameter.kind == INTERVAL:
+        key = "overdue" if status == STATUS_ALERT else "due"
         return config.get(key), key.capitalize()
-    if parameter.kind == "number":
+    if parameter.kind == NUMBER:
         for key, upper in ((f"upper_{status}", True), (f"lower_{status}", False)):
             limit = config.get(key)
             if limit is not None and (value >= limit if upper else value <= limit):
@@ -346,11 +374,11 @@ def _sync_parameter_alert(
     active = session.scalar(
         select(Alert).where(
             Alert.rule_id == rule.id, Alert.target_asset_id == asset.id,
-            Alert.parameter_id == parameter.id, Alert.status == "active",
+            Alert.parameter_id == parameter.id, Alert.status == STATUS_ACTIVE,
         ).order_by(Alert.id.desc()).limit(1)
     )
     meta = {"parameter_id": parameter.id, "parameter_key": parameter.key, "parameter_name": parameter.name}
-    if status in {"warning", "alert"}:
+    if status in {STATUS_WARNING, STATUS_ALERT}:
         threshold, limit_name = triggered_limit(parameter, status, value)
         meta = {**meta, "value": value, "threshold": threshold, "limit": limit_name}
         text = f"{parameter.name}: {message}"
@@ -361,7 +389,7 @@ def _sync_parameter_alert(
                 rule_id=rule.id, target_asset_id=asset.id, target_variable_id=parameter.variable_id,
                 parameter_id=parameter.id, parameter_name=parameter.name, severity=status,
                 title=f"{rule.name} — {parameter.name}", message=text, trigger_value=value,
-                threshold=threshold, status="active", started_at=now, last_updated_at=now,
+                threshold=threshold, status=STATUS_ACTIVE, started_at=now, last_updated_at=now,
             )
             try:
                 with session.begin_nested():
@@ -371,7 +399,7 @@ def _sync_parameter_alert(
                 return  # another worker raised it first
             if notify:  # False when the maintenance "ready to start" email already covers this Due moment
                 enqueue_alert_notifications(session, alert, asset, rule)
-            emit_event(session, event_type="warning_triggered" if status == "warning" else "alert_triggered",
+            emit_event(session, event_type="warning_triggered" if status == STATUS_WARNING else "alert_triggered",
                        message=text, occurred_at=now, asset_id=asset.id, rule_id=rule.id,
                        alert_id=alert.id, severity=status, metadata=meta)
             return
@@ -385,10 +413,10 @@ def _sync_parameter_alert(
                        metadata={**meta, "previous_severity": previous, "new_severity": status})
         active.message, active.trigger_value, active.threshold = text, value, threshold
         active.last_updated_at = now
-    elif status == "normal":
+    elif status == STATUS_NORMAL:
         parameter_state.completed_at = None
         if active is not None:
-            active.status, active.resolved_at, active.last_updated_at = "resolved", now, now
+            active.status, active.resolved_at, active.last_updated_at = STATUS_RESOLVED, now, now
             emit_event(session, event_type="alert_resolved",
                        message=f"Condition cleared: {rule.name} — {parameter.name}", occurred_at=now,
                        asset_id=asset.id, rule_id=rule.id, alert_id=active.id, severity=active.severity,
@@ -396,11 +424,11 @@ def _sync_parameter_alert(
 
 # Calculates the overall status of a multi-parameter rule.
 def overall_summary(results: list[tuple[str, str]]) -> dict[str, Any]:
-    worst = max((s for _n, s in results), key=lambda s: SEVERITY_ORDER[s], default="unknown")
+    worst = max((s for _n, s in results), key=lambda s: SEVERITY_ORDER[s], default=STATUS_UNKNOWN)
     return {
         "status": worst,
         "determined_by": [n for n, s in results if s == worst],
-        "unavailable": [n for n, s in results if s == "unknown"],
+        "unavailable": [n for n, s in results if s == STATUS_UNKNOWN],
     }
 
 UNCHANGED_REWRITE_SECONDS = 5
@@ -433,11 +461,11 @@ def evaluate_multi_parameter(
     results: list[tuple[RuleParameter, str, Any, str]] = []
     skipped = 0
     for parameter in list(rule.parameter_items):
-        if parameter.lifecycle_status != "active":
+        if parameter.lifecycle_status != STATUS_ACTIVE:
             continue  # suspended/deactivated: no evaluation and no alerts; progress and history are kept
         parameter_state = parameter.state
         if parameter_state is None:
-            parameter_state = RuleParameterState(parameter_id=parameter.id, status="unknown", message="")
+            parameter_state = RuleParameterState(parameter_id=parameter.id, status=STATUS_UNKNOWN, message="")
             session.add(parameter_state)
             parameter.state = parameter_state
         previous_reading_at = parameter_state.reading_at
@@ -462,11 +490,11 @@ def evaluate_multi_parameter(
         except Exception:
             # An unexpected failure in one parameter is shown as unavailable; the others still evaluate.
             LOGGER.exception("Parameter %s of rule %s could not be evaluated", parameter.id, rule.id)
-            status, value, raw, message, error = ("unknown", None, None, "This parameter could not be evaluated.", "evaluation_error")
+            status, value, raw, message, error = (STATUS_UNKNOWN, None, None, "This parameter could not be evaluated.", "evaluation_error")
         try:
             # Result, alert and events of ONE parameter are written together or not at all.
             with session.begin_nested():
-                if status != "unknown":
+                if status != STATUS_UNKNOWN:
                     parameter_state.last_valid_value = raw if raw is not None else value
                     parameter_state.last_valid_at = parameter_state.reading_at or now
                 previous_error = parameter_state.error_message
@@ -474,7 +502,7 @@ def evaluate_multi_parameter(
                 parameter_state.message, parameter_state.error_message = message, error
                 parameter_state.last_evaluated_at = now
                 ready_now = False
-                if parameter.kind == "interval" and status != "unknown":
+                if parameter.kind == INTERVAL and status != STATUS_UNKNOWN:
                     try:
                         with session.begin_nested():
                             from app.services.rule_maintenance import apply_evaluation
@@ -482,7 +510,7 @@ def evaluate_multi_parameter(
                     except Exception:  # noqa: BLE001 - a maintenance problem must never stop rule evaluation
                         LOGGER.exception("Maintenance eligibility of parameter %s of rule %s could not be updated", parameter.id, rule.id)
                 _sync_parameter_alert(session, rule, asset, parameter, parameter_state, status, value, message, now,
-                                      notify=not (ready_now and status == "warning"))  # an Overdue alert always sends its own email
+                                      notify=not (ready_now and status == STATUS_WARNING))  # an Overdue alert always sends its own email
                 if error == "stale_reading" and previous_error != "stale_reading":
                     from app.services.monitoring_engine import emit_event
                     emit_event(session, event_type="stale_data_detected", message=f"{parameter.name}: {message}",
@@ -490,15 +518,15 @@ def evaluate_multi_parameter(
                                metadata={"parameter_id": parameter.id, "parameter_name": parameter.name})
         except Exception:
             LOGGER.exception("Result or alert of parameter %s of rule %s could not be saved", parameter.id, rule.id)
-            if status not in {"warning", "alert"}:
-                status, value, message = "unknown", None, "The result of this parameter could not be saved; it will be retried."
+            if status not in {STATUS_WARNING, STATUS_ALERT}:
+                status, value, message = STATUS_UNKNOWN, None, "The result of this parameter could not be saved; it will be retried."
             try:
                 with session.begin_nested():
-                    if status in {"warning", "alert"}:
+                    if status in {STATUS_WARNING, STATUS_ALERT}:
                         parameter_state.status, parameter_state.latest_value, parameter_state.raw_value = status, value, raw
                         parameter_state.message, parameter_state.error_message = message, "alert_not_recorded"
                     else:
-                        parameter_state.status, parameter_state.latest_value, parameter_state.raw_value = "unknown", None, None
+                        parameter_state.status, parameter_state.latest_value, parameter_state.raw_value = STATUS_UNKNOWN, None, None
                         parameter_state.message = "The result of this parameter could not be saved; it will be retried."
                         parameter_state.error_message = "evaluation_error"
                     parameter_state.last_evaluated_at = now
@@ -508,27 +536,27 @@ def evaluate_multi_parameter(
 
     if state is None:
         state = RuleState(rule_id=rule.id, target_asset_id=asset.id, target_variable_id=None,
-                          status="unknown", message="No evaluation has been completed",
+                          status=STATUS_UNKNOWN, message="No evaluation has been completed",
                           last_evaluated_at=now, last_transition_at=now)
         session.add(state)
     if not results:
         items = list(rule.parameter_items)
         if not items:
-            overall, message, headline, error = "unknown", "This rule has no parameters.", None, "no_parameters"
+            overall, message, headline, error = STATUS_UNKNOWN, "This rule has no parameters.", None, "no_parameters"
         else:
-            overall, headline, error = "unknown", None, "no_active_parameters"
+            overall, headline, error = STATUS_UNKNOWN, None, "no_active_parameters"
             message = _no_active_message(items)
     else:
         summary = overall_summary([(p.name, s) for p, s, _v, _m in results])
         overall = summary["status"]
-        if overall == "normal":
+        if overall == STATUS_NORMAL:
             message = f"All {len(results)} parameters are normal."
         else:
             culprits = [f"{p.name}: {m}" for p, s, _v, m in results if s == overall]
             others = len(results) - len(culprits)
             message = " ".join(culprits) + (f" ({others} other parameter(s) not in this state.)" if others else "")
         headline = next((v for _p, s, v, _m in results if s == overall), None)
-        error = "parameter_unavailable" if overall == "unknown" else None
+        error = "parameter_unavailable" if overall == STATUS_UNKNOWN else None
     if (skip_unchanged and results and skipped == len(results) and state.id is not None
             and state.status == overall and state.message == message and state.error_message == error):
         return state  # nothing the rule shows has changed
@@ -546,19 +574,19 @@ def _pause_one(session: Session, rule: MonitoringRule, parameter: RuleParameter,
     parameter_state = parameter.state
     if parameter_state is None:
         return
-    if parameter.kind == "interval" and parameter.variable_id is not None:
+    if parameter.kind == INTERVAL and parameter.variable_id is not None:
         variable = session.get(Variable, parameter.variable_id)
         if variable is not None and not (parameter_state.aggregate_state or {}).get("paused"):
             config = parameter.config or {}
             start = _aware(rule.created_at)
-            if config.get("activation_at"):
+            if config.get(ACTIVATION_AT):
                 try:
-                    start = max(start, _aware(datetime.fromisoformat(str(config["activation_at"]).replace("Z", "+00:00"))))
+                    start = max(start, _aware(datetime.fromisoformat(str(config[ACTIVATION_AT]).replace("Z", "+00:00"))))
                 except ValueError:
                     pass
             seconds, count = _cumulative_aggregate(session, parameter_state, variable, start, now,
                                                    effective_stale_after(rule), max_batches=PAUSE_BATCH_LIMIT)
-            parameter_state.latest_value = float(count) if config.get("interval_parameter") == "counter" else seconds / SECONDS_PER_HOUR
+            parameter_state.latest_value = float(count) if config.get(INTERVAL_PARAMETER) == COUNTER else seconds / SECONDS_PER_HOUR
             checkpoint = dict(parameter_state.aggregate_state or {})
             if checkpoint.get("backlog"):
                 checkpoint["fold_until"] = now.isoformat()
@@ -566,7 +594,7 @@ def _pause_one(session: Session, rule: MonitoringRule, parameter: RuleParameter,
                 checkpoint.update(seconds=seconds, prev=None, prev_at=None)
             checkpoint["paused"] = True
             parameter_state.aggregate_state = checkpoint
-    parameter_state.status = "unknown"
+    parameter_state.status = STATUS_UNKNOWN
     parameter_state.message = message
     parameter_state.error_message = error
     parameter_state.last_evaluated_at = now
@@ -590,19 +618,19 @@ def _resume_one(parameter: RuleParameter, now: datetime) -> None:
 # Pauses parameters evaluation and progress.
 def pause_parameters(session: Session, rule: MonitoringRule, now: datetime) -> None:
     for parameter in rule.parameter_items:
-        if parameter.lifecycle_status == "active":
+        if parameter.lifecycle_status == STATUS_ACTIVE:
             _pause_one(session, rule, parameter, now, "Rule is not active; the parameter is not being evaluated.", "rule_inactive")
 
 # Resumes evaluation.
 def resume_parameters(session: Session, rule: MonitoringRule, now: datetime) -> None:
     # Rule resumed/activated: resume only parameters that are themselves active.
     for parameter in rule.parameter_items:
-        if parameter.lifecycle_status == "active":
+        if parameter.lifecycle_status == STATUS_ACTIVE:
             _resume_one(parameter, now)
 
 # Returns a message explaining why no parameter is being evaluated.
 def _no_active_message(items: list[RuleParameter]) -> str:
-    suspended = sum(1 for p in items if p.lifecycle_status == "suspended")
+    suspended = sum(1 for p in items if p.lifecycle_status == STATUS_SUSPENDED)
     if suspended == len(items):
         return "All parameters are suspended; nothing is being evaluated."
     if suspended == 0:
@@ -612,10 +640,10 @@ def _no_active_message(items: list[RuleParameter]) -> str:
 
 PARAMETER_LIFECYCLE_ACTIONS = {
     # action: (allowed current states, new state)
-    "suspend": ({"active"}, "suspended"),
-    "resume": ({"suspended"}, "active"),
-    "deactivate": ({"active", "suspended"}, "deactivated"),
-    "activate": ({"deactivated"}, "active"),
+    "suspend": ({STATUS_ACTIVE}, STATUS_SUSPENDED),
+    "resume": ({STATUS_SUSPENDED}, STATUS_ACTIVE),
+    "deactivate": ({STATUS_ACTIVE, STATUS_SUSPENDED}, STATUS_DEACTIVATED),
+    "activate": ({STATUS_DEACTIVATED}, STATUS_ACTIVE),
 }
 
 # Suspends, resumes, deactivates or deactivates one parameter.
@@ -627,15 +655,15 @@ def change_parameter_lifecycle(session: Session, rule: MonitoringRule, parameter
     if parameter.lifecycle_status not in allowed:
         raise ValueError(f"A {parameter.lifecycle_status} parameter cannot be {action}d.")
     asset = session.get(Asset, rule.target_asset_id) if rule.target_asset_id else None
-    rule_running = rule.is_enabled and rule.lifecycle_status == "in_progress"
+    rule_running = rule.is_enabled and rule.lifecycle_status == STATUS_IN_PROGRESS
     meta = {"parameter_id": parameter.id, "parameter_key": parameter.key, "parameter_name": parameter.name,
             "previous": parameter.lifecycle_status, "new": target}
-    if target == "active":
-        parameter.lifecycle_status = "active"
+    if target == STATUS_ACTIVE:
+        parameter.lifecycle_status = STATUS_ACTIVE
         if rule_running:
             _resume_one(parameter, now)  # a paused rule resumes it later, together with the rule
         if parameter.state is not None:
-            parameter.state.status, parameter.state.error_message = "unknown", None
+            parameter.state.status, parameter.state.error_message = STATUS_UNKNOWN, None
             parameter.state.message = ("Resumed; waiting for evaluation." if rule_running
                                        else "Rule is not active; the parameter is not being evaluated.")
             parameter.state.completed_at = None
@@ -643,32 +671,32 @@ def change_parameter_lifecycle(session: Session, rule: MonitoringRule, parameter
         parameter.lifecycle_status = target
         # Same as a rule being turned off: this parameter's open alert is closed, its history stays.
         for alert in session.scalars(select(Alert).where(
-                Alert.parameter_id == parameter.id, Alert.status == "active")).all():
-            alert.status, alert.resolved_at, alert.last_updated_at = "resolved", now, now
+                Alert.parameter_id == parameter.id, Alert.status == STATUS_ACTIVE)).all():
+            alert.status, alert.resolved_at, alert.last_updated_at = STATUS_RESOLVED, now, now
         _pause_one(session, rule, parameter, now, f"Parameter is {target}; it is not being evaluated.", f"parameter_{target}")
         if parameter.state is not None:
             parameter.state.completed_at = None
-    emit_event(session, event_type=f"parameter_{ {'suspend': 'suspended', 'resume': 'resumed', 'deactivate': 'deactivated', 'activate': 'activated'}[action] }",
-               message=f"Parameter '{parameter.name}' of rule '{rule.name}' {target if target != 'active' else 'activated'}.",
+    emit_event(session, event_type=f"parameter_{ {'suspend': STATUS_SUSPENDED, 'resume': 'resumed', 'deactivate': STATUS_DEACTIVATED, 'activate': 'activated'}[action] }",
+               message=f"Parameter '{parameter.name}' of rule '{rule.name}' {target if target != STATUS_ACTIVE else 'activated'}.",
                occurred_at=now, asset_id=asset.id if asset else None, rule_id=rule.id, metadata=meta)
     session.flush()
     _refresh_rule_state(session, rule, now)
 
 # Updates the overall state of a multi-parameter rule, based on the current states of its parameters.
 def _refresh_rule_state(session: Session, rule: MonitoringRule, now: datetime) -> None:
-    if not (rule.is_enabled and rule.lifecycle_status == "in_progress"):
+    if not (rule.is_enabled and rule.lifecycle_status == STATUS_IN_PROGRESS):
         return
     state = session.scalar(select(RuleState).where(RuleState.rule_id == rule.id))
     if state is None:
         return
-    live = [p for p in rule.parameter_items if p.lifecycle_status == "active"]
+    live = [p for p in rule.parameter_items if p.lifecycle_status == STATUS_ACTIVE]
     if not live:
-        overall, message, error = "unknown", _no_active_message(list(rule.parameter_items)), "no_active_parameters"
+        overall, message, error = STATUS_UNKNOWN, _no_active_message(list(rule.parameter_items)), "no_active_parameters"
     else:
         # A parameter that was just resumed has no fresh result yet, so it counts as Not Evaluated.
-        summary = overall_summary([(p.name, p.state.status if p.state else "unknown") for p in live])
-        overall, error = summary["status"], ("parameter_unavailable" if summary["status"] == "unknown" else None)
-        message = (f"All {len(live)} evaluated parameter(s) are normal." if overall == "normal"
+        summary = overall_summary([(p.name, p.state.status if p.state else STATUS_UNKNOWN) for p in live])
+        overall, error = summary["status"], ("parameter_unavailable" if summary["status"] == STATUS_UNKNOWN else None)
+        message = (f"All {len(live)} evaluated parameter(s) are normal." if overall == STATUS_NORMAL
                    else f"Worst parameter: {', '.join(summary['determined_by'])}.")
     if state.status != overall:
         state.last_transition_at = now
@@ -682,7 +710,7 @@ def reset_parameter_baseline(session: Session, parameter: RuleParameter) -> bool
     if state is None:
         return False
     state.aggregate_state = None
-    state.status, state.message = "unknown", "Parameter was edited; waiting for evaluation."
+    state.status, state.message = STATUS_UNKNOWN, "Parameter was edited; waiting for evaluation."
     session.info.setdefault("parameter_state_resets", []).append((parameter.rule_id, parameter.id))
     return True
 
@@ -701,9 +729,9 @@ def archive_removed_parameter(session: Session, rule: MonitoringRule, parameter:
 
     state = parameter.state
     snapshot = {
-        "parameter_id": parameter.id, "key": parameter.key, "name": parameter.name, "kind": parameter.kind,
-        "variable_id": parameter.variable_id, "aggregation": parameter.aggregation, "config": plain(parameter.config),
-        "lifecycle_status": parameter.lifecycle_status, "created_at": plain(parameter.created_at), "reason": reason,
+        "parameter_id": parameter.id, "key": parameter.key, "name": parameter.name, KIND: parameter.kind,
+        "variable_id": parameter.variable_id, AGGREGATION: parameter.aggregation, "config": plain(parameter.config),
+        LIFECYCLE_STATUS: parameter.lifecycle_status, "created_at": plain(parameter.created_at), "reason": reason,
         "last_state": None if state is None else plain({
             "status": state.status, "value": state.latest_value, "raw_value": state.raw_value, "message": state.message,
             "last_evaluated_at": state.last_evaluated_at, "last_valid_value": state.last_valid_value,
@@ -723,12 +751,12 @@ def serialize_parameters(rule: MonitoringRule) -> list[dict[str, Any]]:
             "key": parameter.key,
             "name": parameter.name,
             "position": parameter.position,
-            "kind": parameter.kind,
+            KIND: parameter.kind,
             "variable_id": parameter.variable_id,
-            "aggregation": parameter.aggregation,
+            AGGREGATION: parameter.aggregation,
             "config": parameter.config,
-            "lifecycle_status": parameter.lifecycle_status,
-            "status": state.status if state else "unknown",
+            LIFECYCLE_STATUS: parameter.lifecycle_status,
+            "status": state.status if state else STATUS_UNKNOWN,
             # Evaluated (aggregated) value, distinct from the raw PLC value.
             "value": state.latest_value if state else None,
             "raw_value": state.raw_value if state else None,
@@ -751,7 +779,7 @@ def _alert_view(alert: Alert) -> dict[str, Any]:
         "resolved_at": alert.resolved_at, "acknowledged_at": alert.acknowledged_at,
         "acknowledged_by": alert.acknowledged_by,
         # Active alerts are open until completed; resolved ones were completed or cleared.
-        "workflow": ("completed" if alert.status == "resolved" else
+        "workflow": (STATUS_COMPLETED if alert.status == STATUS_RESOLVED else
                      "acknowledged" if alert.acknowledged_at else "open"),
     }
 
@@ -772,53 +800,53 @@ def build_status_detail(session: Session, rule: MonitoringRule, now: datetime | 
         select(Variable).where(Variable.id.in_([p["variable_id"] for p in parameters if p["variable_id"]]))
     ).all()} if parameters else {}
 
-    active = rule.is_enabled and rule.lifecycle_status == "in_progress"
+    active = rule.is_enabled and rule.lifecycle_status == STATUS_IN_PROGRESS
     for item in parameters:
         variable = variables.get(item["variable_id"])
         item["variable_name"] = variable.name if variable else None
         item["unit"] = (variable.unit if variable else None) or (
-            "hours" if item["kind"] == "interval" and (item["config"] or {}).get("interval_parameter") in {"usage", "time"}
-            else "cycles" if item["kind"] == "interval" else None)
+            "hours" if item[KIND] == INTERVAL and (item["config"] or {}).get(INTERVAL_PARAMETER) in {USAGE, TIME}
+            else "cycles" if item[KIND] == INTERVAL else None)
         reading_at = item["reading_at"]
         age = (now - _aware(reading_at)).total_seconds() if reading_at else None
         item["reading_age_seconds"] = age
         item["is_stale"] = bool(item["variable_id"]) and (age is None or age > stale_after)
         # A parameter that is not in a usable state is reported on its own and never counted as Normal.
-        lifecycle = item["lifecycle_status"]
-        evaluating = active and lifecycle == "active"
+        lifecycle = item[LIFECYCLE_STATUS]
+        evaluating = active and lifecycle == STATUS_ACTIVE
         item["evaluating"] = evaluating
         if not active:
             # A suspended/deactivated rule is not evaluating: never show a leftover value or status.
-            item["status"], item["value"], item["active_alert"] = "unknown", None, None
-        elif lifecycle != "active":
+            item["status"], item["value"], item["active_alert"] = STATUS_UNKNOWN, None, None
+        elif lifecycle != STATUS_ACTIVE:
             # Suspended/deactivated parameter: no status, but its preserved progress stays visible.
-            item["status"] = "unknown"
+            item["status"] = STATUS_UNKNOWN
         item["availability"] = ("inactive" if not active else
-                                lifecycle if lifecycle != "active" else
-                                "available" if item["status"] != "unknown" else
+                                lifecycle if lifecycle != STATUS_ACTIVE else
+                                "available" if item["status"] != STATUS_UNKNOWN else
                                 "variable_inactive" if item["error"] == "variable_inactive" else
                                 "awaiting_reading" if item["error"] == "awaiting_fresh_reading" else
                                 "stale" if item["error"] == "stale_reading" else "unavailable")
-        item["schedule"] = None
-        if item["kind"] == "interval":
+        item[SCHEDULE] = None
+        if item[KIND] == INTERVAL:
             config = item["config"] or {}
             start = _aware(rule.created_at)
-            if config.get("activation_at"):
+            if config.get(ACTIVATION_AT):
                 try:
-                    start = max(start, _aware(datetime.fromisoformat(str(config["activation_at"]).replace("Z", "+00:00"))))
+                    start = max(start, _aware(datetime.fromisoformat(str(config[ACTIVATION_AT]).replace("Z", "+00:00"))))
                 except ValueError:
                     pass
-            item["schedule"] = {"start_at": start}
-            if config.get("interval_parameter") == "time" and config.get("due") is not None:
+            item[SCHEDULE] = {"start_at": start}
+            if config.get(INTERVAL_PARAMETER) == TIME and config.get("due") is not None:
                 # Calendar intervals: the dates the Due and Overdue limits fall on (hours after activation).
-                item["schedule"]["due_at"] = start + timedelta(hours=float(config["due"]))
-                item["schedule"]["overdue_at"] = start + timedelta(hours=float(config["overdue"]))
+                item[SCHEDULE]["due_at"] = start + timedelta(hours=float(config["due"]))
+                item[SCHEDULE]["overdue_at"] = start + timedelta(hours=float(config["overdue"]))
         item["live"] = None
-        if item["kind"] == "interval" and evaluating and item["status"] != "unknown" and item["last_evaluated_at"]:
+        if item[KIND] == INTERVAL and evaluating and item["status"] != STATUS_UNKNOWN and item["last_evaluated_at"]:
             config = item["config"] or {}
-            if item["variable_id"] is None and config.get("interval_parameter") == "time":
-                item["live"] = {"mode": "calendar", "baseline_at": item["last_evaluated_at"]}
-            elif item["aggregation"] == "timer" and config.get("interval_parameter") in {"usage", "time"}:
+            if item["variable_id"] is None and config.get(INTERVAL_PARAMETER) == TIME:
+                item["live"] = {"mode": CALENDAR, "baseline_at": item["last_evaluated_at"]}
+            elif item[AGGREGATION] == TIMER and config.get(INTERVAL_PARAMETER) in {USAGE, TIME}:
                 # Freshness comes from the newest reading (the collector re-reads running signals between two
                 # evaluations) and uses the same running-signal timeout as the evaluator's runtime credit.
                 newest = _latest_reading(session, variables[item["variable_id"]], not_after=now) if item["variable_id"] in variables else None
@@ -830,28 +858,28 @@ def build_status_detail(session: Session, rule: MonitoringRule, now: datetime | 
                 # little later than the evaluation instant, so the value is exact as of the later of the two.
                 baseline = max(_aware(item["last_evaluated_at"]), _aware(item["reading_at"])) if item["reading_at"] else item["last_evaluated_at"]
                 item["live"] = {
-                    "mode": "timer",
+                    "mode": TIMER,
                     "baseline_at": baseline,
                     # Already credited up to the timeout: the stored value is final, the display must not move.
                     "running": bool(_as_bool(state_value) is True and fresh_until is not None and fresh_until > _aware(baseline)),
                     "running_until": fresh_until,
                 }
         history = [_alert_view(a) for a in alerts_by_parameter.get(item["id"], [])]
-        item["active_alert"] = next((a for a in history if a["status"] == "active"), None)
+        item["active_alert"] = next((a for a in history if a["status"] == STATUS_ACTIVE), None)
         item["alert_history"] = history[:10]
 
     # Only parameters that are actually being evaluated take part in the parent status.
     evaluated_items = [p for p in parameters if p["evaluating"]]
     summary = overall_summary([(p["name"], p["status"]) for p in evaluated_items])
     determined_by = [p["id"] for p in evaluated_items if p["status"] == summary["status"]]
-    counts = {name: sum(1 for p in parameters if p["lifecycle_status"] == name) for name in ("active", "suspended", "deactivated")}
+    counts = {name: sum(1 for p in parameters if p[LIFECYCLE_STATUS] == name) for name in (STATUS_ACTIVE, STATUS_SUSPENDED, STATUS_DEACTIVATED)}
     if not active:
         mode = "rule_inactive"
     elif evaluated_items:
         mode = "evaluating"
-    elif parameters and counts["deactivated"] == len(parameters):
+    elif parameters and counts[STATUS_DEACTIVATED] == len(parameters):
         mode = "all_deactivated"
-    elif parameters and counts["suspended"] == len(parameters):
+    elif parameters and counts[STATUS_SUSPENDED] == len(parameters):
         mode = "all_suspended"
     else:
         mode = "no_active_parameters"
@@ -859,21 +887,21 @@ def build_status_detail(session: Session, rule: MonitoringRule, now: datetime | 
     category = (rule.parameters or {}).get("category")
     return {
         "rule": {
-            "id": rule.id, "name": rule.name, "rule_type": rule.rule_type,
-            "type": "interval_based" if category == "interval_based" else "parameter_threshold",
-            "is_enabled": rule.is_enabled, "lifecycle_status": rule.lifecycle_status, "completed_at": rule.completed_at,
+            "id": rule.id, "name": rule.name, RULE_TYPE: rule.rule_type,
+            "type": "interval_based" if category == "interval_based" else RULE_PARAMETER_THRESHOLD,
+            "is_enabled": rule.is_enabled, LIFECYCLE_STATUS: rule.lifecycle_status, "completed_at": rule.completed_at,
             "asset_id": rule.target_asset_id, "asset_name": asset.name if asset else None,
             "calculation_period_seconds": (rule.parameters or {}).get("calculation_period_seconds"),
             "stale_after_seconds": stale_after,
         },
         "overall": {
-            "status": summary["status"] if evaluated_items else "unknown",
+            "status": summary["status"] if evaluated_items else STATUS_UNKNOWN,
             "evaluating": bool(evaluated_items),
             "mode": mode,
             "counts": counts,
             "strategy": "worst_parameter_wins",
             "determined_by": determined_by,
-            "unavailable_ids": [p["id"] for p in evaluated_items if p["status"] == "unknown"],
+            "unavailable_ids": [p["id"] for p in evaluated_items if p["status"] == STATUS_UNKNOWN],
             "parameter_count": len(parameters),
             "rule_state_status": rule_state.status if rule_state else None,
             "message": rule_state.message if rule_state else "",

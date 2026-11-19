@@ -39,6 +39,14 @@ from app.services.monitoring_engine import (
     set_rule_enabled_state,
     utc_now,
 )
+from app.core.constants import (
+    STATUS_ACTIVE,
+    STATUS_COMPLETED,
+    STATUS_IN_PROGRESS,
+    STATUS_PLANNED,
+    STATUS_RESOLVED,
+    STATUS_UNKNOWN,
+)
 
 router = APIRouter(tags=["monitoring", "alerts", "events"])
 
@@ -72,7 +80,7 @@ def state_for_rule(session: Session, rule: MonitoringRule) -> RuleStateRead:
             rule_id=rule.id,
             target_asset_id=asset_id,
             target_variable_id=rule.variable_id,
-            status="unknown",
+            status=STATUS_UNKNOWN,
             message="Rule has not yet been evaluated.",
         )
     return RuleStateRead.model_validate(state)
@@ -207,7 +215,7 @@ def alert_query(
         filters.append(Alert.severity == severity)
     if lifecycle_status is not None:
         filters.append(Alert.status == lifecycle_status)
-        if lifecycle_status == "active":
+        if lifecycle_status == STATUS_ACTIVE:
             query = query.outerjoin(MonitoringRule, MonitoringRule.id == Alert.rule_id)
             count_query = count_query.outerjoin( MonitoringRule, MonitoringRule.id == Alert.rule_id)
             filters.extend(
@@ -248,7 +256,7 @@ def active_alerts(
 ) -> dict[str, object]:
     query, count_query = alert_query(
         session, asset_id=asset_id, rule_id=rule_id, severity=severity,
-        lifecycle_status="active", acknowledged=acknowledged,
+        lifecycle_status=STATUS_ACTIVE, acknowledged=acknowledged,
         start_time=start_time, end_time=end_time,
     )
     rows = session.scalars(
@@ -306,7 +314,7 @@ def acknowledge_alert(
 ) -> Alert:
     alert = session.scalar(select(Alert).where(Alert.id == alert_id).with_for_update())
     _alert_in_scope(session, alert, alert_id)
-    if alert.status != "active":
+    if alert.status != STATUS_ACTIVE:
         raise HTTPException(status_code=409, detail="Only active alerts can be acknowledged.")
     if alert.acknowledged_at is None:
         now = utc_now()
@@ -345,7 +353,7 @@ def complete_alert(
 ) -> Alert:
     alert = session.scalar(select(Alert).where(Alert.id == alert_id).with_for_update())
     _alert_in_scope(session, alert, alert_id)
-    if alert.status != "active":
+    if alert.status != STATUS_ACTIVE:
         raise HTTPException(status_code=409, detail="Only active alerts can be completed.")
     if alert.acknowledged_at is None:
         raise HTTPException(status_code=409,detail="Acknowledge this alert before completing it.",)
@@ -372,7 +380,7 @@ def complete_alert(
             occurrence is None
             or occurrence.schedule_id != schedule.id
             or occurrence.planned_due_date != alert.maintenance_due_date
-            or occurrence.status not in {"planned", "in_progress"}
+            or occurrence.status not in {STATUS_PLANNED, STATUS_IN_PROGRESS}
         ):
             raise HTTPException(status_code=409,detail="The maintenance occurrence is no longer available to complete.",)
         from app.api.routes.maintenance import ( _authorize_operator_due_occurrence, complete_maintenance_record,)
@@ -385,7 +393,7 @@ def complete_alert(
         )
         completed_at = occurrence.actual_completed_at or now
         occurrence.actual_completed_at = completed_at
-        alert.status = "resolved"
+        alert.status = STATUS_RESOLVED
         alert.resolved_at = completed_at
         alert.last_updated_at = completed_at
         emit_event(
@@ -414,7 +422,7 @@ def complete_alert(
             session.rollback()
             raise HTTPException(status_code=409,detail="The alert could not be completed because related data changed.",)
     else:
-        alert.status = "resolved"
+        alert.status = STATUS_RESOLVED
         alert.resolved_at = now
         alert.last_updated_at = now
         if alert.parameter_id is not None:
@@ -435,7 +443,7 @@ def complete_alert(
                 raise HTTPException(status_code=409,detail="The alert's monitoring rule could not be found.",)
             if rule.is_enabled:
                 set_rule_enabled_state(session, rule, False, at=now)
-            rule.lifecycle_status = "completed"
+            rule.lifecycle_status = STATUS_COMPLETED
             rule.completed_at = now
         emit_event(
             session,

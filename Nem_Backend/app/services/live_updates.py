@@ -11,6 +11,14 @@ from uuid import uuid4
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy import event, inspect as sa_inspect
 from sqlalchemy.orm import Session
+from app.core.constants import (
+    LIFECYCLE_STATUS,
+    STATUS_CANCELLED,
+    STATUS_COMPLETED,
+    STATUS_DEACTIVATED,
+    STATUS_IN_PROGRESS,
+    STATUS_SUSPENDED,
+)
 
 LOGGER = logging.getLogger(__name__)
 _BRIDGE_CHANNEL = "nem_live_updates"
@@ -64,7 +72,7 @@ _DOMAINS = {
     "nem_monitoring_rule_templates": "rule_template",
     "instruction_documents": "document",
 }
-_LIFECYCLE_EVENT = {"in_progress": "rule.activated", "suspended": "rule.suspended", "deactivated": "rule.deactivated"}
+_LIFECYCLE_EVENT = {STATUS_IN_PROGRESS: "rule.activated", STATUS_SUSPENDED: "rule.suspended", STATUS_DEACTIVATED: "rule.deactivated"}
 
 
 class PostgresEventBridge:
@@ -178,8 +186,8 @@ def _semantic_events(instance: object, table: str, operation: str) -> set[str]:
         names.add("variable.value_changed")
     elif table == "variables" and operation == "updated" and _changed(instance, "is_active"):
         names.add("variable.status_changed")
-    elif table == "nem_monitoring_rules" and operation == "updated" and _changed(instance, "lifecycle_status"):
-        names.add(_LIFECYCLE_EVENT.get(getattr(instance, "lifecycle_status", None), "rule.updated"))
+    elif table == "nem_monitoring_rules" and operation == "updated" and _changed(instance, LIFECYCLE_STATUS):
+        names.add(_LIFECYCLE_EVENT.get(getattr(instance, LIFECYCLE_STATUS, None), "rule.updated"))
     elif table in {"nem_rule_states", "nem_rule_parameter_states"} and operation != "deleted":
         if operation == "created" or _changed(instance, "status"):
             names.add("rule.status_changed")
@@ -205,11 +213,11 @@ def _semantic_events(instance: object, table: str, operation: str) -> set[str]:
         if _changed(instance, "status"):
             names.add("alert.status_changed")  # raised -> resolved/completed; a changed message or value is only alert.updated
     elif table in {"nem_maintenance_records", "nem_maintenance_schedules"} and operation == "updated" and _changed(instance, "status"):
-        if getattr(instance, "status", None) == "completed":
+        if getattr(instance, "status", None) == STATUS_COMPLETED:
             names.add("maintenance.completed")
-        elif getattr(instance, "status", None) == "cancelled":
+        elif getattr(instance, "status", None) == STATUS_CANCELLED:
             names.add("maintenance.cancelled")
-        elif table == "nem_maintenance_records" and getattr(instance, "status", None) == "in_progress":
+        elif table == "nem_maintenance_records" and getattr(instance, "status", None) == STATUS_IN_PROGRESS:
             names.add("maintenance.started")
     elif table in {"nem_maintenance_records", "nem_maintenance_schedules"} and operation == "updated" and (
         _changed(instance, "eligibility") or _changed(instance, "start_eligibility")

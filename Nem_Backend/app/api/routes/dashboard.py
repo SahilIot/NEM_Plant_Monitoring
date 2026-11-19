@@ -11,6 +11,13 @@ from app.models import Alert, Asset, MonitoringRule, Reading, RuleState, Variabl
 # Defines the structure of the response returned by the endpoint
 from app.schemas.dashboard import DashboardSummary
 from app.services.access_scope import access_scope, rule_clause
+from app.core.constants import (
+    STATUS_ACTIVE,
+    STATUS_ALERT,
+    STATUS_NORMAL,
+    STATUS_UNKNOWN,
+    STATUS_WARNING,
+)
 
 #Creating an API endpoint
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -65,16 +72,16 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
                 scope.clause(RuleState.target_asset_id),
             )
         ) or 0
-        for status in ("normal", "warning", "alert", "unknown")
+        for status in (STATUS_NORMAL, STATUS_WARNING, STATUS_ALERT, STATUS_UNKNOWN)
     }
     evaluated_statuses = sum(state_counts.values())
-    state_counts["unknown"] += max(0, enabled - evaluated_statuses)
+    state_counts[STATUS_UNKNOWN] += max(0, enabled - evaluated_statuses)
     asset_alert_count = session.scalar(
         select(func.count(func.distinct(Alert.target_asset_id)))
         .outerjoin(MonitoringRule, MonitoringRule.id == Alert.rule_id)
         .where(
-            Alert.status == "active",
-            Alert.severity == "alert",
+            Alert.status == STATUS_ACTIVE,
+            Alert.severity == STATUS_ALERT,
             Alert.maintenance_schedule_id.is_(None),
             MonitoringRule.is_enabled.is_(True),
             scope.clause(Alert.target_asset_id),
@@ -85,8 +92,8 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
         select(func.count(func.distinct(Alert.target_asset_id)))
         .outerjoin(MonitoringRule, MonitoringRule.id == Alert.rule_id)
         .where(
-            Alert.status == "active",
-            Alert.severity == "warning",
+            Alert.status == STATUS_ACTIVE,
+            Alert.severity == STATUS_WARNING,
             Alert.maintenance_schedule_id.is_(None),
             MonitoringRule.is_enabled.is_(True),
             scope.clause(Alert.target_asset_id),
@@ -98,7 +105,7 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
         .select_from(Alert)
         .outerjoin(MonitoringRule, MonitoringRule.id == Alert.rule_id)
         .where(
-            Alert.status == "active",
+            Alert.status == STATUS_ACTIVE,
             scope.clause(Alert.target_asset_id),
             or_(
                 Alert.maintenance_schedule_id.is_not(None),
@@ -113,7 +120,7 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
         .select_from(Alert)
         .outerjoin(MonitoringRule, MonitoringRule.id == Alert.rule_id)
         .where(
-            Alert.status == "active",
+            Alert.status == STATUS_ACTIVE,
             Alert.acknowledged_at.is_(None),
             scope.clause(Alert.target_asset_id),
             or_(
@@ -135,10 +142,10 @@ def dashboard_summary(session: Session = Depends(get_db)) -> DashboardSummary:
         total_rules=rule_total,
         enabled_rules=enabled,
         disabled_rules=disabled,
-        rules_normal=state_counts["normal"],
-        rules_warning=state_counts["warning"],
-        rules_alert=state_counts["alert"],
-        rules_unknown=state_counts["unknown"],
+        rules_normal=state_counts[STATUS_NORMAL],
+        rules_warning=state_counts[STATUS_WARNING],
+        rules_alert=state_counts[STATUS_ALERT],
+        rules_unknown=state_counts[STATUS_UNKNOWN],
         total_active_alerts=active_alert_count,
         unacknowledged_active_alerts=unacknowledged_count,
         latest_reading_at=latest,

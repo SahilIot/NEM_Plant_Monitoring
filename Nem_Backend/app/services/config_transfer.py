@@ -32,6 +32,13 @@ from app.schemas.rule import RuleTemplateCreate
 from app.core.labels import normalize_label_names
 from app.services.labels import assign_labels
 from app.services.rule_visibility import apply_visibility
+from app.core.constants import (
+    ACTIVATION_AT,
+    CALENDAR,
+    RULE_TYPE,
+    SCHEDULE,
+    STATUS_ACTIVE,
+)
 
 APPLICATION_ID = "nem-plant-monitoring"
 FORMAT_NAME = "nem-configuration-export"
@@ -43,8 +50,8 @@ MAX_TOTAL_NODES = 200_000
 CATEGORIES = ("monitoring_rules", "collection_rules", "maintenance_rules")
 MAX_COLLECTION_RULES = 5
 # Runtime-timing keys that belong to one installation's operation, not to the definition.
-_NON_PORTABLE_PARAMETERS = frozenset({"activation_at"})
-_EXPORTED_SCHEDULE_STATUSES = ("active", "paused")
+_NON_PORTABLE_PARAMETERS = frozenset({ACTIVATION_AT})
+_EXPORTED_SCHEDULE_STATUSES = (STATUS_ACTIVE, "paused")
 
 # Defines what admin can choose when importing.
 class ImportOptions(BaseModel):
@@ -77,7 +84,7 @@ def _template_item(template: MonitoringRuleTemplate) -> dict[str, Any]:
         "name": template.name,
         "description": template.description,
         "labels": sorted(template.labels),
-        "rule_type": template.rule_type,
+        RULE_TYPE: template.rule_type,
         "required_variable_types": template.required_variable_types,
         "variable_key": template.variable_key,
         "operator": template.operator,
@@ -117,7 +124,7 @@ def build_export(
             # The package format only describes calendar schedules (a start offset and a recurrence). Runtime and
             # usage schedules depend on a PLC signal variable of the source machine, so exporting them as calendar
             # entries would recreate them as schedules that are due immediately.
-            MaintenanceSchedule.schedule_mode == "calendar",
+            MaintenanceSchedule.schedule_mode == CALENDAR,
         )
         .order_by(MaintenanceSchedule.id)
     ).all()
@@ -180,7 +187,7 @@ def export_summary(session: Session) -> dict[str, Any]:
     schedules = session.scalars(
         select(MaintenanceSchedule).where(
             MaintenanceSchedule.status.in_(_EXPORTED_SCHEDULE_STATUSES),
-            MaintenanceSchedule.schedule_mode == "calendar",
+            MaintenanceSchedule.schedule_mode == CALENDAR,
         )
     ).all()
     for schedule in schedules:
@@ -381,7 +388,7 @@ def analyse(session: Session, package: Any, options: ImportOptions) -> dict[str,
     assets_by_id = {asset.id: asset for asset in assets}
     existing_schedules = {
         (s.asset_id, s.title.casefold(), s.maintenance_type)
-        for s in session.scalars(select(MaintenanceSchedule).where(MaintenanceSchedule.status.in_(("active", "paused", "awaiting_approval"))))
+        for s in session.scalars(select(MaintenanceSchedule).where(MaintenanceSchedule.status.in_((STATUS_ACTIVE, "paused", "awaiting_approval"))))
     }
     seen_schedules: set[tuple] = set()
     start = options.maintenance_start_date or datetime.now(timezone.utc).date()
@@ -590,7 +597,7 @@ def analyse(session: Session, package: Any, options: ImportOptions) -> dict[str,
                 signature = (asset_id, title_final.casefold(), candidate.maintenance_type)
                 add("maintenance_rules", ref, raw.get("title"), "renamed", final_name=title_final,
                     note=f"A matching maintenance rule exists; imported as '{title_final}'.",
-                    payload={"schedule": candidate, "asset_id": asset_id})
+                    payload={SCHEDULE: candidate, "asset_id": asset_id})
                 seen_schedules.add(signature)
                 continue
             add("maintenance_rules", ref, candidate.title, "duplicate",
@@ -598,7 +605,7 @@ def analyse(session: Session, package: Any, options: ImportOptions) -> dict[str,
             continue
         seen_schedules.add(signature)
         add("maintenance_rules", ref, candidate.title, "new",
-            payload={"schedule": candidate, "asset_id": asset_id})
+            payload={SCHEDULE: candidate, "asset_id": asset_id})
 
     counts = {c: {"new": 0, "renamed": 0, "duplicate": 0, "unresolved": 0, "invalid": 0} for c in CATEGORIES}
     for item in report_items:
@@ -680,9 +687,9 @@ def apply_import(session: Session, package: Any, options: ImportOptions, admin: 
         for entry in work:
             item = entry["item"]
             ref = f"{item['category']}:{item['ref']}"
-            if "schedule" in entry:
+            if SCHEDULE in entry:
                 schedule = _create_maintenance_schedule(
-                    session, entry["schedule"].model_copy(update={"asset_id": entry["asset_id"]}))
+                    session, entry[SCHEDULE].model_copy(update={"asset_id": entry["asset_id"]}))
                 created.append({"category": item["category"], "name": item["final_name"], "id": schedule.id})
             elif "collection" in entry:
                 spec = entry["collection"]

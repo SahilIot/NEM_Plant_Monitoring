@@ -9,13 +9,32 @@ from sqlalchemy.orm import Session
 
 from app.models import Alert, Asset, MonitoringRule, MonitoringRuleTemplate, RuleParameter, Variable
 from app.schemas.rule_parameters import RuleParameterIn
+from app.core.constants import (
+    AGGREGATION,
+    BOOLEAN,
+    COUNTER,
+    CYCLE,
+    INTERVAL,
+    INTERVAL_PARAMETER,
+    KIND,
+    LIFECYCLE_STATUS,
+    NUMBER,
+    RULE_MULTI_PARAMETER,
+    RULE_TYPE,
+    RUNNING,
+    STATUS_ACTIVE,
+    STATUS_ALERT,
+    STATUS_DEACTIVATED,
+    STATUS_IN_PROGRESS,
+    STATUS_RESOLVED,
+)
 
 TEMPLATE_META_KEYS = ("category", "calculation_period_seconds", "combine", "reference_link", "maintenance_instructions")
-NUMERIC = {"number", "integer"}
+NUMERIC = {NUMBER, "integer"}
 
 # Check whether the template is a multi-parameter rule.
 def is_multi(template: MonitoringRuleTemplate) -> bool:
-    return template.rule_type == "multi_parameter"
+    return template.rule_type == RULE_MULTI_PARAMETER
 
 # Retrives parameter definitions stored in the template`s JSON feild
 def template_defs(template: MonitoringRuleTemplate) -> list[dict[str, Any]]:
@@ -28,10 +47,10 @@ def rule_meta(template: MonitoringRuleTemplate) -> dict[str, Any]:
 
 # Determines which PLC variable dtypes are compatible with a parameter.
 def _compatible_types(definition: dict[str, Any]) -> set[str]:
-    kind, aggregation = definition["kind"], definition["aggregation"]
-    if kind == "number" and aggregation in {"none", "last"}:
+    kind, aggregation = definition[KIND], definition[AGGREGATION]
+    if kind == NUMBER and aggregation in {"none", "last"}:
         return set(NUMERIC)
-    return {"boolean"}
+    return {BOOLEAN}
 
 # Finds all PLC variables that can be selected for a particular rule parameter.
 def candidates_for(session: Session, request: Request, asset: Asset, definition: dict[str, Any],
@@ -45,13 +64,13 @@ def candidates_for(session: Session, request: Request, asset: Asset, definition:
         Variable.asset_id == asset.id,
         or_(Variable.is_active.is_(True), Variable.id.in_(keep_variable_ids or {0})),
         Variable.data_type.in_(_compatible_types(definition))).order_by(Variable.name, Variable.id)).all()
-    if definition["kind"] != "interval":
+    if definition[KIND] != INTERVAL:
         return list(variables)
-    counter = (definition["config"] or {}).get("interval_parameter") == "counter"
+    counter = (definition["config"] or {}).get(INTERVAL_PARAMETER) == COUNTER
     mapping = configured_cycle_signal_mapping if counter else configured_runtime_signal_mapping
     bypass = is_mapping_bypass_enabled(request)
     return [v for v in variables if mapping(request, v.id) == (asset.id, v.id)
-            or (bypass and v.opcua_node_id is not None and v.signal_role in {None, "cycle" if counter else "running"})]
+            or (bypass and v.opcua_node_id is not None and v.signal_role in {None, CYCLE if counter else RUNNING})]
 
 # Automatically suggests a variable when creating a rule.
 def suggested_variable(definition: dict[str, Any], candidates: list[Variable]) -> Variable | None:
@@ -76,7 +95,7 @@ def resolve_variable(session: Session, request: Request, asset: Asset, definitio
         return chosen
     if not candidates:
         raise HTTPException(status_code=422, detail=f"{label}: no active compatible variable is available on this asset")
-    chosen = suggested_variable(definition, [v for v in candidates if (v.id, definition["aggregation"]) not in taken] or candidates)
+    chosen = suggested_variable(definition, [v for v in candidates if (v.id, definition[AGGREGATION]) not in taken] or candidates)
     if chosen is None:
         raise HTTPException(status_code=422, detail=f"{label}: choose a variable for this parameter on the target asset")
     return chosen
@@ -96,13 +115,13 @@ def build_items(session: Session, request: Request, asset: Asset, template: Moni
     for position, definition in enumerate(template_defs(template)):
         variable = resolve_variable(session, request, asset, definition, mappings.get(definition["key"]), taken)
         if variable is not None:
-            taken.add((variable.id, definition["aggregation"]))
+            taken.add((variable.id, definition[AGGREGATION]))
         items.append({"key": definition["key"], "name": definition["name"], "position": position,
-                      "kind": definition["kind"], "variable_id": variable.id if variable else None,
-                      "aggregation": definition["aggregation"], "config": definition["config"]})
+                      KIND: definition[KIND], "variable_id": variable.id if variable else None,
+                      AGGREGATION: definition[AGGREGATION], "config": definition["config"]})
     _check_parameters(session, request, asset,
-                      [RuleParameterIn(key=i["key"], name=i["name"], kind=i["kind"], variable_id=i["variable_id"],
-                                       aggregation=i["aggregation"], config=i["config"]) for i in items],
+                      [RuleParameterIn(key=i["key"], name=i["name"], kind=i[KIND], variable_id=i["variable_id"],
+                                       aggregation=i[AGGREGATION], config=i["config"]) for i in items],
                       (template.parameters or {}).get("category"))
     return items
 
@@ -115,10 +134,10 @@ def instance_definition(session: Session, request: Request, template: Monitoring
     asset = session.get(Asset, asset_id)
     items = build_items(session, request, asset, template, mappings)
     return {
-        "name": template.name, "description": template.description, "rule_type": "multi_parameter",
+        "name": template.name, "description": template.description, RULE_TYPE: RULE_MULTI_PARAMETER,
         "target_asset_id": asset_id, "variable_id": None, "operator": None, "threshold": None,
-        "parameters": rule_meta(template), "severity": "alert", "is_enabled": activate,
-        "lifecycle_status": "in_progress" if activate else "deactivated",
+        "parameters": rule_meta(template), "severity": STATUS_ALERT, "is_enabled": activate,
+        LIFECYCLE_STATUS: STATUS_IN_PROGRESS if activate else STATUS_DEACTIVATED,
         "evaluation_interval_seconds": template.evaluation_interval_seconds,
         "stale_after_seconds": template.stale_after_seconds, "source_template_id": template.id,
         "_parameter_items": items,
@@ -150,8 +169,8 @@ def sync_instance(session: Session, request: Request, rule: MonitoringRule, temp
     existing = {p.key: p for p in rule.parameter_items}
     now = datetime.now(timezone.utc)
     for key in set(existing) - set(defs):
-        for alert in session.scalars(select(Alert).where(Alert.parameter_id == existing[key].id, Alert.status == "active")).all():
-            alert.status, alert.resolved_at, alert.last_updated_at = "resolved", now, now
+        for alert in session.scalars(select(Alert).where(Alert.parameter_id == existing[key].id, Alert.status == STATUS_ACTIVE)).all():
+            alert.status, alert.resolved_at, alert.last_updated_at = STATUS_RESOLVED, now, now
         from app.services.rule_parameters import archive_removed_parameter
 
         archive_removed_parameter(session, rule, existing[key], "removed from the shared rule")
@@ -162,13 +181,13 @@ def sync_instance(session: Session, request: Request, rule: MonitoringRule, temp
         if parameter is None:
             variable = resolve_variable(session, request, asset, definition, None, taken)
             if variable is not None:
-                taken.add((variable.id, definition["aggregation"]))
+                taken.add((variable.id, definition[AGGREGATION]))
             rule.parameter_items.append(RuleParameter(
-                key=key, name=definition["name"], position=position, kind=definition["kind"],
-                variable_id=variable.id if variable else None, aggregation=definition["aggregation"],
+                key=key, name=definition["name"], position=position, kind=definition[KIND],
+                variable_id=variable.id if variable else None, aggregation=definition[AGGREGATION],
                 config=definition["config"]))
             continue
-        if parameter.kind != definition["kind"]:
+        if parameter.kind != definition[KIND]:
             raise HTTPException(status_code=409, detail=f"Parameter '{definition['name']}' cannot change its type; add a new parameter instead")
         variable_id = parameter.variable_id if definition.get("uses_variable", True) else None
         if variable_id is not None:
@@ -177,9 +196,9 @@ def sync_instance(session: Session, request: Request, rule: MonitoringRule, temp
                 raise HTTPException(status_code=409, detail=(f"Parameter '{definition['name']}': the connected variable on asset {asset.name} is not compatible "
                     "with the new configuration"))
         changed = _measured_source(parameter.variable_id, parameter.aggregation, parameter.config) != _measured_source(
-            variable_id, definition["aggregation"], definition["config"])
+            variable_id, definition[AGGREGATION], definition["config"])
         parameter.name, parameter.position = definition["name"], position
-        parameter.variable_id, parameter.aggregation, parameter.config = variable_id, definition["aggregation"], definition["config"]
+        parameter.variable_id, parameter.aggregation, parameter.config = variable_id, definition[AGGREGATION], definition["config"]
         if changed:
             reset_parameter_baseline(session, parameter)
     session.flush()

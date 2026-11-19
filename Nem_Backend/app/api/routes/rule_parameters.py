@@ -38,10 +38,27 @@ from app.services.legacy_parameters import (
 from app.services.rule_parameters import (
     build_status_detail, change_parameter_lifecycle, reset_parameter_baseline, serialize_parameters)
 from app.services.rule_visibility import SUPERVISOR_EDITABLE_LIMITS, enforce_template_edit_permission
+from app.core.constants import (
+    AGGREGATION,
+    BOOLEAN,
+    COUNTER,
+    CYCLE,
+    INTERVAL,
+    INTERVAL_PARAMETER,
+    NUMBER,
+    RULE_MULTI_PARAMETER,
+    RUNNING,
+    STATUS_ACTIVE,
+    STATUS_ALERT,
+    STATUS_DEACTIVATED,
+    STATUS_IN_PROGRESS,
+    STATUS_RESOLVED,
+    TIMER,
+)
 
 router = APIRouter(tags=["multi-parameter rules"])
 
-NUMERIC_TYPES = {"number", "integer"}
+NUMERIC_TYPES = {NUMBER, "integer"}
 # Config keys that only change how the value is judged. Editing them re-evaluates on the next cycle but
 # never discards accumulated progress; every other key (interval type, start time) changes what is measured.
 LIMIT_CONFIG_KEYS = {"lower_alert", "lower_warning", "upper_warning", "upper_alert", "unit", "due", "overdue", "expected", "severity"}
@@ -106,13 +123,13 @@ def _check_parameters(session: Session,request: Request,asset: Asset,items: list
         if not variable.is_active and not (item.key and (current or {}).get(item.key) == variable.id):
             raise HTTPException(status_code=422, detail=f"{label}: the variable is inactive")
 
-        boolean = variable.data_type == "boolean"
-        if item.kind == "number":
+        boolean = variable.data_type == BOOLEAN
+        if item.kind == NUMBER:
             if item.aggregation in {"none", "last"} and variable.data_type not in NUMERIC_TYPES:
                 raise HTTPException(status_code=422, detail=f"{label}: Number parameters with {item.aggregation.capitalize()} aggregation need a numeric variable")
-            if item.aggregation in {"counter", "timer"} and not boolean:
+            if item.aggregation in {COUNTER, TIMER} and not boolean:
                 raise HTTPException(status_code=422, detail=f"{label}: {item.aggregation.capitalize()} aggregation needs a Boolean variable")
-        elif item.kind == "boolean":
+        elif item.kind == BOOLEAN:
             if not boolean:
                 raise HTTPException(status_code=422, detail=f"{label}: Boolean parameters need a Boolean variable")
             if item.aggregation not in {"none", "last"}:
@@ -120,12 +137,12 @@ def _check_parameters(session: Session,request: Request,asset: Asset,items: list
         else:
             if not boolean:
                 raise HTTPException(status_code=422, detail=f"{label}: interval parameters need a Boolean variable")
-            counter = item.config.get("interval_parameter") == "counter"
+            counter = item.config.get(INTERVAL_PARAMETER) == COUNTER
             mapping = (configured_cycle_signal_mapping if counter else configured_runtime_signal_mapping)(request, variable.id)
-            bypass_ok = bypass and variable.opcua_node_id is not None and variable.signal_role in {None, "cycle" if counter else "running"}
+            bypass_ok = bypass and variable.opcua_node_id is not None and variable.signal_role in {None, CYCLE if counter else RUNNING}
             if mapping != (asset.id, variable.id) and not bypass_ok:
                 raise HTTPException(status_code=422, detail=(f"{label}: the variable must be this asset's configured "
-                    f"{'cycle' if counter else 'running'} signal"))
+                    f"{CYCLE if counter else RUNNING} signal"))
 
         pair = (variable.id, item.aggregation)
         if pair in seen:
@@ -147,8 +164,8 @@ def _apply(rule: MonitoringRule, items: list[RuleParameterIn]) -> None:
         now = datetime.now(timezone.utc)
         # The parameter's own active alerts end with it; other parameters' alerts are untouched.
         for alert in session.scalars(select(Alert).where(
-                Alert.parameter_id == existing[key].id, Alert.status == "active")).all():
-            alert.status, alert.resolved_at, alert.last_updated_at = "resolved", now, now
+                Alert.parameter_id == existing[key].id, Alert.status == STATUS_ACTIVE)).all():
+            alert.status, alert.resolved_at, alert.last_updated_at = STATUS_RESOLVED, now, now
         from app.services.rule_parameters import archive_removed_parameter
 
         archive_removed_parameter(session, rule, existing[key], "removed by the user")
@@ -214,12 +231,12 @@ def create_multi_parameter_rule(
     rule = MonitoringRule(
         name=payload.name,
         description=payload.description,
-        rule_type="multi_parameter",
+        rule_type=RULE_MULTI_PARAMETER,
         target_asset_id=asset_id,
         variable_id=None,
-        severity="alert",
+        severity=STATUS_ALERT,
         is_enabled=payload.is_enabled,
-        lifecycle_status="in_progress" if payload.is_enabled else "deactivated",
+        lifecycle_status=STATUS_IN_PROGRESS if payload.is_enabled else STATUS_DEACTIVATED,
         stale_after_seconds=payload.stale_after_seconds,
         parameters={
             "category": payload.category,
@@ -246,7 +263,7 @@ def create_multi_parameter_rule(
 @router.get("/rules/{rule_id}/parameters")
 def list_rule_parameters(rule_id: int, session: Session = Depends(get_db)) -> dict[str, Any]:
     rule = rule_or_404(session, rule_id)
-    if rule.rule_type != "multi_parameter":
+    if rule.rule_type != RULE_MULTI_PARAMETER:
         # Rules created before the parameter system are presented as one parameter (no data is converted).
         return {"rule_id": rule.id, "category": None, "calculation_period_seconds": None,
                 "parameters": serialize_legacy_parameters(session, rule)}
@@ -263,7 +280,7 @@ def rule_status_detail(rule_id: int, session: Session = Depends(get_db)) -> dict
    # Current Status detail for one parent multi-parameter rule (all values computed by the backend).
     rule = rule_or_404(session, rule_id)
     require_rule_access(session, rule)
-    if rule.rule_type != "multi_parameter":
+    if rule.rule_type != RULE_MULTI_PARAMETER:
         return build_legacy_status_detail(session, rule)
     return build_status_detail(session, rule)
 
@@ -279,7 +296,7 @@ def replace_rule_parameters(
     _require_editor(user)
     rule = rule_or_404(session, rule_id)  # existence and asset access first
     require_rule_access(session, rule)
-    if rule.rule_type != "multi_parameter":
+    if rule.rule_type != RULE_MULTI_PARAMETER:
         raise HTTPException(status_code=422, detail="Only multi-parameter rules have editable parameters")
     asset = session.get(Asset, rule.target_asset_id) if rule.target_asset_id else None
     if asset is None or not access_scope(session).allows(asset.id):
@@ -287,7 +304,7 @@ def replace_rule_parameters(
     if rule.source_template_id is not None:
         raise HTTPException(status_code=409, detail="This rule's parameters are managed by its shared rule; edit each parameter individually")
     category = (rule.parameters or {}).get("category")
-    if any((item.kind == "interval") != (category == "interval_based") for item in payload.parameters):
+    if any((item.kind == INTERVAL) != (category == "interval_based") for item in payload.parameters):
         raise HTTPException(status_code=422, detail="Parameter types do not match this rule's category")
     names = [item.name.casefold() for item in payload.parameters]
     if len(set(names)) != len(names):
@@ -339,7 +356,7 @@ def update_rule_parameter(
     _require_editor(user)
     rule = rule_or_404(session, rule_id)
     require_rule_access(session, rule)
-    if rule.rule_type != "multi_parameter":
+    if rule.rule_type != RULE_MULTI_PARAMETER:
         return _update_legacy_parameter(rule, parameter_id, payload, request, session, user)
     asset = session.get(Asset, rule.target_asset_id) if rule.target_asset_id else None
     if asset is None or not access_scope(session).allows(asset.id):
@@ -401,7 +418,7 @@ def _apply_shared_parameter_edit(rule, parameter, payload, request, session) -> 
     from pydantic import ValidationError
 
     template = session.get(MonitoringRuleTemplate, rule.source_template_id)
-    if template is None or template.rule_type != "multi_parameter":
+    if template is None or template.rule_type != RULE_MULTI_PARAMETER:
         raise HTTPException(status_code=409, detail="The shared rule behind this rule is unavailable")
     if not rules_module.can_view_template(session, rules_module.request_user(session), template):
         raise HTTPException(status_code=403, detail="This rule is shared and its configuration is managed by an Administrator")
@@ -409,7 +426,7 @@ def _apply_shared_parameter_edit(rule, parameter, payload, request, session) -> 
     target = next((item for item in defs if item["key"] == parameter.key), None)
     if target is None:
         raise HTTPException(status_code=409, detail="This parameter is no longer part of its shared rule")
-    target.update({"name": payload.name, "aggregation": payload.aggregation, "config": payload.config})
+    target.update({"name": payload.name, AGGREGATION: payload.aggregation, "config": payload.config})
     values = {field: getattr(template, field) for field in rules_module.TEMPLATE_VALUE_FIELDS}
     values["parameters"] = {**(template.parameters or {}), "parameter_defs": defs}
     try:
@@ -468,7 +485,7 @@ def update_parameter_lifecycle(
     if rule is None:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id} was not found")
     require_rule_access(session, rule)
-    if rule.rule_type != "multi_parameter":
+    if rule.rule_type != RULE_MULTI_PARAMETER:
         # One parameter == the whole rule, so the rule-level lifecycle transition is the parameter's.
         from app.api.routes.frontend_compat import _transition_rule_lifecycle
 

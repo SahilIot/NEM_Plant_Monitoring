@@ -14,14 +14,15 @@ from app.services.monitoring_engine import (
     update_rule_signal_states,
 )
 from app.services.maintenance_progress import update_maintenance_progress
+from app.core.constants import BOOLEAN, NUMBER
 
 #checking the data type
 def validate_value(data_type: str, value: object) -> None:
     valid = (
-        (data_type == "number" and isinstance(value, (int, float)) and not isinstance(value, bool))
+        (data_type == NUMBER and isinstance(value, (int, float)) and not isinstance(value, bool))
         or (data_type == "integer" and isinstance(value, int) and not isinstance(value, bool))
         or (data_type == "string" and isinstance(value, str))
-        or (data_type == "boolean" and isinstance(value, bool))
+        or (data_type == BOOLEAN and isinstance(value, bool))
     )
     if not valid:
         raise HTTPException(status_code=422,detail=f"Value does not match variable data type '{data_type}'",)

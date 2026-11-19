@@ -91,6 +91,27 @@ from app.services.rule_visibility import (
     visible_templates_clause,
 )
 from app.services.labels import apply_label_filter, assign_labels
+from app.core.constants import (
+    AGGREGATION,
+    CYCLE,
+    KIND,
+    LIFECYCLE_STATUS,
+    RULE_BOOLEAN_COUNT_THRESHOLD,
+    RULE_MULTI_PARAMETER,
+    RULE_PARAMETER_THRESHOLD,
+    RULE_RUNTIME_DURATION,
+    RULE_TYPE,
+    RUNNING,
+    STATUS_ALERT,
+    STATUS_COMPLETED,
+    STATUS_DEACTIVATED,
+    STATUS_IN_PROGRESS,
+    STATUS_NORMAL,
+    STATUS_PENDING,
+    STATUS_SUSPENDED,
+    STATUS_UNKNOWN,
+    STATUS_WARNING,
+)
 
 router = APIRouter(tags=["frontend compatibility"])
 logger = logging.getLogger(__name__)
@@ -208,7 +229,7 @@ class DocumentCreate(BaseModel):
     asset_id: int | None = Field(default=None, gt=0)
     entry_type: Literal["document", "instruction"] = "document"
 
-    @field_validator("title", "kind")
+    @field_validator("title", KIND)
     @classmethod
     def strip_required_text(cls, value: str) -> str:
         value = value.strip()
@@ -235,7 +256,7 @@ class DocumentUpdate(BaseModel):
     duration_minutes: int | None = Field(default=None, ge=1)
     asset_id: int | None = Field(default=None, gt=0)
 
-    @field_validator("title", "kind")
+    @field_validator("title", KIND)
     @classmethod
     def strip_required_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -336,7 +357,7 @@ def _rule_row(session: Session, rule: MonitoringRule) -> dict[str, Any]:
         "severity": rule.severity,
         "state": "activated" if rule.is_enabled else rule.lifecycle_status,
         "is_enabled": rule.is_enabled,
-        "lifecycle_status": rule.lifecycle_status,
+        LIFECYCLE_STATUS: rule.lifecycle_status,
         "completed_at": rule.completed_at,
         "created_at": rule.created_at,
         "updated_at": rule.updated_at,
@@ -345,14 +366,14 @@ def _rule_row(session: Session, rule: MonitoringRule) -> dict[str, Any]:
         "updated_by": rule.updated_by,
         "status": (
             "evaluated"
-            if rule.lifecycle_status == "completed"
-            else {"normal": "ok"}.get(state.status, state.status)
+            if rule.lifecycle_status == STATUS_COMPLETED
+            else {STATUS_NORMAL: "ok"}.get(state.status, state.status)
             if rule.is_enabled
-            else "unknown"
+            else STATUS_UNKNOWN
         ),
         "current_status": (
             "evaluated"
-            if rule.lifecycle_status == "completed"
+            if rule.lifecycle_status == STATUS_COMPLETED
             else state.status
         ),
         "evaluation_status": state.status,
@@ -361,10 +382,10 @@ def _rule_row(session: Session, rule: MonitoringRule) -> dict[str, Any]:
         "latest_value": state.latest_value,
         "last_evaluated_at": state.last_evaluated_at,
         "condition_started_at": state.condition_started_at,
-        "rule_type": rule.rule_type,
+        RULE_TYPE: rule.rule_type,
         # Parameter rows exist only for multi-parameter rules; other rule types omit the key.
         # Every rule has a parameter list: parameter rows for multi-parameter rules, one adapted parameter for older ones.
-        "parameter_items": (serialize_parameters(rule) if rule.rule_type == "multi_parameter"
+        "parameter_items": (serialize_parameters(rule) if rule.rule_type == RULE_MULTI_PARAMETER
                             else serialize_legacy_parameters(session, rule)),
         # The id of a shared rule is only disclosed to roles that may see shared rules.
         "source_template_id": _visible_source_template_id(session, rule),
@@ -420,7 +441,7 @@ def frontend_summary(session: Session = Depends(get_db)) -> dict[str, Any]:
             )
         )
         or 0
-        for status in ("in_progress", "suspended", "deactivated", "completed")
+        for status in (STATUS_IN_PROGRESS, STATUS_SUSPENDED, STATUS_DEACTIVATED, STATUS_COMPLETED)
     }
     return {
         "rules_alert": summary.rules_alert,
@@ -430,12 +451,12 @@ def frontend_summary(session: Session = Depends(get_db)) -> dict[str, Any]:
         "monitored_assets": summary.monitored_assets,
         "total_assets": summary.total_assets,
         "stats": {
-            "activated": lifecycle_counts["in_progress"],
-            "in_progress": lifecycle_counts["in_progress"],
-            "suspended": lifecycle_counts["suspended"],
-            "deactivated": lifecycle_counts["deactivated"],
-            "completed": lifecycle_counts["completed"],
-            "not_activated": lifecycle_counts["deactivated"],
+            "activated": lifecycle_counts[STATUS_IN_PROGRESS],
+            STATUS_IN_PROGRESS: lifecycle_counts[STATUS_IN_PROGRESS],
+            STATUS_SUSPENDED: lifecycle_counts[STATUS_SUSPENDED],
+            STATUS_DEACTIVATED: lifecycle_counts[STATUS_DEACTIVATED],
+            STATUS_COMPLETED: lifecycle_counts[STATUS_COMPLETED],
+            "not_activated": lifecycle_counts[STATUS_DEACTIVATED],
         },
     }
 
@@ -446,7 +467,7 @@ def frontend_rules_by_lifecycle(
     lifecycle_status: str,
     session: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    allowed_statuses = {"in_progress", "suspended", "deactivated", "completed"}
+    allowed_statuses = {STATUS_IN_PROGRESS, STATUS_SUSPENDED, STATUS_DEACTIVATED, STATUS_COMPLETED}
     if lifecycle_status not in allowed_statuses:
         raise HTTPException(status_code=422,detail="Rule lifecycle status must be in_progress, suspended, deactivated, or completed",)
     rules = session.scalars(
@@ -464,7 +485,7 @@ def frontend_rules_by_lifecycle(
 #Rules by status
 @router.get("/rules/status/{kind}")
 def frontend_rules_by_status(kind: str, session: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    if kind not in {"alert", "warning"}:
+    if kind not in {STATUS_ALERT, STATUS_WARNING}:
         raise HTTPException(status_code=422, detail="Rule status must be alert or warning")
     rows = session.scalars(
         select(MonitoringRule)
@@ -529,8 +550,8 @@ def _multi_copy_definition(session: Session, request: Request, source: Monitorin
     items = []
     for parameter in source.parameter_items:
         mapped = _mapped_variable(session, parameter.variable_id, target_asset_id)
-        items.append({"key": parameter.key, "name": parameter.name, "position": parameter.position, "kind": parameter.kind,
-                      "variable_id": mapped.id if mapped else None, "aggregation": parameter.aggregation,
+        items.append({"key": parameter.key, "name": parameter.name, "position": parameter.position, KIND: parameter.kind,
+                      "variable_id": mapped.id if mapped else None, AGGREGATION: parameter.aggregation,
                       "config": parameter.config})
     _check_parameters(session, request, session.get(Asset, target_asset_id),
                       [RuleParameterIn(**{k: v for k, v in item.items() if k != "position"}) for item in items],
@@ -549,7 +570,7 @@ def _rule_definition(
     return {
         "name": source.name,
         "description": source.description,
-        "rule_type": source.rule_type,
+        RULE_TYPE: source.rule_type,
         "target_asset_id": target_asset_id,
         "source_template_id": source.source_template_id,
         "variable_id": variable.id if variable else None,
@@ -558,7 +579,7 @@ def _rule_definition(
         "parameters": source.parameters,
         "severity": source.severity,
         "is_enabled": False,
-        "lifecycle_status": "deactivated",
+        LIFECYCLE_STATUS: STATUS_DEACTIVATED,
         "evaluation_interval_seconds": source.evaluation_interval_seconds,
         "stale_after_seconds": source.stale_after_seconds,
     }
@@ -569,7 +590,7 @@ def _same_rule_definition(rule: MonitoringRule, definition: dict[str, Any]) -> b
         for field in (
             "name",
             "description",
-            "rule_type",
+            RULE_TYPE,
             "target_asset_id",
             "variable_id",
             "operator",
@@ -602,16 +623,16 @@ def _template_variables(
         if not mapping_bypass_enabled:
             return candidates
         required_role = (
-            "running"
-            if template.rule_type == "runtime_duration"
+            RUNNING
+            if template.rule_type == RULE_RUNTIME_DURATION
             or (
                 template.rule_type == "duration"
                 and isinstance(
                     (template.parameters or {}).get("expected_value"), bool
                 )
             )
-            else "cycle"
-            if template.rule_type == "boolean_count_threshold"
+            else CYCLE
+            if template.rule_type == RULE_BOOLEAN_COUNT_THRESHOLD
             else None
         )
         if required_role is None:
@@ -620,7 +641,7 @@ def _template_variables(
         if request is not None:
             mapping_function = (
                 configured_runtime_signal_mapping
-                if required_role == "running"
+                if required_role == RUNNING
                 else configured_cycle_signal_mapping
             )
             configured_variable_ids = {
@@ -709,7 +730,7 @@ def _template_rule_definition(
         definition = {
             "name": template.name,
             "description": template.description,
-            "rule_type": template.rule_type,
+            RULE_TYPE: template.rule_type,
             "target_asset_id": asset_id,
             "variable_id": variable.id if variable else None,
             "operator": template.operator,
@@ -717,7 +738,7 @@ def _template_rule_definition(
             "parameters": template.parameters,
             "severity": template.severity,
             "is_enabled": activate,
-            "lifecycle_status": "in_progress" if activate else "deactivated",
+            LIFECYCLE_STATUS: STATUS_IN_PROGRESS if activate else STATUS_DEACTIVATED,
             "evaluation_interval_seconds": template.evaluation_interval_seconds,
             "stale_after_seconds": template.stale_after_seconds,
             "source_template_id": template.id,
@@ -835,7 +856,7 @@ def _rule_template_request_row(
         "suggestion_type": item.suggestion_type,
         "name": item.name,
         "description": item.description,
-        "rule_type": item.rule_type,
+        RULE_TYPE: item.rule_type,
         "required_variable_types": item.required_variable_types,
         "variable_key": item.variable_key,
         "operator": item.operator,
@@ -901,10 +922,10 @@ def submit_rule_template_request(
             name=maintenance.title,
             description=maintenance.description,
             rule_type="maintenance_schedule",
-            severity="warning",
+            severity=STATUS_WARNING,
             is_enabled=False,
             requested_by=user.id,
-            status="pending",
+            status=STATUS_PENDING,
             suggestion_type="maintenance",
             maintenance_details=maintenance.model_dump(mode="json"),
         )
@@ -914,7 +935,7 @@ def submit_rule_template_request(
             # Converts the payload into a dictionary while excluding labels, since labels are handled separately.
             **{**payload.model_dump(exclude={"labels"}), "collection_id": None},
             requested_by=user.id,
-            status="pending",
+            status=STATUS_PENDING,
             suggestion_type="monitoring_rule",
         )
     session.add(item)
@@ -943,7 +964,7 @@ def list_rule_template_requests(
     query = select(MonitoringRuleTemplateRequest)
 
     if status:
-        if status not in {"pending", "approved", "declined"}:
+        if status not in {STATUS_PENDING, "approved", "declined"}:
             raise HTTPException(status_code=422, detail="Invalid request status")
         query = query.where(MonitoringRuleTemplateRequest.status == status)
 
@@ -977,7 +998,7 @@ def approve_rule_template_request(
     if item is None:
         raise HTTPException(status_code=404, detail="Rule suggestion was not found")
 
-    if item.status != "pending":
+    if item.status != STATUS_PENDING:
         raise HTTPException(status_code=409, detail="This suggestion has already been reviewed")
 
     if item.suggestion_type == "maintenance":
@@ -1063,7 +1084,7 @@ def decline_rule_template_request(
     if item is None:
         raise HTTPException(status_code=404, detail="Rule suggestion was not found")
 
-    if item.status != "pending":
+    if item.status != STATUS_PENDING:
         raise HTTPException(status_code=409, detail="This suggestion has already been reviewed")
 
     item.status = "declined"
@@ -1126,7 +1147,7 @@ def apply_template_update(
         _ensure_collection_keeps_rule(session, template.collection_id, template.id)
         _validate_template_collection(session, values["collection_id"], excluded_template_id=template.id)
     semantic_fields = (
-        "rule_type",
+        RULE_TYPE,
         "required_variable_types",
         "variable_key",
         "operator",
@@ -1140,7 +1161,7 @@ def apply_template_update(
         getattr(template, field) != values[field]
         for field in semantic_fields
     )
-    if (values["rule_type"] == "multi_parameter") != template_params.is_multi(template) and session.scalar(
+    if (values[RULE_TYPE] == RULE_MULTI_PARAMETER) != template_params.is_multi(template) and session.scalar(
         select(MonitoringRule.id).where(MonitoringRule.source_template_id == template.id).limit(1)):
         raise HTTPException(status_code=409, detail="A shared rule that is already assigned cannot switch between single-parameter and multi-parameter")
     record_template_changes(session, template, values,labels,)
@@ -1179,7 +1200,7 @@ def apply_template_update(
                 for field in (
                     "name",
                     "description",
-                    "rule_type",
+                    RULE_TYPE,
                     "operator",
                     "threshold",
                     "parameters",
@@ -1304,7 +1325,7 @@ def assign_template_to_assets(
                 "id": rule.id,
                 "name": rule.name,
                 "is_enabled": rule.is_enabled,
-                "lifecycle_status": rule.lifecycle_status,
+                LIFECYCLE_STATUS: rule.lifecycle_status,
                 "state": "activated" if rule.is_enabled else rule.lifecycle_status,
             })
         session.commit()
@@ -1328,8 +1349,8 @@ def _multi_template_row(session: Session, request: Request, template: Monitoring
         if needs and candidates and mapped is None:
             mapping_required = True
         parameters.append({
-            "key": definition["key"], "name": definition["name"], "kind": definition["kind"],
-            "aggregation": definition["aggregation"], "uses_variable": needs,
+            "key": definition["key"], "name": definition["name"], KIND: definition[KIND],
+            AGGREGATION: definition[AGGREGATION], "uses_variable": needs,
             "mapped_variable_id": mapped.id if mapped else None,
             "compatible_variables": [{"id": v.id, "name": v.name, "key": v.key, "data_type": v.data_type} for v in candidates],
         })
@@ -1395,7 +1416,7 @@ def frontend_predefined_rules(
             if template.required_variable_types and not candidates:
                 required_role = (
                     "Machine running state"
-                    if template.rule_type == "runtime_duration"
+                    if template.rule_type == RULE_RUNTIME_DURATION
                     or (
                         template.rule_type == "duration"
                         and isinstance(
@@ -1404,7 +1425,7 @@ def frontend_predefined_rules(
                         )
                     )
                     else "Cycle signal"
-                    if template.rule_type == "boolean_count_threshold"
+                    if template.rule_type == RULE_BOOLEAN_COUNT_THRESHOLD
                     else None
                 )
                 if is_mapping_bypass_enabled(request) and required_role:
@@ -1533,7 +1554,7 @@ def frontend_assign_predefined_rules(
             "id": rule.id,
             "name": rule.name,
             "is_enabled": rule.is_enabled,
-            "lifecycle_status": rule.lifecycle_status,
+            LIFECYCLE_STATUS: rule.lifecycle_status,
             "state": "activated" if rule.is_enabled else rule.lifecycle_status,
         })
     session.commit()
@@ -1684,7 +1705,7 @@ def frontend_copy_asset_rules(
     for source in selected:
         if source.rule_type == "generic":
             raise HTTPException(status_code=422,detail=f"Rule '{source.name}' has no monitoring evaluator and cannot be copied",)
-        if source.rule_type == "multi_parameter":
+        if source.rule_type == RULE_MULTI_PARAMETER:
             definition = _multi_copy_definition(session, request, source, asset_id)
             if any(_same_rule_definition(rule, definition) for rule in existing):
                 already_copied.append(source.id)
@@ -1756,8 +1777,8 @@ def frontend_create_asset_rule(
         is_mapping_bypass_enabled(request),
     )
     rule_data = payload.model_dump(exclude={"labels"})
-    rule_data["lifecycle_status"] = (
-        "in_progress" if payload.is_enabled else "deactivated"
+    rule_data[LIFECYCLE_STATUS] = (
+        STATUS_IN_PROGRESS if payload.is_enabled else STATUS_DEACTIVATED
     )
     rule = MonitoringRule(**rule_data)
     session.add(rule)
@@ -1796,7 +1817,7 @@ def frontend_create_usage_rule(
         name=payload.name,
         description=payload.description,
         labels=payload.labels,
-        rule_type="parameter_threshold",
+        rule_type=RULE_PARAMETER_THRESHOLD,
         target_asset_id=asset_id,
         variable_id=payload.variable_id,
         operator=">=",
@@ -1872,7 +1893,7 @@ def frontend_bulk_rule_state(
     updated = []
     skipped = []
     for rule in rules:
-        if rule.lifecycle_status == "completed":
+        if rule.lifecycle_status == STATUS_COMPLETED:
             skipped.append({
                 "rule_id": rule.id,
                 "name": rule.name,
@@ -1926,13 +1947,13 @@ def _transition_rule_lifecycle(
     now = datetime.now(timezone.utc)
     current = rule.lifecycle_status
     if action == "suspend":
-        if current != "in_progress" or not rule.is_enabled:
+        if current != STATUS_IN_PROGRESS or not rule.is_enabled:
             raise HTTPException(status_code=409, detail="Only an active rule can be suspended.")
         set_rule_enabled_state(session, rule, False, at=now)
-        rule.lifecycle_status = "suspended"
+        rule.lifecycle_status = STATUS_SUSPENDED
         event_type = "rule_suspended"
     elif action in {"resume", "activate"}:
-        expected = "suspended" if action == "resume" else "deactivated"
+        expected = STATUS_SUSPENDED if action == "resume" else STATUS_DEACTIVATED
         if current != expected or rule.is_enabled:
             raise HTTPException(status_code=409, detail=f"Only a {expected} rule can be {action}d.",)
         if rule.rule_type == "generic":
@@ -1950,15 +1971,15 @@ def _transition_rule_lifecycle(
             is_mapping_bypass_enabled(request),
         )
         set_rule_enabled_state(session, rule, True, at=now)
-        rule.lifecycle_status = "in_progress"
+        rule.lifecycle_status = STATUS_IN_PROGRESS
         rule.completed_at = None
         event_type = "rule_resumed" if action == "resume" else "rule_activated"
     elif action == "deactivate":
-        if current not in {"in_progress", "suspended"}:
+        if current not in {STATUS_IN_PROGRESS, STATUS_SUSPENDED}:
             raise HTTPException(status_code=409, detail="Only an active or suspended rule can be deactivated.")
         if rule.is_enabled:
             set_rule_enabled_state(session, rule, False, at=now)
-        rule.lifecycle_status = "deactivated"
+        rule.lifecycle_status = STATUS_DEACTIVATED
         event_type = "rule_deactivated"
     else:
         raise HTTPException(status_code=422, detail="Unsupported lifecycle action.")
@@ -1967,7 +1988,7 @@ def _transition_rule_lifecycle(
         session,
         event_type=event_type,
         message=(f"Rule '{rule.name}' "
-            f"{ {'suspend': 'suspended', 'resume': 'resumed', 'activate': 'activated', 'deactivate': 'deactivated'}[action] }."),
+            f"{ {'suspend': STATUS_SUSPENDED, 'resume': 'resumed', 'activate': 'activated', 'deactivate': STATUS_DEACTIVATED}[action] }."),
         occurred_at=now,
         asset_id=rule.target_asset_id,
         rule_id=rule.id,
@@ -2087,7 +2108,7 @@ def frontend_asset_logbook(
         .outerjoin(Alert, Alert.id == MaintenanceRecord.alert_id)
         .outerjoin(MonitoringRule, MonitoringRule.id == Alert.rule_id)
         .where(MaintenanceRecord.asset_id == asset_id)
-        .where(MaintenanceRecord.status == "completed")
+        .where(MaintenanceRecord.status == STATUS_COMPLETED)
         .order_by(MaintenanceRecord.performed_at.desc())
     ).all()
     return [
@@ -2175,7 +2196,7 @@ def frontend_bulk_delete_asset_logbook(
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
 
     records = _lock_rows_by_ids(session, MaintenanceRecord, payload.ids)
-    if any(record.asset_id != asset_id or record.status != "completed" for record in records):
+    if any(record.asset_id != asset_id or record.status != STATUS_COMPLETED for record in records):
         raise HTTPException(status_code=404, detail="One or more selected records do not belong to this maintenance logbook.",)
     record_ids_by_schedule: dict[int, set[int]] = {}
     for record in records:
@@ -2242,7 +2263,7 @@ def frontend_add_logbook_entry(
         performed_at=datetime.now(timezone.utc),
         actual_completed_at=datetime.now(timezone.utc),
         maintenance_type="inspection",
-        status="completed",
+        status=STATUS_COMPLETED,
         priority="medium",
     )
     session.add(record)
@@ -2560,7 +2581,7 @@ def _document_payloads(session: Session, documents: list[InstructionDocument]) -
         else:
             status = "available" if all(item["available"] for item in files) else "missing"
         result.append({
-            "id": document.id, "title": document.title, "kind": document.kind,
+            "id": document.id, "title": document.title, KIND: document.kind,
             "entry_type": "instruction" if is_instruction else "document",
             "description": document.description, "labels": document.labels or [],
             "duration_minutes": document.duration_minutes,
@@ -2659,7 +2680,7 @@ def update_document(
             _require_instruction_content("instruction", changes["description"])
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
-    for field in ("title", "kind", "description", "duration_minutes"):
+    for field in ("title", KIND, "description", "duration_minutes"):
         if field in changes:
             setattr(document, field, changes[field])
     if "asset_id" in changes:

@@ -9,6 +9,13 @@ from app.models import Asset, MonitoringRule, Reading, Variable
 from app.services.access_scope import access_scope
 from app.services.asset_deletion import variable_deletion_summary
 from app.schemas.variable import VariableCreate, VariableRead, VariableUpdate
+from app.core.constants import (
+    BOOLEAN,
+    CYCLE,
+    RULE_BOOLEAN_COUNT_THRESHOLD,
+    RULE_RUNTIME_DURATION,
+    RUNNING,
+)
 
 router = APIRouter(tags=["variables"])
 
@@ -106,7 +113,7 @@ def update_variable(variable_id: int,payload: VariableUpdate,session: Session = 
 
     resulting_data_type = changes.get("data_type", variable.data_type)
     resulting_signal_role = changes.get("signal_role", variable.signal_role)
-    if resulting_data_type != "boolean" and resulting_signal_role is not None:
+    if resulting_data_type != BOOLEAN and resulting_signal_role is not None:
         raise HTTPException(status_code=422,detail="A signal purpose can only be set for Boolean variables",)
     if "signal_role" in changes or resulting_data_type != variable.data_type:
         active_signal_rule_types = set(
@@ -115,19 +122,19 @@ def update_variable(variable_id: int,payload: VariableUpdate,session: Session = 
                     MonitoringRule.variable_id == variable.id,
                     MonitoringRule.is_enabled.is_(True),
                     MonitoringRule.rule_type.in_(
-                        {"runtime_duration", "boolean_count_threshold"}
+                        {RULE_RUNTIME_DURATION, RULE_BOOLEAN_COUNT_THRESHOLD}
                     ),
                 )
             ).all()
         )
         required_roles = {
-            "running" if rule_type == "runtime_duration" else "cycle"
+            RUNNING if rule_type == RULE_RUNTIME_DURATION else CYCLE
             for rule_type in active_signal_rule_types
         }
         if required_roles and (
             len(required_roles) > 1
             or resulting_signal_role not in required_roles
-            or resulting_data_type != "boolean"
+            or resulting_data_type != BOOLEAN
         ):
             raise HTTPException(status_code=409,detail=("Deactivate or remap the active rules using this variable "
                     "before changing its Boolean purpose."),)

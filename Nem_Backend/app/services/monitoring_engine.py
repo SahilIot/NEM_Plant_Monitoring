@@ -23,6 +23,25 @@ from app.models import (
 )
 
 from app.services.email_notifications import enqueue_alert_notifications
+from app.core.constants import (
+    ACTIVATION_AT,
+    BOOLEAN,
+    INTERVAL,
+    NUMBER,
+    RULE_BOOLEAN_COUNT_THRESHOLD,
+    RULE_MULTI_PARAMETER,
+    RULE_PARAMETER_THRESHOLD,
+    RULE_RUNTIME_DURATION,
+    STATUS_ACTIVE,
+    STATUS_ALERT,
+    STATUS_COMPLETED,
+    STATUS_DEACTIVATED,
+    STATUS_IN_PROGRESS,
+    STATUS_NORMAL,
+    STATUS_RESOLVED,
+    STATUS_UNKNOWN,
+    STATUS_WARNING,
+)
 
 LOGGER = logging.getLogger("nem_backend.monitoring")
 
@@ -54,7 +73,7 @@ def utc_now() -> datetime:
 
 # Validates the scheduled start time for runtime-based monitoring rules.
 def runtime_activation_at(rule: MonitoringRule) -> datetime | None:
-    value = (rule.parameters or {}).get("activation_at")
+    value = (rule.parameters or {}).get(ACTIVATION_AT)
     if value is None:
         return None
     if not isinstance(value, str):
@@ -122,7 +141,7 @@ def current_state(
 
 
 def _condition_holds(rule: MonitoringRule, value: Any) -> bool:
-    if rule.rule_type == "parameter_threshold":
+    if rule.rule_type == RULE_PARAMETER_THRESHOLD:
         comparison = rule.operator
         threshold: Any = rule.threshold
         expected_value = (rule.parameters or {}).get("expected_value")
@@ -159,7 +178,7 @@ def _condition_holds(rule: MonitoringRule, value: Any) -> bool:
 def _valid_value(variable: Variable, value: Any) -> bool:
     return (
         (
-            variable.data_type == "number"
+            variable.data_type == NUMBER
             and isinstance(value, (int, float))
             and not isinstance(value, bool)
         )
@@ -173,7 +192,7 @@ def _valid_value(variable: Variable, value: Any) -> bool:
             and isinstance(value, str)
         )
         or (
-            variable.data_type == "boolean"
+            variable.data_type == BOOLEAN
             and isinstance(value, bool)
         )
     )
@@ -247,14 +266,14 @@ def update_rule_signal_states(
             MonitoringRule.target_asset_id == asset_id,
             MonitoringRule.variable_id == variable_id,
             MonitoringRule.rule_type.in_(
-                {"boolean_count_threshold", "runtime_duration"}
+                {RULE_BOOLEAN_COUNT_THRESHOLD, RULE_RUNTIME_DURATION}
             ),
         )
         .order_by(MonitoringRule.id)
         .with_for_update()
     ).all()
     for rule in rules:
-        if rule.rule_type == "runtime_duration" and not rule.is_enabled:
+        if rule.rule_type == RULE_RUNTIME_DURATION and not rule.is_enabled:
             continue
         counter = session.scalar(
             select(RuleCounterState)
@@ -276,7 +295,7 @@ def update_rule_signal_states(
         if counter.last_signal_at is not None and at <= counter.last_signal_at:
             continue
 
-        if rule.rule_type == "boolean_count_threshold":
+        if rule.rule_type == RULE_BOOLEAN_COUNT_THRESHOLD:
             signal_is_fresh = (
                 counter.last_signal_at is not None
                 and at - counter.last_signal_at
@@ -333,7 +352,7 @@ def _transition_state(
             rule_id=rule.id,
             target_asset_id=asset.id,
             target_variable_id=rule.variable_id,
-            status="unknown",
+            status=STATUS_UNKNOWN,
             message="No evaluation has been completed",
             last_evaluated_at=evaluated_at,
             last_transition_at=evaluated_at,
@@ -349,7 +368,7 @@ def _transition_state(
         .where(
             Alert.rule_id == rule.id,
             Alert.target_asset_id == asset.id,
-            Alert.status == "active",
+            Alert.status == STATUS_ACTIVE,
         )
         .order_by(Alert.id.desc())
         .limit(1)
@@ -370,7 +389,7 @@ def _transition_state(
 
     alert = active_alert_before
 
-    if next_status in {"warning", "alert"}:
+    if next_status in {STATUS_WARNING, STATUS_ALERT}:
         can_create_alert = alert is not None or (
             allow_new_occurrence
             or _is_new_alert_occurrence(
@@ -390,7 +409,7 @@ def _transition_state(
                 message=message,
                 trigger_value=value,
                 threshold=threshold,
-                status="active",
+                status=STATUS_ACTIVE,
                 started_at=evaluated_at,
                 last_updated_at=evaluated_at,
             )
@@ -406,7 +425,7 @@ def _transition_state(
                     .where(
                         Alert.rule_id == rule.id,
                         Alert.target_asset_id == asset.id,
-                        Alert.status == "active",
+                        Alert.status == STATUS_ACTIVE,
                     )
                     .order_by(Alert.id.desc())
                     .limit(1)
@@ -444,7 +463,7 @@ def _transition_state(
 
         # Coming back from Not Evaluated to the same, still-active alert is not a new trigger.
         resumed_existing_alert = (
-            previous_status == "unknown"
+            previous_status == STATUS_UNKNOWN
             and active_alert_before is not None
             and alert_severity_before == next_status
         )
@@ -453,7 +472,7 @@ def _transition_state(
                 session,
                 event_type=(
                     "warning_triggered"
-                    if next_status == "warning"
+                    if next_status == STATUS_WARNING
                     else "alert_triggered"
                 ),
                 message=message,
@@ -468,8 +487,8 @@ def _transition_state(
                 },
             )
 
-    elif next_status == "normal" and alert is not None:
-        alert.status = "resolved"
+    elif next_status == STATUS_NORMAL and alert is not None:
+        alert.status = STATUS_RESOLVED
         alert.resolved_at = evaluated_at
         alert.last_updated_at = evaluated_at
         emit_event(
@@ -485,8 +504,8 @@ def _transition_state(
 
     if (
         transitioned
-        and previous_status in {"warning", "alert"}
-        and next_status == "normal"
+        and previous_status in {STATUS_WARNING, STATUS_ALERT}
+        and next_status == STATUS_NORMAL
     ):
         emit_event(
             session,
@@ -498,7 +517,7 @@ def _transition_state(
         )
 
     if (
-        next_status == "unknown"
+        next_status == STATUS_UNKNOWN
         and error_message == "stale_reading"
         and previous_error != "stale_reading"
     ):
@@ -534,9 +553,9 @@ def _is_new_alert_occurrence(
     *,
     previous_status: str,
 ) -> bool:
-    if previous_status in {"warning", "alert"}:
+    if previous_status in {STATUS_WARNING, STATUS_ALERT}:
         return False
-    if previous_status == "normal":
+    if previous_status == STATUS_NORMAL:
         return True
 
     previous_alert_exists = session.scalar(
@@ -634,7 +653,7 @@ def evaluate_boolean_count_threshold(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=None,
             message="Count threshold configuration is invalid.",
             evaluated_at=evaluated_at,
@@ -657,7 +676,7 @@ def evaluate_boolean_count_threshold(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=None,
             message="No rule-specific cycle counter is available.",
             evaluated_at=evaluated_at,
@@ -683,7 +702,7 @@ def evaluate_boolean_count_threshold(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=count,
             message=(
                 "Waiting for a trustworthy Boolean cycle signal; "
@@ -702,7 +721,7 @@ def evaluate_boolean_count_threshold(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=count,
             message=(
                 f"Cycle signal is stale (older than {signal_limit} seconds); "
@@ -714,29 +733,29 @@ def evaluate_boolean_count_threshold(
         )
 
     if count >= alert_threshold:
-        stage = "alert"
-        severity = "alert"
+        stage = STATUS_ALERT
+        severity = STATUS_ALERT
         threshold = alert_threshold
     elif count >= warning_2:
         stage = "warning_2"
-        severity = "warning"
+        severity = STATUS_WARNING
         threshold = warning_2
     elif count >= warning_1:
         stage = "warning_1"
-        severity = "warning"
+        severity = STATUS_WARNING
         threshold = warning_1
     else:
-        stage = "normal"
-        severity = "normal"
+        stage = STATUS_NORMAL
+        severity = STATUS_NORMAL
         threshold = None
 
-    if stage == "normal":
+    if stage == STATUS_NORMAL:
         return _transition_state(
             session,
             rule,
             asset,
             state,
-            next_status="normal",
+            next_status=STATUS_NORMAL,
             value=count,
             message=f"Cumulative cycle count: {count}.",
             evaluated_at=evaluated_at,
@@ -746,7 +765,7 @@ def evaluate_boolean_count_threshold(
     messages = {
         "warning_1": f"Warning 1: cycle count reached {warning_1}.",
         "warning_2": f"Warning 2: cycle count reached {warning_2}.",
-        "alert": f"Alert: cycle count reached {alert_threshold}.",
+        STATUS_ALERT: f"Alert: cycle count reached {alert_threshold}.",
     }
     message = f"{messages[stage]} [count-stage:{stage}]"
 
@@ -773,7 +792,7 @@ def evaluate_boolean_count_threshold(
             occurred_at=evaluated_at,
             asset_id=asset.id,
             rule_id=rule.id,
-            severity="warning",
+            severity=STATUS_WARNING,
             metadata={
                 "count": count,
                 "threshold": warning_2,
@@ -802,7 +821,7 @@ def evaluate_runtime_duration(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=None,
             message="Scheduled running-time activation is invalid.",
             evaluated_at=evaluated_at,
@@ -828,7 +847,7 @@ def evaluate_runtime_duration(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=None,
             message="Running-time threshold configuration is invalid.",
             evaluated_at=evaluated_at,
@@ -842,7 +861,7 @@ def evaluate_runtime_duration(
             rule,
             asset,
             state,
-            next_status="normal",
+            next_status=STATUS_NORMAL,
             value=0,
             message=(
                 f"Scheduled runtime monitoring starts at "
@@ -862,7 +881,7 @@ def evaluate_runtime_duration(
             occurred_at=evaluated_at,
             asset_id=asset.id,
             rule_id=rule.id,
-            metadata={"activation_at": activation_at.isoformat()},
+            metadata={ACTIVATION_AT: activation_at.isoformat()},
         )
 
     counter = session.scalar(
@@ -879,7 +898,7 @@ def evaluate_runtime_duration(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=None,
             message="Waiting for a trustworthy Boolean running-state signal.",
             evaluated_at=evaluated_at,
@@ -899,7 +918,7 @@ def evaluate_runtime_duration(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=float(running_seconds),
             message=(
                 f"Running-state signal is stale (older than {stale_after} seconds); "
@@ -916,7 +935,7 @@ def evaluate_runtime_duration(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=float(counter.accumulated_running_seconds),
             message="Running-state signal is unknown; running time is paused.",
             evaluated_at=evaluated_at,
@@ -926,25 +945,25 @@ def evaluate_runtime_duration(
 
     running_seconds = float(running_seconds)
     stage = (
-        "alert"
+        STATUS_ALERT
         if running_seconds >= alert_threshold
         else "warning_2"
         if running_seconds >= warnings[1]
         else "warning_1"
         if running_seconds >= warnings[0]
-        else "normal"
+        else STATUS_NORMAL
     )
-    severity = "alert" if stage == "alert" else "warning" if stage.startswith("warning") else "normal"
+    severity = STATUS_ALERT if stage == STATUS_ALERT else STATUS_WARNING if stage.startswith(STATUS_WARNING) else STATUS_NORMAL
     thresholds = {
         "warning_1": warnings[0],
         "warning_2": warnings[1],
-        "alert": alert_threshold,
+        STATUS_ALERT: alert_threshold,
     }
     messages = {
-        "normal": f"{'Machine running' if counter.is_running else 'Machine stopped'}. Accumulated running time: {running_seconds:.1f} seconds.",
+        STATUS_NORMAL: f"{'Machine running' if counter.is_running else 'Machine stopped'}. Accumulated running time: {running_seconds:.1f} seconds.",
         "warning_1": f"Running time reached the warning threshold ({warnings[0]} seconds).",
         "warning_2": f"Running time reached the higher warning threshold ({warnings[1]} seconds).",
-        "alert": f"Running time reached the alert threshold ({alert_threshold} seconds).",
+        STATUS_ALERT: f"Running time reached the alert threshold ({alert_threshold} seconds).",
     }
     previous_message = state.message if state is not None else ""
     previous_stage = (
@@ -975,7 +994,7 @@ def evaluate_runtime_duration(
             occurred_at=evaluated_at,
             asset_id=asset.id,
             rule_id=rule.id,
-            severity="warning",
+            severity=STATUS_WARNING,
             metadata={
                 "running_seconds": running_seconds,
                 "threshold_seconds": warnings[1],
@@ -1004,7 +1023,7 @@ def evaluate_interval_elapsed(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=None,
             message="Interval rule configuration is invalid.",
             evaluated_at=evaluated_at,
@@ -1033,7 +1052,7 @@ def evaluate_interval_elapsed(
             rule,
             asset,
             state,
-            next_status="normal",
+            next_status=STATUS_NORMAL,
             value=0,
             message=(
                 f"Next interval is due at "
@@ -1066,7 +1085,7 @@ def evaluate_interval_elapsed(
                 .where(
                     Alert.rule_id == rule.id,
                     Alert.target_asset_id == asset.id,
-                    Alert.status == "active",
+                    Alert.status == STATUS_ACTIVE,
                 )
                 .order_by(Alert.id.desc())
                 .limit(1)
@@ -1135,7 +1154,7 @@ def evaluate_rule(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=state.latest_value if state else None,
             message=(
                 "Rule is disabled; existing alerts remain active until "
@@ -1146,7 +1165,7 @@ def evaluate_rule(
         )
 
     if not asset.is_active:
-        if rule.rule_type == "multi_parameter":
+        if rule.rule_type == RULE_MULTI_PARAMETER:
             # Mark every parameter as paused so that reactivation waits for a fresh reading, like a variable does.
             from app.models import RuleParameter, RuleParameterState
 
@@ -1162,7 +1181,7 @@ def evaluate_rule(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=None,
             message=("Target asset is inactive; physical operating status is not inferred."),
             evaluated_at=now,
@@ -1170,7 +1189,7 @@ def evaluate_rule(
             error_message="asset_inactive",
         )
 
-    if rule.rule_type == "multi_parameter":
+    if rule.rule_type == RULE_MULTI_PARAMETER:
         # Several independently evaluated parameters; the rule shows the worst of them.
         from app.services.rule_parameters import evaluate_multi_parameter
 
@@ -1185,7 +1204,7 @@ def evaluate_rule(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=None,
             message=(
                 "Generic rule type has no evaluator configured."
@@ -1219,7 +1238,7 @@ def evaluate_rule(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=None,
             message="Variable is inactive; monitoring is paused until it is reactivated and reports a fresh reading.",
             evaluated_at=now,
@@ -1247,7 +1266,7 @@ def evaluate_rule(
                 rule,
                 asset,
                 state,
-                next_status="unknown",
+                next_status=STATUS_UNKNOWN,
                 value=None,
                 message="Reactivated; waiting for a fresh reading before monitoring resumes.",
                 evaluated_at=now,
@@ -1260,7 +1279,7 @@ def evaluate_rule(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=None,
             message="Rule target variable is unavailable or inactive.",
             evaluated_at=now,
@@ -1268,14 +1287,14 @@ def evaluate_rule(
             error_message="target_variable_unavailable",
         )
 
-    if rule.rule_type == "boolean_count_threshold":
-        if variable.data_type != "boolean":
+    if rule.rule_type == RULE_BOOLEAN_COUNT_THRESHOLD:
+        if variable.data_type != BOOLEAN:
             return _transition_state(
                 session,
                 rule,
                 asset,
                 state,
-                next_status="unknown",
+                next_status=STATUS_UNKNOWN,
                 value=None,
                 message=("Boolean count threshold requires a Boolean variable."),
                 evaluated_at=now,
@@ -1294,16 +1313,16 @@ def evaluate_rule(
         )
 
     if (
-        rule.rule_type == "runtime_duration"
+        rule.rule_type == RULE_RUNTIME_DURATION
         and (rule.parameters or {}).get("warning_thresholds_seconds") is not None
     ):
-        if variable.data_type != "boolean":
+        if variable.data_type != BOOLEAN:
             return _transition_state(
                 session,
                 rule,
                 asset,
                 state,
-                next_status="unknown",
+                next_status=STATUS_UNKNOWN,
                 value=None,
                 message="Running-time rules require a Boolean variable.",
                 evaluated_at=now,
@@ -1336,7 +1355,7 @@ def evaluate_rule(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=None,
             message="No reading is available for the rule target.",
             evaluated_at=now,
@@ -1349,7 +1368,7 @@ def evaluate_rule(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=reading.value,
             message="Latest reading is future-dated and cannot be evaluated.",
             evaluated_at=now,
@@ -1365,7 +1384,7 @@ def evaluate_rule(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=reading.value,
             message=(f"Latest reading is stale (older than {stale_after} seconds)."),
             evaluated_at=now,
@@ -1379,7 +1398,7 @@ def evaluate_rule(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=reading.value,
             message=("Latest reading does not match the configured variable data type."),
             evaluated_at=now,
@@ -1396,7 +1415,7 @@ def evaluate_rule(
             rule,
             asset,
             state,
-            next_status="unknown",
+            next_status=STATUS_UNKNOWN,
             value=reading.value,
             message=("Rule configuration or reading is invalid; state cannot be determined."),
             evaluated_at=now,
@@ -1412,19 +1431,19 @@ def evaluate_rule(
             rule,
             asset,
             state,
-            next_status="normal",
+            next_status=STATUS_NORMAL,
             value=reading.value,
             message="Configured condition is not met.",
             evaluated_at=now,
             condition_started_at=None,
             threshold=(
                 rule.threshold
-                if rule.rule_type == "parameter_threshold"
+                if rule.rule_type == RULE_PARAMETER_THRESHOLD
                 else None
             ),
         )
 
-    duration_rule = rule.rule_type in {"runtime_duration", "duration"}
+    duration_rule = rule.rule_type in {RULE_RUNTIME_DURATION, "duration"}
 
     if duration_rule:
         if condition_started is None:
@@ -1438,7 +1457,7 @@ def evaluate_rule(
                 rule,
                 asset,
                 state,
-                next_status="normal",
+                next_status=STATUS_NORMAL,
                 value=reading.value,
                 message=("Condition is active but has not met its configured duration.",),
                 evaluated_at=now,
@@ -1453,7 +1472,7 @@ def evaluate_rule(
     else:
         severity = rule.severity
         expected_value = (rule.parameters or {}).get("expected_value")
-        if rule.rule_type == "parameter_threshold" and isinstance(expected_value, bool):
+        if rule.rule_type == RULE_PARAMETER_THRESHOLD and isinstance(expected_value, bool):
             message = (f"Boolean signal is {'ON' if reading.value else 'OFF'} "
                 f"({rule.operator} {'ON' if expected_value else 'OFF'}).")
         else:
@@ -1507,10 +1526,10 @@ def evaluate_rules(
 
     counts = {
         "evaluated": 0,
-        "unknown": 0,
-        "normal": 0,
-        "warning": 0,
-        "alert": 0,
+        STATUS_UNKNOWN: 0,
+        STATUS_NORMAL: 0,
+        STATUS_WARNING: 0,
+        STATUS_ALERT: 0,
     }
 
     for rule in rules:
@@ -1543,7 +1562,7 @@ def evaluate_rules(
         except Exception:
             LOGGER.exception("Evaluation of rule %s failed; continuing with the remaining rules", rule.id)
             counts["evaluated"] += 1
-            counts["unknown"] += 1
+            counts[STATUS_UNKNOWN] += 1
             continue
 
         if state is not None:
@@ -1643,8 +1662,8 @@ def evaluate_reading_rules(
 
     parameter_rule_ids = select(RuleParameter.rule_id).where(
         RuleParameter.variable_id == variable_id,
-        RuleParameter.kind != "interval",
-        RuleParameter.lifecycle_status == "active",
+        RuleParameter.kind != INTERVAL,
+        RuleParameter.lifecycle_status == STATUS_ACTIVE,
     )
     rules = session.scalars(
         select(MonitoringRule)
@@ -1653,7 +1672,7 @@ def evaluate_reading_rules(
             or_(
                 MonitoringRule.variable_id == variable_id,
                 and_(
-                    MonitoringRule.rule_type == "multi_parameter",
+                    MonitoringRule.rule_type == RULE_MULTI_PARAMETER,
                     MonitoringRule.id.in_(parameter_rule_ids),
                 ),
             ),
@@ -1669,10 +1688,10 @@ def evaluate_reading_rules(
 
     counts = {
         "evaluated": 0,
-        "unknown": 0,
-        "normal": 0,
-        "warning": 0,
-        "alert": 0,
+        STATUS_UNKNOWN: 0,
+        STATUS_NORMAL: 0,
+        STATUS_WARNING: 0,
+        STATUS_ALERT: 0,
     }
 
     for rule in matching:
@@ -1689,7 +1708,7 @@ def evaluate_reading_rules(
         except Exception:
             LOGGER.exception("Evaluation of rule %s failed; continuing with the remaining rules", rule.id)
             counts["evaluated"] += 1
-            counts["unknown"] += 1
+            counts[STATUS_UNKNOWN] += 1
             continue
 
         if state is not None:
@@ -1720,12 +1739,12 @@ def evaluate_interval_parameter_rules(
         select(MonitoringRule)
         .where(
             MonitoringRule.is_enabled.is_(True),
-            MonitoringRule.rule_type == "multi_parameter",
+            MonitoringRule.rule_type == RULE_MULTI_PARAMETER,
             MonitoringRule.id.in_(
                 select(RuleParameter.rule_id).where(
                     RuleParameter.variable_id == variable_id,
-                    RuleParameter.kind == "interval",
-                    RuleParameter.lifecycle_status == "active",
+                    RuleParameter.kind == INTERVAL,
+                    RuleParameter.lifecycle_status == STATUS_ACTIVE,
                 )
             ),
         )
@@ -1761,11 +1780,11 @@ def set_rule_enabled_state(
 
     now = at or utc_now()
     rule.is_enabled = enabled
-    if rule.lifecycle_status != "completed":
-        rule.lifecycle_status = "in_progress" if enabled else "deactivated"
+    if rule.lifecycle_status != STATUS_COMPLETED:
+        rule.lifecycle_status = STATUS_IN_PROGRESS if enabled else STATUS_DEACTIVATED
     asset, _ = get_rule_asset(session, rule)
 
-    if rule.rule_type == "runtime_duration":
+    if rule.rule_type == RULE_RUNTIME_DURATION:
         counter = session.scalar(
             select(RuleCounterState)
             .where(
@@ -1787,7 +1806,7 @@ def set_rule_enabled_state(
             counter.runtime_checkpoint_at = None
             counter.updated_at = now
 
-    if rule.rule_type == "multi_parameter":
+    if rule.rule_type == RULE_MULTI_PARAMETER:
         from app.services.rule_parameters import pause_parameters, resume_parameters
 
         (resume_parameters if enabled else pause_parameters)(session, rule, now)
@@ -1801,7 +1820,7 @@ def set_rule_enabled_state(
                 rule,
                 asset,
                 state,
-                next_status="unknown",
+                next_status=STATUS_UNKNOWN,
                 value=state.latest_value if state else None,
                 message="Rule disabled; its active alert has been closed.",
                 evaluated_at=now,
@@ -1829,10 +1848,10 @@ def resolve_active_rule_alerts(
     active_alerts = session.scalars(
         select(Alert).where(
             Alert.rule_id == rule_id,
-            Alert.status == "active",
+            Alert.status == STATUS_ACTIVE,
         )
     ).all()
     for alert in active_alerts:
-        alert.status = "resolved"
+        alert.status = STATUS_RESOLVED
         alert.resolved_at = now
         alert.last_updated_at = now

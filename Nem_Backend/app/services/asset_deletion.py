@@ -31,6 +31,7 @@ from app.models import (
     RuleState,
     Variable,
 )
+from app.core.constants import KIND, RULE_TYPE, STATUS_ACTIVE
 
 
 def _count(session: Session, column, ids) -> int:
@@ -102,7 +103,7 @@ def asset_deletion_summary(session: Session, asset: Asset, collector: Any = None
     parameter_ids = list(session.scalars(select(RuleParameter.id).where(RuleParameter.rule_id.in_(rule_ids))).all()) if rule_ids else []
 
     active_alerts = (session.scalar(select(func.count()).select_from(Alert).where(
-        Alert.target_asset_id.in_(asset_ids), Alert.status == "active")) or 0)
+        Alert.target_asset_id.in_(asset_ids), Alert.status == STATUS_ACTIVE)) or 0)
     events = session.scalar(select(func.count()).select_from(MonitoringEvent).where(
         (MonitoringEvent.asset_id.in_(asset_ids))
         | (MonitoringEvent.rule_id.in_(rule_ids) if rule_ids else False)
@@ -132,13 +133,13 @@ def asset_deletion_summary(session: Session, asset: Asset, collector: Any = None
     }
     retained = []
     if docs:
-        retained.append({"kind": "instruction_documents", "count": docs,
+        retained.append({KIND: "instruction_documents", "count": docs,
                          "action": "Kept; only their link to the deleted asset is cleared."})
 
     legacy_templates = session.scalar(select(func.count()).select_from(MonitoringRuleTemplate).where(
         MonitoringRuleTemplate.legacy_rule_id.in_(rule_ids))) if rule_ids else 0
     if legacy_templates:
-        retained.append({"kind": "rule_templates", "count": legacy_templates,
+        retained.append({KIND: "rule_templates", "count": legacy_templates,
                          "action": "Kept; reusable templates created from these rules are not deleted."})
     blockers = _collector_blockers(session, collector, id_set, set(variable_ids))
     # Rows outside the deleted hierarchy that point into it would be orphaned or violate constraints.
@@ -242,7 +243,7 @@ def variable_deletion_summary(session: Session, variable: Variable, collector: A
         select(MaintenanceSchedule.id, MaintenanceSchedule.asset_id).where(MaintenanceSchedule.signal_variable_id == variable.id)).all()
     alerts = session.scalar(select(func.count()).select_from(Alert).where(Alert.target_variable_id == variable.id)) or 0
     active_alerts = session.scalar(select(func.count()).select_from(Alert).where(
-        Alert.target_variable_id == variable.id, Alert.status == "active")) or 0
+        Alert.target_variable_id == variable.id, Alert.status == STATUS_ACTIVE)) or 0
     states = session.scalar(select(func.count()).select_from(RuleState).where(RuleState.target_variable_id == variable.id)) or 0
     readings = session.scalar(select(func.count()).select_from(Reading).where(Reading.variable_id == variable.id)) or 0
 
@@ -261,7 +262,7 @@ def variable_deletion_summary(session: Session, variable: Variable, collector: A
         "counts": {"readings": readings, "rules": len(rules), "rule_parameters": len(parameters),
                    "maintenance_schedules": len(schedules), "alerts": alerts, "active_alerts": active_alerts,
                    "rule_states": states},
-        "rules": [{"id": r[0], "name": r[1], "rule_type": r[2], "is_enabled": r[3]} for r in rules],
+        "rules": [{"id": r[0], "name": r[1], RULE_TYPE: r[2], "is_enabled": r[3]} for r in rules],
         "parameters": [{"id": p[0], "name": p[1], "rule_id": p[2], "rule_name": p[3]} for p in parameters],
         "blockers": blockers,
         "can_delete": not blockers,

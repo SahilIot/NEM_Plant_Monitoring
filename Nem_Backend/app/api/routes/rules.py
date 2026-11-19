@@ -17,22 +17,37 @@ from app.services.access_scope import access_scope, rule_asset_id
 from app.services.labels import apply_label_filter, assign_labels
 from app.services.monitoring_engine import emit_event, evaluate_rules, set_rule_enabled_state
 from app.services.monitoring_engine import utc_now
+from app.core.constants import (
+    BOOLEAN,
+    CYCLE,
+    LIFECYCLE_STATUS,
+    NUMBER,
+    RULE_BOOLEAN_COUNT_THRESHOLD,
+    RULE_PARAMETER_THRESHOLD,
+    RULE_RUNTIME_DURATION,
+    RULE_TYPE,
+    RUNNING,
+    STATUS_ACTIVE,
+    STATUS_COMPLETED,
+    STATUS_DEACTIVATED,
+    STATUS_IN_PROGRESS,
+)
 
 router = APIRouter(prefix="/rules", tags=["monitoring rules"])
 
 # Threshold keys inside `parameters` that a Supervisor may change, per rule type.
 SUPERVISOR_PARAMETER_KEYS: dict[str, frozenset[str]] = {
-    "runtime_duration": frozenset({"warning_thresholds_seconds", "alert_threshold_seconds"}),
-    "boolean_count_threshold": frozenset({"warning_thresholds", "alert_threshold"}),
+    RULE_RUNTIME_DURATION: frozenset({"warning_thresholds_seconds", "alert_threshold_seconds"}),
+    RULE_BOOLEAN_COUNT_THRESHOLD: frozenset({"warning_thresholds", "alert_threshold"}),
 }
 
 # Fields that live on the shared rule (template) for rules created from one.
 SHARED_RULE_FIELDS = frozenset({
-    "name", "description", "rule_type", "operator", "threshold", "parameters", "severity",
+    "name", "description", RULE_TYPE, "operator", "threshold", "parameters", "severity",
     "evaluation_interval_seconds", "stale_after_seconds",
 })
 TEMPLATE_VALUE_FIELDS = (
-    "name", "description", "collection_id", "rule_type", "required_variable_types", "variable_key",
+    "name", "description", "collection_id", RULE_TYPE, "required_variable_types", "variable_key",
     "operator", "threshold", "parameters", "severity", "is_enabled",
     "evaluation_interval_seconds", "stale_after_seconds",
 )
@@ -122,24 +137,24 @@ def validate_targets(
     if variable is not None and target_asset_id is not None:
         if variable.asset_id != target_asset_id:
             raise HTTPException(status_code=422, detail="Target variable does not belong to target asset")
-    if rule_type == "parameter_threshold":
+    if rule_type == RULE_PARAMETER_THRESHOLD:
         expected_value = (parameters or {}).get("expected_value")
         if isinstance(expected_value, bool):
             if (
                 variable is None
                 or not variable.is_active
-                or variable.data_type != "boolean"
+                or variable.data_type != BOOLEAN
                 or operator not in {"==", "!=", "eq", "ne"}
                 or threshold is not None
             ):
                 raise HTTPException(status_code=422,detail=("Boolean parameter thresholds require an active Boolean "
                         "variable, an equality operator, and a Boolean expected_value"),)
         else:
-            if variable is None or variable.data_type not in {"number", "integer"}:
+            if variable is None or variable.data_type not in {NUMBER, "integer"}:
                 raise HTTPException(status_code=422,detail="Parameter threshold rules require a numeric variable",)
             if operator is None or threshold is None:
                 raise HTTPException(status_code=422, detail="Parameter threshold rules require an operator and threshold",)
-    if rule_type in {"runtime_duration", "duration"}:
+    if rule_type in {RULE_RUNTIME_DURATION, "duration"}:
         interval_elapsed = (
             rule_type == "duration"
             and parameters is not None
@@ -158,20 +173,20 @@ def validate_targets(
                         "interval_seconds value, and no variable target"),)
             return
         duration = parameters.get("duration_seconds") if parameters else None
-        if rule_type == "runtime_duration" and parameters and ("warning_thresholds_seconds" in parameters):
+        if rule_type == RULE_RUNTIME_DURATION and parameters and ("warning_thresholds_seconds" in parameters):
             if (
                 asset is None
                 or not asset.is_active
                 or variable is None
                 or not variable.is_active
-                or variable.data_type != "boolean"
+                or variable.data_type != BOOLEAN
             ):
                 raise HTTPException(status_code=422,detail="Running-time rules require an active Boolean variable on an active asset",)
             bypass_signal_is_valid = (
                 mapping_bypass_enabled
                 and variable is not None
                 and variable.opcua_node_id is not None
-                and variable.signal_role in {None, "running"}
+                and variable.signal_role in {None, RUNNING}
             )
             if bypass_signal_is_valid:
                 try:
@@ -196,7 +211,7 @@ def validate_targets(
                 condition = (parameters or {}).get("condition", "equals")
                 expected = (parameters or {}).get("expected_value")
                 if condition == "threshold":
-                    if variable is None or variable.data_type not in {"number", "integer"}:
+                    if variable is None or variable.data_type not in {NUMBER, "integer"}:
                         raise HTTPException(status_code=422, detail="Threshold duration rules require a numeric variable.",)
                 elif isinstance(expected, bool):
                     if (
@@ -204,13 +219,13 @@ def validate_targets(
                         or not asset.is_active
                         or variable is None
                         or not variable.is_active
-                        or variable.data_type != "boolean"
+                        or variable.data_type != BOOLEAN
                     ):
                         raise HTTPException( status_code=422, detail="Boolean duration rules require an active Boolean variable on an active asset.",)
                     bypass_signal_is_valid = (
                         mapping_bypass_enabled
                         and variable.opcua_node_id is not None
-                        and variable.signal_role == "running"
+                        and variable.signal_role == RUNNING
                     )
                     if bypass_signal_is_valid:
                         try:
@@ -224,20 +239,20 @@ def validate_targets(
                         raise HTTPException(status_code=422,detail=("Boolean duration rules must target this asset's "
                                 "configured running signal or a declared variable "
                                 "marked as Machine running state."),)
-    if rule_type == "boolean_count_threshold":
+    if rule_type == RULE_BOOLEAN_COUNT_THRESHOLD:
         if (
             asset is None
             or not asset.is_active
             or variable is None
             or not variable.is_active
-            or variable.data_type != "boolean"
+            or variable.data_type != BOOLEAN
         ):
             raise HTTPException(status_code=422,detail=("Boolean count threshold rules require an active Boolean variable"),)
         bypass_signal_is_valid = (
             mapping_bypass_enabled
             and variable is not None
             and variable.opcua_node_id is not None
-            and variable.signal_role in {None, "cycle"}
+            and variable.signal_role in {None, CYCLE}
         )
         if bypass_signal_is_valid:
             try:
@@ -287,7 +302,7 @@ def create_rule(
         is_mapping_bypass_enabled(request),
     )
     rule_data = payload.model_dump(exclude={"labels"})
-    rule_data["lifecycle_status"] = ("in_progress" if payload.is_enabled else "deactivated")
+    rule_data[LIFECYCLE_STATUS] = (STATUS_IN_PROGRESS if payload.is_enabled else STATUS_DEACTIVATED)
     rule = MonitoringRule(**rule_data)
     session.add(rule)
     session.flush()
@@ -412,13 +427,13 @@ def update_rule(
             raise HTTPException(status_code=403,detail=("Supervisors can only edit Due and Overdue values. "
                     f"Restricted fields: {', '.join(sorted(restricted))}"),)
 
-    if rule.lifecycle_status == "completed" and changes.get("is_enabled") is True:
+    if rule.lifecycle_status == STATUS_COMPLETED and changes.get("is_enabled") is True:
         raise HTTPException(status_code=409,detail="Completed rules cannot be reactivated. Create a new rule instead.",)
 
     prospective = {
         key: changes.get(key, getattr(rule, key))
         for key in (
-            "name", "rule_type", "target_asset_id", "variable_id", "operator",
+            "name", RULE_TYPE, "target_asset_id", "variable_id", "operator",
             "threshold", "parameters", "severity", "is_enabled",
             "evaluation_interval_seconds", "stale_after_seconds",
         )
@@ -439,7 +454,7 @@ def update_rule(
     #Prevent changing targets while alerts are active
     if target_fields.intersection(changes) and session.scalar(select(RuleState.id).where(RuleState.rule_id == rule.id).limit(1)):
         raise HTTPException(status_code=409,detail="A rule target cannot be changed after evaluation state exists",)
-    if target_fields.intersection(changes) and session.scalar(select(Alert.id).where(Alert.rule_id == rule.id, Alert.status == "active").limit(1)):
+    if target_fields.intersection(changes) and session.scalar(select(Alert.id).where(Alert.rule_id == rule.id, Alert.status == STATUS_ACTIVE).limit(1)):
         raise HTTPException(status_code=409,detail="Resolve active alerts before changing a rule target",)
 
     # A rule created from a shared rule is a view of it: threshold-type edits go to the shared

@@ -23,6 +23,7 @@ from app.models.rule_visibility import (
     rule_template_visibility_supervisors,
 )
 from app.services.access_scope import REQUEST_SESSION_KEY
+from app.core.constants import RULE_TYPE
 
 # Identifying the authenticated user 
 def request_user(session: Session) -> User | None:
@@ -215,7 +216,7 @@ def enforce_template_edit_permission(
 
 
 _TRACKED_FIELDS = (
-    "name", "description", "rule_type", "required_variable_types", "variable_key",
+    "name", "description", RULE_TYPE, "required_variable_types", "variable_key",
     "operator", "threshold", "parameters", "severity", "is_enabled",
     "evaluation_interval_seconds", "stale_after_seconds", "collection_id",
 )
