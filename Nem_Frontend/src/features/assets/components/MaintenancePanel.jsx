@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   CalendarDays,
@@ -22,13 +23,81 @@ import {
   Modal,
   useConfirmation,
 } from "../../../components/common/UI.jsx";
-import { DotsIcon } from "../../../components/common/Icons.jsx";
+import { DotsIcon, RefreshIcon } from "../../../components/common/Icons.jsx";
 import RuleLiveHours from "./RuleLiveHours.jsx";
 import { auditUser, formatAuditTime, formatDurationHours, formatTime, isHoursUnit } from "../../../utils/format.js";
 import MaintenanceDetails from "./MaintenanceDetails.jsx";
 import MaintenanceRegistrationDialog from "./MaintenanceRegistrationDialog.jsx";
 import { recordDeleteConfirmation, recordDeleteState, scheduleDeleteState } from "../maintenanceDeletion.js";
 import "./MaintenancePanel.css";
+
+const svgProps = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true };
+const WrenchGlyph = () => (
+  <svg {...svgProps}><path d="M14.7 6.3a4 4 0 005.4 5.4l-8.9 8.9a2.1 2.1 0 01-3-3l8.9-8.9z" /><path d="M14.7 6.3l2.1-2.1M17.8 9.4l2.1-2.1" /></svg>
+);
+const CheckCircleGlyph = () => (
+  <svg {...svgProps}><circle cx="12" cy="12" r="9" /><path d="M8 12.5l3 3 5-6" /></svg>
+);
+
+// Completion choice for rule-generated maintenance. Only presentation lives here: the three actions are the same
+// handlers the previous dialog used and are passed in by the caller.
+function CompletionChoiceDialog({ busy, error, onReset, onKeep, onCancel }) {
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === "Escape" && !busy) onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onCancel]);
+
+  return createPortal(
+    <div className="modal-bg" onClick={() => { if (!busy) onCancel(); }}>
+      <div
+        className="modal completion-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="completion-dialog-title"
+        aria-busy={busy}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="completion-head">
+          <span className="completion-head-icon"><WrenchGlyph /></span>
+          <div>
+            <h3 id="completion-dialog-title">Complete Maintenance</h3>
+            <p className="completion-sub">Choose what happens to this parameter&apos;s progress.</p>
+          </div>
+        </header>
+        {error && (
+          <p className="notice error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="completion-choices">
+          <button type="button" className="completion-card completion-card-primary" disabled={busy} onClick={onReset}>
+            <span className="completion-card-icon"><RefreshIcon size={22} aria-hidden="true" /></span>
+            <span className="completion-card-text">
+              <strong>{busy ? "Completing…" : "Reset & Start Next Cycle"}</strong>
+              <span>Complete maintenance, reset parameter progress to zero, and automatically start a new maintenance cycle.</span>
+            </span>
+          </button>
+          <button type="button" className="completion-card" disabled={busy} onClick={onKeep}>
+            <span className="completion-card-icon"><CheckCircleGlyph /></span>
+            <span className="completion-card-text">
+              <strong>Complete Without Reset</strong>
+              <span>Complete maintenance while preserving current parameter progress. No new cycle starts automatically.</span>
+            </span>
+          </button>
+        </div>
+        <div className="completion-footer">
+          <button type="button" className="completion-cancel" disabled={busy} onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 const API_BASE = (import.meta.env.VITE_API_URL || "/api/v1").replace(/\/+$/, "");
 const TYPES = ["preventive", "corrective", "inspection", "unplanned"];
@@ -2694,10 +2763,26 @@ export default function MaintenancePanel({
 
       {/* Nothing is completed or reset until one of the two choices is confirmed; Cancel completes nothing. */}
       {dialog?.kind === "reset_choice" && (
+        <CompletionChoiceDialog
+          busy={busy}
+          error={error}
+          // Selecting a card only opens the confirmation step; nothing is sent until it is confirmed.
+          onReset={() => { setError(""); setDialog({ kind: "reset_confirm", record: dialog.record, payload: dialog.payload, resetProgress: true }); }}
+          onKeep={() => { setError(""); setDialog({ kind: "reset_confirm", record: dialog.record, payload: dialog.payload, resetProgress: false }); }}
+          onCancel={() => setDialog(null)}
+        />
+      )}
+
+      {/* Second step: the completion request is sent only from the explicit confirmation button. Cancel (or a
+          failed request) keeps the record and payload so the user can go back or retry. */}
+      {dialog?.kind === "reset_confirm" && (
         <Modal
-          title="Complete Maintenance"
+          title={dialog.resetProgress ? "Confirm Progress Reset" : "Confirm Maintenance Completion"}
           onClose={() => {
-            if (!busy) setDialog(null);
+            if (!busy) {
+              setError("");
+              setDialog({ kind: "reset_choice", record: dialog.record, payload: dialog.payload });
+            }
           }}
         >
           <div className="maintenance-form">
@@ -2707,41 +2792,31 @@ export default function MaintenancePanel({
               </p>
             )}
             <p>
-              Do you want to reset this parameter&apos;s progress and start a new maintenance cycle from zero?
-            </p>
-            <p className="muted">
-              <strong>Reset &amp; Start Next Cycle</strong> completes this maintenance and restarts the
-              parameter&apos;s progress at 0. <strong>Complete Without Reset</strong> also completes this
-              maintenance, but keeps the current progress and does not start a new cycle automatically.
+              {dialog.resetProgress
+                ? "Are you sure you want to complete this maintenance and reset parameter progress to zero? A new maintenance cycle will start automatically."
+                : "Are you sure you want to complete this maintenance without resetting parameter progress? The current progress will be preserved, and no new cycle will start automatically."}
             </p>
             <div className="modal-actions">
+              <button
+                type="button"
+                className="btn-outline"
+                disabled={busy}
+                onClick={() => {
+                  setError("");
+                  setDialog({ kind: "reset_choice", record: dialog.record, payload: dialog.payload });
+                }}
+              >
+                Cancel
+              </button>
               <button
                 type="button"
                 className="btn-primary"
                 disabled={busy}
                 onClick={() =>
-                  changeMaintenanceStatus(dialog.record, { ...dialog.payload, reset_progress: true })
+                  changeMaintenanceStatus(dialog.record, { ...dialog.payload, reset_progress: dialog.resetProgress })
                 }
               >
-                {busy ? "Completing…" : "Reset & Start Next Cycle"}
-              </button>
-              <button
-                type="button"
-                className="btn-outline"
-                disabled={busy}
-                onClick={() =>
-                  changeMaintenanceStatus(dialog.record, { ...dialog.payload, reset_progress: false })
-                }
-              >
-                Complete Without Reset
-              </button>
-              <button
-                type="button"
-                className="btn-outline"
-                disabled={busy}
-                onClick={() => setDialog(null)}
-              >
-                Cancel
+                {busy ? "Completing…" : dialog.resetProgress ? "Yes, Reset & Start Next Cycle" : "Yes, Complete Maintenance"}
               </button>
             </div>
           </div>

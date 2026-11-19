@@ -2559,3 +2559,170 @@ html[data-theme="dark"] .maintenance-detail-symbol svg {
     width: 100%;
   }
 }
+
+/* Completion choice dialog (rule-generated maintenance). */
+.modal.completion-dialog {
+  width: min(480px, calc(100vw - 32px));
+  display: grid;
+  gap: 16px;
+}
+
+.completion-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.completion-head h3 {
+  margin: 0;
+}
+
+.completion-head-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  color: var(--action, #8bb8f7);
+  background: var(--action-soft, rgba(79, 140, 255, 0.12));
+  border: 1px solid color-mix(in srgb, var(--action, #8bb8f7) 30%, transparent);
+}
+
+.completion-sub {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: var(--muted, #93a0ad);
+}
+
+.completion-choices {
+  display: grid;
+  gap: 10px;
+}
+
+.completion-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  text-align: left;
+  font: inherit;
+  color: var(--ink, inherit);
+  background: var(--surface-2, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.05s ease;
+}
+
+.completion-card:hover:not(:disabled) {
+  border-color: var(--line-strong, rgba(255, 255, 255, 0.28));
+  background: var(--surface-hover, rgba(120, 145, 175, 0.1));
+}
+
+.completion-card:focus-visible {
+  outline: 2px solid var(--action, #8bb8f7);
+  outline-offset: 2px;
+}
+
+.completion-card:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.completion-card:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.completion-card-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  color: var(--ink-2, var(--muted, #b3bdc8));
+  background: color-mix(in srgb, var(--ink, #fff) 7%, transparent);
+}
+
+.completion-card-text {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.completion-card-text strong {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.completion-card-text span {
+  font-size: 0.83rem;
+  line-height: 1.4;
+  color: var(--muted, #93a0ad);
+}
+
+.completion-card-primary {
+  background: var(--action-soft, rgba(79, 140, 255, 0.12));
+  border-color: color-mix(in srgb, var(--action, #8bb8f7) 55%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--action, #8bb8f7) 18%, transparent);
+}
+
+.completion-card-primary .completion-card-icon {
+  color: #fff;
+  background: var(--action-bg, #2f6bc2);
+}
+
+.completion-card-primary:hover:not(:disabled) {
+  border-color: var(--action, #8bb8f7);
+  background: color-mix(in srgb, var(--action, #8bb8f7) 20%, var(--surface-2, transparent));
+}
+
+.completion-card-primary .completion-card-text span {
+  color: var(--ink-2, var(--muted, #b3bdc8));
+}
+
+.completion-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 12px;
+  border-top: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+}
+
+.completion-cancel {
+  min-height: 36px;
+  padding: 0 16px;
+  font: inherit;
+  color: var(--muted, #93a0ad);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.completion-cancel:hover:not(:disabled) {
+  color: var(--ink, inherit);
+  background: var(--surface-hover, rgba(120, 145, 175, 0.1));
+}
+
+.completion-cancel:focus-visible {
+  outline: 2px solid var(--action, #8bb8f7);
+  outline-offset: 2px;
+}
+
+.completion-cancel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .completion-card {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .completion-footer .completion-cancel {
+    width: 100%;
+  }
+}
