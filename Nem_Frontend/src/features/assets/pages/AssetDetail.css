@@ -1510,3 +1510,11 @@ button:disabled {
 /* The variables table has status and lifecycle actions; give its dialog room instead of scrolling sideways. */
 .modal:has(.variables-table) { width: min(900px, 100%); }
 .variables-table .variable-row-actions { flex-wrap: nowrap; align-items: center; }
+
+.asset-page .rule-loading-spinner { display: flex; justify-content: center; align-items: flex-start; padding: 64px 0; }
+.asset-page .rule-loading-ring {
+  width: 32px; height: 32px; border-radius: 50%;
+  border: 3px solid var(--line-strong); border-top-color: var(--accent);
+  animation: app-loading-spin 800ms linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .asset-page .rule-loading-ring { animation-duration: 2.4s; } }

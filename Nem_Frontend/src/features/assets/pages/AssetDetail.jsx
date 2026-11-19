@@ -59,6 +59,7 @@ import {
   DotsIcon,
   ChevronDown,
 } from "../../../components/common/Icons.jsx";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 const ORDER = { alert: 0, warning: 1, ok: 2 };
 
@@ -355,6 +356,7 @@ export default function AssetDetail() {
     routeState.eventEndDateTime || ""
   );
   const [loadError, setLoadError] = useState("");
+  const [rulesLoaded, setRulesLoaded] = useState(false);
   const [deletingAsset, setDeletingAsset] = useState(false);
   const [showDeleteAsset, setShowDeleteAsset] = useState(false);
   const [togglingVariableId, setTogglingVariableId] = useState(null);
@@ -518,6 +520,7 @@ export default function AssetDetail() {
       ) {
         const loadedRules = Array.isArray(r.value) ? r.value : [];
         setRules(loadedRules);
+        setRulesLoaded(true);
         if (
           generation === seq.current &&
           ruleRequest === ruleListSeq.current
@@ -532,6 +535,7 @@ export default function AssetDetail() {
         setLoadError(
           r.reason?.message || "Unable to load rules."
         );
+        setRulesLoaded(true);
       }
 
       if (
@@ -742,6 +746,7 @@ export default function AssetDetail() {
     setSort(restoredState.assetRuleSort === "name" ? "name" : "severity");
     setChildren(Boolean(restoredState.assetIncludeChildren));
     setRules([]);
+    setRulesLoaded(false);
     setAllVariables([]);
     setVariables([]);
     setLogs([]);
@@ -1888,11 +1893,13 @@ const filteredEvents = [...events]
         const detailRule = rules.find((item) => item.id === detailRuleId);
         return (
           <section className="rule-detail-page" aria-label="Rule status details">
-            <button type="button" className="rule-detail-back" onClick={closeRuleStatusPage}>
-              <span aria-hidden="true">←</span> Back to Current status
-            </button>
-            {!detailRule && rules.length === 0 && <p className="muted">Loading rule…</p>}
-            {!detailRule && rules.length > 0 && (
+            <BackButton label="Current status" onClick={closeRuleStatusPage} />
+            {!detailRule && !rulesLoaded && (
+              <div className="rule-loading-spinner" role="status" aria-label="Loading rule">
+                <span className="rule-loading-ring" aria-hidden="true" />
+              </div>
+            )}
+            {!detailRule && rulesLoaded && !loadError && (
               <p className="muted">This rule was not found on this asset. It may have been deleted.</p>
             )}
             {detailRule && (

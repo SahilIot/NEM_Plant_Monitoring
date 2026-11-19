@@ -2,7 +2,6 @@ import React, { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Download, ExternalLink, FileText } from "lucide-react";
 import { api } from "../../../services/api.js";
-import { BackIcon } from "../../../components/common/Icons.jsx";
 import { LoadingIndicator } from "../../../components/common/UI.jsx";
 import { auditUser } from "../../../utils/format.js";
 import {
@@ -14,6 +13,7 @@ import {
   formatDocumentDate,
 } from "../../../utils/documents.js";
 import "./Documents.css";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 export default function DocumentViewerPage() {
   const { documentId, fileId } = useParams();
@@ -82,9 +82,7 @@ export default function DocumentViewerPage() {
 
   return (
     <div className="docs-page">
-      <button type="button" className="link-btn" onClick={() => nav("/configuration/documents")}>
-        <BackIcon size={14} /> Back to documents
-      </button>
+      <BackButton label="Documents" onClick={() => nav("/configuration/documents")} />
 
       <div className="docs-head">
         <div>

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, Pencil, X } from "lucide-react";
+import { ArrowLeft, Pencil, X } from "lucide-react";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { RuleField, UnitInput } from "./RuleFormParts.jsx";
@@ -321,7 +321,7 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
     <form id="pe-form" className="pe-body" onSubmit={save} noValidate>
       {(loaded.parameters.length > 1 || alwaysSelect) && parameterId === null && (
         <button type="button" className="pe-back" onClick={() => setSelected(null)} disabled={saving}>
-          <ChevronLeft size={14} aria-hidden="true" /> All parameters
+          <ArrowLeft size={16} aria-hidden="true" /> All parameters
         </button>
       )}
 

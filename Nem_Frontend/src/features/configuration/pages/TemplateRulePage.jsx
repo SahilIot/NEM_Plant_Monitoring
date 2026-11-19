@@ -13,6 +13,7 @@ import { COLLECTIONS_PATH, LIBRARY_PATH } from "./RuleTypeSelectPage.jsx";
 import { MAX_COLLECTION_RULES } from "./collectionLimits.js";
 import "../../rules/pages/RuleCreatePage.css";
 import "./NewRuleWorkflow.css";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 // The one reusable-rule (template) configuration page. It hosts the same parameter wizard as an asset rule, in template
 // mode: the parameters are saved as definitions, and a variable is chosen for each when the rule is assigned to an asset.
@@ -203,10 +204,10 @@ export default function TemplateRulePage() {
   };
 
   const copy = COPY[category];
-  const back = editing ? "← Back" : draftMode ? "← Back to collection form" : collection ? "← Back to Collection" : "← Back to Rule Library";
+  const back = editing ? "Back" : draftMode ? "Collection form" : collection ? "Collection" : "Rule Library";
   const head = (
     <>
-      <button type="button" className="btn-outline rule-back-btn" onClick={cancel}>{back}</button>
+      <BackButton className="rule-back-btn" label={back} onClick={cancel} />
       <div className="page-head rule-page-head">
         <span className="rule-create-kicker">{editing ? "EDIT REUSABLE RULE" : suggest ? "SUGGEST A RULE" : "NEW RULE"}</span>
         <h1 className="page-title rule-page-title">{editing ? (template?.name || "Reusable rule") : `Create ${copy.title}`}</h1>

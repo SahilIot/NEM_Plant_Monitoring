@@ -37,6 +37,7 @@ import "./RuleLibrary.css";
 import CopyRuleModal from "./CopyRuleModal.jsx";
 import "./CopyRuleModal.css";
 import { useLiveRefresh } from "../../../services/useLiveRefresh.js";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 function formatInterval(seconds) {
   for (const [unit, divisor] of [
@@ -528,8 +529,8 @@ const reviewRequest = async (request, action) => {
 
   return (
     <main className="rule-library-page">
-      <button
-        className="link-btn"
+      <BackButton
+        label="Back"
         onClick={() =>
           returnToNavigationOrigin(
             navigate,
@@ -537,9 +538,7 @@ const reviewRequest = async (request, action) => {
             "/configuration"
           )
         }
-      >
-        ‹ Back
-      </button>
+      />
       <div className="rule-library-heading">
         <div>
           <h1 className="page-title">Monitoring Rule Library</h1>

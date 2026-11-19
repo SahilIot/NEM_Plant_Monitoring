@@ -16,7 +16,6 @@ import {
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import LabelsField from "../../../components/common/LabelsField.jsx";
-import { BackIcon } from "../../../components/common/Icons.jsx";
 import { LoadingIndicator, Modal, useConfirmation } from "../../../components/common/UI.jsx";
 import { auditUser } from "../../../utils/format.js";
 import { useLiveRefresh } from "../../../services/useLiveRefresh.js";
@@ -31,6 +30,7 @@ import {
   validateFiles,
 } from "../../../utils/documents.js";
 import "./Documents.css";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 const SORTS = [
   ["newest", "Newest first"],
@@ -410,9 +410,7 @@ export default function DocumentsPage() {
 
   return (
     <div className="docs-page">
-      <button type="button" className="link-btn" onClick={() => nav("/configuration")}>
-        <BackIcon size={14} /> Back
-      </button>
+      <BackButton label="Configuration" onClick={() => nav("/configuration")} />
 
       <div className="docs-head">
         <div>

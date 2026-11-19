@@ -8,6 +8,7 @@ import {
 import RuleCategoryOptions from "../../rules/components/RuleCategoryOptions.jsx";
 import "../../rules/pages/RuleCreatePage.css";
 import "./NewRuleWorkflow.css";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 export const LIBRARY_PATH = "/configuration/rules";
 export const COLLECTIONS_PATH = "/configuration/collections";
@@ -36,13 +37,11 @@ export default function RuleTypeSelectPage() {
   return (
     <div className="rule-create-page rule-create-page-select">
       <div className="rule-create-container">
-        <button
-          type="button"
-          className="btn-outline rule-back-btn"
+        <BackButton
+          className="rule-back-btn"
           onClick={backToLibrary}
-        >
-          {collection?.draft ? "← Back to collection form" : collection ? "← Back to Collection" : "← Back to Rule Library"}
-        </button>
+          label={collection?.draft ? "Collection form" : collection ? "Collection" : "Rule Library"}
+        />
 
         <div className="page-head rule-page-head">
           <span className="rule-create-kicker">NEW RULE</span>

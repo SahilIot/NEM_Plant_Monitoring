@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Eye, Layers, Pencil, Plus, PlusCircle, RefreshCw, Search, Trash2 } from "lucide-react";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
-import { BackIcon } from "../../../components/common/Icons.jsx";
 import { EmptyState, LoadingIndicator, Modal, useConfirmation } from "../../../components/common/UI.jsx";
 import LabelsField from "../../../components/common/LabelsField.jsx";
 import RuleCollectionCreateModal from "./RuleCollectionCreateModal.jsx";
@@ -14,6 +13,7 @@ import { captureNavigationOrigin, consumeNavigationFlash } from "../../../utils/
 import { RuleViewModal, displayType, ruleKind, templateSummary } from "./RuleLibrary.jsx";
 import "./RuleLibrary.css";
 import { useLiveRefresh } from "../../../services/useLiveRefresh.js";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 
 const labelName = (label) => (typeof label === "string" ? label : label?.name);
@@ -181,9 +181,7 @@ export default function CollectionLibrary() {
 
   return (
     <main className="rule-library-page">
-      <button type="button" className="link-btn" onClick={() => nav("/configuration")}>
-        <BackIcon size={14} /> Back
-      </button>
+      <BackButton label="Configuration" onClick={() => nav("/configuration")} />
 
       <div className="rule-library-heading">
         <div>

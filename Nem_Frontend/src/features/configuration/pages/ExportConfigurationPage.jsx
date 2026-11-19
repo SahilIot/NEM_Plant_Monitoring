@@ -3,9 +3,9 @@ import { Link, useNavigate } from "react-router-dom";
 import { Download, RefreshCw } from "lucide-react";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
-import { BackIcon } from "../../../components/common/Icons.jsx";
 import { LoadingIndicator } from "../../../components/common/UI.jsx";
 import "./ConfigTransfer.css";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 // Only what the backend can export and import again.
 const CATEGORY_DEFS = [
@@ -117,9 +117,7 @@ export default function ExportConfigurationPage() {
 
   return (
     <div className="xfer-page">
-      <button type="button" className="link-btn" onClick={() => nav("/configuration")}>
-        <BackIcon size={14} /> Back
-      </button>
+      <BackButton label="Configuration" onClick={() => nav("/configuration")} />
 
       <div className="xfer-head">
         <h1 className="page-title">Export configuration</h1>

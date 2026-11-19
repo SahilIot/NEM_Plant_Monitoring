@@ -8,6 +8,7 @@ import ParameterRuleWizard from "../components/ParameterRuleWizard.jsx";
 import { buildMultiParameterPayload } from "../components/parameterRules.js";
 import { parameterForKind } from "../components/intervalConfig.js";
 import "./RuleCreatePage.css";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 const COPY = {
   parameter_threshold: {
@@ -87,7 +88,7 @@ export default function MultiParameterRulePage({ category }) {
   return (
     <div className="rule-create-page">
       <div className="rule-create-container">
-        <button type="button" className="btn-outline rule-back-btn" onClick={goBack}>← Back to Asset</button>
+        <BackButton className="rule-back-btn" label="Asset" onClick={goBack} />
         <div className="page-head rule-page-head">
           <span className="rule-create-kicker">MONITORING RULE</span>
           <h1 className="page-title rule-page-title">{copy.title}</h1>

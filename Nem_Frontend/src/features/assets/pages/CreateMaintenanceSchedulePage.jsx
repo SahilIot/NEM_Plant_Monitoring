@@ -9,6 +9,7 @@ import {
   rememberNavigationOrigin,
   returnToNavigationOrigin,
 } from "../../../utils/navigation.js";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 // Available maintenance types, priorities, and recurrence units.
 const TYPES = [
@@ -809,14 +810,11 @@ export default function CreateMaintenanceSchedulePage() {
 
       {/* Page header and navigation controls. */}
       <div className="create-schedule-header">
-        <button
-          type="button"
-          className="btn-outline"
+        <BackButton
           onClick={goToMaintenanceLog}
           disabled={busy}
-        >
-          {isSuggestion ? "← Back to Rule Library" : "← Back"}
-        </button>
+          label={isSuggestion ? "Rule Library" : "Maintenance log"}
+        />
 
         <div>
           <p className="create-schedule-eyebrow">

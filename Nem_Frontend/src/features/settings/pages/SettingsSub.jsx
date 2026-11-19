@@ -4,8 +4,9 @@ import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { LoadingIndicator, Modal } from "../../../components/common/UI.jsx";
-import { BackIcon, EditIcon } from "../../../components/common/Icons.jsx";
+import { EditIcon } from "../../../components/common/Icons.jsx";
 import BackupRestore from "./BackupRestore.jsx";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 const TITLES = {
   user: "User information",
@@ -428,7 +429,7 @@ export default function SettingsSub() {
   const nav = useNavigate();
   return (
     <div>
-      <button className="link-btn" onClick={() => nav("/settings")}><BackIcon size={14} /> Back</button>
+      <BackButton label="Settings" onClick={() => nav("/settings")} />
       <h1>{TITLES[sub] || "Settings"}</h1>
       {sub === "user" && <UserInfo />}
       {(sub === "email" || sub === "analytics" || sub === "connectivity") && <SettingsForm section={sub} />}

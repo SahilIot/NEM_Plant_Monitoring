@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { FileText, Upload, X } from "lucide-react";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
-import { BackIcon } from "../../../components/common/Icons.jsx";
 import LabelsField from "../../../components/common/LabelsField.jsx";
 import {
   DOCUMENT_CATEGORIES,
@@ -13,6 +12,7 @@ import {
   validateFiles,
 } from "../../../utils/documents.js";
 import "./Documents.css";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 // Creates an instruction (text content). An attachment is optional: with no file the
 // instruction is saved as text only; with files it is saved together with them.
@@ -97,9 +97,7 @@ export default function CreateInstructionPage() {
 
   return (
     <div className="docs-page docs-form-page">
-      <button type="button" className="link-btn" onClick={() => nav("/configuration/documents")}>
-        <BackIcon size={14} /> Back to instructions &amp; documents
-      </button>
+      <BackButton label="Instructions & documents" onClick={() => nav("/configuration/documents")} />
 
       <div className="docs-head">
         <div>

@@ -7,8 +7,8 @@ import {
   LoadingIndicator,
   StatusBadge,
 } from "../../../components/common/UI.jsx";
-import { BackIcon } from "../../../components/common/Icons.jsx";
 import { returnToNavigationOrigin } from "../../../utils/navigation.js";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 export default function AlertRules() {
   const { kind } = useParams();
@@ -63,9 +63,7 @@ export default function AlertRules() {
 
   return (
     <div>
-      <button className="link-btn" onClick={returnToHome}>
-        <BackIcon size={14} /> Back
-      </button>
+      <BackButton label="Back" onClick={returnToHome} />
       <h1 className="page-title">{heading}</h1>
       <div className="panel">
         {error ? (

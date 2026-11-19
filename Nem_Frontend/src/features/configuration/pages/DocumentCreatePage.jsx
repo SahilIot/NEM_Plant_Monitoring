@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { FileText, Upload, X } from "lucide-react";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
-import { BackIcon } from "../../../components/common/Icons.jsx";
 import LabelsField from "../../../components/common/LabelsField.jsx";
 import {
   DOCUMENT_CATEGORIES,
@@ -12,6 +11,7 @@ import {
   validateFiles,
 } from "../../../utils/documents.js";
 import "./Documents.css";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 export default function DocumentCreatePage() {
   const { user } = useAuth();
@@ -89,9 +89,7 @@ export default function DocumentCreatePage() {
 
   return (
     <div className="docs-page docs-form-page">
-      <button type="button" className="link-btn" onClick={() => nav("/configuration/documents")}>
-        <BackIcon size={14} /> Back to documents
-      </button>
+      <BackButton label="Documents" onClick={() => nav("/configuration/documents")} />
 
       <div className="docs-head">
         <div>

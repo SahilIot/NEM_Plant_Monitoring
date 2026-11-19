@@ -30,6 +30,7 @@ import MaintenanceDetails from "./MaintenanceDetails.jsx";
 import MaintenanceRegistrationDialog from "./MaintenanceRegistrationDialog.jsx";
 import { recordDeleteConfirmation, recordDeleteState, scheduleDeleteState } from "../maintenanceDeletion.js";
 import "./MaintenancePanel.css";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 const svgProps = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true };
 const WrenchGlyph = () => (
@@ -1598,14 +1599,12 @@ export default function MaintenancePanel({
         {scheduleId && (
           <header className="maintenance-schedule-page-heading">
             <div className="maintenance-schedule-page-heading-copy">
-              <button
-                type="button"
-                className="btn-outline maintenance-schedule-back"
+              <BackButton
+                className="maintenance-schedule-back"
                 onClick={closeScheduleDetails}
                 disabled={busy}
-              >
-                Back to maintenance schedules
-              </button>
+                label="Maintenance schedules"
+              />
               <h1>{schedule.title || "Maintenance schedule"}</h1>
               <div className="maintenance-schedule-page-status">
                 <span className={`schedule-page-status schedule-page-status--${String(schedule.status || "active").replaceAll("_", "-")}`}>
@@ -2089,9 +2088,7 @@ export default function MaintenancePanel({
               <p className="notice error" role="alert">
                 {error || "This maintenance schedule could not be found."}
               </p>
-              <button type="button" className="btn-outline" onClick={closeScheduleDetails}>
-                Back to maintenance schedules
-              </button>
+              <BackButton label="Maintenance schedules" onClick={closeScheduleDetails} />
             </div>
           )}
         </main>
@@ -2512,9 +2509,8 @@ export default function MaintenancePanel({
         >
           {materialViewer.file ? (
             <>
-              <button
-                type="button"
-                className="btn-outline"
+              <BackButton
+                label="Instructions & documents"
                 onClick={() => {
                   setMaterialError("");
                   setMaterialViewer((current) => ({
@@ -2523,9 +2519,7 @@ export default function MaintenancePanel({
                     previewUrl: null,
                   }));
                 }}
-              >
-                Back to instructions and documents
-              </button>
+              />
               {materialError && (
                 <p className="notice error" role="alert">
                   {materialError}
