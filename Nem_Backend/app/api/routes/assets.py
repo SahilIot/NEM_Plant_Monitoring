@@ -16,6 +16,7 @@ from app.db.session import get_db
 from app.services.access_scope import access_scope
 from app.models import Asset
 from app.schemas.asset import AssetCreate, AssetRead, AssetTree, AssetUpdate # pydantic schema for input validation and output formatting
+from app.core.constants import ERR_ASSET_HIERARCHY_CYCLE, ERR_NO_FIELDS_TO_UPDATE
 
 router = APIRouter(prefix="/assets", tags=["assets"]) 
 
@@ -58,7 +59,7 @@ def validate_parent(session: Session, parent_id: int | None, asset_id: int | Non
 # Building a nested hierarchy of assets, starting from a given asset and recursively adding its children. It also checks for cycles in the hierarchy to prevent infinite loops.
 def to_tree(session: Session, asset: Asset, ancestors: frozenset[int] = frozenset()) -> AssetTree:
     if asset.id in ancestors:
-        raise HTTPException(status_code=409, detail="Existing asset hierarchy contains a cycle")
+        raise HTTPException(status_code=409, detail=ERR_ASSET_HIERARCHY_CYCLE)
     next_ancestors = ancestors | {asset.id}
     scope = access_scope(session)
     children = session.scalars(
@@ -141,7 +142,7 @@ def update_asset(asset_id: int, payload: AssetUpdate, session: Session = Depends
     asset = asset_or_404(session, asset_id)
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
-        raise HTTPException(status_code=422, detail="Provide at least one field to update")
+        raise HTTPException(status_code=422, detail=ERR_NO_FIELDS_TO_UPDATE)
     for required in ("name", "asset_type", "is_active"):
         if required in changes and changes[required] is None:
             raise HTTPException(status_code=422, detail=f"Asset {required} cannot be null")
@@ -182,11 +183,11 @@ def asset_hierarchy(asset_id: int, session: Session = Depends(get_db)) -> AssetT
     # Climb to the root, but never above the top-most asset the caller may reach.
     while asset.parent_asset_id is not None and scope.allows(asset.parent_asset_id):
         if asset.id in seen:
-            raise HTTPException(status_code=409, detail="Existing asset hierarchy contains a cycle")
+            raise HTTPException(status_code=409, detail=ERR_ASSET_HIERARCHY_CYCLE)
         seen.add(asset.id)
         asset = asset_or_404(session, asset.parent_asset_id)
     if asset.id in seen:
-        raise HTTPException(status_code=409, detail="Existing asset hierarchy contains a cycle")
+        raise HTTPException(status_code=409, detail=ERR_ASSET_HIERARCHY_CYCLE)
     return to_tree(session, asset)
 
 # Moving an asset to a new parent asset, validating the new parent to ensure it doesn't create a circular hierarchy, and returning the updated asset.

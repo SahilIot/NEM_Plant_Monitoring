@@ -41,12 +41,19 @@ from app.core.constants import (
     STATUS_RESOLVED,
     STATUS_UNKNOWN,
     STATUS_WARNING,
+    EVENT_ALERT_RESOLVED,
+    EVENT_ALERT_SEVERITY_CHANGED,
+    EVENT_STALE_DATA_DETECTED,
+    EVENT_WARNING_TRIGGERED,
+    RULE_BOOLEAN_CONDITION,
+    RULE_DURATION,
+    RULE_GENERIC,
 )
 
 LOGGER = logging.getLogger("nem_backend.monitoring")
 
 # Rule types the database accepts but the engine cannot evaluate yet.
-UNEVALUATED_RULE_TYPES = frozenset({"generic", "boolean_condition"})
+UNEVALUATED_RULE_TYPES = frozenset({RULE_GENERIC, RULE_BOOLEAN_CONDITION})
 
 # Readings written by the OPC UA collector carry this source id; they are the only ones held to the
 # short runtime freshness limit. API and manually entered readings keep the rule/default stale limit.
@@ -441,7 +448,7 @@ def _transition_state(
                 enqueue_alert_notifications(session, alert, asset, rule)
                 emit_event(
                     session,
-                    event_type="alert_severity_changed",
+                    event_type=EVENT_ALERT_SEVERITY_CHANGED,
                     message=(
                         f"Alert severity changed to {next_status}: {message}"
                     ),
@@ -493,7 +500,7 @@ def _transition_state(
         alert.last_updated_at = evaluated_at
         emit_event(
             session,
-            event_type="alert_resolved",
+            event_type=EVENT_ALERT_RESOLVED,
             message=f"Condition cleared: {rule.name}",
             occurred_at=evaluated_at,
             asset_id=asset.id,
@@ -523,7 +530,7 @@ def _transition_state(
     ):
         emit_event(
             session,
-            event_type="stale_data_detected",
+            event_type=EVENT_STALE_DATA_DETECTED,
             message=message,
             occurred_at=evaluated_at,
             asset_id=asset.id,
@@ -787,7 +794,7 @@ def evaluate_boolean_count_threshold(
     if stage != previous_stage and stage == "warning_2":
         emit_event(
             session,
-            event_type="warning_triggered",
+            event_type=EVENT_WARNING_TRIGGERED,
             message=messages[stage],
             occurred_at=evaluated_at,
             asset_id=asset.id,
@@ -1208,7 +1215,7 @@ def evaluate_rule(
             value=None,
             message=(
                 "Generic rule type has no evaluator configured."
-                if rule.rule_type == "generic"
+                if rule.rule_type == RULE_GENERIC
                 else f"Rule type '{rule.rule_type}' has no evaluator configured."
             ),
             evaluated_at=now,
@@ -1216,7 +1223,7 @@ def evaluate_rule(
         )
 
     if (
-        rule.rule_type == "duration"
+        rule.rule_type == RULE_DURATION
         and (rule.parameters or {}).get("condition") == "interval_elapsed"
     ):
         return evaluate_interval_elapsed(
@@ -1443,7 +1450,7 @@ def evaluate_rule(
             ),
         )
 
-    duration_rule = rule.rule_type in {RULE_RUNTIME_DURATION, "duration"}
+    duration_rule = rule.rule_type in {RULE_RUNTIME_DURATION, RULE_DURATION}
 
     if duration_rule:
         if condition_started is None:

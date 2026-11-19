@@ -13,6 +13,7 @@ from app.services.access_scope import access_scope
 from app.services.monitoring_engine import evaluate_reading_rules
 from app.services.reading_ingestion import (ingest_reading as persist_reading,make_reading,validate_reading,)
 from app.services.maintenance_progress import update_maintenance_progress
+from app.core.constants import ERR_START_AFTER_END
 
 router = APIRouter(prefix="/readings", tags=["readings"])
 MAX_BATCH_SIZE = 100
@@ -150,7 +151,7 @@ def list_variable_readings(
 
     start, end = normalize(start_time), normalize(end_time)
     if start is not None and end is not None and start > end:
-        raise HTTPException(status_code=422, detail="start_time must not be later than end_time")
+        raise HTTPException(status_code=422, detail=ERR_START_AFTER_END)
     query = select(Reading).where(Reading.variable_id == variable_id)
     count_query = select(func.count()).select_from(Reading).where(Reading.variable_id == variable_id)
 

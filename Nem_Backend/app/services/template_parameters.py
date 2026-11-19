@@ -27,6 +27,8 @@ from app.core.constants import (
     STATUS_DEACTIVATED,
     STATUS_IN_PROGRESS,
     STATUS_RESOLVED,
+    AGGREGATION_LAST,
+    AGGREGATION_NONE,
 )
 
 TEMPLATE_META_KEYS = ("category", "calculation_period_seconds", "combine", "reference_link", "maintenance_instructions")
@@ -48,7 +50,7 @@ def rule_meta(template: MonitoringRuleTemplate) -> dict[str, Any]:
 # Determines which PLC variable dtypes are compatible with a parameter.
 def _compatible_types(definition: dict[str, Any]) -> set[str]:
     kind, aggregation = definition[KIND], definition[AGGREGATION]
-    if kind == NUMBER and aggregation in {"none", "last"}:
+    if kind == NUMBER and aggregation in {AGGREGATION_NONE, AGGREGATION_LAST}:
         return set(NUMERIC)
     return {BOOLEAN}
 

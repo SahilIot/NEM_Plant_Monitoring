@@ -12,8 +12,9 @@ from app.models import Asset, AssetSupervisor, EmailNotification, User
 from app.services.email_notifications import (
     supervisor_assignments_for_asset,
 )
+from app.core.constants import ROLE_ADMINISTRATOR, ROLE_OPERATOR, ROLE_SUPERVISOR
 
-router = APIRouter(tags=["notifications"], dependencies=[Depends(require_roles("Administrator"))])
+router = APIRouter(tags=["notifications"], dependencies=[Depends(require_roles(ROLE_ADMINISTRATOR))])
 Db = Annotated[Session, Depends(get_db)]
 
 #Accepts list of supervisor used IDs,with a maximum of 50 entries
@@ -30,11 +31,11 @@ def _assignment(session: Session, asset_id: int) -> dict:
         "asset_id": asset_id,
         "supervisors": [
             {"id": u.id, "username": u.username, "email_address": u.email_address}
-            for u in users if u.role == "Supervisor"
+            for u in users if u.role == ROLE_SUPERVISOR
         ],
         "operators": [
             {"id": u.id, "username": u.username, "email_address": u.email_address}
-            for u in users if u.role == "Operator"
+            for u in users if u.role == ROLE_OPERATOR
         ],
     }
 
@@ -78,7 +79,7 @@ def set_asset_supervisors(asset_id: int, payload: SupervisorAssignment, session:
         valid = set(session.scalars(
             select(User.id).where(
                 User.id.in_(user_ids),
-                User.role.in_(("Supervisor", "Operator")),
+                User.role.in_((ROLE_SUPERVISOR, ROLE_OPERATOR)),
                 User.is_active.is_(True),
             )
         ).all())

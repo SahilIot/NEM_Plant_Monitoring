@@ -48,6 +48,11 @@ from app.core.constants import (
     STATUS_PLANNED,
     STATUS_RESOLVED,
     STATUS_UNKNOWN,
+    ERR_START_AFTER_END,
+    EVENT_ALERT_COMPLETED,
+    ROLE_ADMINISTRATOR,
+    ROLE_OPERATOR,
+    ROLE_SUPERVISOR,
 )
 
 router = APIRouter(tags=["monitoring", "alerts", "events"])
@@ -204,7 +209,7 @@ def alert_query(
 ):
     start, end = normalized(start_time), normalized(end_time)
     if start is not None and end is not None and start > end:
-        raise HTTPException(status_code=422, detail="start_time must not be later than end_time")
+        raise HTTPException(status_code=422, detail=ERR_START_AFTER_END)
     query = select(Alert)
     count_query = select(func.count()).select_from(Alert)
     # Only alerts on assets the caller may reach (administrators: all alerts).
@@ -311,7 +316,7 @@ def acknowledge_alert(
     alert_id: int,
     session: Session = Depends(get_db),
     user: User = Depends(
-        require_roles("Administrator", "Supervisor", "Operator")
+        require_roles(ROLE_ADMINISTRATOR, ROLE_SUPERVISOR, ROLE_OPERATOR)
     ),
 ) -> Alert:
     alert = session.scalar(select(Alert).where(Alert.id == alert_id).with_for_update())
@@ -352,7 +357,7 @@ def complete_alert(
     alert_id: int,
     payload: AlertCompletion | None = None,
     session: Session = Depends(get_db),
-    user: User = Depends(require_roles("Administrator", "Supervisor", "Operator")),
+    user: User = Depends(require_roles(ROLE_ADMINISTRATOR, ROLE_SUPERVISOR, ROLE_OPERATOR)),
 ) -> Alert:
     alert = session.scalar(select(Alert).where(Alert.id == alert_id).with_for_update())
     _alert_in_scope(session, alert, alert_id)
@@ -401,7 +406,7 @@ def complete_alert(
         alert.last_updated_at = completed_at
         emit_event(
             session,
-            event_type="alert_completed",
+            event_type=EVENT_ALERT_COMPLETED,
             message=f"Maintenance due alert completed: {schedule.title}.",
             occurred_at=completed_at,
             asset_id=alert.target_asset_id,
@@ -453,7 +458,7 @@ def complete_alert(
             rule.completed_at = now
         emit_event(
             session,
-            event_type="alert_completed",
+            event_type=EVENT_ALERT_COMPLETED,
             message=f"Alert completed: {alert.title}.",
             occurred_at=now,
             asset_id=alert.target_asset_id,
@@ -510,7 +515,7 @@ def list_events(
 ) -> dict[str, object]:
     start, end = normalized(start_time), normalized(end_time)
     if start is not None and end is not None and start > end:
-        raise HTTPException(status_code=422, detail="start_time must not be later than end_time")
+        raise HTTPException(status_code=422, detail=ERR_START_AFTER_END)
     query = (
         select(MonitoringEvent, Asset.name, MonitoringRule.name)
         .outerjoin(Asset, Asset.id == MonitoringEvent.asset_id)
@@ -565,7 +570,7 @@ def get_event(event_id: int, session: Session = Depends(get_db)) -> MonitoringEv
 def delete_event(
     event_id: int,
     session: Session = Depends(get_db),
-    user: User = Depends(require_roles("Administrator")),
+    user: User = Depends(require_roles(ROLE_ADMINISTRATOR)),
 ) -> Response:
     event = session.get(MonitoringEvent, event_id)
     if event is None:

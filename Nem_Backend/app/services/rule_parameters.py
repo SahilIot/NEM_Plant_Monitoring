@@ -39,6 +39,13 @@ from app.core.constants import (
     TIME,
     TIMER,
     USAGE,
+    AGGREGATION_LAST,
+    AGGREGATION_NONE,
+    CATEGORY_INTERVAL_BASED,
+    EVENT_ALERT_RESOLVED,
+    EVENT_ALERT_SEVERITY_CHANGED,
+    EVENT_STALE_DATA_DETECTED,
+    EVENT_WARNING_TRIGGERED,
 )
 
 LOGGER = logging.getLogger("nem_backend.monitoring")
@@ -341,7 +348,7 @@ def _evaluate_parameter(
     aggregation = parameter.aggregation
     credit_limit = runtime_credit_limit(stale_after, latest.source_id)
     if parameter.kind == BOOLEAN:
-        if aggregation == "last" and period:
+        if aggregation == AGGREGATION_LAST and period:
             window_start = now - timedelta(seconds=period)
             reading = _latest_reading(session, variable, not_after=now)
             if _aware(reading.recorded_at) < window_start:
@@ -356,8 +363,8 @@ def _evaluate_parameter(
                 f"State is {str(state).upper()}, expected {str(expected).upper()}.", None)
 
     if parameter.kind == NUMBER:
-        if aggregation in {"none", "last"}:
-            if aggregation == "last" and period and _aware(latest.recorded_at) < now - timedelta(seconds=period):
+        if aggregation in {AGGREGATION_NONE, AGGREGATION_LAST}:
+            if aggregation == AGGREGATION_LAST and period and _aware(latest.recorded_at) < now - timedelta(seconds=period):
                 return unknown("No reading inside the calculation period.", "no_reading_in_period", raw=raw)
             value = _as_number(raw)
             if value is None:
@@ -442,7 +449,7 @@ def _sync_parameter_alert(
                 return  # another worker raised it first
             if notify:  # False when the maintenance "ready to start" email already covers this Due moment
                 enqueue_alert_notifications(session, alert, asset, rule)
-            emit_event(session, event_type="warning_triggered" if status == STATUS_WARNING else "alert_triggered",
+            emit_event(session, event_type=EVENT_WARNING_TRIGGERED if status == STATUS_WARNING else "alert_triggered",
                        message=text, occurred_at=now, asset_id=asset.id, rule_id=rule.id,
                        alert_id=alert.id, severity=status, metadata=meta)
             return
@@ -450,7 +457,7 @@ def _sync_parameter_alert(
             previous = active.severity
             active.severity = status
             enqueue_alert_notifications(session, active, asset, rule)
-            emit_event(session, event_type="alert_severity_changed",
+            emit_event(session, event_type=EVENT_ALERT_SEVERITY_CHANGED,
                        message=f"Alert severity changed to {status}: {text}", occurred_at=now,
                        asset_id=asset.id, rule_id=rule.id, alert_id=active.id, severity=status,
                        metadata={**meta, "previous_severity": previous, "new_severity": status})
@@ -460,7 +467,7 @@ def _sync_parameter_alert(
         parameter_state.completed_at = None
         if active is not None:
             active.status, active.resolved_at, active.last_updated_at = STATUS_RESOLVED, now, now
-            emit_event(session, event_type="alert_resolved",
+            emit_event(session, event_type=EVENT_ALERT_RESOLVED,
                        message=f"Condition cleared: {rule.name} — {parameter.name}", occurred_at=now,
                        asset_id=asset.id, rule_id=rule.id, alert_id=active.id, severity=active.severity,
                        metadata=meta)
@@ -571,7 +578,7 @@ def evaluate_multi_parameter(
                                       notify=not (ready_now and status == STATUS_WARNING))  # an Overdue alert always sends its own email
                 if error == "stale_reading" and previous_error != "stale_reading":
                     from app.services.monitoring_engine import emit_event
-                    emit_event(session, event_type="stale_data_detected", message=f"{parameter.name}: {message}",
+                    emit_event(session, event_type=EVENT_STALE_DATA_DETECTED, message=f"{parameter.name}: {message}",
                                occurred_at=now, asset_id=asset.id, rule_id=rule.id,
                                metadata={"parameter_id": parameter.id, "parameter_name": parameter.name})
         except Exception:
@@ -951,7 +958,7 @@ def build_status_detail(session: Session, rule: MonitoringRule, now: datetime | 
     return {
         "rule": {
             "id": rule.id, "name": rule.name, RULE_TYPE: rule.rule_type,
-            "type": "interval_based" if category == "interval_based" else RULE_PARAMETER_THRESHOLD,
+            "type": CATEGORY_INTERVAL_BASED if category == CATEGORY_INTERVAL_BASED else RULE_PARAMETER_THRESHOLD,
             "is_enabled": rule.is_enabled, LIFECYCLE_STATUS: rule.lifecycle_status, "completed_at": rule.completed_at,
             "asset_id": rule.target_asset_id, "asset_name": asset.name if asset else None,
             "calculation_period_seconds": (rule.parameters or {}).get("calculation_period_seconds"),

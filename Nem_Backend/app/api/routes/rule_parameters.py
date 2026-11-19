@@ -53,6 +53,14 @@ from app.core.constants import (
     STATUS_IN_PROGRESS,
     STATUS_RESOLVED,
     TIMER,
+    AGGREGATION_LAST,
+    AGGREGATION_NONE,
+    CATEGORY_INTERVAL_BASED,
+    ERR_SUPERVISOR_PARAMETER_EDIT,
+    EVENT_RULE_CREATED,
+    ROLE_ADMINISTRATOR,
+    ROLE_SUPERVISOR,
+    TIME,
 )
 
 router = APIRouter(tags=["multi-parameter rules"])
@@ -85,13 +93,13 @@ def _stored_definition(parameter: RuleParameter) -> RuleParameterIn:
 
 # Controls what a supervisor can edit.
 def _enforce_supervisor_edit(user: User, parameter: RuleParameter, item: RuleParameterIn) -> None:
-    if user.role != "Supervisor":
+    if user.role != ROLE_SUPERVISOR:
         return
     old = _stored_definition(parameter)
     strip = lambda config: {k: v for k, v in (config or {}).items() if k not in SUPERVISOR_EDITABLE_LIMITS}  # noqa: E731
     if (old.name, old.kind, old.variable_id, old.aggregation, strip(old.config)) != (
             item.name, item.kind, item.variable_id, item.aggregation, strip(item.config)):
-        raise HTTPException(status_code=403, detail="Supervisors may only change the Due and Overdue values of a parameter")
+        raise HTTPException(status_code=403, detail=ERR_SUPERVISOR_PARAMETER_EDIT)
 
 # Imp -> Its responsibility is to ensure that every param references a valid var and that the var is suitable for the param config.
 def _check_parameters(session: Session,request: Request,asset: Asset,items: list[RuleParameterIn],category: str,
@@ -112,14 +120,14 @@ def _check_parameters(session: Session,request: Request,asset: Asset,items: list
 
         boolean = variable.data_type == BOOLEAN
         if item.kind == NUMBER:
-            if item.aggregation in {"none", "last"} and variable.data_type not in NUMERIC_TYPES:
+            if item.aggregation in {AGGREGATION_NONE, AGGREGATION_LAST} and variable.data_type not in NUMERIC_TYPES:
                 raise HTTPException(status_code=422, detail=f"{label}: Number parameters with {item.aggregation.capitalize()} aggregation need a numeric variable")
             if item.aggregation in {COUNTER, TIMER} and not boolean:
                 raise HTTPException(status_code=422, detail=f"{label}: {item.aggregation.capitalize()} aggregation needs a Boolean variable")
         elif item.kind == BOOLEAN:
             if not boolean:
                 raise HTTPException(status_code=422, detail=f"{label}: Boolean parameters need a Boolean variable")
-            if item.aggregation not in {"none", "last"}:
+            if item.aggregation not in {AGGREGATION_NONE, AGGREGATION_LAST}:
                 raise HTTPException(status_code=422, detail=f"{label}: Boolean parameters support None or Last aggregation only")
         else:
             if not boolean:
@@ -139,7 +147,7 @@ def _check_parameters(session: Session,request: Request,asset: Asset,items: list
 # This func handles a special case for Time-Based interval params.
 def _require_time_start(items: list[RuleParameterIn], existing: dict[str, RuleParameter] | None = None) -> None:
     for item in items:
-        if item.kind != INTERVAL or item.variable_id is None or item.config.get(INTERVAL_PARAMETER) != "time":
+        if item.kind != INTERVAL or item.variable_id is None or item.config.get(INTERVAL_PARAMETER) != TIME:
             continue
         if item.config.get("activation_at"):
             continue
@@ -201,7 +209,7 @@ def _commit(session: Session) -> None:
 
 # Only admin and supervisor can configure theser rules.
 def _require_editor(user: User) -> None:
-    if user.role not in {"Administrator", "Supervisor"}:
+    if user.role not in {ROLE_ADMINISTRATOR, ROLE_SUPERVISOR}:
         raise HTTPException(status_code=403, detail="You are not allowed to configure monitoring rules")
 
 # Below now are the functions that the frontend calls
@@ -253,7 +261,7 @@ def create_multi_parameter_rule(
     session.flush()
     _apply(rule, payload.parameters)
     assign_labels(session, rule, payload.labels)
-    emit_event(session, event_type="rule_created", message=f"Rule '{rule.name}' created.",
+    emit_event(session, event_type=EVENT_RULE_CREATED, message=f"Rule '{rule.name}' created.",
                occurred_at=datetime.now(timezone.utc), asset_id=asset_id, rule_id=rule.id)
     _commit(session)  # rule and all parameters are saved together or not at all
     session.refresh(rule)
@@ -306,7 +314,7 @@ def replace_rule_parameters(
     if rule.source_template_id is not None:
         raise HTTPException(status_code=409, detail="This rule's parameters are managed by its shared rule; edit each parameter individually")
     category = (rule.parameters or {}).get("category")
-    if any((item.kind == INTERVAL) != (category == "interval_based") for item in payload.parameters):
+    if any((item.kind == INTERVAL) != (category == CATEGORY_INTERVAL_BASED) for item in payload.parameters):
         raise HTTPException(status_code=422, detail="Parameter types do not match this rule's category")
     names = [item.name.casefold() for item in payload.parameters]
     if len(set(names)) != len(names):
@@ -320,13 +328,13 @@ def replace_rule_parameters(
     for item in payload.parameters:
         if item.key and item.kind != existing[item.key].kind:  # same rule as the single edit
             raise HTTPException(status_code=422, detail="A parameter's type cannot be changed; add a new parameter instead")
-    if user.role == "Supervisor":
+    if user.role == ROLE_SUPERVISOR:
         # Same policy as every other edit: only Due and Overdue. No adding, removing, reordering or renaming.
         if [item.key for item in payload.parameters] != [parameter.key for parameter in rule.parameter_items]:
-            raise HTTPException(status_code=403, detail="Supervisors may only change the Due and Overdue values of a parameter")
+            raise HTTPException(status_code=403, detail=ERR_SUPERVISOR_PARAMETER_EDIT)
         if (payload.calculation_period_seconds is not None
                 and payload.calculation_period_seconds != (rule.parameters or {}).get("calculation_period_seconds")):
-            raise HTTPException(status_code=403, detail="Supervisors may only change the Due and Overdue values of a parameter")
+            raise HTTPException(status_code=403, detail=ERR_SUPERVISOR_PARAMETER_EDIT)
         for item in payload.parameters:
             _enforce_supervisor_edit(user, existing[item.key], item)
     _check_parameters(session, request, asset, payload.parameters, category,
@@ -467,7 +475,7 @@ def update_parameter_lifecycle(
     user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
 
-    allowed = {"Administrator", "Supervisor"} if payload.action == "activate" else {"Administrator"}
+    allowed = {ROLE_ADMINISTRATOR, ROLE_SUPERVISOR} if payload.action == "activate" else {ROLE_ADMINISTRATOR}
     if user.role not in allowed:
         raise HTTPException(status_code=403, detail=("Only Administrators and Supervisors can activate parameters." if payload.action == "activate"
             else "Only Administrators can change a parameter's state."))

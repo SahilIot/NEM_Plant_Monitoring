@@ -24,6 +24,7 @@ from app.services.auth_security import (
     new_session_token,
     verify_password,
 )
+from app.core.constants import ROLE_ADMINISTRATOR
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 SESSION_HOURS = 8
@@ -224,13 +225,13 @@ def logout(request: Request, db: Db) -> None:
         db.commit()
 
 #List accounts 
-@router.get("/users", dependencies=[Depends(require_roles("Administrator"))])
+@router.get("/users", dependencies=[Depends(require_roles(ROLE_ADMINISTRATOR))])
 def list_users(db: Db) -> list[dict]:
     users = db.scalars(select(User).order_by(User.username)).all()
     return [_user_read(user) for user in users]
 
 #Create account 
-@router.post("/users", status_code=201, dependencies=[Depends(require_roles("Administrator"))])
+@router.post("/users", status_code=201, dependencies=[Depends(require_roles(ROLE_ADMINISTRATOR))])
 def create_user(payload: UserCreate, db: Db) -> dict:
     user = User(
         username=payload.username,
@@ -250,7 +251,7 @@ def create_user(payload: UserCreate, db: Db) -> dict:
     return _user_read(user)
 
 #Updating a user account
-@router.patch("/users/{user_id}", dependencies=[Depends(require_roles("Administrator"))])
+@router.patch("/users/{user_id}", dependencies=[Depends(require_roles(ROLE_ADMINISTRATOR))])
 def update_user(user_id: int, payload: UserUpdate, db: Db) -> dict:
     user = db.get(User, user_id)
     if user is None:
@@ -260,12 +261,12 @@ def update_user(user_id: int, payload: UserUpdate, db: Db) -> dict:
         return _user_read(user)
     if any(value is None for value in values.values()):
         raise HTTPException(status_code=422, detail="User update values cannot be null")
-    removing_admin = user.role == "Administrator" and (
-        values.get("role", user.role) != "Administrator"
+    removing_admin = user.role == ROLE_ADMINISTRATOR and (
+        values.get("role", user.role) != ROLE_ADMINISTRATOR
         or values.get("is_active", user.is_active) is False
     )
     if removing_admin:
-        active_admin_count = db.scalar(select(User.id).where(User.role == "Administrator", User.is_active.is_(True), User.id != user.id).limit(1))
+        active_admin_count = db.scalar(select(User.id).where(User.role == ROLE_ADMINISTRATOR, User.is_active.is_(True), User.id != user.id).limit(1))
         if active_admin_count is None:
             raise HTTPException(status_code=409, detail="The last active administrator cannot be removed")
     role_or_password_changed = "role" in values or "password" in values
@@ -280,13 +281,13 @@ def update_user(user_id: int, payload: UserUpdate, db: Db) -> dict:
     return _user_read(user)
 
 #Delete users without linked history; deactivate accounts referenced by operational or historical records.
-@router.delete("/users/{user_id}", dependencies=[Depends(require_roles("Administrator"))])
+@router.delete("/users/{user_id}", dependencies=[Depends(require_roles(ROLE_ADMINISTRATOR))])
 def delete_user(user_id: int, db: Db) -> dict:
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User was not found")
-    if user.role == "Administrator":
-        active_admin_count = db.scalar(select(User.id).where(User.role == "Administrator", User.is_active.is_(True), User.id != user_id).limit(1))
+    if user.role == ROLE_ADMINISTRATOR:
+        active_admin_count = db.scalar(select(User.id).where(User.role == ROLE_ADMINISTRATOR, User.is_active.is_(True), User.id != user_id).limit(1))
         if active_admin_count is None:
             raise HTTPException(status_code=409, detail="The last administrator cannot be deleted")
 

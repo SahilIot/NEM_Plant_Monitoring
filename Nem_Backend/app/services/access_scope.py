@@ -9,8 +9,9 @@ from sqlalchemy import and_, false, or_, select, true
 from sqlalchemy.orm import Session
 
 from app.models import Asset, AssetSupervisor, InstructionDocument, MaintenanceSchedule, MonitoringRule, User, Variable
+from app.core.constants import ROLE_ADMINISTRATOR, ROLE_OPERATOR, ROLE_SUPERVISOR
 
-SCOPED_ROLES = frozenset({"Supervisor", "Operator"})
+SCOPED_ROLES = frozenset({ROLE_SUPERVISOR, ROLE_OPERATOR})
 REQUEST_SESSION_KEY = "access_scope_required"
 _CACHE_KEY = "_access_scope"
 
@@ -62,7 +63,7 @@ def scope_for_user(session: Session, user: User | None) -> AccessScope:
     # Compute the scope of user from the database.
     if user is None or not user.is_active:
         return NO_ACCESS
-    if user.role == "Administrator":
+    if user.role == ROLE_ADMINISTRATOR:
         return UNRESTRICTED
     if user.role not in SCOPED_ROLES:
         return NO_ACCESS

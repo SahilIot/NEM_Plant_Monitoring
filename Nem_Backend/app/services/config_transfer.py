@@ -38,6 +38,9 @@ from app.core.constants import (
     RULE_TYPE,
     SCHEDULE,
     STATUS_ACTIVE,
+    ROLE_SUPERVISOR,
+    STATUS_AWAITING_APPROVAL,
+    STATUS_PAUSED,
 )
 
 APPLICATION_ID = "nem-plant-monitoring"
@@ -51,7 +54,7 @@ CATEGORIES = ("monitoring_rules", "collection_rules", "maintenance_rules")
 MAX_COLLECTION_RULES = 5
 # Runtime-timing keys that belong to one installation's operation, not to the definition.
 _NON_PORTABLE_PARAMETERS = frozenset({ACTIVATION_AT})
-_EXPORTED_SCHEDULE_STATUSES = (STATUS_ACTIVE, "paused")
+_EXPORTED_SCHEDULE_STATUSES = (STATUS_ACTIVE, STATUS_PAUSED)
 
 # Defines what admin can choose when importing.
 class ImportOptions(BaseModel):
@@ -372,7 +375,7 @@ def analyse(session: Session, package: Any, options: ImportOptions) -> dict[str,
 
     contents = check_package(package)
     active_supervisors = session.scalars(
-        select(User).where(User.role == "Supervisor", User.is_active.is_(True))
+        select(User).where(User.role == ROLE_SUPERVISOR, User.is_active.is_(True))
     ).all()
     supervisors = {user.username.casefold(): user for user in active_supervisors}
     valid_ids = {user.id: user for user in active_supervisors}
@@ -388,7 +391,7 @@ def analyse(session: Session, package: Any, options: ImportOptions) -> dict[str,
     assets_by_id = {asset.id: asset for asset in assets}
     existing_schedules = {
         (s.asset_id, s.title.casefold(), s.maintenance_type)
-        for s in session.scalars(select(MaintenanceSchedule).where(MaintenanceSchedule.status.in_((STATUS_ACTIVE, "paused", "awaiting_approval"))))
+        for s in session.scalars(select(MaintenanceSchedule).where(MaintenanceSchedule.status.in_((STATUS_ACTIVE, STATUS_PAUSED, STATUS_AWAITING_APPROVAL))))
     }
     seen_schedules: set[tuple] = set()
     start = options.maintenance_start_date or datetime.now(timezone.utc).date()

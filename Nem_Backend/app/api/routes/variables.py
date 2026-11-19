@@ -15,6 +15,7 @@ from app.core.constants import (
     RULE_BOOLEAN_COUNT_THRESHOLD,
     RULE_RUNTIME_DURATION,
     RUNNING,
+    ERR_NO_FIELDS_TO_UPDATE,
 )
 
 router = APIRouter(tags=["variables"])
@@ -105,7 +106,7 @@ def update_variable(variable_id: int,payload: VariableUpdate,session: Session = 
     changes = payload.model_dump(exclude_unset=True)
 
     if not changes:
-        raise HTTPException(status_code=422,detail="Provide at least one field to update",)
+        raise HTTPException(status_code=422,detail=ERR_NO_FIELDS_TO_UPDATE,)
 
     for required in ("name", "key", "data_type", "is_active"):
         if required in changes and changes[required] is None:

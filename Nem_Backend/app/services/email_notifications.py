@@ -27,6 +27,15 @@ from app.models import (
     MonitoringRule,
     User,
 )
+from app.core.constants import (
+    NOTIFICATION_FAILED,
+    NOTIFICATION_SENT,
+    NOTIFICATION_SKIPPED,
+    ROLE_SUPERVISOR,
+    STATUS_ACTIVE,
+    STATUS_ALERT,
+    STATUS_PENDING,
+)
 
 LOGGER = logging.getLogger("nem_backend.notifications")
 _EMAIL_REGEX = re.compile(r"^[^\s@<>\",;]+@[^\s@<>\",;]+\.[^\s@<>\",;]+$")
@@ -65,7 +74,7 @@ def supervisor_assignments_for_asset(
             .join(User, User.id == AssetSupervisor.user_id)
             .where(
                 User.is_active.is_(True),
-                User.role == "Supervisor",
+                User.role == ROLE_SUPERVISOR,
                 # Parent-only assignment: only a top-level asset's assignments are valid.
                 ancestry.c.parent_asset_id.is_(None),
             )
@@ -83,7 +92,7 @@ def _assigned_supervisors_for_asset(session: Session, asset: Asset) -> list[User
     has_direct_assignments = asset.parent_asset_id is None and session.scalar(
         select(AssetSupervisor.id)
         .join(User, User.id == AssetSupervisor.user_id)
-        .where(AssetSupervisor.asset_id == asset.id, User.role == "Supervisor")
+        .where(AssetSupervisor.asset_id == asset.id, User.role == ROLE_SUPERVISOR)
         .limit(1)
     ) is not None
     effective_assignments = [
@@ -238,7 +247,7 @@ def _enqueue(session: Session, alert: Alert, asset: Asset, rule: MonitoringRule 
         if not valid_email(user.email_address):
             notification = EmailNotification(
                 alert_id=alert.id, user_id=user.id, severity=alert.severity,
-                payload=payload, status="skipped",
+                payload=payload, status=NOTIFICATION_SKIPPED,
                 last_error="Supervisor has no valid email address",
             )
             session.add(notification)
@@ -268,7 +277,7 @@ def _enqueue(session: Session, alert: Alert, asset: Asset, rule: MonitoringRule 
             notification.status,
         )
     return sum(
-        notification.status == "pending"
+        notification.status == STATUS_PENDING
         for notification in queued_notifications
     )
 
@@ -355,7 +364,7 @@ def _maintenance_ready_rows(payload: dict[str, Any], settings: Settings) -> list
 
 
 def build_message(payload: dict[str, Any], *, sender: str, recipient: str, settings: Settings) -> EmailMessage:
-    kind = "Alert" if payload["severity"] == "alert" else "Warning"
+    kind = "Alert" if payload["severity"] == STATUS_ALERT else "Warning"
     asset_name = _clean(payload["asset_name"])
     ready = payload.get("notification_kind") == "maintenance_ready"
     rows = _maintenance_ready_rows(payload, settings) if ready else [
@@ -367,7 +376,7 @@ def build_message(payload: dict[str, Any], *, sender: str, recipient: str, setti
         ("Threshold", _clean(payload["threshold"]) if payload.get("threshold") is not None else "n/a"),
         ("Observed value", _clean(payload["observed_value"]) if payload.get("observed_value") is not None else "n/a"),
         ("Event time", _format_time(payload["event_time"], settings)),
-        ("Status", _clean(payload.get("status") or "active").capitalize()),
+        ("Status", _clean(payload.get("status") or STATUS_ACTIVE).capitalize()),
         ("Details", _clean(payload.get("message") or "")),
     ]
     if payload.get("link"):
@@ -520,7 +529,7 @@ def deliver_pending(session_factory, settings: Settings, *, batch_size: int = 20
     with session_factory() as session:
         due = session.scalars(
             select(EmailNotification)
-            .where(EmailNotification.status == "pending", EmailNotification.next_attempt_at <= _now())
+            .where(EmailNotification.status == STATUS_PENDING, EmailNotification.next_attempt_at <= _now())
             .order_by(EmailNotification.id)
             .limit(batch_size)
             .with_for_update(skip_locked=True)
@@ -546,7 +555,7 @@ def deliver_pending(session_factory, settings: Settings, *, batch_size: int = 20
                     else None
                 )
                 if asset is None:
-                    item.status = "skipped"
+                    item.status = NOTIFICATION_SKIPPED
                     item.last_error = "Alert asset is no longer available"
                     LOGGER.warning("Notification %s skipped: %s",item.id,item.last_error,)
                     continue
@@ -555,14 +564,14 @@ def deliver_pending(session_factory, settings: Settings, *, batch_size: int = 20
                     _log_recipient_resolution(session, asset, current_recipients, item.severity)
                     assigned_user_ids_by_asset[asset.id] = {supervisor.id for supervisor in current_recipients}
                 if item.user_id not in assigned_user_ids_by_asset[asset.id]:
-                    item.status = "skipped"
+                    item.status = NOTIFICATION_SKIPPED
                     item.last_error = ("Supervisor is no longer assigned to this asset")
                     LOGGER.info("Notification %s skipped because user %s is no longer "
                         "assigned to asset %s",item.id, item.user_id, asset.id,)
                     continue
                 user = session.get(User, item.user_id)
                 if user is None or not user.is_active or not valid_email(user.email_address):
-                    item.status = "skipped"
+                    item.status = NOTIFICATION_SKIPPED
                     item.last_error = "Supervisor is inactive or has no valid email address"
                     LOGGER.warning("Notification %s skipped: %s", item.id, item.last_error)
                     continue
@@ -578,7 +587,7 @@ def deliver_pending(session_factory, settings: Settings, *, batch_size: int = 20
                     _masked_email(message["To"]),
                 )
                 _send(config, message, settings.email_smtp_timeout_seconds)
-                item.status = "sent"
+                item.status = NOTIFICATION_SENT
                 item.sent_at = _now()
                 item.last_error = None
                 sent += 1
@@ -587,7 +596,7 @@ def deliver_pending(session_factory, settings: Settings, *, batch_size: int = 20
             except Exception as error:
                 item.last_error = describe_smtp_error(error)
                 if item.attempts >= settings.email_notification_max_attempts:
-                    item.status = "failed"
+                    item.status = NOTIFICATION_FAILED
                 else:
                     delay = min(_RETRY_BASE_SECONDS * 2 ** (item.attempts - 1), _RETRY_MAX_SECONDS)
                     item.next_attempt_at = _now() + timedelta(seconds=delay)

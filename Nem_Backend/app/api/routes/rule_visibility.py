@@ -17,6 +17,7 @@ from app.services.rule_visibility import (
     get_visible_template,
     request_user,
 )
+from app.core.constants import ERR_TEMPLATE_NOT_FOUND, ROLE_ADMINISTRATOR, ROLE_SUPERVISOR
 
 router = APIRouter(tags=["rule visibility"])
 
@@ -70,10 +71,10 @@ def _visibility_detail(session: Session, template: MonitoringRuleTemplate) -> di
 # ONly admin can access it 
 @router.get("/rule-visibility/supervisors")
 def list_selectable_supervisors(session: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    _require_user(session, "Administrator")
+    _require_user(session, ROLE_ADMINISTRATOR)
     users = session.scalars(
         select(User)
-        .where(User.role == "Supervisor", User.is_active.is_(True))
+        .where(User.role == ROLE_SUPERVISOR, User.is_active.is_(True))
         .order_by(User.username)
     ).all()
     return [{"id": user.id, "username": user.username} for user in users]
@@ -81,10 +82,10 @@ def list_selectable_supervisors(session: Session = Depends(get_db)) -> list[dict
 # Requires admin permission , find the requested template.
 @router.get("/rule-templates/{template_id}/visibility")
 def get_template_visibility(template_id: int, session: Session = Depends(get_db)) -> dict[str, Any]:
-    _require_user(session, "Administrator")
+    _require_user(session, ROLE_ADMINISTRATOR)
     template = session.get(MonitoringRuleTemplate, template_id)
     if template is None:
-        raise HTTPException(status_code=404, detail="Rule template was not found")
+        raise HTTPException(status_code=404, detail=ERR_TEMPLATE_NOT_FOUND)
     return _visibility_detail(session, template)
 
 # Changes the visibility
@@ -94,10 +95,10 @@ def set_template_visibility(
     payload: RuleVisibilityUpdate,
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    admin = _require_user(session, "Administrator")
+    admin = _require_user(session, ROLE_ADMINISTRATOR)
     template = session.get(MonitoringRuleTemplate, template_id)
     if template is None:
-        raise HTTPException(status_code=404, detail="Rule template was not found")
+        raise HTTPException(status_code=404, detail=ERR_TEMPLATE_NOT_FOUND)
     apply_visibility(session, template, payload.visibility_type, payload.supervisor_ids,
         actor=admin, source="admin",)
     session.commit()
@@ -127,7 +128,7 @@ def get_template_history(
             "previous": change.previous_value,
             "new": change.new_value,
         })
-    if user is not None and user.role == "Administrator":
+    if user is not None and user.role == ROLE_ADMINISTRATOR:
         for change in session.scalars(
             select(RuleVisibilityChange)
             .where(RuleVisibilityChange.template_id == template.id)
@@ -163,7 +164,7 @@ def get_template_assignments(
         .order_by(Asset.name, MonitoringRule.id)
     ).all()
     total = None
-    if user is not None and user.role == "Administrator":
+    if user is not None and user.role == ROLE_ADMINISTRATOR:
         total = len(rows)
     return {
         "total": total,

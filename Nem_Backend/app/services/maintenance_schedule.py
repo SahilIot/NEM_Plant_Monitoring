@@ -22,6 +22,9 @@ from app.core.constants import (
     STATUS_RESOLVED,
     STATUS_WARNING,
     USAGE,
+    APPROVAL_APPROVED,
+    APPROVAL_NOT_REQUIRED,
+    STATUS_AWAITING_APPROVAL,
 )
 
 RECURRENCE_UNITS = {"days", "weeks", "months", "years"}
@@ -37,7 +40,7 @@ def due_status(
     if completed:
         return STATUS_COMPLETED
     if awaiting_approval:
-        return "awaiting_approval"
+        return STATUS_AWAITING_APPROVAL
     if cancelled or due_date is None:
         return "not_scheduled"
     if due_date < today:
@@ -181,7 +184,7 @@ def emit_due_schedule_events(session: Session, *, today: date) -> int:
             MaintenanceSchedule.schedule_mode == CALENDAR,
             MaintenanceSchedule.status == STATUS_ACTIVE,
             MaintenanceSchedule.current_due_date <= today,
-            MaintenanceSchedule.approval_status.in_(("not_required", "approved")),
+            MaintenanceSchedule.approval_status.in_((APPROVAL_NOT_REQUIRED, APPROVAL_APPROVED)),
         )
         .with_for_update()
     ).all()

@@ -6,6 +6,13 @@ from typing import Any, Literal
 from pydantic import Field, field_validator, model_validator
 from app.core.labels import normalize_label_names
 from app.schemas.common import ORMModel
+from app.core.constants import (
+    RULE_BOOLEAN_COUNT_THRESHOLD,
+    RULE_DURATION,
+    RULE_MULTI_PARAMETER,
+    RULE_PARAMETER_THRESHOLD,
+    RULE_RUNTIME_DURATION,
+)
 
 #This function checks the thresholds used by a running-time monitoring rule
 def validate_runtime_thresholds(parameters: dict[str, Any] | None) -> None:
@@ -99,7 +106,7 @@ class RuleCreate(ORMModel):
     @field_validator("rule_type", mode="before")
     @classmethod
     def reject_multi_parameter(cls, value: Any) -> Any:
-        if value == "multi_parameter":
+        if value == RULE_MULTI_PARAMETER:
             raise ValueError(
                 "Multi-parameter rules cannot be created here; use POST /assets/{asset_id}/multi-parameter-rules, "
                 "which validates every parameter."
@@ -111,7 +118,7 @@ class RuleCreate(ORMModel):
     def validate_rule_definition(self):
         if self.target_asset_id is None and self.variable_id is None:
             raise ValueError("A rule must target an asset, a variable, or both")
-        if self.rule_type == "parameter_threshold":
+        if self.rule_type == RULE_PARAMETER_THRESHOLD:
             if self.variable_id is None or self.operator is None:
                 raise ValueError("Parameter threshold rules require a variable and operator")
             # For temperature rules, use the warning and alert thresholds to initialize
@@ -136,7 +143,7 @@ class RuleCreate(ORMModel):
             elif self.threshold is None:
                 raise ValueError("Numeric parameter thresholds require a numeric threshold")
         # Validates running-time monitoring rules using a Boolean running signal.
-        if self.rule_type == "runtime_duration":
+        if self.rule_type == RULE_RUNTIME_DURATION:
             validate_runtime_thresholds(self.parameters)
             if self.parameters and "warning_thresholds_seconds" in self.parameters:
                 if self.variable_id is None:
@@ -161,7 +168,7 @@ class RuleCreate(ORMModel):
                 if not isinstance(duration, int) or isinstance(duration, bool) or duration <= 0:
                     raise ValueError("Legacy runtime duration rules require a positive duration_seconds")
                 
-        if self.rule_type == "duration":
+        if self.rule_type == RULE_DURATION:
             parameters = self.parameters or {}
             condition = parameters.get("condition", "equals")
 
@@ -208,7 +215,7 @@ class RuleCreate(ORMModel):
         # Validates Boolean cycle/count monitoring rules.
         # Uses two warning thresholds and one higher alert threshold to monitor
         # the number of Boolean events or activations.    
-        if self.rule_type == "boolean_count_threshold":
+        if self.rule_type == RULE_BOOLEAN_COUNT_THRESHOLD:
             if self.variable_id is None:
                 raise ValueError("Boolean count threshold rules require a variable_id")
             parameters = self.parameters or {}
@@ -234,7 +241,7 @@ class RuleCreate(ORMModel):
                 or alert_threshold <= warning_thresholds[1]
             ):
                 raise ValueError("alert_threshold must be a positive integer greater than both warnings")
-        if self.rule_type == "runtime_duration":
+        if self.rule_type == RULE_RUNTIME_DURATION:
             validate_runtime_thresholds(self.parameters)
         return self
 
@@ -285,7 +292,7 @@ class RuleTemplateCreate(ORMModel):
     @model_validator(mode="after")
     def validate_template_definition(self):
         required_types = self.required_variable_types
-        if self.rule_type == "multi_parameter":
+        if self.rule_type == RULE_MULTI_PARAMETER:
             # Parameter-based template: definitions live in parameters.parameter_defs; variables are chosen per asset.
             from app.schemas.rule_parameters import normalize_template_parameters
 
@@ -294,7 +301,7 @@ class RuleTemplateCreate(ORMModel):
             self.parameters = normalize_template_parameters(self.parameters)
             self.required_variable_types = None
             return self
-        if self.rule_type == "parameter_threshold":
+        if self.rule_type == RULE_PARAMETER_THRESHOLD:
             # Initialize the main threshold from the warning threshold for temperature rules when missing, then validate all temperature-specific parameters.
             if (self.parameters or {}).get("temperature_rule") is True:
                 if self.threshold is None and (self.parameters or {}).get("warning_threshold") is not None:
@@ -313,20 +320,20 @@ class RuleTemplateCreate(ORMModel):
             elif not required_types or any(item not in {"number", "integer"} for item in required_types):
                 raise ValueError("Parameter threshold templates require numeric variables or a Boolean variable")
             
-        elif self.rule_type == "boolean_count_threshold":
+        elif self.rule_type == RULE_BOOLEAN_COUNT_THRESHOLD:
             if required_types is not None and required_types != ["boolean"]:
                 raise ValueError("Boolean count templates require boolean variables")
             self.required_variable_types = ["boolean"]
         # Running-time templates require Boolean variables representing machine running status.
         # This allows the same running-time monitoring rule to be reused across different assets.
-        elif self.rule_type == "runtime_duration":
+        elif self.rule_type == RULE_RUNTIME_DURATION:
             if required_types is not None and required_types != ["boolean"]:
                 raise ValueError("Running-time templates require Boolean variables")
             self.required_variable_types = ["boolean"]
 
             if not (self.parameters or {}).get("warning_thresholds_seconds"):
                 raise ValueError("Running-time templates require two warning thresholds and an alert threshold")
-        elif self.rule_type == "duration":
+        elif self.rule_type == RULE_DURATION:
             condition = (self.parameters or {}).get("condition", "equals")
             if condition == "interval_elapsed":
                 if required_types:
@@ -379,7 +386,7 @@ class RuleTemplateCreate(ORMModel):
                 "target_asset_id": 1,
                 "variable_id": (
                     1 if needs_variable and not (
-                        self.rule_type == "duration"
+                        self.rule_type == RULE_DURATION
                         and (self.parameters or {}).get("condition")
                         == "interval_elapsed"
                     ) else None

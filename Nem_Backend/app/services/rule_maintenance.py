@@ -10,15 +10,21 @@ from app.models import Alert, Asset, MaintenanceRecord, MaintenanceSchedule, Mon
 from app.services.email_notifications import enqueue_alert_notifications
 from app.core.config import get_settings
 from app.services.monitoring_engine import emit_event
-from app.services.rule_parameters import _aware, _refresh_rule_state, effective_stale_after
+from app.services.rule_parameters import _aware, _refresh_rule_state, change_parameter_lifecycle, effective_stale_after
 from app.core.constants import (
+    APPROVAL_NOT_REQUIRED,
+    CATEGORY_INTERVAL_BASED,
     COUNTER,
+    ELIGIBILITY_NOT_DUE,
+    ELIGIBILITY_READY,
+    EVENT_ALERT_RESOLVED,
     INTERVAL,
     INTERVAL_PARAMETER,
     PROGRESS_RESET,
     PROGRESS_RETAINED,
     RULE_MULTI_PARAMETER,
     RULE_TYPE,
+    SCHEDULE_MODE_RULE,
     STATUS_ACTIVE,
     STATUS_ALERT,
     STATUS_CANCELLED,
@@ -28,13 +34,14 @@ from app.core.constants import (
     STATUS_NORMAL,
     STATUS_PLANNED,
     STATUS_RESOLVED,
+    STATUS_SUSPENDED,
     STATUS_UNKNOWN,
     STATUS_WARNING,
 )
 
 LOGGER = logging.getLogger(__name__)
 
-MODE = "rule"
+MODE = SCHEDULE_MODE_RULE
 # Parameter statuses that mean "Due reached" (warning = Due, alert = Overdue), as produced by interval_status().
 DUE_STATUSES = {STATUS_WARNING, STATUS_ALERT}
 # A displayed progress value is only rewritten when it moved by at least this much (running hours / cycles),
@@ -51,7 +58,7 @@ def is_eligible_rule(rule: MonitoringRule) -> bool:
     return (
         rule.rule_type == RULE_MULTI_PARAMETER
         and rule.target_asset_id is not None
-        and (rule.parameters or {}).get("category") == "interval_based"
+        and (rule.parameters or {}).get("category") == CATEGORY_INTERVAL_BASED
     )
 
 
@@ -110,7 +117,7 @@ def _context(schedule: MaintenanceSchedule) -> dict[str, Any]:
 def _sync_job(schedule: MaintenanceSchedule, job: MaintenanceRecord | None) -> None:
     if job is None:
         return
-    job.start_eligibility = schedule.eligibility or "not_due"
+    job.start_eligibility = schedule.eligibility or ELIGIBILITY_NOT_DUE
     job.rule_context = _context(schedule)
 
 # Emits an event about a schedule or job.
@@ -154,7 +161,7 @@ def _create_schedule_unsafe(session: Session, rule: MonitoringRule, parameter: R
         instruction_document_ids=list((rule.parameters or {}).get("document_ids") or []),
         schedule_mode=MODE,
         status=STATUS_ACTIVE,
-        approval_status="not_required",
+        approval_status=APPROVAL_NOT_REQUIRED,
         schedule_start_date=today,
         current_period_start_date=today,
         first_due_date=today,
@@ -165,8 +172,8 @@ def _create_schedule_unsafe(session: Session, rule: MonitoringRule, parameter: R
         source_parameter_key=parameter.key,
         source_rule_name=rule.name,
         source_parameter_name=parameter.name,
-        source_rule_type="interval_based",
-        eligibility="not_due",
+        source_rule_type=CATEGORY_INTERVAL_BASED,
+        eligibility=ELIGIBILITY_NOT_DUE,
         due_threshold=float(config["due"]) if config.get("due") is not None else None,
         overdue_threshold=float(config["overdue"]) if config.get("overdue") is not None else None,
         threshold_unit=_unit(parameter),
@@ -178,7 +185,7 @@ def _create_schedule_unsafe(session: Session, rule: MonitoringRule, parameter: R
         asset_id=schedule.asset_id, summary=schedule.title, notes=schedule.description,
         performed_by="Unassigned", maintenance_type=schedule.maintenance_type, status=STATUS_PLANNED,
         planned_start_at=now, planned_end_at=now, planned_due_date=None, priority=schedule.priority,
-        schedule_id=schedule.id, start_eligibility="not_due",
+        schedule_id=schedule.id, start_eligibility=ELIGIBILITY_NOT_DUE,
     )
     session.add(job)
     session.flush()
@@ -234,8 +241,8 @@ def _refresh_thresholds(session: Session, schedule: MaintenanceSchedule, rule: M
     schedule.due_threshold, schedule.overdue_threshold = due, overdue
     schedule.threshold_unit = _unit(parameter)
     job = _job(session, schedule)
-    if schedule.eligibility == "ready" and job is not None and job.status == STATUS_PLANNED:
-        schedule.eligibility, schedule.became_due_at, schedule.due_value = "not_due", None, None
+    if schedule.eligibility == ELIGIBILITY_READY and job is not None and job.status == STATUS_PLANNED:
+        schedule.eligibility, schedule.became_due_at, schedule.due_value = ELIGIBILITY_NOT_DUE, None, None
         alert = session.scalar(select(Alert).where(
             Alert.maintenance_schedule_id == schedule.id, Alert.status == STATUS_ACTIVE).with_for_update())
         if alert is not None:
@@ -256,7 +263,7 @@ def sync_rule_schedules(session: Session, rule: MonitoringRule, now: datetime | 
         now = now or _now()
         for schedule in session.scalars(select(MaintenanceSchedule).where(
                 MaintenanceSchedule.source_rule_id == rule.id, MaintenanceSchedule.status == STATUS_ACTIVE,
-                MaintenanceSchedule.eligibility == "not_due").with_for_update()).all():
+                MaintenanceSchedule.eligibility == ELIGIBILITY_NOT_DUE).with_for_update()).all():
             _close(session, schedule, _job(session, schedule), now,
                    "The monitoring rule is no longer an interval-based rule, so this maintenance was cancelled before it became due.")
         return
@@ -277,7 +284,7 @@ def sync_rule_schedules(session: Session, rule: MonitoringRule, now: datetime | 
         _refresh_thresholds(session, schedule, rule, parameter, now)
         # Only deactivation cancels; a suspended rule also has is_enabled False but keeps every schedule untouched.
         deactivated = rule.lifecycle_status == STATUS_DEACTIVATED or parameter.lifecycle_status == STATUS_DEACTIVATED
-        if deactivated and schedule.eligibility == "not_due":
+        if deactivated and schedule.eligibility == ELIGIBILITY_NOT_DUE:
             _close(session, schedule, _job(session, schedule), now, "The monitoring rule was deactivated before this maintenance became due.")
 
 # Cancels eligible schedules for removed rules/parameters.
@@ -291,7 +298,7 @@ def cancel_for_removed(session: Session, *, parameter_ids: set[int], rule_ids: s
     if rule_ids:
         conditions.append(MaintenanceSchedule.source_rule_id.in_(rule_ids))
     for schedule in session.scalars(select(MaintenanceSchedule).where(
-            MaintenanceSchedule.status == STATUS_ACTIVE, MaintenanceSchedule.eligibility == "not_due", or_(*conditions)).with_for_update()).all():
+            MaintenanceSchedule.status == STATUS_ACTIVE, MaintenanceSchedule.eligibility == ELIGIBILITY_NOT_DUE, or_(*conditions)).with_for_update()).all():
         # link_rule=False: the rule row is being deleted in this same flush, so the event must not point at it.
         _close(session, schedule, _job(session, schedule), now,"The monitoring rule or parameter was removed before this maintenance became due.", link_rule=False)
 
@@ -324,17 +331,17 @@ def apply_evaluation(session: Session, rule: MonitoringRule, parameter: RulePara
     job = _job(session, schedule)
     became_ready = False
     unit = schedule.threshold_unit or _unit(parameter)
-    if number is not None and schedule.eligibility == "not_due":
+    if number is not None and schedule.eligibility == ELIGIBILITY_NOT_DUE:
         step = _PROGRESS_STEP.get(unit, 0.01)
         if abs(number - (schedule.current_progress or 0.0)) >= step:
             schedule.current_progress = max(0.0, number)
     if status in DUE_STATUSES:
-        if schedule.eligibility == "not_due" and job is not None and job.status == STATUS_PLANNED:
+        if schedule.eligibility == ELIGIBILITY_NOT_DUE and job is not None and job.status == STATUS_PLANNED:
             _make_ready(session, rule, parameter, schedule, job, number, now)
             became_ready = True
-    elif status == STATUS_NORMAL and schedule.eligibility == "ready" and job is not None and job.status == STATUS_PLANNED:
+    elif status == STATUS_NORMAL and schedule.eligibility == ELIGIBILITY_READY and job is not None and job.status == STATUS_PLANNED:
         # Below Due again before anyone started the work (for example the limit was raised): Start must lock.
-        schedule.eligibility, schedule.became_due_at, schedule.due_value = "not_due", None, None
+        schedule.eligibility, schedule.became_due_at, schedule.due_value = ELIGIBILITY_NOT_DUE, None, None
         alert = session.scalar(select(Alert).where(
             Alert.maintenance_schedule_id == schedule.id, Alert.status == STATUS_ACTIVE).with_for_update())
         if alert is not None:
@@ -348,7 +355,7 @@ def apply_evaluation(session: Session, rule: MonitoringRule, parameter: RulePara
 # Marks a schedule as ready and creates an alert.
 def _make_ready(session: Session, rule: MonitoringRule, parameter: RuleParameter, schedule: MaintenanceSchedule,
                 job: MaintenanceRecord, value: float | None, now: datetime) -> None:
-    schedule.eligibility = "ready"
+    schedule.eligibility = ELIGIBILITY_READY
     schedule.became_due_at = now
     schedule.due_value = value
     if value is not None:
@@ -430,8 +437,7 @@ def cancel_unavailable(session: Session, schedule_id: int, *, user_id: int | Non
            now, link_rule=False)
     return schedule
 
-# Checks, before anything is changed, that a progress reset can be applied to the rule parameter of this schedule.
-# Returns the locked rule and parameter. Raises ValueError (with a message for the user) when it cannot.
+# Find and validate the monitoring rule and parameter associated with a maintenance schedule before resetting their progress.
 def prepare_progress_reset(session: Session, schedule: MaintenanceSchedule) -> tuple[MonitoringRule, RuleParameter]:
     gone = ("The monitoring rule or parameter this maintenance was created from no longer exists, so its progress "
             "cannot be reset. Complete the maintenance without a reset.")
@@ -449,10 +455,31 @@ def prepare_progress_reset(session: Session, schedule: MaintenanceSchedule) -> t
                          "cannot be reset. Complete the maintenance without a reset.")
     return rule, parameter
 
-# Applies the user's decision for a rule-generated schedule that was just completed (schedule.status is already
-# 'completed' and flushed). reset_progress=True starts a new cycle from zero; False keeps the accumulated progress and
-# starts nothing. Everything runs in the caller's transaction, so the baseline, checkpoint, alerts, decision and the new
-# schedule are saved together or not at all. Returns the new schedule when one was created.
+# Stop the maintenance cycle when an operator chooses complete without reset.
+def _stop_retained_cycle(session: Session, schedule: MaintenanceSchedule, now: datetime, meta: dict[str, Any]) -> None:
+    if schedule.source_rule_id is None or schedule.source_parameter_id is None:
+        return  # the rule or parameter was deleted: nothing is left to stop
+    rule = session.scalar(select(MonitoringRule).where(MonitoringRule.id == schedule.source_rule_id)
+                          .with_for_update().execution_options(populate_existing=True))
+    parameter = session.scalar(select(RuleParameter).where(RuleParameter.id == schedule.source_parameter_id,
+                                                           RuleParameter.rule_id == schedule.source_rule_id)
+                               .with_for_update().execution_options(populate_existing=True))
+    if rule is None or parameter is None:
+        return
+    if parameter.lifecycle_status in (STATUS_ACTIVE, STATUS_SUSPENDED):
+        change_parameter_lifecycle(session, rule, parameter, "deactivate", now)
+    if rule.is_enabled and not any(item.lifecycle_status == STATUS_ACTIVE for item in rule.parameter_items):
+        from app.services.monitoring_engine import set_rule_enabled_state
+
+        set_rule_enabled_state(session, rule, False, at=now)  # also deactivates the rule and closes its open alerts
+        emit_event(session, event_type="rule_deactivated", occurred_at=now,
+                   message=(f"Rule '{rule.name}' was deactivated after maintenance was completed without resetting "
+                            "progress. Its progress is kept; start a new cycle explicitly."),
+                   asset_id=schedule.asset_id, rule_id=rule.id, metadata=meta)
+    session.flush()
+
+
+# Main decision making func. decides what happens after the operator completes maintenance.
 def apply_completion_decision(session: Session, schedule: MaintenanceSchedule, *, reset_progress: bool,
                               completed_at: datetime, now: datetime, user_name: str) -> MaintenanceSchedule | None:
     meta = {"maintenance_schedule_id": schedule.id, "parameter_id": schedule.source_parameter_id,
@@ -464,6 +491,7 @@ def apply_completion_decision(session: Session, schedule: MaintenanceSchedule, *
                    message=(f"{schedule.title}: maintenance completed without resetting progress. The accumulated "
                             "progress is kept and no new maintenance cycle was started."),
                    asset_id=schedule.asset_id, rule_id=schedule.source_rule_id, metadata=meta)
+        _stop_retained_cycle(session, schedule, now, meta)
         return None
     rule, parameter = prepare_progress_reset(session, schedule)
     schedule.progress_reset = PROGRESS_RESET
@@ -480,7 +508,7 @@ def apply_completion_decision(session: Session, schedule: MaintenanceSchedule, *
     for alert in session.scalars(select(Alert).where(
             Alert.rule_id == rule.id, Alert.parameter_id == parameter.id, Alert.status == STATUS_ACTIVE).with_for_update()).all():
         alert.status, alert.resolved_at, alert.last_updated_at = STATUS_RESOLVED, now, now
-        emit_event(session, event_type="alert_resolved", occurred_at=now,
+        emit_event(session, event_type=EVENT_ALERT_RESOLVED, occurred_at=now,
                    message=f"Alert resolved: {rule.name} — {parameter.name} (maintenance completed and progress reset).",
                    asset_id=schedule.asset_id, rule_id=rule.id, alert_id=alert.id, severity=alert.severity,
                    metadata={**meta, "outcome": "maintenance_progress_reset"})
@@ -489,14 +517,12 @@ def apply_completion_decision(session: Session, schedule: MaintenanceSchedule, *
                asset_id=schedule.asset_id, rule_id=rule.id, metadata={**meta, "cycle_baseline_at": now.isoformat()})
     session.flush()
     _refresh_rule_state(session, rule, now)
-    # Exactly one next schedule: the one-open-schedule-per-parameter index and the savepoint in _create_schedule keep
-    # a concurrent attempt from adding a second. A rule that is suspended or deactivated gets it once it runs again
-    # (apply_evaluation), because this schedule is marked 'reset'.
+
     if _rule_running(rule, parameter) and _open_schedule(session, parameter.id) is None:
         return _create_schedule(session, rule, parameter, now)
     return None
 
-# Verfies that a job may start.
+# Verfies that a job may start. Validate whether an operator allowed to start a maintenance job.
 def ensure_startable(session: Session, record: MaintenanceRecord) -> None:
     if record.schedule_id is None:
         return  # not rule-controlled
@@ -504,7 +530,7 @@ def ensure_startable(session: Session, record: MaintenanceRecord) -> None:
                               .with_for_update().execution_options(populate_existing=True))
     if schedule is None or schedule.schedule_mode != MODE:
         return  # calendar, runtime, usage and manual maintenance keep their own rules
-    if record.start_eligibility != "ready" or schedule.eligibility != "ready":
+    if record.start_eligibility != ELIGIBILITY_READY or schedule.eligibility != ELIGIBILITY_READY:
         raise ValueError("This maintenance is not due yet. It can be started once its rule reaches Due.")
     if schedule.status != STATUS_ACTIVE or schedule.current_occurrence_id != record.id:
         raise ValueError("This maintenance is no longer the active occurrence of its schedule.")
@@ -512,8 +538,7 @@ def ensure_startable(session: Session, record: MaintenanceRecord) -> None:
             "be started. Its schedule and history are kept.")
     if schedule.source_rule_id is None or schedule.source_parameter_id is None:
         raise ValueError(gone)
-    # Shared row locks (rule first, then parameter - the order a rule deletion takes them) so the rule or parameter
-    # cannot be deleted while this Start is deciding.
+
     rule = session.scalar(select(MonitoringRule).where(MonitoringRule.id == schedule.source_rule_id)
                           .with_for_update(read=True).execution_options(populate_existing=True))
     parameter = session.scalar(select(RuleParameter).where(RuleParameter.id == schedule.source_parameter_id,
@@ -528,8 +553,7 @@ def ensure_startable(session: Session, record: MaintenanceRecord) -> None:
     if not is_eligible_rule(rule) or not _valid_relationship(session, rule, parameter):
         raise ValueError("The monitoring rule is no longer an interval-based rule for this parameter, so this maintenance "
                          "cannot be started. Its schedule and history are kept.")
-    # The saved evaluation is the single source of truth: Start is only allowed on an explicit, fresh Due/Overdue result.
-    # Due is never recomputed here with a separate threshold.
+
     state = session.scalar(select(RuleParameterState).where(RuleParameterState.parameter_id == parameter.id)
                            .execution_options(populate_existing=True))
     if state is None or state.last_evaluated_at is None:
@@ -550,8 +574,7 @@ def ensure_startable(session: Session, record: MaintenanceRecord) -> None:
         raise ValueError("The rule's Due evaluation is out of date, so this maintenance cannot be started until the rule "
                          "evaluates again.")
     if parameter.variable_id is not None:
-        # Counter/timer from a PLC signal: the reading itself must also be fresh. Calendar-based interval parameters have
-        # no reading and rely on the evaluation time above.
+       
         if state.reading_at is None:
             raise ValueError("The signal has no reading, so this maintenance cannot be started.")
         reading_age = (now - _aware(state.reading_at)).total_seconds()

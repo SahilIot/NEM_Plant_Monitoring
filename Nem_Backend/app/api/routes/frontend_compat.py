@@ -111,6 +111,15 @@ from app.core.constants import (
     STATUS_SUSPENDED,
     STATUS_UNKNOWN,
     STATUS_WARNING,
+    ERR_DOCUMENT_ATTACHMENT_NOT_FOUND,
+    ERR_NO_FIELDS_TO_UPDATE,
+    ERR_TEMPLATE_NOT_FOUND,
+    EVENT_MAINTENANCE_RECORD_PERMANENTLY_DELETED,
+    EVENT_RULE_CREATED,
+    EVENT_RULE_PERMANENTLY_DELETED,
+    ROLE_ADMINISTRATOR,
+    ROLE_SUPERVISOR,
+    RULE_GENERIC,
 )
 
 router = APIRouter(tags=["frontend compatibility"])
@@ -760,7 +769,7 @@ def _template_read(session: Session, template: MonitoringRuleTemplate) -> RuleTe
     # Shared rule payload; the Supervisor visibility list is shown to Administrators only.
     data = RuleTemplateRead.model_validate(template)
     user = request_user(session)
-    if user is None or user.role != "Administrator":
+    if user is None or user.role != ROLE_ADMINISTRATOR:
         data = data.model_copy(update={"visibility_supervisor_ids": []})
     return data
 
@@ -895,7 +904,7 @@ def submit_rule_template_request(
 ) -> dict[str, Any]:
     user = _authenticated_user(request, session)
 
-    if user.role != "Supervisor":
+    if user.role != ROLE_SUPERVISOR:
         raise HTTPException(status_code=403,detail="Only Supervisors can suggest reusable monitoring rules",)
 
     if isinstance(payload, MaintenanceSuggestionPayload):
@@ -952,7 +961,7 @@ def list_rule_template_requests(
 ) -> list[dict[str, Any]]:
     user = _authenticated_user(request, session)
 
-    if user.role != "Administrator":
+    if user.role != ROLE_ADMINISTRATOR:
         raise HTTPException(status_code=403,detail="Only Administrators can review rule suggestions",)
 
     query = select(MonitoringRuleTemplateRequest)
@@ -980,7 +989,7 @@ def approve_rule_template_request(
 ) -> dict[str, Any]:
     user = _authenticated_user(request, session)
 
-    if user.role != "Administrator":
+    if user.role != ROLE_ADMINISTRATOR:
         raise HTTPException(status_code=403, detail="Administrator access required")
 
     item = session.scalar(
@@ -1066,7 +1075,7 @@ def decline_rule_template_request(
 ) -> dict[str, Any]:
     user = _authenticated_user(request, session)
 
-    if user.role != "Administrator":
+    if user.role != ROLE_ADMINISTRATOR:
         raise HTTPException(status_code=403, detail="Administrator access required")
 
     item = session.scalar(
@@ -1104,7 +1113,7 @@ def _apply_creation_visibility(session, template, visibility_type, supervisor_id
 def create_rule_template(
         payload: RuleTemplateCreateRequest, session: Session = Depends(get_db)
 ) -> RuleTemplateRead:
-        admin = require_session_roles(session, "Administrator")
+        admin = require_session_roles(session, ROLE_ADMINISTRATOR)
         _validate_template_collection(session, payload.collection_id)
         values = payload.model_dump(exclude={"labels", "visibility_type", "visibility_supervisor_ids"})
         # Visibility is an explicit Admin choice; the row starts Admin Only until it is applied.
@@ -1166,7 +1175,7 @@ def apply_template_update(
             )
         ).all()
         editor = request_user(session)
-        is_admin = editor is not None and editor.role == "Administrator"
+        is_admin = editor is not None and editor.role == ROLE_ADMINISTRATOR
 
         with internal_propagation_scope(session):
             for rule in assigned_rules:
@@ -1232,10 +1241,10 @@ def update_rule_template(
 #if template has assigned rules,it cannot be deleted 
 @router.delete("/rule-templates/{template_id}", status_code=204)
 def delete_rule_template(template_id: int, session: Session = Depends(get_db)) -> None:
-        require_session_roles(session, "Administrator")
+        require_session_roles(session, ROLE_ADMINISTRATOR)
         template = session.get(MonitoringRuleTemplate, template_id)
         if template is None:
-            raise HTTPException(status_code=404, detail="Rule template was not found")
+            raise HTTPException(status_code=404, detail=ERR_TEMPLATE_NOT_FOUND)
         _ensure_collection_keeps_rule(session, template.collection_id, template.id)
         assigned_count = session.scalar(
             select(func.count())
@@ -1257,9 +1266,9 @@ def assign_template_to_assets(
         session: Session = Depends(get_db),
 ) -> dict[str, Any]:
         # Assigning needs: an assigning role, visibility of the rule, and access to each asset.
-        assigner = require_session_roles(session, "Administrator", "Supervisor")
+        assigner = require_session_roles(session, ROLE_ADMINISTRATOR, ROLE_SUPERVISOR)
         # Supervisors review a new assignment first: it is stored Not Activated.
-        activate_on_assign = assigner is None or assigner.role == "Administrator"
+        activate_on_assign = assigner is None or assigner.role == ROLE_ADMINISTRATOR
         template = get_visible_template(session, template_id)
         prepared = []
         already_assigned = []
@@ -1300,7 +1309,7 @@ def assign_template_to_assets(
             assign_labels(session, rule, template.labels)
             emit_event(
                 session,
-                event_type="rule_created",
+                event_type=EVENT_RULE_CREATED,
                 message=f"Rule '{rule.name}' assigned to asset {asset_id}.",
                 occurred_at=datetime.now(timezone.utc),
                 asset_id=asset_id,
@@ -1476,14 +1485,14 @@ def frontend_assign_predefined_rules(
     request: Request,
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    require_session_roles(session, "Administrator", "Supervisor")
+    require_session_roles(session, ROLE_ADMINISTRATOR, ROLE_SUPERVISOR)
     if session.scalar(
         select(Asset).where(Asset.id == asset_id).with_for_update()
     ) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     assigner = request_user(session)
     # Supervisors review a new assignment first: it is stored Not Activated.
-    activate_on_assign = assigner is None or assigner.role == "Administrator"
+    activate_on_assign = assigner is None or assigner.role == ROLE_ADMINISTRATOR
     templates = session.scalars(
         select(MonitoringRuleTemplate)
         .where(MonitoringRuleTemplate.id.in_(payload.rule_ids))
@@ -1529,7 +1538,7 @@ def frontend_assign_predefined_rules(
         assign_labels(session, rule, template.labels)
         emit_event(
             session,
-            event_type="rule_created",
+            event_type=EVENT_RULE_CREATED,
             message=f"Rule '{rule.name}' assigned to asset {asset_id}.",
             occurred_at=datetime.now(timezone.utc),
             asset_id=asset_id,
@@ -1549,7 +1558,7 @@ def frontend_assign_predefined_rules(
 # Unassign a collection atomically while applying the same safety checks as individual rule deletion.
 @router.delete(
     "/assets/{asset_id}/rule-collections/{collection_id}",
-    dependencies=[Depends(require_roles("Administrator"))],
+    dependencies=[Depends(require_roles(ROLE_ADMINISTRATOR))],
 )
 def frontend_unassign_rule_collection(
     asset_id: int,
@@ -1625,7 +1634,7 @@ def frontend_unassign_rule_collection(
         for rule in deleted_rules:
             emit_event(
                 session,
-                event_type="rule_permanently_deleted",
+                event_type=EVENT_RULE_PERMANENTLY_DELETED,
                 message=f"Monitoring rule '{rule['name']}' was unassigned with its collection.",
                 occurred_at=datetime.now(timezone.utc),
                 asset_id=asset_id,
@@ -1689,7 +1698,7 @@ def frontend_copy_asset_rules(
     prepared = []
     already_copied = []
     for source in selected:
-        if source.rule_type == "generic":
+        if source.rule_type == RULE_GENERIC:
             raise HTTPException(status_code=422,detail=f"Rule '{source.name}' has no monitoring evaluator and cannot be copied",)
         if source.rule_type == RULE_MULTI_PARAMETER:
             definition = _multi_copy_definition(session, request, source, asset_id)
@@ -1731,7 +1740,7 @@ def frontend_copy_asset_rules(
         assign_labels(session, rule, source.labels)
         emit_event(
             session,
-            event_type="rule_created",
+            event_type=EVENT_RULE_CREATED,
             message=f"Rule '{rule.name}' copied from asset {payload.source_asset_id}.",
             occurred_at=datetime.now(timezone.utc),
             asset_id=asset_id,
@@ -1772,7 +1781,7 @@ def frontend_create_asset_rule(
     assign_labels(session, rule, payload.labels)
     emit_event(
         session,
-        event_type="rule_created",
+        event_type=EVENT_RULE_CREATED,
         message=f"Rule '{rule.name}' created.",
         occurred_at=datetime.now(timezone.utc),
         asset_id=rule.target_asset_id,
@@ -1829,7 +1838,7 @@ def frontend_create_usage_rule(
     assign_labels(session, rule, rule_payload.labels)
     emit_event(
         session,
-        event_type="rule_created",
+        event_type=EVENT_RULE_CREATED,
         message=f"Usage threshold rule '{rule.name}' created.",
         occurred_at=datetime.now(timezone.utc),
         asset_id=asset_id,
@@ -1852,7 +1861,7 @@ def frontend_create_time_rule(
 # endpoint allows the frontend to change the state of multiple monitoring rules belonging to one asset
 @router.post(
     "/assets/{asset_id}/rules/bulk",
-    dependencies=[Depends(require_roles("Administrator"))],
+    dependencies=[Depends(require_roles(ROLE_ADMINISTRATOR))],
 )
 def frontend_bulk_rule_state(
     asset_id: int,
@@ -1890,7 +1899,7 @@ def frontend_bulk_rule_state(
             continue
         if enabled:
             try:
-                if rule.rule_type == "generic":
+                if rule.rule_type == RULE_GENERIC:
                     raise HTTPException(status_code=422,detail="This rule type has no monitoring evaluator",)
                 validate_targets(
                     session,
@@ -1946,7 +1955,7 @@ def _transition_rule_lifecycle(
         expected = STATUS_SUSPENDED if action == "resume" else STATUS_DEACTIVATED
         if current != expected or rule.is_enabled:
             raise HTTPException(status_code=409, detail=f"Only a {expected} rule can be {action}d.",)
-        if rule.rule_type == "generic":
+        if rule.rule_type == RULE_GENERIC:
             raise HTTPException(status_code=422, detail="This rule type has no monitoring evaluator.")
         validate_targets(
             session,
@@ -1993,7 +2002,7 @@ def _transition_rule_lifecycle(
 
 @router.post(
     "/rules/{rule_id}/suspend",
-    dependencies=[Depends(require_roles("Administrator"))],
+    dependencies=[Depends(require_roles(ROLE_ADMINISTRATOR))],
 )
 def suspend_rule(
     rule_id: int,
@@ -2005,7 +2014,7 @@ def suspend_rule(
 
 @router.post(
     "/rules/{rule_id}/resume",
-    dependencies=[Depends(require_roles("Administrator"))],
+    dependencies=[Depends(require_roles(ROLE_ADMINISTRATOR))],
 )
 def resume_rule(
     rule_id: int,
@@ -2019,7 +2028,7 @@ def resume_rule(
     "/rules/{rule_id}/activate",
     # Supervisors may activate a Not Activated rule after reviewing it; suspend, resume and
     # deactivate stay Administrator-only.
-    dependencies=[Depends(require_roles("Administrator", "Supervisor"))],
+    dependencies=[Depends(require_roles(ROLE_ADMINISTRATOR, ROLE_SUPERVISOR))],
 )
 def activate_rule(
     rule_id: int,
@@ -2031,7 +2040,7 @@ def activate_rule(
 
 @router.post(
     "/rules/{rule_id}/deactivate",
-    dependencies=[Depends(require_roles("Administrator"))],
+    dependencies=[Depends(require_roles(ROLE_ADMINISTRATOR))],
 )
 def deactivate_rule(
     rule_id: int,
@@ -2044,7 +2053,7 @@ def deactivate_rule(
 def frontend_delete_rule(
     rule_id: int,
     session: Session = Depends(get_db),
-    user: User = Depends(require_roles("Administrator")),
+    user: User = Depends(require_roles(ROLE_ADMINISTRATOR)),
 ) -> None:
     rule = session.scalar(
         select(MonitoringRule)
@@ -2080,7 +2089,7 @@ def frontend_delete_rule(
     session.flush()
     emit_event(
         session,
-        event_type="rule_permanently_deleted",
+        event_type=EVENT_RULE_PERMANENTLY_DELETED,
         message=f"Monitoring rule '{deleted_name}' was permanently deleted.",
         occurred_at=datetime.now(timezone.utc),
         asset_id=deleted_asset_id,
@@ -2183,7 +2192,7 @@ def frontend_bulk_delete_asset_logbook(
     asset_id: int,
     payload: BulkLogbookDelete,
     session: Session = Depends(get_db),
-    user: User = Depends(require_roles("Administrator")),
+    user: User = Depends(require_roles(ROLE_ADMINISTRATOR)),
 ) -> dict[str, int]:
     if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
@@ -2218,7 +2227,7 @@ def frontend_bulk_delete_asset_logbook(
     for record in records:
         emit_event(
             session,
-            event_type="maintenance_record_permanently_deleted",
+            event_type=EVENT_MAINTENANCE_RECORD_PERMANENTLY_DELETED,
             message=f"Maintenance '{record.summary}' was permanently deleted.",
             occurred_at=datetime.now(timezone.utc),
             asset_id=record.asset_id,
@@ -2305,7 +2314,7 @@ def frontend_bulk_delete_asset_events(
     asset_id: int,
     payload: BulkLogbookDelete,
     session: Session = Depends(get_db),
-    user: User = Depends(require_roles("Administrator")),
+    user: User = Depends(require_roles(ROLE_ADMINISTRATOR)),
 ) -> dict[str, int]:
     if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
@@ -2404,7 +2413,7 @@ def _claim_existing_templates(session: Session, template_ids: list[int]) -> list
 @router.post("/collections", status_code=201)
 def create_collection(payload: CollectionCreate, session: Session = Depends(get_db)) -> dict[str, Any]:
     # Defence in depth behind the middleware: only Administrators create collections.
-    require_session_roles(session, "Administrator")
+    require_session_roles(session, ROLE_ADMINISTRATOR)
     try:
         existing = _claim_existing_templates(session, payload.existing_template_ids)
         collection = RuleCollection(name=payload.name.strip(), description=payload.description)
@@ -2459,7 +2468,7 @@ def create_collection(payload: CollectionCreate, session: Session = Depends(get_
 
 @router.patch(
     "/collections/{collection_id}",
-    dependencies=[Depends(require_roles("Administrator"))],
+    dependencies=[Depends(require_roles(ROLE_ADMINISTRATOR))],
 )
 def update_collection(
     collection_id: int,
@@ -2652,7 +2661,7 @@ def create_document(payload: DocumentCreate, session: Session = Depends(get_db))
     return _document_payloads(session, [document])[0]
 
 # updating an existing instruction document. 
-@router.patch("/documents/{document_id}",dependencies=[Depends(require_roles("Administrator"))],)
+@router.patch("/documents/{document_id}",dependencies=[Depends(require_roles(ROLE_ADMINISTRATOR))],)
 def update_document(
     document_id: int,
     payload: DocumentUpdate,
@@ -2663,7 +2672,7 @@ def update_document(
         raise HTTPException(status_code=404, detail="Document was not found")
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
-        raise HTTPException(status_code=422, detail="Provide at least one field to update")
+        raise HTTPException(status_code=422, detail=ERR_NO_FIELDS_TO_UPDATE)
     if "description" in changes and (document.entry_type == "instruction" or document.kind == "Instruction"):
         try:
             _require_instruction_content("instruction", changes["description"])
@@ -2784,7 +2793,7 @@ def view_document_file(
         )
     )
     if attachment is None or document_id in hidden_document_ids(session):
-        raise HTTPException(status_code=404, detail="Document attachment was not found")
+        raise HTTPException(status_code=404, detail=ERR_DOCUMENT_ATTACHMENT_NOT_FOUND)
     path = _stored_instruction_file_path(attachment)
 
     extension = Path(attachment.original_name).suffix.lower()
@@ -2852,7 +2861,7 @@ def download_document_file(
         InstructionDocumentFile.document_id == document_id,
     ))
     if attachment is None or document_id in hidden_document_ids(session):
-        raise HTTPException(status_code=404, detail="Document attachment was not found")
+        raise HTTPException(status_code=404, detail=ERR_DOCUMENT_ATTACHMENT_NOT_FOUND)
     path = _stored_instruction_file_path(attachment)
     media_type, _ = mimetypes.guess_type(attachment.original_name)
     return FileResponse(
@@ -2913,7 +2922,7 @@ async def replace_document_file(
         InstructionDocumentFile.document_id == document_id,
     ))
     if document is None or attachment is None or document_id in hidden_document_ids(session):
-        raise HTTPException(status_code=404, detail="Document attachment was not found")
+        raise HTTPException(status_code=404, detail=ERR_DOCUMENT_ATTACHMENT_NOT_FOUND)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     old_path = UPLOAD_DIR / attachment.stored_name
     new_path: Path | None = None
@@ -2947,7 +2956,7 @@ def delete_document_file(document_id: int, file_id: int, session: Session = Depe
         InstructionDocumentFile.document_id == document_id,
     ))
     if document is None or attachment is None or document_id in hidden_document_ids(session):
-        raise HTTPException(status_code=404, detail="Document attachment was not found")
+        raise HTTPException(status_code=404, detail=ERR_DOCUMENT_ATTACHMENT_NOT_FOUND)
     stored_path = UPLOAD_DIR / attachment.stored_name
     session.delete(attachment)
     flag_modified(document, "updated_at")
@@ -3062,21 +3071,21 @@ def _backup_item(record: BackupRecord, settings: Any, detailed: bool = False) ->
 #List backups, with facts read from each backup's manifest
 @router.get("/backups")
 def list_frontend_backups(request: Request, session: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    require_session_roles(session, "Administrator")
+    require_session_roles(session, ROLE_ADMINISTRATOR)
     records = session.scalars(select(BackupRecord).order_by(BackupRecord.created_at.desc())).all()
     return [_backup_item(item, request.app.state.settings) for item in records]
 
 #Backup folder use, files without a history record and unresolved attachment recoveries
 @router.get("/backups/storage")
 def backup_storage(request: Request, session: Session = Depends(get_db)) -> dict[str, Any]:
-    require_session_roles(session, "Administrator")
+    require_session_roles(session, ROLE_ADMINISTRATOR)
     known = set(session.scalars(select(BackupRecord.file_name)).all())
     return storage_report(request.app.state.settings, known)
 
 #Try again to place attachment files that a restore could not place
 @router.post("/backups/recovery/{folder}/retry")
 def retry_backup_recovery(folder: str, session: Session = Depends(get_db)) -> dict[str, Any]:
-    require_session_roles(session, "Administrator")
+    require_session_roles(session, ROLE_ADMINISTRATOR)
     return retry_recovery(folder)
 
 #Upload a backup file (new ZIP or old JSON format) into the history
@@ -3088,7 +3097,7 @@ def upload_frontend_backup(
     note: str = Form(""),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    require_session_roles(session, "Administrator")
+    require_session_roles(session, ROLE_ADMINISTRATOR)
     if len(name) > 200:
         raise HTTPException(status_code=422, detail="Backup name cannot exceed 200 characters")
     record = import_backup_file(
@@ -3106,7 +3115,7 @@ def create_frontend_backup(
     name = (payload.name or "").strip() or f"Backup {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
     if len(name) > 200:
         raise HTTPException(status_code=422, detail="Backup name cannot exceed 200 characters")
-    require_session_roles(session, "Administrator")
+    require_session_roles(session, ROLE_ADMINISTRATOR)
     record, report = create_backup_with_report(session, request.app.state.settings, name, payload.note)
     return {"id": record.id, "name": record.name, "note": record.note,
             "created": record.created_at.isoformat(), "warnings": report["warnings"],
@@ -3115,13 +3124,13 @@ def create_frontend_backup(
 #Backup details (manifest facts: tables, rows, attachments, problems)
 @router.get("/backups/{backup_id}")
 def backup_details(backup_id: int, request: Request, session: Session = Depends(get_db)) -> dict[str, Any]:
-    require_session_roles(session, "Administrator")
+    require_session_roles(session, ROLE_ADMINISTRATOR)
     return _backup_item(_backup_record(session, backup_id), request.app.state.settings, detailed=True)
 
 #Download the backup file
 @router.get("/backups/{backup_id}/download")
 def download_frontend_backup(backup_id: int, request: Request, session: Session = Depends(get_db)) -> FileResponse:
-    require_session_roles(session, "Administrator")
+    require_session_roles(session, ROLE_ADMINISTRATOR)
     record = _backup_record(session, backup_id)
     path = resolve_backup_path(request.app.state.settings, record.file_name)
     download_name = f"nem-backup-{record.created_at.strftime('%Y%m%d-%H%M%S')}-{record.id}{path.suffix}"
@@ -3130,7 +3139,7 @@ def download_frontend_backup(backup_id: int, request: Request, session: Session 
 #Delete a backup file and its history record
 @router.delete("/backups/{backup_id}", status_code=204)
 def delete_frontend_backup(backup_id: int, request: Request, session: Session = Depends(get_db)) -> None:
-    require_session_roles(session, "Administrator")
+    require_session_roles(session, ROLE_ADMINISTRATOR)
     record = _backup_record(session, backup_id)
     delete_backup_file(request.app.state.engine, request.app.state.settings, record.file_name)
     session.delete(record)
@@ -3139,7 +3148,7 @@ def delete_frontend_backup(backup_id: int, request: Request, session: Session = 
 #Validate a backup and describe exactly what restoring it would change (nothing is changed)
 @router.post("/backups/{backup_id}/restore/preview")
 def preview_frontend_restore(backup_id: int, request: Request, session: Session = Depends(get_db)) -> dict[str, Any]:
-    user = require_session_roles(session, "Administrator")
+    user = require_session_roles(session, ROLE_ADMINISTRATOR)
     record = _backup_record(session, backup_id)
     result = analyze_restore(request.app.state.settings, request.app.state.engine, record.file_name, user.id if user else None)
     return {"id": record.id, "name": record.name, "created": record.created_at.isoformat(), **result}
@@ -3152,7 +3161,7 @@ def restore_frontend_backup(
     payload: BackupRestoreRequest | None = None,
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    user = require_session_roles(session, "Administrator")
+    user = require_session_roles(session, ROLE_ADMINISTRATOR)
     record = _backup_record(session, backup_id)
     name, file_name = record.name, record.file_name
     report = restore_backup(

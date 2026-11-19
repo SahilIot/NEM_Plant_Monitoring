@@ -12,11 +12,25 @@ from pydantic import Field, ValidationInfo, field_validator, model_validator
 
 from app.core.labels import normalize_label_names
 from app.schemas.common import ORMModel
+from app.core.constants import (
+    AGGREGATION_NONE,
+    BOOLEAN,
+    CATEGORY_INTERVAL_BASED,
+    COUNTER,
+    INTERVAL,
+    NUMBER,
+    RULE_PARAMETER_THRESHOLD,
+    STATUS_ALERT,
+    STATUS_WARNING,
+    TIME,
+    TIMER,
+    USAGE,
+)
 
-CATEGORIES = ("parameter_threshold", "interval_based")
+CATEGORIES = (RULE_PARAMETER_THRESHOLD, CATEGORY_INTERVAL_BASED)
 MAX_PARAMETERS = 20
 NUMBER_LIMIT_KEYS = ("lower_alert", "lower_warning", "upper_warning", "upper_alert")
-INTERVAL_PARAMETERS = ("usage", "time", "counter")
+INTERVAL_PARAMETERS = (USAGE, TIME, COUNTER)
 
 
 def _number(value: Any) -> float | None:
@@ -53,7 +67,7 @@ class RuleParameterIn(ORMModel):
         stored = bool(info.context and info.context.get("stored"))
         label = f"Parameter '{self.name}'"
         config = dict(self.config or {})
-        if self.kind == "number":
+        if self.kind == NUMBER:
             limits = {key: _number(config.get(key)) for key in NUMBER_LIMIT_KEYS}
             if all(value is None for value in limits.values()):
                 raise ValueError(f"{label}: configure at least one limit")
@@ -71,12 +85,12 @@ class RuleParameterIn(ORMModel):
             if lowers and uppers and not max(lowers) < min(uppers):
                 raise ValueError(f"{label}: lower limits must be below the upper limits")
             self.config = {**{k: v for k, v in limits.items()}, "unit": str(config.get("unit") or "")[:20]}
-        elif self.kind == "boolean":
+        elif self.kind == BOOLEAN:
             expected = config.get("expected")
             if not isinstance(expected, bool):
                 raise ValueError(f"{label}: choose the expected state (TRUE or FALSE)")
-            severity = config.get("severity", "alert")
-            if severity not in {"warning", "alert"}:
+            severity = config.get("severity", STATUS_ALERT)
+            if severity not in {STATUS_WARNING, STATUS_ALERT}:
                 raise ValueError(f"{label}: severity must be warning or alert")
             if self.variable_id is None and not stored:
                 raise ValueError(f"{label}: connect a variable")
@@ -90,14 +104,14 @@ class RuleParameterIn(ORMModel):
                 raise ValueError(f"{label}: Due and Overdue must be positive numbers")
             if overdue <= due:
                 raise ValueError(f"{label}: Overdue must be greater than Due")
-            if parameter == "counter":
+            if parameter == COUNTER:
                 if not float(due).is_integer() or not float(overdue).is_integer():
                     raise ValueError(f"{label}: Due and Overdue must be whole numbers of cycles")
                 due, overdue = int(due), int(overdue)
             activation_at = config.get("activation_at")
-            if parameter == "time" and activation_at is not None and not isinstance(activation_at, str):
+            if parameter == TIME and activation_at is not None and not isinstance(activation_at, str):
                 raise ValueError(f"{label}: start time must be an ISO-8601 timestamp")
-            if parameter == "time" and activation_at:
+            if parameter == TIME and activation_at:
                 try:
                     datetime.fromisoformat(activation_at.replace("Z", "+00:00"))
                 except ValueError:
@@ -106,18 +120,18 @@ class RuleParameterIn(ORMModel):
                 "interval_parameter": parameter,
                 "due": due,
                 "overdue": overdue,
-                **({"activation_at": activation_at} if parameter == "time" and activation_at else {}),
+                **({"activation_at": activation_at} if parameter == TIME and activation_at else {}),
             }
             if stored:
                 return self
-            if parameter == "counter":
-                if self.aggregation != "counter" or self.variable_id is None:
+            if parameter == COUNTER:
+                if self.aggregation != COUNTER or self.variable_id is None:
                     raise ValueError(f"{label}: Counter intervals need a variable with Counter aggregation")
             elif self.variable_id is None:
                 # Calendar-based Time interval: no PLC variable; elapsed hours since the start time.
-                if parameter != "time" or self.aggregation != "none":
+                if parameter != TIME or self.aggregation != AGGREGATION_NONE:
                     raise ValueError(f"{label}: Usage intervals need a variable with Timer aggregation")
-            elif self.aggregation != "timer":
+            elif self.aggregation != TIMER:
                 raise ValueError(f"{label}: Usage and Time intervals with a variable need Timer aggregation")
         return self
 
@@ -162,13 +176,13 @@ class MultiParameterRuleCreate(ORMModel):
 
     @model_validator(mode="after")
     def validate_rule(self):
-        if self.category == "parameter_threshold":
+        if self.category == RULE_PARAMETER_THRESHOLD:
             if self.calculation_period_seconds is None:
                 raise ValueError("Parameter Threshold rules need a calculation period")
-            if any(item.kind == "interval" for item in self.parameters):
+            if any(item.kind == INTERVAL for item in self.parameters):
                 raise ValueError("Parameter Threshold rules cannot contain interval parameters")
         else:
-            if any(item.kind != "interval" for item in self.parameters):
+            if any(item.kind != INTERVAL for item in self.parameters):
                 raise ValueError("Interval Based rules can only contain interval parameters")
         names = [item.name.casefold() for item in self.parameters]
         if len(set(names)) != len(names):
@@ -210,7 +224,7 @@ def normalize_template_parameters(raw: dict[str, Any] | None) -> dict[str, Any]:
     if period is not None:
         if isinstance(period, bool) or not isinstance(period, int) or not 1 <= period <= 31_536_000:
             raise ValueError("calculation_period_seconds must be a whole number of seconds")
-    if category == "parameter_threshold" and period is None:
+    if category == RULE_PARAMETER_THRESHOLD and period is None:
         raise ValueError("Parameter Threshold rules need a calculation period")
     defs = raw.get("parameter_defs")
     if not isinstance(defs, list) or not 1 <= len(defs) <= MAX_PARAMETERS:
@@ -225,16 +239,16 @@ def normalize_template_parameters(raw: dict[str, Any] | None) -> dict[str, Any]:
         item = RuleParameterIn(
             key=definition.get("key"), name=definition.get("name") or "", kind=definition.get("kind"),
             variable_id=1 if uses_variable else None,
-            aggregation=definition.get("aggregation") or "none", config=definition.get("config") or {})
+            aggregation=definition.get("aggregation") or AGGREGATION_NONE, config=definition.get("config") or {})
         hint = str(definition.get("variable_key") or "").strip()[:200]
         normalised.append({
             "key": item.key or str(uuid.uuid4()), "name": item.name, "kind": item.kind,
             "aggregation": item.aggregation, "config": item.config, "uses_variable": uses_variable,
             "variable_key": hint or None,
         })
-    if category == "parameter_threshold" and any(item["kind"] == "interval" for item in normalised):
+    if category == RULE_PARAMETER_THRESHOLD and any(item["kind"] == INTERVAL for item in normalised):
         raise ValueError("Parameter Threshold rules cannot contain interval parameters")
-    if category == "interval_based" and any(item["kind"] != "interval" for item in normalised):
+    if category == CATEGORY_INTERVAL_BASED and any(item["kind"] != INTERVAL for item in normalised):
         raise ValueError("Interval Based rules can only contain interval parameters")
     names = [item["name"].casefold() for item in normalised]
     if len(set(names)) != len(names):

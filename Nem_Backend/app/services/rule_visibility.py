@@ -24,6 +24,7 @@ from app.models.rule_visibility import (
 )
 from app.services.access_scope import REQUEST_SESSION_KEY
 from app.core.constants import RULE_TYPE
+from app.core.constants import ERR_TEMPLATE_NOT_FOUND, ROLE_ADMINISTRATOR, ROLE_SUPERVISOR
 
 # Identifying the authenticated user 
 def request_user(session: Session) -> User | None:
@@ -42,9 +43,9 @@ def visible_templates_clause(session: Session, user: User | None):
         return true()
     if user is None or not user.is_active:
         return false()
-    if user.role == "Administrator":
+    if user.role == ROLE_ADMINISTRATOR:
         return true()
-    if user.role != "Supervisor":
+    if user.role != ROLE_SUPERVISOR:
         return false()
     listed = (
         select(rule_template_visibility_supervisors.c.template_id)
@@ -62,9 +63,9 @@ def can_view_template(session: Session, user: User | None, template: MonitoringR
         return True
     if user is None or not user.is_active:
         return False
-    if user.role == "Administrator":
+    if user.role == ROLE_ADMINISTRATOR:
         return True
-    if user.role != "Supervisor":
+    if user.role != ROLE_SUPERVISOR:
         return False
     return template.visibility_type == "specific_supervisors" and any(
         listed.id == user.id for listed in template.visibility_supervisors
@@ -75,7 +76,7 @@ def get_visible_template(session: Session, template_id: int) -> MonitoringRuleTe
     # Return the shared rule or raise 404 when missing or not visible to the caller.
     template = session.get(MonitoringRuleTemplate, template_id)
     if template is None or not can_view_template(session, request_user(session), template):
-        raise HTTPException(status_code=404, detail="Rule template was not found")
+        raise HTTPException(status_code=404, detail=ERR_TEMPLATE_NOT_FOUND)
     return template
 
 # This function validates the IDs selected when an Administrator changes rule visibility.
@@ -87,7 +88,7 @@ def active_supervisors(session: Session, user_ids) -> list[User]:
     users = session.scalars(select(User).where(User.id.in_(ids))).all()
     found = {user.id for user in users}
     missing = [item for item in ids if item not in found]
-    invalid = [user for user in users if user.role != "Supervisor" or not user.is_active]
+    invalid = [user for user in users if user.role != ROLE_SUPERVISOR or not user.is_active]
     if missing or invalid:
         raise HTTPException(status_code=422,detail="Visibility can only be granted to active Supervisors",)
     return users
@@ -195,9 +196,9 @@ def enforce_template_edit_permission(
     user = request_user(session)
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required")
-    if user.role == "Administrator":
+    if user.role == ROLE_ADMINISTRATOR:
         return
-    if user.role != "Supervisor":
+    if user.role != ROLE_SUPERVISOR:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     denied = HTTPException(status_code=403,detail="Supervisors may only change the Due and Overdue values of a shared rule",)
     for field, new in new_values.items():

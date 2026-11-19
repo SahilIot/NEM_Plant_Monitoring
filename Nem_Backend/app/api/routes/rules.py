@@ -32,6 +32,12 @@ from app.core.constants import (
     STATUS_COMPLETED,
     STATUS_DEACTIVATED,
     STATUS_IN_PROGRESS,
+    ERR_NO_FIELDS_TO_UPDATE,
+    EVENT_RULE_CREATED,
+    ROLE_ADMINISTRATOR,
+    ROLE_OPERATOR,
+    ROLE_SUPERVISOR,
+    RULE_DURATION,
 )
 
 router = APIRouter(prefix="/rules", tags=["monitoring rules"])
@@ -155,9 +161,9 @@ def validate_targets(
                 raise HTTPException(status_code=422,detail="Parameter threshold rules require a numeric variable",)
             if operator is None or threshold is None:
                 raise HTTPException(status_code=422, detail="Parameter threshold rules require an operator and threshold",)
-    if rule_type in {RULE_RUNTIME_DURATION, "duration"}:
+    if rule_type in {RULE_RUNTIME_DURATION, RULE_DURATION}:
         interval_elapsed = (
-            rule_type == "duration"
+            rule_type == RULE_DURATION
             and parameters is not None
             and parameters.get("condition") == "interval_elapsed"
         )
@@ -208,7 +214,7 @@ def validate_targets(
                 or duration <= 0
             ):
                 raise HTTPException(status_code=422,detail="Runtime rules require a positive parameters.duration_seconds",)
-            if rule_type == "duration":
+            if rule_type == RULE_DURATION:
                 condition = (parameters or {}).get("condition", "equals")
                 expected = (parameters or {}).get("expected_value")
                 if condition == "threshold":
@@ -311,7 +317,7 @@ def create_rule(
 
     emit_event(
         session,
-        event_type="rule_created",
+        event_type=EVENT_RULE_CREATED,
         message=f"Rule '{rule.name}' created.",
         occurred_at=utc_now(),
         asset_id=rule.target_asset_id,
@@ -387,15 +393,15 @@ def update_rule(
     user: User = Depends(get_current_user),
 ) -> MonitoringRule:
     # Authorization comes first and is based on the authenticated user only.
-    if user.role == "Operator":
+    if user.role == ROLE_OPERATOR:
         raise HTTPException(status_code=403, detail="Operators are not allowed to edit monitoring rules")
-    if user.role not in {"Administrator", "Supervisor"}:
+    if user.role not in {ROLE_ADMINISTRATOR, ROLE_SUPERVISOR}:
         raise HTTPException(status_code=403, detail="You are not allowed to edit monitoring rules")
 
     rule = rule_or_404(session, rule_id)
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
-        raise HTTPException(status_code=422, detail="Provide at least one field to update")
+        raise HTTPException(status_code=422, detail=ERR_NO_FIELDS_TO_UPDATE)
 
     # Nested parameters are merged into the stored ones so omitted keys
     # (for example activation_at) are never cleared by a partial update.
@@ -403,7 +409,7 @@ def update_rule(
         incoming = changes["parameters"]
         if not isinstance(incoming, dict):
             raise HTTPException(status_code=422, detail="parameters must be an object")
-        if user.role == "Supervisor":
+        if user.role == ROLE_SUPERVISOR:
             allowed_keys = SUPERVISOR_PARAMETER_KEYS.get(rule.rule_type, frozenset())
             disallowed = set(incoming) - allowed_keys
             if disallowed:
@@ -420,7 +426,7 @@ def update_rule(
     if not changes:
         return rule
 
-    if user.role == "Supervisor":
+    if user.role == ROLE_SUPERVISOR:
         # Only the Due and Overdue values (the interval thresholds inside `parameters`) may change.
         allowed_fields = {"parameters"} if rule.rule_type in SUPERVISOR_PARAMETER_KEYS else set()
         restricted = set(changes) - allowed_fields

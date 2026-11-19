@@ -53,6 +53,7 @@ from app.services.monitoring_engine import (
 )
 from app.services.opcua_collector import OpcUaCollector
 from app.services.live_updates import LiveUpdateHub, serve_live_updates
+from app.core.constants import ROLE_ADMINISTRATOR, ROLE_OPERATOR, ROLE_SUPERVISOR
 
 LOGGER = logging.getLogger("nem_backend")
 MAX_REQUEST_BODY_BYTES = 25 * 1024 * 1024  
@@ -321,7 +322,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "/api/v1/usage",
         )
         supervisor_content_create = (
-            role == "Supervisor"
+            role == ROLE_SUPERVISOR
             and method == "POST"
             and policy_path in {
                 "/api/v1/rule-template-requests",
@@ -331,14 +332,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
                 
         supervisor_rule_template_update = (
-            role == "Supervisor"
+            role == ROLE_SUPERVISOR
             and method == "PUT"
             and policy_path.startswith("/api/v1/rule-templates/")
             and len(policy_path.rstrip("/").split("/")) == 5
         )
         rule_path_segments = policy_path.rstrip("/").split("/")
         supervisor_rule_create_or_copy = (
-            role == "Supervisor"
+            role == ROLE_SUPERVISOR
             and method == "POST"
             and (
                 policy_path.rstrip("/") == "/api/v1/rules"
@@ -358,7 +359,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         )
         supervisor_plc_status_read = (
-            role == "Supervisor"
+            role == ROLE_SUPERVISOR
             and method in {"GET", "HEAD"}
             and policy_path == "/api/v1/plc/status"
         )
@@ -371,7 +372,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             or policy_path.startswith("/api/v1/plc")
             or policy_path.startswith("/api/v1/rule-templates")
             and not (
-                (role == "Supervisor" and method == "POST" and policy_path.endswith("/assign"))
+                (role == ROLE_SUPERVISOR and method == "POST" and policy_path.endswith("/assign"))
                 or supervisor_content_create
                 or supervisor_rule_template_update
             )
@@ -388,7 +389,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             and method == "DELETE"
         )
         if (
-            role != "Administrator"
+            role != ROLE_ADMINISTRATOR
             and policy_path.startswith(admin_only_read_paths)
             and policy_path != "/api/v1/auth/logout"
             and not supervisor_plc_status_read
@@ -415,7 +416,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             or supervisor_rule_template_update
         )
         if (
-            role == "Supervisor"
+            role == ROLE_SUPERVISOR
             and not safe_method
             and policy_path != "/api/v1/auth/logout"
             and (
@@ -430,7 +431,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ):
             return JSONResponse(status_code=403,content={"detail": "This action is not available to supervisors"},)
         if (
-            role == "Operator"
+            role == ROLE_OPERATOR
             and not safe_method
             and policy_path != "/api/v1/auth/logout"
         ):

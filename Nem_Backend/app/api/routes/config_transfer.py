@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.services.config_transfer import CATEGORIES, ImportRequest, analyse, apply_import, build_export, export_summary
 from app.services.rule_visibility import require_session_roles
+from app.core.constants import ROLE_ADMINISTRATOR
 
 router = APIRouter(prefix="/config-transfer", tags=["configuration transfer"])
 logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ def export_configuration(
     asset_ids: str | None = Query(default=None, description="Comma-separated asset ids limiting maintenance rules"),
     session: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    admin = require_session_roles(session, "Administrator")
+    admin = require_session_roles(session, ROLE_ADMINISTRATOR)
     selected = None
     if categories is not None:
         selected = tuple(dict.fromkeys(part.strip() for part in categories.split(",") if part.strip()))
@@ -52,19 +53,19 @@ def export_configuration(
 # Counts shown before downloading (read-only).
 @router.get("/export/summary")
 def export_preview(session: Session = Depends(get_db)) -> dict[str, Any]:
-    require_session_roles(session, "Administrator")
+    require_session_roles(session, ROLE_ADMINISTRATOR)
     return export_summary(session)
 
 # Validation stage -> 
 @router.post("/preview")
 def preview_import(payload: ImportRequest, session: Session = Depends(get_db)) -> dict[str, Any]:
     # Validate a package and report what an import would do. Writes nothing
-    require_session_roles(session, "Administrator")
+    require_session_roles(session, ROLE_ADMINISTRATOR)
     return _public(analyse(session, payload.package, payload))
 
 # Actual import endpoint -> this is where the actual db records are created. 
 @router.post("/import", status_code=201)
 def import_configuration(payload: ImportRequest, session: Session = Depends(get_db)) -> dict[str, Any]:
     # Re-validate and import a package in one transaction (all or nothing).
-    admin = require_session_roles(session, "Administrator")
+    admin = require_session_roles(session, ROLE_ADMINISTRATOR)
     return _public(apply_import(session, payload.package, payload, admin))

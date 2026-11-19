@@ -54,6 +54,19 @@ from app.core.constants import (
     STATUS_PLANNED,
     STATUS_RESOLVED,
     USAGE,
+    APPROVAL_APPROVED,
+    APPROVAL_DECLINED,
+    APPROVAL_NOT_REQUIRED,
+    ERR_NO_FIELDS_TO_UPDATE,
+    ERR_START_AFTER_END,
+    EVENT_MAINTENANCE_COMPLETED,
+    EVENT_MAINTENANCE_RECORD_PERMANENTLY_DELETED,
+    ROLE_ADMINISTRATOR,
+    ROLE_OPERATOR,
+    ROLE_SUPERVISOR,
+    SCHEDULE_MODE_RULE,
+    STATUS_AWAITING_APPROVAL,
+    STATUS_PAUSED,
 )
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
@@ -133,7 +146,7 @@ def _authorize_operator_due_occurrence(
     action: str,
 ) -> None:
     # Non-Operator users continue without this restriction.
-    if user.role != "Operator":
+    if user.role != ROLE_OPERATOR:
         return
 
     # Operator can only work on scheduled maintenance records.
@@ -148,7 +161,7 @@ def _authorize_operator_due_occurrence(
         raise HTTPException(status_code=403,detail="Maintenance must be in progress before an Operator can complete it.",)
 
     # Runtime and usage-based schedules do not depend on calendar due dates.
-    if schedule.schedule_mode in {RUNTIME, USAGE, "rule"}:
+    if schedule.schedule_mode in {RUNTIME, USAGE, SCHEDULE_MODE_RULE}:
 
         # Allow Operators only on the active occurrence of the schedule.
         if (
@@ -227,7 +240,7 @@ def _schedule_read(
         else "hours"
         if schedule.schedule_mode == RUNTIME
         else (schedule.threshold_unit or "hours")
-        if schedule.schedule_mode == "rule"
+        if schedule.schedule_mode == SCHEDULE_MODE_RULE
         else "cycles"
     )
 
@@ -515,7 +528,7 @@ def create_maintenance_record(
         _emit_maintenance_event(
             session,
             record,
-            event_type="maintenance_completed",
+            event_type=EVENT_MAINTENANCE_COMPLETED,
             message=f"Maintenance completed: {record.summary} by {record.performed_by}.",
         )
     else:
@@ -641,7 +654,7 @@ def _create_maintenance_schedule(
         last_signal_at=None,
 
         status=STATUS_ACTIVE,
-        approval_status="not_required",
+        approval_status=APPROVAL_NOT_REQUIRED,
     )
 
     session.add(schedule)
@@ -809,7 +822,7 @@ def cancel_unavailable_rule_schedule(
     payload: UnavailableScheduleCancellation,
     schedule_id: int = Path(gt=0),
     session: Session = Depends(get_db),
-    user: User = Depends(require_roles("Administrator")),  # Supervisors and Operators are rejected with 403
+    user: User = Depends(require_roles(ROLE_ADMINISTRATOR)),  # Supervisors and Operators are rejected with 403
 ) -> MaintenanceScheduleRead:
     # Cancel a rule schedule whose rule or parameter was deleted. History is kept; see rule_maintenance.
     existing = session.get(MaintenanceSchedule, schedule_id)
@@ -832,7 +845,7 @@ def cancel_unavailable_rule_schedule(
 def permanently_delete_maintenance_schedule(
     schedule_id: int = Path(gt=0),
     session: Session = Depends(get_db),
-    user: User = Depends(require_roles("Administrator")),
+    user: User = Depends(require_roles(ROLE_ADMINISTRATOR)),
 ) -> None:
     schedule = session.scalar(
         select(MaintenanceSchedule)
@@ -841,7 +854,7 @@ def permanently_delete_maintenance_schedule(
     )
     if schedule is None or not access_scope(session).allows(schedule.asset_id):
         raise HTTPException(status_code=404,detail=f"Maintenance schedule {schedule_id} was not found",)
-    is_rule_schedule = schedule.schedule_mode == "rule"
+    is_rule_schedule = schedule.schedule_mode == SCHEDULE_MODE_RULE
     if is_rule_schedule:
         # Only a rule schedule that is already cancelled (for example rule unavailable) and holds only finished
         # records may be removed; an active rule schedule is controlled by its rule.
@@ -899,12 +912,12 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
 
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
-        raise HTTPException(status_code=422,detail="Provide at least one field to update",)
+        raise HTTPException(status_code=422,detail=ERR_NO_FIELDS_TO_UPDATE,)
 
     # A cancelled schedule is terminal and cannot be reactivated.
     if (
         schedule.status == STATUS_CANCELLED
-        and changes.get("status") in {STATUS_ACTIVE, "paused"}
+        and changes.get("status") in {STATUS_ACTIVE, STATUS_PAUSED}
     ):
         raise HTTPException(status_code=409, detail=("A cancelled maintenance schedule cannot be reactivated. Create a new schedule instead."),)
     # Prevent changing the scheduling mode of an existing schedule.
@@ -914,13 +927,13 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
     ):
         raise HTTPException(status_code=409,detail="Changing the maintenance schedule mode is not supported. Create a new schedule instead.",)
 
-    if schedule.schedule_mode == "rule":
+    if schedule.schedule_mode == SCHEDULE_MODE_RULE:
         blocked = set(changes) - {"title", "priority", "assigned_technician", "description", "instruction_document_ids"}
         if blocked:
             raise HTTPException(status_code=409,detail="This schedule is controlled by its monitoring rule. Only its title, priority, assigned technician, description and documents can be edited here.",)
     is_calendar = schedule.schedule_mode == CALENDAR
     if not is_calendar and "status" in changes:
-        allowed_runtime_statuses = {STATUS_ACTIVE, "paused", STATUS_CANCELLED}
+        allowed_runtime_statuses = {STATUS_ACTIVE, STATUS_PAUSED, STATUS_CANCELLED}
 
         if changes["status"] not in allowed_runtime_statuses:
             raise HTTPException(status_code=422,detail=("Runtime/usage schedules support only active, paused, and cancelled statuses."),)
@@ -1006,9 +1019,9 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
                 schedule.last_signal_at = None
     
     # Role-based field restrictions for editing maintenance schedules
-    if user.role == "Operator":
+    if user.role == ROLE_OPERATOR:
         raise HTTPException(status_code=403, detail="Operators are not allowed to edit maintenance schedules")
-    if user.role == "Supervisor":
+    if user.role == ROLE_SUPERVISOR:
         allowed_supervisor_fields = {
             "schedule_start_date",
             "first_due_date",
@@ -1030,7 +1043,7 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
 
     previous_due_date = schedule.current_due_date
 
-    administrator_can_reanchor = user.role == "Administrator"
+    administrator_can_reanchor = user.role == ROLE_ADMINISTRATOR
     if (
         "first_due_date" in changes
         and changes["first_due_date"] != schedule.first_due_date
@@ -1070,8 +1083,8 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
     # This prevents paused time from being included after the schedule resumes.
     if (
         not is_calendar
-        and changes.get("status") == "paused"
-        and schedule.status != "paused"
+        and changes.get("status") == STATUS_PAUSED
+        and schedule.status != STATUS_PAUSED
     ):
         schedule.last_signal_value = None
         schedule.last_signal_at = None
@@ -1121,9 +1134,9 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
 
         if schedule.approval_status == STATUS_PENDING:
             schedule.proposed_due_date = None
-            schedule.approval_status = "declined"
+            schedule.approval_status = APPROVAL_DECLINED
 
-            if schedule.status == "awaiting_approval":
+            if schedule.status == STATUS_AWAITING_APPROVAL:
                 schedule.status = STATUS_COMPLETED
 
     if (
@@ -1199,7 +1212,7 @@ def update_maintenance_schedule(schedule_id: int,payload: MaintenanceScheduleUpd
         _mark_schedule_cancelled(schedule, user)
         # Cancelled schedules must not retain proposals or active due alerts.
         schedule.proposed_due_date = None
-        schedule.approval_status = "declined"
+        schedule.approval_status = APPROVAL_DECLINED
 
         # Cancel the current planned occurrence, but preserve historical records.
         if current_occurrence is not None:
@@ -1256,7 +1269,7 @@ def confirm_next_occurrence(
     if (schedule.approval_status == "approved"and schedule.current_occurrence_id):
         return _schedule_read(session, schedule)
 
-    if schedule.approval_status not in {STATUS_PENDING, "declined"}:
+    if schedule.approval_status not in {STATUS_PENDING, APPROVAL_DECLINED}:
         raise HTTPException(status_code=409,detail="No proposed date or declined proposal is awaiting confirmation",)
 
     if schedule.status in {STATUS_CANCELLED, STATUS_COMPLETED}:
@@ -1286,7 +1299,7 @@ def confirm_next_occurrence(
     # Save the confirmed or replacement date.
     schedule.current_due_date = selected_date
     schedule.proposed_due_date = None
-    schedule.approval_status = "approved"
+    schedule.approval_status = APPROVAL_APPROVED
     schedule.status = STATUS_ACTIVE
 
     # Create the next planned maintenance occurrence.
@@ -1330,7 +1343,7 @@ def decline_next_occurrence(schedule_id: int,
     if schedule.schedule_mode != CALENDAR:
         raise HTTPException(status_code=409,detail="Next occurrence approval is only available for calendar-based maintenance schedules.",)
     # A repeated decline is safe if the proposal has already been cleared.
-    if (schedule.approval_status == "declined" and schedule.proposed_due_date is None):
+    if (schedule.approval_status == APPROVAL_DECLINED and schedule.proposed_due_date is None):
         return _schedule_read(session, schedule)
 
     if (schedule.approval_status != STATUS_PENDING or schedule.proposed_due_date is None):
@@ -1339,7 +1352,7 @@ def decline_next_occurrence(schedule_id: int,
     rejected_date = schedule.proposed_due_date
     # Clear only the proposed date. Keep the recurring schedule available.
     schedule.proposed_due_date = None
-    schedule.approval_status = "declined"
+    schedule.approval_status = APPROVAL_DECLINED
     schedule.status = STATUS_ACTIVE
 
     _emit_schedule_event(session,
@@ -1364,7 +1377,7 @@ def list_maintenance_records(
 ) -> dict[str, object]:
     start, end = _normalized(start_time), _normalized(end_time)
     if start is not None and end is not None and start > end:
-        raise HTTPException(status_code=422,detail="start_time must not be later than end_time",)
+        raise HTTPException(status_code=422,detail=ERR_START_AFTER_END,)
 
     # Only records on assets the caller may reach (administrators: all records).
     conditions = [access_scope(session).clause(MaintenanceRecord.asset_id)]
@@ -1412,7 +1425,7 @@ def get_maintenance_record(
 def permanently_delete_maintenance_record(
     record_id: int = Path(gt=0),
     session: Session = Depends(get_db),
-    user: User = Depends(require_roles("Administrator")),
+    user: User = Depends(require_roles(ROLE_ADMINISTRATOR)),
 ) -> None:
     record = session.scalar(
         select(MaintenanceRecord)
@@ -1479,7 +1492,7 @@ def permanently_delete_maintenance_record(
                        entity_ids={record_id_value, deleted_alert_id, schedule_id})
     emit_event(
         session,
-        event_type="maintenance_record_permanently_deleted",
+        event_type=EVENT_MAINTENANCE_RECORD_PERMANENTLY_DELETED,
         message=f"Maintenance '{deleted_title}' was permanently deleted.",
         occurred_at=utc_now(),
         asset_id=deleted_asset_id,
@@ -1512,12 +1525,12 @@ def update_maintenance_record(
 
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
-        raise HTTPException(status_code=422, detail="Provide at least one field to update")
+        raise HTTPException(status_code=422, detail=ERR_NO_FIELDS_TO_UPDATE)
 
     # Role-based field restrictions for editing maintenance records
-    if user.role == "Operator":
+    if user.role == ROLE_OPERATOR:
         raise HTTPException(status_code=403, detail="Operators are not allowed to edit maintenance records")
-    if user.role == "Supervisor":
+    if user.role == ROLE_SUPERVISOR:
         allowed_supervisor_fields = {"planned_start_at", "planned_end_at"}
         restricted = set(changes.keys()) - allowed_supervisor_fields
         if restricted:
@@ -1630,11 +1643,11 @@ def complete_maintenance_record(
 
     if record.status in {STATUS_COMPLETED, STATUS_CANCELLED}:
         raise HTTPException(status_code=409,detail="Completed or cancelled maintenance cannot be completed",)
-    if schedule is not None and schedule.schedule_mode == "rule" and record.status != STATUS_IN_PROGRESS:
+    if schedule is not None and schedule.schedule_mode == SCHEDULE_MODE_RULE and record.status != STATUS_IN_PROGRESS:
         raise HTTPException(status_code=409, detail="Maintenance must be started before it can be completed.")
 
     reset_choice = payload.reset_progress if payload is not None else None
-    is_rule_job = schedule is not None and schedule.schedule_mode == "rule"
+    is_rule_job = schedule is not None and schedule.schedule_mode == SCHEDULE_MODE_RULE
     if is_rule_job:
         if schedule.status != STATUS_ACTIVE:
             raise HTTPException(status_code=409, detail="This maintenance schedule has already been completed.")
@@ -1698,7 +1711,7 @@ def complete_maintenance_record(
     if schedule is not None:
 
         # Resolve the alert associated with this occurrence.
-        if (is_usage_based or schedule.schedule_mode == "rule") and record.alert_id is not None:
+        if (is_usage_based or schedule.schedule_mode == SCHEDULE_MODE_RULE) and record.alert_id is not None:
             due_alert = session.scalar(
                 select(Alert)
                 .where(
@@ -1736,11 +1749,11 @@ def complete_maintenance_record(
             schedule.current_occurrence_id = None
             schedule.current_due_date = None
             schedule.due_alerted_for = None
-            schedule.approval_status = "not_required"
+            schedule.approval_status = APPROVAL_NOT_REQUIRED
             schedule.proposed_due_date = None
 
             # Keep the schedule active unless it was paused/cancelled.
-            if schedule.status not in {"paused", STATUS_CANCELLED}:
+            if schedule.status not in {STATUS_PAUSED, STATUS_CANCELLED}:
                 schedule.status = STATUS_ACTIVE
 
             _emit_schedule_event(
@@ -1768,8 +1781,8 @@ def complete_maintenance_record(
 
                 schedule.approval_status = STATUS_PENDING
 
-                if schedule.status != "paused":
-                    schedule.status = "awaiting_approval"
+                if schedule.status != STATUS_PAUSED:
+                    schedule.status = STATUS_AWAITING_APPROVAL
             else:
                 schedule.status = STATUS_COMPLETED
 
@@ -1791,7 +1804,7 @@ def complete_maintenance_record(
 
         elif schedule.status != STATUS_CANCELLED:
             schedule.status = STATUS_COMPLETED
-            schedule.approval_status = "not_required"
+            schedule.approval_status = APPROVAL_NOT_REQUIRED
 
             _emit_schedule_event(
                 session,
@@ -1814,7 +1827,7 @@ def complete_maintenance_record(
     _emit_maintenance_event(
         session,
         record,
-        event_type="maintenance_completed",
+        event_type=EVENT_MAINTENANCE_COMPLETED,
         message=f"Maintenance completed: {record.summary}.",
         details={
             "title": record.summary,
@@ -1888,7 +1901,7 @@ def cancel_maintenance_record(
     if record.status == STATUS_IN_PROGRESS:
         raise HTTPException(status_code=409,detail="Maintenance that is in progress cannot be cancelled. Complete it instead.",)
     linked_schedule = session.get(MaintenanceSchedule, record.schedule_id) if record.schedule_id is not None else None
-    if record.rule_context or (linked_schedule is not None and linked_schedule.schedule_mode == "rule"):
+    if record.rule_context or (linked_schedule is not None and linked_schedule.schedule_mode == SCHEDULE_MODE_RULE):
 
         raise HTTPException(status_code=409,detail="Maintenance created from a monitoring rule cannot be cancelled here. Deactivate or edit the rule; "
                    "if the rule was deleted, an Administrator can cancel the unavailable schedule.",)
@@ -1900,7 +1913,7 @@ def cancel_maintenance_record(
             schedule.status = STATUS_CANCELLED
             _mark_schedule_cancelled(schedule, user)
             schedule.proposed_due_date = None
-            schedule.approval_status = "declined"
+            schedule.approval_status = APPROVAL_DECLINED
 
             # Clear the pointer only when it references this record.
             if schedule.current_occurrence_id == record.id:

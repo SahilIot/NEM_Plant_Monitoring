@@ -30,6 +30,8 @@ from app.core.constants import (
     STATUS_UNKNOWN,
     TIMER,
     USAGE,
+    AGGREGATION_NONE,
+    CATEGORY_INTERVAL_BASED,
 )
 
 # Generates a unique-looking parameter ID for an old rule.
@@ -65,7 +67,7 @@ def mapping(rule: MonitoringRule) -> dict[str, Any]:
         "duration": "Time-period rules are shown for monitoring only; their schedule cannot be edited as a parameter yet.",
         RULE_PARAMETER_THRESHOLD: "Single-threshold rules are shown for monitoring only; they cannot be edited as a parameter yet.",
     }.get(rule.rule_type, "This rule's configuration cannot be edited as a parameter yet.")
-    return {"editable": False, "reason": reason, KIND: NUMBER, AGGREGATION: "none", "unit": None,
+    return {"editable": False, "reason": reason, KIND: NUMBER, AGGREGATION: AGGREGATION_NONE, "unit": None,
             "default_name": rule.name, "scale": 1.0, "config": {}}
 
 # Determine the display name of the virtual parameter.
@@ -149,7 +151,7 @@ def build_legacy_status_detail(session: Session, rule: MonitoringRule, now: date
     mode = "evaluating" if evaluated else "rule_inactive"
     return {
         "rule": {
-            "id": rule.id, "name": rule.name, RULE_TYPE: rule.rule_type, "type": "interval_based",
+            "id": rule.id, "name": rule.name, RULE_TYPE: rule.rule_type, "type": CATEGORY_INTERVAL_BASED,
             "is_enabled": rule.is_enabled, LIFECYCLE_STATUS: rule.lifecycle_status, "completed_at": rule.completed_at,
             "asset_id": rule.target_asset_id, "asset_name": asset.name if asset else None,
             "calculation_period_seconds": None,
