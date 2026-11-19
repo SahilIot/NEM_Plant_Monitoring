@@ -26,6 +26,12 @@ class EvaluationResult(ORMModel):
     warning: int
     alert: int
 
+# Optional body of POST /alerts/{id}/complete. reset_progress is only meaningful (and then required) when the alert
+# belongs to maintenance created from a monitoring rule; it is never defaulted.
+class AlertCompletion(ORMModel):
+    reset_progress: bool | None = None
+
+
 #Returning an alert to the frontend
 class AlertRead(ORMModel):
     id: int

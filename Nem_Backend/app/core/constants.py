@@ -1,12 +1,3 @@
-"""Shared string constants for rules, parameters, schedules and maintenance.
-
-The values are the exact strings stored in the database and exchanged with the frontend, so they must never be
-changed here without a migration. Use these names instead of repeating the literals.
-
-Models, schemas (``Literal[...]`` types), SQL text and migrations keep their literal strings on purpose: they
-describe the stored format itself.
-"""
-
 # Payload keys
 KIND = "kind"
 SCHEDULE = "schedule"
@@ -53,3 +44,6 @@ STATUS_UNKNOWN = "unknown"
 STATUS_NORMAL = "normal"
 STATUS_WARNING = "warning"
 STATUS_ALERT = "alert"
+
+PROGRESS_RESET = "reset"
+PROGRESS_RETAINED = "retained"

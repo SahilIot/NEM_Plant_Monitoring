@@ -96,6 +96,16 @@ class RuleCreate(ORMModel):
     @classmethod
     def clean_labels(cls, value: list[str]) -> list[str]:
         return normalize_label_names(value)
+    @field_validator("rule_type", mode="before")
+    @classmethod
+    def reject_multi_parameter(cls, value: Any) -> Any:
+        if value == "multi_parameter":
+            raise ValueError(
+                "Multi-parameter rules cannot be created here; use POST /assets/{asset_id}/multi-parameter-rules, "
+                "which validates every parameter."
+            )
+        return value
+
 #main model validator , it can inspect the rule type and compare multiple fields
     @model_validator(mode="after")
     def validate_rule_definition(self):
@@ -610,4 +620,4 @@ class RuleSelection(ORMModel):
 # Copying rules between assets.
 class RuleCopyRequest(RuleSelection):
     source_asset_id: int = Field(gt=0)
-    include_disabled: bool = True
+    include_disabled: bool = True

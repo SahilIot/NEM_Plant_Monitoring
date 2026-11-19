@@ -202,10 +202,11 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
     }
     if (selected.kind === "number") list.push(...validateNumberLimits(form.limits));
     if (interval) {
-      const { errors } = validateLimits(intervalType, form.due, form.overdue);
+      const { errors } = validateLimits(intervalType, form.due, form.overdue, { legacy: String(selected.key || "").startsWith("legacy-") });
       if (errors.due) list.push(errors.due);
       if (errors.overdue) list.push(errors.overdue);
-      if (intervalType === "time" && !calendar && !form.activationAt) list.push("Choose when counting should start.");
+      // A stored Time interval that never had a start time stays editable without inventing one.
+      if (intervalType === "time" && !calendar && !form.activationAt && selected.config?.activation_at) list.push("Choose when counting should start.");
     }
     return list;
   }, [selected, form, shape, variables, loaded.parameters, calendar, interval, intervalType]);
@@ -365,6 +366,7 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
                 </UnitInput>
               </RuleField>
             ))}
+            <small style={{ gridColumn: "1 / -1" }}>At least one threshold is required. Configure only the limits you want to monitor.</small>
             {(form.aggregation === "none" || form.aggregation === "last") && (
               <RuleField id="pe-unit" label="Unit" optional>
                 <input id="pe-unit" value={form.unit} maxLength={20} disabled={saving || supervisor} autoComplete="off" onChange={(e) => patch({ unit: e.target.value })} />

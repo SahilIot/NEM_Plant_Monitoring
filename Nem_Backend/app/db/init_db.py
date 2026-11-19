@@ -636,6 +636,8 @@ def _upgrade_rule_maintenance(engine: Engine) -> None:
         "cancellation_kind": "VARCHAR(30)",
         "became_due_at": "TIMESTAMP",  # naive UTC, as the models store it (same as a fresh database)
         "due_value": "DOUBLE PRECISION",
+        "progress_reset": "VARCHAR(20)",
+        "progress_reset_at": "TIMESTAMP",
     }
     record_columns = {
         "start_eligibility": "VARCHAR(20)",
@@ -650,6 +652,8 @@ def _upgrade_rule_maintenance(engine: Engine) -> None:
         # application's back is never silently recreated. Parameters that already have a schedule are backfilled.
         if "nem_rule_parameters" in tables:
             connection.execute(text("ALTER TABLE nem_rule_parameters ADD COLUMN IF NOT EXISTS maintenance_scheduled_at TIMESTAMP"))
+            # Start of the current maintenance cycle (set only by a user-confirmed progress reset); NULL for every existing row.
+            connection.execute(text("ALTER TABLE nem_rule_parameters ADD COLUMN IF NOT EXISTS cycle_baseline_at TIMESTAMP"))
         for name, definition in schedule_columns.items():
             connection.execute(text(f"ALTER TABLE nem_maintenance_schedules ADD COLUMN IF NOT EXISTS {name} {definition}"))
         if "nem_maintenance_records" in tables:

@@ -301,6 +301,7 @@ export default function ParameterRuleWizard({
           </UnitInput>
         </RuleField>
       ))}
+      <small style={{ gridColumn: "1 / -1" }}>At least one threshold is required. Configure only the limits you want to monitor.</small>
     </div>
   );
 

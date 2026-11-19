@@ -9,7 +9,7 @@ from sqlalchemy.sql import Executable
 
 from pydantic import ValidationError
 
-from app.services.rule_maintenance import cancel_unavailable, ensure_startable
+from app.services.rule_maintenance import apply_completion_decision, cancel_unavailable, ensure_startable, prepare_progress_reset
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.api.routes.auth import get_current_user, require_roles
@@ -1655,10 +1655,12 @@ def complete_maintenance_record(
         if schedule is None:
             raise HTTPException(status_code=404,detail="The maintenance schedule was not found",)
 
+    # populate_existing: a request that waited for the lock must see the status the first request committed.
     record = session.scalar(
         select(MaintenanceRecord)
         .where(MaintenanceRecord.id == record_id)
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
 
     if record is None or not access_scope(session).allows(record.asset_id):
@@ -1672,6 +1674,23 @@ def complete_maintenance_record(
         raise HTTPException(status_code=409,detail="Completed or cancelled maintenance cannot be completed",)
     if schedule is not None and schedule.schedule_mode == "rule" and record.status != STATUS_IN_PROGRESS:
         raise HTTPException(status_code=409, detail="Maintenance must be started before it can be completed.")
+
+    reset_choice = payload.reset_progress if payload is not None else None
+    is_rule_job = schedule is not None and schedule.schedule_mode == "rule"
+    if is_rule_job:
+        if schedule.status != STATUS_ACTIVE:
+            raise HTTPException(status_code=409, detail="This maintenance schedule has already been completed.")
+        if reset_choice is None:
+            raise HTTPException(status_code=422, detail=(
+                "Choose whether to reset the parameter's progress: send reset_progress true or false when "
+                "completing maintenance created from a monitoring rule."))
+        if reset_choice:
+            try:
+                prepare_progress_reset(session, schedule)
+            except ValueError as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+    elif reset_choice is not None:
+        raise HTTPException(status_code=422, detail="reset_progress only applies to maintenance created from a monitoring rule.")
 
     # Persist submitted registration fields before running the existing completion workflow.
     if payload is not None and payload.model_fields_set:
@@ -1825,6 +1844,16 @@ def complete_maintenance_record(
                 message=f"Maintenance schedule completed: {schedule.title}.",
                 due_date=None,
             )
+
+    if is_rule_job:
+        session.flush()  # the schedule must be saved as completed before a next cycle can be created
+        try:
+            apply_completion_decision(
+                session, schedule, reset_progress=bool(reset_choice), completed_at=normalized_completed_at,
+                now=utc_now(), user_name=_user_label(user))
+        except ValueError as error:
+            session.rollback()
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
     _emit_maintenance_event(
         session,

@@ -1778,6 +1778,12 @@ def set_rule_enabled_state(
     if rule.is_enabled == enabled:
         return
 
+    if enabled and rule.rule_type == RULE_MULTI_PARAMETER:
+        # Checked before anything changes, so a rejected enable leaves the rule exactly as it was.
+        from app.services.rule_parameters import require_valid_parameters
+
+        require_valid_parameters([p for p in rule.parameter_items if p.lifecycle_status == STATUS_ACTIVE])
+
     now = at or utc_now()
     rule.is_enabled = enabled
     if rule.lifecycle_status != STATUS_COMPLETED:

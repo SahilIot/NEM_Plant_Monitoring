@@ -17,6 +17,7 @@ from app.services.access_scope import access_scope, rule_asset_id
 from app.services.labels import apply_label_filter, assign_labels
 from app.services.monitoring_engine import emit_event, evaluate_rules, set_rule_enabled_state
 from app.services.monitoring_engine import utc_now
+from app.services.rule_parameters import ParameterConfigError
 from app.core.constants import (
     BOOLEAN,
     CYCLE,
@@ -489,7 +490,11 @@ def update_rule(
     if "labels" in changes:
         assign_labels(session, rule, changes["labels"])
     if "is_enabled" in changes:
-        set_rule_enabled_state(session, rule, changes["is_enabled"])
+        try:
+            set_rule_enabled_state(session, rule, changes["is_enabled"])
+        except ParameterConfigError as error:
+            session.rollback()
+            raise HTTPException(status_code=422, detail=str(error)) from error
     # Apply a changed threshold immediately instead of waiting for the next PLC value or evaluation cycle.
     # A shared-rule edit already re-evaluated every rule using it in apply_template_update.
     if template is None and rule.is_enabled and set(changes) & EVALUATION_FIELDS:
@@ -502,4 +507,4 @@ def update_rule(
         )
     session.commit()
     session.refresh(rule)
-    return rule
+    return rule

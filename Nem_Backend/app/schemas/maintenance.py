@@ -174,6 +174,9 @@ class MaintenanceCompletion(ORMModel):
     completion_notes: str | None = Field(default=None, max_length=10_000)
     parts_used: str | None = Field(default=None, max_length=10_000)
     checklist: list[dict[str, object]] | None = None
+    # Required (true or false) when completing a rule-generated job, rejected for every other kind of maintenance.
+    # It is never defaulted: a client that does not send it cannot trigger or decline a reset by accident.
+    reset_progress: bool | None = None
 
     @field_validator("actual_completed_at")
     @classmethod
@@ -436,6 +439,8 @@ class MaintenanceScheduleRead(ORMModel):
     threshold_unit: str | None = None
     became_due_at: datetime | None = None
     due_value: float | None = None
+    progress_reset: str | None = None
+    progress_reset_at: datetime | None = None
     cancelled_at: datetime | None = None
     cancelled_by_name: str | None = None
     cancellation_reason: str | None = None

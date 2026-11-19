@@ -36,7 +36,7 @@ from app.services.legacy_parameters import (
     serialize_legacy_parameters,
 )
 from app.services.rule_parameters import (
-    build_status_detail, change_parameter_lifecycle, reset_parameter_baseline, serialize_parameters)
+    ParameterConfigError, build_status_detail, change_parameter_lifecycle, reset_parameter_baseline, serialize_parameters)
 from app.services.rule_visibility import SUPERVISOR_EDITABLE_LIMITS, enforce_template_edit_permission
 from app.core.constants import (
     AGGREGATION,
@@ -150,6 +150,20 @@ def _check_parameters(session: Session,request: Request,asset: Asset,items: list
         seen[pair] = item.name
 
 
+def _require_time_start(items: list[RuleParameterIn], existing: dict[str, RuleParameter] | None = None) -> None:
+    # A Time interval counted from a PLC variable needs its start time. A stored parameter that never had one (older
+    # configuration) stays editable as it is: its baseline is not rewritten or invented here.
+    for item in items:
+        if item.kind != INTERVAL or item.variable_id is None or item.config.get(INTERVAL_PARAMETER) != "time":
+            continue
+        if item.config.get("activation_at"):
+            continue
+        old = (existing or {}).get(item.key) if item.key else None
+        if old is not None and not (old.config or {}).get("activation_at"):
+            continue
+        raise HTTPException(status_code=422, detail=f"Parameter '{item.name}': a start time is required for Time intervals")
+
+
 def _apply(rule: MonitoringRule, items: list[RuleParameterIn]) -> None:
     # Replace the rule's parameters, matching existing rows by stable key (never by position)
     existing = {parameter.key: parameter for parameter in rule.parameter_items}
@@ -221,6 +235,7 @@ def create_multi_parameter_rule(
     if not asset.is_active:
         raise HTTPException(status_code=422, detail="Rules cannot be created for an inactive asset")
     _check_parameters(session, request, asset, payload.parameters, payload.category)
+    _require_time_start(payload.parameters)
     document_ids = sorted(set(payload.document_ids))
     hidden = hidden_document_ids(session)
     for document_id in document_ids:
@@ -329,6 +344,8 @@ def replace_rule_parameters(
             _enforce_supervisor_edit(user, existing[item.key], item)
     _check_parameters(session, request, asset, payload.parameters, category,
                       current={key: parameter.variable_id for key, parameter in existing.items()})
+    if rule.source_template_id is None:
+        _require_time_start(payload.parameters, existing)
     if payload.calculation_period_seconds is not None:
         rule.parameters = {**(rule.parameters or {}), "calculation_period_seconds": payload.calculation_period_seconds}
     _apply(rule, payload.parameters)
@@ -375,6 +392,8 @@ def update_rule_parameter(
     category = (rule.parameters or {}).get("category")
     _check_parameters(session, request, asset, [payload.model_copy(update={"key": parameter.key})], category,
                       current={parameter.key: parameter.variable_id})
+    if rule.source_template_id is None:
+        _require_time_start([payload.model_copy(update={"key": parameter.key})], {parameter.key: parameter})
     clash = next((item for item in others if payload.variable_id is not None
                   and (item.variable_id, item.aggregation) == (payload.variable_id, payload.aggregation)), None)
     if clash is not None:
@@ -473,9 +492,7 @@ def update_parameter_lifecycle(
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    # Suspend, resume, deactivate or activate ONE parameter. The parent rule stays as it is.
-    # Same roles as the rule-level actions: Administrators may suspend, resume and deactivate; Supervisors
-    # may also activate a deactivated one.
+
     allowed = {"Administrator", "Supervisor"} if payload.action == "activate" else {"Administrator"}
     if user.role not in allowed:
         raise HTTPException(status_code=403, detail=(
@@ -502,6 +519,9 @@ def update_parameter_lifecycle(
         raise HTTPException(status_code=404, detail=f"Parameter {parameter_id} was not found in rule {rule_id}")
     try:
         change_parameter_lifecycle(session, rule, parameter, payload.action, datetime.now(timezone.utc))
+    except ParameterConfigError as error:
+        session.rollback()
+        raise HTTPException(status_code=422, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     session.commit()

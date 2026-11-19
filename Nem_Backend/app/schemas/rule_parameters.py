@@ -5,9 +5,10 @@
 from __future__ import annotations
 
 import math
+from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 
 from app.core.labels import normalize_label_names
 from app.schemas.common import ORMModel
@@ -46,14 +47,17 @@ class RuleParameterIn(ORMModel):
         return value
 
     @model_validator(mode="after")
-    def validate_definition(self):
+    def validate_definition(self, info: ValidationInfo):
+        # context {"stored": True} re-checks an already stored parameter (activation, resume, evaluation): the same
+        # limit / expected-state / Due-Overdue rules apply, but variable wiring is not re-judged here.
+        stored = bool(info.context and info.context.get("stored"))
         label = f"Parameter '{self.name}'"
         config = dict(self.config or {})
         if self.kind == "number":
             limits = {key: _number(config.get(key)) for key in NUMBER_LIMIT_KEYS}
             if all(value is None for value in limits.values()):
                 raise ValueError(f"{label}: configure at least one limit")
-            if self.variable_id is None:
+            if self.variable_id is None and not stored:
                 raise ValueError(f"{label}: connect a variable")
             lower_alert, lower_warning = limits["lower_alert"], limits["lower_warning"]
             upper_warning, upper_alert = limits["upper_warning"], limits["upper_alert"]
@@ -74,7 +78,7 @@ class RuleParameterIn(ORMModel):
             severity = config.get("severity", "alert")
             if severity not in {"warning", "alert"}:
                 raise ValueError(f"{label}: severity must be warning or alert")
-            if self.variable_id is None:
+            if self.variable_id is None and not stored:
                 raise ValueError(f"{label}: connect a variable")
             self.config = {"expected": expected, "severity": severity}
         else:
@@ -93,12 +97,19 @@ class RuleParameterIn(ORMModel):
             activation_at = config.get("activation_at")
             if parameter == "time" and activation_at is not None and not isinstance(activation_at, str):
                 raise ValueError(f"{label}: start time must be an ISO-8601 timestamp")
+            if parameter == "time" and activation_at:
+                try:
+                    datetime.fromisoformat(activation_at.replace("Z", "+00:00"))
+                except ValueError:
+                    raise ValueError(f"{label}: start time must be an ISO-8601 timestamp") from None
             self.config = {
                 "interval_parameter": parameter,
                 "due": due,
                 "overdue": overdue,
                 **({"activation_at": activation_at} if parameter == "time" and activation_at else {}),
             }
+            if stored:
+                return self
             if parameter == "counter":
                 if self.aggregation != "counter" or self.variable_id is None:
                     raise ValueError(f"{label}: Counter intervals need a variable with Counter aggregation")

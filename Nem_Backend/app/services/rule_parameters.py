@@ -9,6 +9,8 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from pydantic import ValidationError
+
 from app.models import Alert, Asset, MonitoringRule, Reading, RuleParameter, RuleParameterState, RuleState, Variable
 from app.core.constants import (
     ACTIVATION_AT,
@@ -69,9 +71,7 @@ def effective_stale_after(rule: MonitoringRule, default: int | None = None) -> i
 
 # Longest gap after a confirmed running sample that may still be credited as running time.
 def runtime_credit_limit(stale_after: int, source_id: str | None) -> int:
-    """Readings from the OPC UA collector are re-read every few seconds while connected, so a gap longer than the
-    running-signal timeout means the signal is gone: credit stops there. Readings from other sources (API, manual)
-    are not refreshed that way and keep the rule's own stale limit."""
+
     from app.core.config import get_settings
     from app.services.monitoring_engine import OPCUA_SOURCE_ID
 
@@ -102,6 +102,13 @@ def _as_number(value: Any) -> float | None:
 
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+# Progress of an interval parameter is counted from the later of the rule's creation / activation time and the start of
+# its current maintenance cycle (RuleParameter.cycle_baseline_at, set only by a user-confirmed reset). The baseline is
+# part of the cumulative checkpoint's identity, so a checkpoint from a previous cycle is never reused.
+def _with_cycle_baseline(start: datetime, parameter: RuleParameter) -> datetime:
+    baseline = parameter.cycle_baseline_at
+    return max(start, _aware(baseline)) if baseline is not None else start
 
 # Evaluates number thresholds.
 def number_status(value: float, config: dict[str, Any]) -> tuple[str, str]:
@@ -243,6 +250,35 @@ def _cumulative_aggregate(
         seconds += max(0.0, (min(now, prev_at + timedelta(seconds=stale_after)) - prev_at).total_seconds())
     return seconds, int(checkpoint["count"])
 
+class ParameterConfigError(ValueError):
+    """A stored parameter's configuration is not valid, so it must not be activated or evaluated."""
+
+
+# Re-checks a STORED parameter with the same validator that guards creation and editing (nothing is rewritten).
+def parameter_config_problem(parameter: RuleParameter) -> str | None:
+    from app.schemas.rule_parameters import RuleParameterIn
+
+    try:
+        RuleParameterIn.model_validate(
+            {"name": parameter.name or "(unnamed)", "kind": parameter.kind, "variable_id": parameter.variable_id,
+             "aggregation": parameter.aggregation, "config": parameter.config or {}},
+            context={"stored": True})
+    except ValidationError as error:
+        first = error.errors()[0]
+        message = str(first.get("msg", "invalid configuration")).removeprefix("Value error, ")
+        if first.get("loc") and not message.startswith("Parameter '"):
+            message = f"Parameter '{parameter.name}': {'.'.join(str(part) for part in first['loc'])}: {message}"
+        return message
+    return None
+
+
+# Raises ParameterConfigError naming every parameter that cannot be activated as stored.
+def require_valid_parameters(parameters: list[RuleParameter]) -> None:
+    problems = [problem for problem in (parameter_config_problem(item) for item in parameters) if problem]
+    if problems:
+        raise ParameterConfigError("Invalid parameter configuration: " + "; ".join(problems))
+
+
 # Evaluates one parameter.
 def _evaluate_parameter(
     session: Session,
@@ -259,6 +295,11 @@ def _evaluate_parameter(
     period = rule_parameters.get("calculation_period_seconds")
     unknown = lambda message, code, value=None, raw=None: (STATUS_UNKNOWN, value, raw, message, code)  # noqa: E731
 
+    problem = parameter_config_problem(parameter)
+    if problem:
+        # Never Normal and never a maintenance schedule from a configuration that cannot be trusted.
+        return unknown(f"Invalid configuration: {problem}", "invalid_configuration")
+
     if parameter.kind == INTERVAL:
         interval = config.get(INTERVAL_PARAMETER)
         unit = "cycles" if interval == COUNTER else "hours"
@@ -269,6 +310,7 @@ def _evaluate_parameter(
                 start = max(start, _aware(datetime.fromisoformat(str(activation).replace("Z", "+00:00"))))
             except ValueError:
                 return unknown("Scheduled start time is invalid.", "invalid_activation")
+        start = _with_cycle_baseline(start, parameter)
         if now < start:
             return STATUS_NORMAL, 0, None, f"Counting starts at {start.isoformat()}.", None
         if parameter.variable_id is None:  # calendar-based Time interval: no PLC variable
@@ -337,6 +379,7 @@ def _evaluate_parameter(
     start = _aware(rule.created_at)
     if config.get(ACTIVATION_AT):
         start = max(start, _aware(datetime.fromisoformat(str(config[ACTIVATION_AT]).replace("Z", "+00:00"))))
+    start = _with_cycle_baseline(start, parameter)
     seconds, count = _cumulative_aggregate(session, parameter_state, variable, start, now, credit_limit)
     if interval == COUNTER:
         value, unit = float(count), "cycles"
@@ -446,6 +489,16 @@ def _result_unchanged(parameter_state: RuleParameterState, status: str, value: A
             and parameter_state.raw_value == raw and parameter_state.message == message
             and parameter_state.error_message == error)
 
+# True when the parameter's saved cycle baseline differs from the one this evaluation was calculated with.
+def _cycle_baseline_moved(session: Session, parameter: RuleParameter) -> bool:
+    if parameter.kind != INTERVAL or parameter.id is None:
+        return False
+    saved = session.scalar(select(RuleParameter.cycle_baseline_at).where(RuleParameter.id == parameter.id))
+    held = parameter.cycle_baseline_at
+    if saved is None or held is None:
+        return (saved is None) != (held is None)
+    return _aware(saved) != _aware(held)
+
 # Evaluates all parameters of a multi-parameter rule, updates their states and alerts, and returns the overall rule state.
 def evaluate_multi_parameter(
     session: Session,
@@ -491,6 +544,11 @@ def evaluate_multi_parameter(
             # An unexpected failure in one parameter is shown as unavailable; the others still evaluate.
             LOGGER.exception("Parameter %s of rule %s could not be evaluated", parameter.id, rule.id)
             status, value, raw, message, error = (STATUS_UNKNOWN, None, None, "This parameter could not be evaluated.", "evaluation_error")
+        if _cycle_baseline_moved(session, parameter):
+
+            session.refresh(parameter_state)
+            results.append((parameter, parameter_state.status, parameter_state.latest_value, parameter_state.message))
+            continue
         try:
             # Result, alert and events of ONE parameter are written together or not at all.
             with session.begin_nested():
@@ -584,6 +642,7 @@ def _pause_one(session: Session, rule: MonitoringRule, parameter: RuleParameter,
                     start = max(start, _aware(datetime.fromisoformat(str(config[ACTIVATION_AT]).replace("Z", "+00:00"))))
                 except ValueError:
                     pass
+            start = _with_cycle_baseline(start, parameter)
             seconds, count = _cumulative_aggregate(session, parameter_state, variable, start, now,
                                                    effective_stale_after(rule), max_batches=PAUSE_BATCH_LIMIT)
             parameter_state.latest_value = float(count) if config.get(INTERVAL_PARAMETER) == COUNTER else seconds / SECONDS_PER_HOUR
@@ -659,6 +718,7 @@ def change_parameter_lifecycle(session: Session, rule: MonitoringRule, parameter
     meta = {"parameter_id": parameter.id, "parameter_key": parameter.key, "parameter_name": parameter.name,
             "previous": parameter.lifecycle_status, "new": target}
     if target == STATUS_ACTIVE:
+        require_valid_parameters([parameter])  # before any state change
         parameter.lifecycle_status = STATUS_ACTIVE
         if rule_running:
             _resume_one(parameter, now)  # a paused rule resumes it later, together with the rule
@@ -766,6 +826,7 @@ def serialize_parameters(rule: MonitoringRule) -> list[dict[str, Any]]:
             "reading_at": state.reading_at if state else None,
             "last_valid_value": state.last_valid_value if state else None,
             "last_valid_at": state.last_valid_at if state else None,
+            "cycle_baseline_at": parameter.cycle_baseline_at,
         })
     return items
 
@@ -836,6 +897,8 @@ def build_status_detail(session: Session, rule: MonitoringRule, now: datetime | 
                     start = max(start, _aware(datetime.fromisoformat(str(config[ACTIVATION_AT]).replace("Z", "+00:00"))))
                 except ValueError:
                     pass
+            if item.get("cycle_baseline_at") is not None:
+                start = max(start, _aware(item["cycle_baseline_at"]))
             item[SCHEDULE] = {"start_at": start}
             if config.get(INTERVAL_PARAMETER) == TIME and config.get("due") is not None:
                 # Calendar intervals: the dates the Due and Overdue limits fall on (hours after activation).

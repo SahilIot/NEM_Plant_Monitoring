@@ -1627,6 +1627,17 @@ export default function MaintenancePanel({
                 <small style={{ display: "block" }}>Schedule created</small>
                 <strong>{formatTime(schedule.created_at)}</strong>
               </div>
+              {schedule.progress_reset && (
+                <div>
+                  <small style={{ display: "block" }}>Completed with</small>
+                  <strong>
+                    {schedule.progress_reset === "reset"
+                      ? "Progress reset — a new cycle was started"
+                      : "No reset — progress kept, no new cycle started"}
+                    {schedule.progress_reset_at ? ` (${formatTime(schedule.progress_reset_at)})` : ""}
+                  </strong>
+                </div>
+              )}
               <div>
                 <small style={{ display: "block" }}>Became Due</small>
                 <strong>{schedule.became_due_at ? `${formatTime(schedule.became_due_at)} (${schedule.due_value ?? "—"} ${schedule.threshold_unit || ""})` : "—"}</strong>
@@ -2668,8 +2679,73 @@ export default function MaintenancePanel({
           onClose={() => {
             if (!busy) setDialog(null);
           }}
-          onSubmit={(payload) => changeMaintenanceStatus(dialog.record, payload)}
+          onSubmit={(payload) => {
+            // Rule-generated maintenance always asks what happens to the parameter's progress before completing.
+            const ownSchedule = schedules.find((item) => item.id === dialog.record.schedule_id);
+            if (ownSchedule?.schedule_mode === "rule") {
+              setError("");
+              setDialog({ kind: "reset_choice", record: dialog.record, payload });
+              return undefined;
+            }
+            return changeMaintenanceStatus(dialog.record, payload);
+          }}
         />
+      )}
+
+      {/* Nothing is completed or reset until one of the two choices is confirmed; Cancel completes nothing. */}
+      {dialog?.kind === "reset_choice" && (
+        <Modal
+          title="Complete Maintenance"
+          onClose={() => {
+            if (!busy) setDialog(null);
+          }}
+        >
+          <div className="maintenance-form">
+            {error && (
+              <p className="notice error" role="alert">
+                {error}
+              </p>
+            )}
+            <p>
+              Do you want to reset this parameter&apos;s progress and start a new maintenance cycle from zero?
+            </p>
+            <p className="muted">
+              <strong>Reset &amp; Start Next Cycle</strong> completes this maintenance and restarts the
+              parameter&apos;s progress at 0. <strong>Complete Without Reset</strong> also completes this
+              maintenance, but keeps the current progress and does not start a new cycle automatically.
+            </p>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={busy}
+                onClick={() =>
+                  changeMaintenanceStatus(dialog.record, { ...dialog.payload, reset_progress: true })
+                }
+              >
+                {busy ? "Completing…" : "Reset & Start Next Cycle"}
+              </button>
+              <button
+                type="button"
+                className="btn-outline"
+                disabled={busy}
+                onClick={() =>
+                  changeMaintenanceStatus(dialog.record, { ...dialog.payload, reset_progress: false })
+                }
+              >
+                Complete Without Reset
+              </button>
+              <button
+                type="button"
+                className="btn-outline"
+                disabled={busy}
+                onClick={() => setDialog(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {(dialog?.kind === "create" || dialog?.kind === "edit") && (

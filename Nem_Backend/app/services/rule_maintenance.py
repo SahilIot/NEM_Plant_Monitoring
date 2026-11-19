@@ -10,11 +10,13 @@ from app.models import Alert, Asset, MaintenanceRecord, MaintenanceSchedule, Mon
 from app.services.email_notifications import enqueue_alert_notifications
 from app.core.config import get_settings
 from app.services.monitoring_engine import emit_event
-from app.services.rule_parameters import _aware, effective_stale_after
+from app.services.rule_parameters import _aware, _refresh_rule_state, effective_stale_after
 from app.core.constants import (
     COUNTER,
     INTERVAL,
     INTERVAL_PARAMETER,
+    PROGRESS_RESET,
+    PROGRESS_RETAINED,
     RULE_MULTI_PARAMETER,
     RULE_TYPE,
     STATUS_ACTIVE,
@@ -307,7 +309,9 @@ def apply_evaluation(session: Session, rule: MonitoringRule, parameter: RulePara
         last = _last_schedule(session, parameter.id)
         first = last is None and parameter.maintenance_scheduled_at is None
         marker = parameter.maintenance_scheduled_at
+        # A job completed WITHOUT a progress reset never starts a new cycle by itself (the user declined it).
         next_cycle = (last is not None and last.status == STATUS_COMPLETED and status == STATUS_NORMAL
+                      and last.progress_reset != PROGRESS_RETAINED
                       and (marker is None or last.updated_at is None or marker <= last.updated_at))
         if _rule_running(rule, parameter) and (first or next_cycle):
             schedule = _create_schedule(session, rule, parameter, now)
@@ -315,6 +319,8 @@ def apply_evaluation(session: Session, rule: MonitoringRule, parameter: RulePara
                 return False
         else:
             return False
+    if schedule.created_at is not None and _aware(now) < _aware(schedule.created_at):
+        return False  # calculated before this cycle began (a confirmed reset was committed meanwhile): not for this cycle
     job = _job(session, schedule)
     became_ready = False
     unit = schedule.threshold_unit or _unit(parameter)
@@ -423,6 +429,72 @@ def cancel_unavailable(session: Session, schedule_id: int, *, user_id: int | Non
            f"{schedule.title}: cancelled by {user_name} because its monitoring rule is no longer available. Reason: {reason}",
            now, link_rule=False)
     return schedule
+
+# Checks, before anything is changed, that a progress reset can be applied to the rule parameter of this schedule.
+# Returns the locked rule and parameter. Raises ValueError (with a message for the user) when it cannot.
+def prepare_progress_reset(session: Session, schedule: MaintenanceSchedule) -> tuple[MonitoringRule, RuleParameter]:
+    gone = ("The monitoring rule or parameter this maintenance was created from no longer exists, so its progress "
+            "cannot be reset. Complete the maintenance without a reset.")
+    if schedule.source_rule_id is None or schedule.source_parameter_id is None:
+        raise ValueError(gone)
+    rule = session.scalar(select(MonitoringRule).where(MonitoringRule.id == schedule.source_rule_id)
+                          .with_for_update().execution_options(populate_existing=True))
+    parameter = session.scalar(select(RuleParameter).where(RuleParameter.id == schedule.source_parameter_id,
+                                                           RuleParameter.rule_id == schedule.source_rule_id)
+                               .with_for_update().execution_options(populate_existing=True))
+    if rule is None or parameter is None:
+        raise ValueError(gone)
+    if not is_eligible_rule(rule) or not _valid_relationship(session, rule, parameter):
+        raise ValueError("The monitoring rule is no longer an interval-based rule for this parameter, so its progress "
+                         "cannot be reset. Complete the maintenance without a reset.")
+    return rule, parameter
+
+# Applies the user's decision for a rule-generated schedule that was just completed (schedule.status is already
+# 'completed' and flushed). reset_progress=True starts a new cycle from zero; False keeps the accumulated progress and
+# starts nothing. Everything runs in the caller's transaction, so the baseline, checkpoint, alerts, decision and the new
+# schedule are saved together or not at all. Returns the new schedule when one was created.
+def apply_completion_decision(session: Session, schedule: MaintenanceSchedule, *, reset_progress: bool,
+                              completed_at: datetime, now: datetime, user_name: str) -> MaintenanceSchedule | None:
+    meta = {"maintenance_schedule_id": schedule.id, "parameter_id": schedule.source_parameter_id,
+            "completed_by": user_name, "completed_at": completed_at.isoformat(), "reset_progress": bool(reset_progress)}
+    schedule.progress_reset_at = now
+    if not reset_progress:
+        schedule.progress_reset = PROGRESS_RETAINED
+        emit_event(session, event_type="maintenance_completed_without_reset", occurred_at=now,
+                   message=(f"{schedule.title}: maintenance completed without resetting progress. The accumulated "
+                            "progress is kept and no new maintenance cycle was started."),
+                   asset_id=schedule.asset_id, rule_id=schedule.source_rule_id, metadata=meta)
+        return None
+    rule, parameter = prepare_progress_reset(session, schedule)
+    schedule.progress_reset = PROGRESS_RESET
+    # The new cycle counts from this instant. Readings stamped earlier never count; readings from now on do.
+    parameter.cycle_baseline_at = now
+    state = session.scalar(select(RuleParameterState).where(RuleParameterState.parameter_id == parameter.id)
+                           .with_for_update().execution_options(populate_existing=True))
+    if state is not None:
+        state.aggregate_state = None
+        state.status, state.latest_value, state.error_message = STATUS_NORMAL, 0.0, None
+        state.message = f"Progress was reset after maintenance; counting restarted at {now.isoformat()}."
+        state.last_evaluated_at = now
+        state.completed_at = None
+    for alert in session.scalars(select(Alert).where(
+            Alert.rule_id == rule.id, Alert.parameter_id == parameter.id, Alert.status == STATUS_ACTIVE).with_for_update()).all():
+        alert.status, alert.resolved_at, alert.last_updated_at = STATUS_RESOLVED, now, now
+        emit_event(session, event_type="alert_resolved", occurred_at=now,
+                   message=f"Alert resolved: {rule.name} — {parameter.name} (maintenance completed and progress reset).",
+                   asset_id=schedule.asset_id, rule_id=rule.id, alert_id=alert.id, severity=alert.severity,
+                   metadata={**meta, "outcome": "maintenance_progress_reset"})
+    emit_event(session, event_type="maintenance_completed_progress_reset", occurred_at=now,
+               message=f"{schedule.title}: maintenance completed and progress reset. A new maintenance cycle starts from zero.",
+               asset_id=schedule.asset_id, rule_id=rule.id, metadata={**meta, "cycle_baseline_at": now.isoformat()})
+    session.flush()
+    _refresh_rule_state(session, rule, now)
+    # Exactly one next schedule: the one-open-schedule-per-parameter index and the savepoint in _create_schedule keep
+    # a concurrent attempt from adding a second. A rule that is suspended or deactivated gets it once it runs again
+    # (apply_evaluation), because this schedule is marked 'reset'.
+    if _rule_running(rule, parameter) and _open_schedule(session, parameter.id) is None:
+        return _create_schedule(session, rule, parameter, now)
+    return None
 
 # Verfies that a job may start.
 def ensure_startable(session: Session, record: MaintenanceRecord) -> None:

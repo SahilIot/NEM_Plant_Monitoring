@@ -21,7 +21,9 @@ from app.models import (
     User, # stores the current state associated with a rule and target
     Variable, # represents a monitored variable belonging to an asset
 )
+from app.schemas.maintenance import MaintenanceCompletion
 from app.schemas.monitoring import (
+    AlertCompletion,
     AlertRead,
     EvaluationResult,
     EventRead,
@@ -348,6 +350,7 @@ def acknowledge_alert(
 @router.post("/alerts/{alert_id}/complete", response_model=AlertRead)
 def complete_alert(
     alert_id: int,
+    payload: AlertCompletion | None = None,
     session: Session = Depends(get_db),
     user: User = Depends(require_roles("Administrator", "Supervisor", "Operator")),
 ) -> Alert:
@@ -414,7 +417,10 @@ def complete_alert(
             },
         )
         try:
-            complete_maintenance_record(occurrence.id, session, user)
+            # The same completion logic (and the same required reset decision) as POST /maintenance/{id}/complete.
+            complete_maintenance_record(
+                occurrence.id, session, user,
+                MaintenanceCompletion(reset_progress=payload.reset_progress) if payload is not None else None)
         except HTTPException:
             session.rollback()
             raise

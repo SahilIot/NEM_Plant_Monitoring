@@ -476,23 +476,18 @@ class RuleParameter(Base):
         String(20), nullable=False, default="active", server_default="active"
     )
     maintenance_scheduled_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
-    created_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(), default=lambda: datetime.now(timezone.utc), nullable=False
-    )
+    cycle_baseline_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
-    state: Mapped["RuleParameterState | None"] = relationship(
-        "RuleParameterState", uselist=False, cascade="all, delete-orphan", lazy="selectin"
-    )
-
+    state: Mapped["RuleParameterState | None"] = relationship("RuleParameterState", uselist=False, cascade="all, delete-orphan", lazy="selectin")
 
 class RuleParameterState(Base):
     # Latest evaluation of one rule parameter (the rule's own RuleState holds the combined result).
-
     __tablename__ = "nem_rule_parameter_states"
     __table_args__ = (
         CheckConstraint(

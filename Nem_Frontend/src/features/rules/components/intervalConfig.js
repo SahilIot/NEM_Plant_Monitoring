@@ -75,8 +75,10 @@ function positive(value) {
 /**
  * Validates the Due and Overdue entries. Returns { due, overdue, errors } where due/overdue are numbers
  * (or null when they cannot be used yet) and errors maps "due"/"overdue" to a message.
+ * Overdue only has to be greater than Due, like the backend. `legacy` is for rules created before the parameter
+ * system: they keep an intermediate warning level between Due and Overdue, which needs two units of room.
  */
-export function validateLimits(parameterId, dueText, overdueText) {
+export function validateLimits(parameterId, dueText, overdueText, { legacy = false } = {}) {
   const parameter = parameterById(parameterId);
   const counter = parameter.aggregation === "counter";
   const errors = {};
@@ -95,9 +97,9 @@ export function validateLimits(parameterId, dueText, overdueText) {
   if (!errors.due && !errors.overdue) {
     if (overdue <= due) {
       errors.overdue = "Overdue must be greater than Due.";
-    } else if (counter && overdue - due < 2) {
+    } else if (legacy && counter && overdue - due < 2) {
       errors.overdue = "Overdue must be at least 2 cycles above Due.";
-    } else if (!counter && toSeconds(overdue) - toSeconds(due) < 2) {
+    } else if (legacy && !counter && toSeconds(overdue) - toSeconds(due) < 2) {
       errors.overdue = "Overdue must be at least 2 seconds above Due.";
     }
   }

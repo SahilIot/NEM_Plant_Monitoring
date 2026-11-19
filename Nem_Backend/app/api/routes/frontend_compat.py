@@ -25,7 +25,7 @@ from docx.opc.exceptions import PackageNotFoundError
 from app.db.session import get_db
 from app.services.legacy_parameters import serialize_legacy_parameters
 from app.services import template_parameters as template_params
-from app.services.rule_parameters import serialize_parameters
+from app.services.rule_parameters import ParameterConfigError, serialize_parameters
 from app.core.labels import normalize_label_names
 from app.models import (
     Alert,
@@ -1921,7 +1921,11 @@ def frontend_bulk_rule_state(
             except HTTPException as error:
                 skipped.append({"rule_id": rule.id, "name": rule.name, "reason": str(error.detail)})
                 continue
-            set_rule_enabled_state(session, rule, enabled)
+            try:
+                set_rule_enabled_state(session, rule, enabled)
+            except ParameterConfigError as error:
+                skipped.append({"rule_id": rule.id, "name": rule.name, "reason": str(error)})
+                continue
         else:
             set_rule_enabled_state(session, rule, enabled)
         updated.append(rule.id)
@@ -1970,7 +1974,10 @@ def _transition_rule_lifecycle(
             configured_runtime_signal_mapping(request, rule.variable_id),
             is_mapping_bypass_enabled(request),
         )
-        set_rule_enabled_state(session, rule, True, at=now)
+        try:
+            set_rule_enabled_state(session, rule, True, at=now)
+        except ParameterConfigError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
         rule.lifecycle_status = STATUS_IN_PROGRESS
         rule.completed_at = None
         event_type = "rule_resumed" if action == "resume" else "rule_activated"

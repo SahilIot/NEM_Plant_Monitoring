@@ -126,8 +126,6 @@ class MaintenanceSchedule(AuditNamesMixin, Base):
     approval_status: Mapped[str] = mapped_column(String(20), nullable=False, default="not_required", server_default=text("'not_required'"))
     last_completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     due_alerted_for: Mapped[date | None] = mapped_column(Date)
-    # --- Schedules created from a monitoring rule (schedule_mode 'rule') -----------------------------
-    # The links are SET NULL when the rule or parameter is deleted; the names and thresholds below keep the history readable.
     source_rule_id: Mapped[int | None] = mapped_column(ForeignKey("nem_monitoring_rules.id", ondelete="SET NULL"), index=True)
     source_parameter_id: Mapped[int | None] = mapped_column(ForeignKey("nem_rule_parameters.id", ondelete="SET NULL"), index=True)
     source_parameter_key: Mapped[str | None] = mapped_column(String(36))
@@ -141,8 +139,8 @@ class MaintenanceSchedule(AuditNamesMixin, Base):
     threshold_unit: Mapped[str | None] = mapped_column(String(20))
     became_due_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     due_value: Mapped[float | None] = mapped_column(Float)
-    # Set when an Administrator cancels a rule schedule whose rule or parameter no longer exists
-    # (cancellation_kind 'rule_unavailable'). The schedule and its job snapshot stay as they were.
+    progress_reset: Mapped[str | None] = mapped_column(String(20))
+    progress_reset_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     cancelled_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     cancelled_by_id: Mapped[int | None] = mapped_column(ForeignKey("auth_users.id", ondelete="SET NULL"))
     cancelled_by_name: Mapped[str | None] = mapped_column(String(200))
@@ -193,8 +191,6 @@ class MaintenanceRecord(AuditNamesMixin, Base):
     checklist: Mapped[list[dict[str, object]] | None] = mapped_column(JSON)
     schedule_id: Mapped[int | None] = mapped_column(ForeignKey("nem_maintenance_schedules.id", ondelete="RESTRICT"), index=True)
     planned_due_date: Mapped[date | None] = mapped_column(Date)
-    # Only jobs created from a monitoring rule carry an eligibility: 'not_due' until the rule reaches Due, then 'ready'.
-    # NULL means "not rule-controlled" (calendar, runtime, usage and manual maintenance), which keeps their behaviour.
     start_eligibility: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Rule, parameter, Due threshold and the value at the moment it became Due, kept with the job permanently.
     rule_context: Mapped[dict | None] = mapped_column(JSON)
