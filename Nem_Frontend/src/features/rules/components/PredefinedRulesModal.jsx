@@ -7,6 +7,8 @@ import "./PredefinedRulesModal.css";
 import LabelsField from "../../../components/common/LabelsField.jsx";
 import TemplateParameterMapping, { isMultiTemplate, mappingIncomplete, parameterMappingsPayload } from "./TemplateParameterMapping.jsx";
 import "./TemplateParameterMapping.css";
+import { componentIdentifierProblem, normalizeComponentIdentifier } from "./componentIdentifier.js";
+import "./ComponentIdentifierField.css";
 import { matchesRuleFilters, ruleConditionSummary } from "../rulePresentation.js";
 import {
   ShieldCheck,
@@ -35,6 +37,8 @@ export default function PredefinedRulesModal({
   const [severity, setSeverity] = useState("all");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [componentIdentifier, setComponentIdentifier] = useState("");
+  const componentProblem = componentIdentifierProblem(componentIdentifier);
   const [reviewing, setReviewing] = useState(false);
   const [error, setError] = useState("");
   const [labelIds, setLabelIds] = useState([]);
@@ -84,7 +88,7 @@ export default function PredefinedRulesModal({
   };
 
   const assign = async () => {
-    if (!selected.size || saving) return;
+    if (!selected.size || saving || componentProblem) return;
     setSaving(true);
     setError("");
     try {
@@ -99,6 +103,9 @@ export default function PredefinedRulesModal({
           [...selected].map((id) => rules.find((item) => item.id === id)).filter(Boolean),
           parameterMappings
         ),
+        ...(normalizeComponentIdentifier(componentIdentifier)
+          ? { component_identifier: normalizeComponentIdentifier(componentIdentifier) }
+          : {}),
       });
       await onAssigned?.(result);
       onClose();
@@ -309,6 +316,20 @@ export default function PredefinedRulesModal({
           </div>
         )}
 
+        {reviewing && (
+          <label className="prm-component-field">
+            <span>Component identifier (optional)</span>
+            <input
+              type="text"
+              value={componentIdentifier}
+              onChange={(event) => setComponentIdentifier(event.target.value)}
+              placeholder="For example P-101; applied to every rule assigned now"
+              disabled={saving}
+            />
+            {componentProblem && <small role="alert">{componentProblem}</small>}
+          </label>
+        )}
+
         <footer className="prm-footer">
           <span className="prm-note">
             {availableCount
@@ -325,7 +346,7 @@ export default function PredefinedRulesModal({
               if (reviewing) assign();
               else setReviewing(true);
             }}
-            disabled={saving || loading || selected.size === 0 || !mappingsComplete}
+            disabled={saving || loading || selected.size === 0 || !mappingsComplete || Boolean(componentProblem)}
           >
             {!saving && <Check size={17} />}
             {saving

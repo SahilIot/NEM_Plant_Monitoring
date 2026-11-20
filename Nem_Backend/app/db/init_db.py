@@ -599,6 +599,9 @@ def _upgrade_rule_maintenance(engine: Engine) -> None:
         "completed_by_name": "VARCHAR(200)",
     }
     with engine.begin() as connection:
+        if "nem_monitoring_rules" in tables:
+            # Optional component identifier of an assigned rule; NULL for every existing row.
+            connection.execute(text("ALTER TABLE nem_monitoring_rules ADD COLUMN IF NOT EXISTS component_identifier VARCHAR(100)"))
         if "nem_rule_parameters" in tables:
             connection.execute(text("ALTER TABLE nem_rule_parameters ADD COLUMN IF NOT EXISTS maintenance_scheduled_at TIMESTAMP"))
             # Start of the current maintenance cycle (set only by a user-confirmed progress reset); NULL for every existing row.

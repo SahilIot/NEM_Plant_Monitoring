@@ -1,0 +1,8 @@
+/* Optional component identifier field of the assignment review step (Predefined rules and Rule collections modals). */
+.prm-component-field { display: flex; flex-direction: column; gap: 6px; margin: 12px 20px 0; color: var(--ink-2); font-size: 13px; font-weight: 600; }
+.prm-component-field input {
+  min-height: 38px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--r-ctl);
+  background: var(--surface); color: var(--ink); font-family: var(--font); font-size: 14px; font-weight: 400;
+}
+.prm-component-field input:focus { outline: none; border-color: var(--action); box-shadow: 0 0 0 3px var(--action-soft); }
+.prm-component-field small { color: var(--danger, #c0392b); font-weight: 400; }

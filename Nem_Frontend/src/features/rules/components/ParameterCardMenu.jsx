@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Eye, Pause, Pencil, Power, PowerOff } from "lucide-react";
+import { Eye, Pause, Pencil, Power, PowerOff, RotateCcw } from "lucide-react";
 import { api } from "../../../services/api.js";
 import { DotsIcon } from "../../../components/common/Icons.jsx";
 import { FloatingMenu, useConfirmation } from "../../../components/common/UI.jsx";
 import { useAuth } from "../../auth/AuthContext.jsx";
+import { confirmAndResetProgress } from "./intervalReset.js";
 
 const ACTIONS = {
   suspend: {
@@ -41,6 +42,7 @@ export default function ParameterCardMenu({ ruleId, rule, p, detailsOpen, onTogg
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const submitting = useRef(false);
   const root = useRef(null);
 
@@ -76,6 +78,31 @@ export default function ParameterCardMenu({ ruleId, rule, p, detailsOpen, onTogg
     }
   };
 
+  // Manual progress reset of this one interval (Administrators and Supervisors; the server checks the rest).
+  const resetProgress = async () => {
+    setOpen(false);
+    if (submitting.current) return;
+    submitting.current = true;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await confirmAndResetProgress({
+        confirm, url: `/rules/${ruleId}/parameters/${p.id}/reset-progress`, ruleName: rule.name, single: true,
+      });
+      if (!result.cancelled) {
+        setNotice(result.message);
+        await onChanged?.();
+      }
+    } catch (requestError) {
+      setError(requestError?.message || "Could not reset the progress.");
+    } finally {
+      submitting.current = false;
+      setBusy(false);
+    }
+  };
+  const canReset = (isAdministrator || isSupervisor) && p.kind === "interval" && state === "active" && rule.lifecycle_status === "in_progress";
+
   const notEditable = p.editable === false;
   const editBlocked = notEditable || (!isAdministrator && !isSupervisor) || (isSupervisor && rule.lifecycle_status === "in_progress");
   const adminOnly = "Only Administrators can change a parameter's state.";
@@ -106,6 +133,14 @@ export default function ParameterCardMenu({ ruleId, rule, p, detailsOpen, onTogg
               <Pause size={16} aria-hidden="true" /><span>Suspend parameter</span>
             </button>
           )}
+          {p.kind === "interval" && (
+            <button type="button" className="rule-action-menu-item rule-action-menu-item--lifecycle" role="menuitem"
+              disabled={!canReset}
+              title={!canReset ? (isAdministrator || isSupervisor ? "Only an active interval of a running rule can be reset." : "Only Administrators and Supervisors can reset interval progress.") : undefined}
+              onClick={resetProgress}>
+              <RotateCcw size={16} aria-hidden="true" /><span>Reset progress</span>
+            </button>
+          )}
           {state === "suspended" && (
             <button type="button" className="rule-action-menu-item rule-action-menu-item--lifecycle" role="menuitem"
               disabled={!isAdministrator} title={!isAdministrator ? adminOnly : undefined} onClick={() => run("resume")}>
@@ -128,6 +163,7 @@ export default function ParameterCardMenu({ ruleId, rule, p, detailsOpen, onTogg
         </FloatingMenu>
       )}
       {error && <span className="rsd-param-error" role="alert">{error}</span>}
+      {notice && <span className="rsd-param-notice" role="status">{notice}</span>}
     </div>
   );
 }

@@ -1,0 +1,8 @@
+/* Notification settings dialog; builds on the .pe-modal styles. */
+.ns-switch { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; color: var(--ink); font-size: 14px; cursor: pointer; }
+.ns-switch input { width: 16px; height: 16px; margin: 0; accent-color: var(--action); }
+.pe-modal .form-group textarea.ns-message {
+  width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--r-ctl);
+  outline: none; background: var(--surface); color: var(--ink); font-family: var(--font); font-size: 14px; line-height: 1.45; resize: vertical;
+}
+.pe-modal .form-group textarea.ns-message:focus { border-color: var(--action); box-shadow: 0 0 0 3px var(--action-soft); }

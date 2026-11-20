@@ -1229,6 +1229,7 @@ def build_status_detail(session: Session, rule: MonitoringRule, now: datetime | 
 
             "asset_id": rule.target_asset_id,
             "asset_name": asset.name if asset else None,
+            "component_identifier": rule.component_identifier,
 
             "calculation_period_seconds": (
                 (rule.parameters or {}).get(

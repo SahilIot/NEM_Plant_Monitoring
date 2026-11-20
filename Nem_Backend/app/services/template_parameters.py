@@ -165,7 +165,7 @@ def sync_instance(session: Session, request: Request, rule: MonitoringRule, temp
 
     asset = session.get(Asset, rule.target_asset_id)
     meta = rule_meta(template)
-    kept = {k: v for k, v in (rule.parameters or {}).items() if k == "document_ids"}
+    kept = {k: v for k, v in (rule.parameters or {}).items() if k in {"document_ids", "notifications"}}
     rule.parameters = {**meta, **kept}
     defs = {d["key"]: d for d in template_defs(template)}
     existing = {p.key: p for p in rule.parameter_items}

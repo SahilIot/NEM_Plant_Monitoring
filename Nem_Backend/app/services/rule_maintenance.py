@@ -10,9 +10,7 @@ from app.models import Alert, Asset, MaintenanceRecord, MaintenanceSchedule, Mon
 from app.services.email_notifications import enqueue_alert_notifications
 from app.core.config import get_settings
 from app.services.monitoring_engine import emit_event
-from app.services.rule_parameters import (
-    _aware, _refresh_rule_state, calendar_last_reset_at, change_parameter_lifecycle, effective_stale_after,
-)
+from app.services.rule_parameters import (_aware, _refresh_rule_state, calendar_last_reset_at, change_parameter_lifecycle, effective_stale_after,)
 from app.core.constants import (
     APPROVAL_NOT_REQUIRED,
     CATEGORY_INTERVAL_BASED,
@@ -41,9 +39,7 @@ from app.core.constants import (
     TIME,
     STATUS_WARNING,
 )
-from app.services.rule_calendar import (
-    calendar_cycle,
-)
+from app.services.rule_calendar import (calendar_cycle,)
 
 LOGGER = logging.getLogger(__name__)
 

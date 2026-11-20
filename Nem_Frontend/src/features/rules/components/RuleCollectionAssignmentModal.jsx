@@ -21,6 +21,8 @@ import {
 import "./RuleCollectionAssignmentModal.css";
 import TemplateParameterMapping, { isMultiTemplate, mappingIncomplete, parameterMappingsPayload } from "./TemplateParameterMapping.jsx";
 import "./TemplateParameterMapping.css";
+import { componentIdentifierProblem, normalizeComponentIdentifier } from "./componentIdentifier.js";
+import "./ComponentIdentifierField.css";
 import { BackButton, ForwardButton } from "../../../components/common/NavButtons.jsx";
 
 export default function RuleCollectionAssignmentModal({
@@ -45,6 +47,8 @@ export default function RuleCollectionAssignmentModal({
   const [labelIds, setLabelIds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [componentIdentifier, setComponentIdentifier] = useState("");
+  const componentProblem = componentIdentifierProblem(componentIdentifier);
   const [reviewing, setReviewing] = useState(false);
   const [error, setError] = useState("");
 
@@ -193,7 +197,7 @@ export default function RuleCollectionAssignmentModal({
 
   // Submit only eligible templates through the existing asset assignment API.
   const assign = async () => {
-    if (!selectedTemplates.length || saving || !canAssign) return;
+    if (!selectedTemplates.length || saving || !canAssign || componentProblem) return;
     setSaving(true);
     setError("");
     try {
@@ -208,6 +212,9 @@ export default function RuleCollectionAssignmentModal({
             ])
         ),
         parameter_mappings: parameterMappingsPayload(selectedTemplates, parameterMappings),
+        ...(normalizeComponentIdentifier(componentIdentifier)
+          ? { component_identifier: normalizeComponentIdentifier(componentIdentifier) }
+          : {}),
       });
       await onAssigned?.({
         ...result,
@@ -467,6 +474,20 @@ export default function RuleCollectionAssignmentModal({
           )}
         </div>
 
+        {reviewing && (
+          <label className="prm-component-field">
+            <span>Component identifier (optional)</span>
+            <input
+              type="text"
+              value={componentIdentifier}
+              onChange={(event) => setComponentIdentifier(event.target.value)}
+              placeholder="For example P-101; applied to every rule assigned now"
+              disabled={saving}
+            />
+            {componentProblem && <small role="alert">{componentProblem}</small>}
+          </label>
+        )}
+
         <footer className="rca-footer">
           <span>
             Filters show collections with matching member rules. Selecting a collection assigns all eligible rules in it. Supervisors’ assignments are saved Not Activated for review.
@@ -484,7 +505,8 @@ export default function RuleCollectionAssignmentModal({
                 loading ||
                 !canAssign ||
                 selectedTemplates.length === 0 ||
-                !mappingsComplete
+                !mappingsComplete ||
+                Boolean(componentProblem)
               }
             >
               {!saving && <Check size={16} />}

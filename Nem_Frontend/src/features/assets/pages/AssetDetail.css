@@ -1525,3 +1525,7 @@ button:disabled {
   animation: app-loading-spin 800ms linear infinite;
 }
 @media (prefers-reduced-motion: reduce) { .asset-page .rule-loading-ring { animation-duration: 2.4s; } }
+
+/* Component identifier tag: on rule cards and under the rule name in the event log. */
+.rule-component-chip { font-variant-numeric: tabular-nums; }
+.event-log-section .event-log-table .event-component { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }

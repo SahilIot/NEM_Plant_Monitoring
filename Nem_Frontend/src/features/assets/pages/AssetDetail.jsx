@@ -2,7 +2,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import {
+  Bell,
   Download,
+  Tag,
   Eye,
   Pencil,
   Pause,
@@ -28,6 +30,8 @@ import MaintenanceDetails from "../components/MaintenanceDetails.jsx";
 import MaintenancePanel from "../components/MaintenancePanel.jsx";
 import RuleStatusDetail from "../../rules/components/RuleStatusDetail.jsx";
 import ParameterEditDialog from "../../rules/components/ParameterEditDialog.jsx";
+import NotificationSettingsDialog from "../../rules/components/NotificationSettingsDialog.jsx";
+import ComponentIdentifierDialog from "../../rules/components/ComponentIdentifierDialog.jsx";
 import "./AssetDetail.css";
 import {
   legacyRulePath,
@@ -290,6 +294,9 @@ export default function AssetDetail() {
   const [lifecycleAction, setLifecycleAction] = useState(null);
   // "Edit parameter" on the multi-parameter detail page: the rule being edited, and a refresh trigger.
   const [parameterEdit, setParameterEdit] = useState(null); // { ruleId, parameterId, alwaysSelect }
+  const [notificationRuleId, setNotificationRuleId] = useState(null); // rule whose notification settings are open
+  const [componentRuleId, setComponentRuleId] = useState(null); // rule whose component identifier is being edited
+  const [eventComponentFilter, setEventComponentFilter] = useState("");
   const [statusRefresh, setStatusRefresh] = useState(0);
   const openRuleStatusPage = (ruleId) => {
     navigate(`/assets/${assetId}/rules/${ruleId}/status`, {
@@ -1093,9 +1100,12 @@ const filteredLogs = [...logs]
 
 const eventTypes = [...new Set(events.map((event) => event.event_type).filter(Boolean))]
   .sort((a, b) => eventActionLabel(a).localeCompare(eventActionLabel(b)));
+const eventComponents = [...new Set(events.map((event) => event.component_identifier).filter(Boolean))]
+  .sort((a, b) => a.localeCompare(b));
 const filteredEvents = [...events]
   .filter((event) => {
     if (eventTypeFilter && event.event_type !== eventTypeFilter) return false;
+    if (eventComponentFilter && event.component_identifier !== eventComponentFilter) return false;
     const timestamp = new Date(event.time || event.occurred_at || "").getTime();
     const start = eventStartDateTime
       ? new Date(eventStartDateTime).getTime()
@@ -1122,6 +1132,7 @@ const filteredEvents = [...events]
   const exportEventsFile = async (format) => {
     const params = new URLSearchParams({ format });
     if (eventTypeFilter) params.set("event_type", eventTypeFilter);
+    if (eventComponentFilter) params.set("component_identifier", eventComponentFilter);
     for (const [key, value] of [["start_time", eventStartDateTime], ["end_time", eventEndDateTime]]) {
       const date = value ? new Date(value) : null;
       if (date && !Number.isNaN(date.getTime())) params.set(key, date.toISOString());
@@ -1254,6 +1265,36 @@ const filteredEvents = [...events]
     >
       <Pencil size={16} aria-hidden="true" />
       <span>Edit parameter</span>
+    </button>
+
+    <button
+      type="button"
+      className="rule-action-menu-item rule-action-menu-item--edit"
+      role="menuitem"
+      onClick={() => {
+        setRuleActionMenuId(null);
+        setNotificationRuleId(rule.id);
+      }}
+      disabled={!canManageRules && !isSupervisor}
+      title={!canManageRules && !isSupervisor ? "You do not have permission to manage monitoring rules." : undefined}
+    >
+      <Bell size={16} aria-hidden="true" />
+      <span>Notification settings</span>
+    </button>
+
+    <button
+      type="button"
+      className="rule-action-menu-item rule-action-menu-item--edit"
+      role="menuitem"
+      onClick={() => {
+        setRuleActionMenuId(null);
+        setComponentRuleId(rule.id);
+      }}
+      disabled={!canManageRules && !isSupervisor}
+      title={!canManageRules && !isSupervisor ? "You do not have permission to manage monitoring rules." : undefined}
+    >
+      <Tag size={16} aria-hidden="true" />
+      <span>Component identifier</span>
     </button>
 
     {/* Suspend rule */}
@@ -2194,6 +2235,11 @@ const filteredEvents = [...events]
 
                     <div className="rule-name rule-card-main">
                       <strong>{rule.name}</strong>
+                      {rule.component_identifier && (
+                        <span className="label-chip rule-component-chip" title="Component identifier">
+                          {rule.component_identifier}
+                        </span>
+                      )}
                       {rule.labels?.length > 0 && (
                         <span className="labels-chips asset-rule-labels">
                           {rule.labels.map((label) => (
@@ -2581,7 +2627,7 @@ const filteredEvents = [...events]
         disabled={filteredEvents.length === 0 || exporting}
         onClick={() =>
           exportExcel({
-            headers: ["Date and time", "Event", "Details", "Asset", "Assigned rule"],
+            headers: ["Date and time", "Event", "Details", "Asset", "Assigned rule", "Component"],
             rows: filteredEvents.map((event) => [
               event.time || event.occurred_at
                 ? new Date(event.time || event.occurred_at).toLocaleString()
@@ -2600,6 +2646,7 @@ const filteredEvents = [...events]
                   : event.rule_id != null
                     ? `Rule #${event.rule_id}`
                     : "Not assigned"),
+              event.component_identifier || "",
             ]),
             sheetName: "Event log",
             fileName: `${assetFileName}-event-log-${exportFileDate}.xlsx`,
@@ -2645,6 +2692,21 @@ const filteredEvents = [...events]
         </select>
       </label>
 
+      {eventComponents.length > 0 && (
+        <label>
+          <span>Component</span>
+          <select
+            value={eventComponentFilter}
+            onChange={(event) => setEventComponentFilter(event.target.value)}
+          >
+            <option value="">All components</option>
+            {eventComponents.map((component) => (
+              <option key={component} value={component}>{component}</option>
+            ))}
+          </select>
+        </label>
+      )}
+
       <label>
         <span>From</span>
         <input
@@ -2668,11 +2730,13 @@ const filteredEvents = [...events]
         className="btn-outline"
         onClick={() => {
           setEventTypeFilter("");
+          setEventComponentFilter("");
           setEventStartDateTime("");
           setEventEndDateTime("");
         }}
         disabled={
           !eventTypeFilter &&
+          !eventComponentFilter &&
           !eventStartDateTime &&
           !eventEndDateTime
         }
@@ -2780,7 +2844,12 @@ const filteredEvents = [...events]
                       (event.asset_id != null ? `Asset ${event.asset_id}` : "System")}
                   </td>
 
-                  <td className="event-col-rule">{assignedRule}</td>
+                  <td className="event-col-rule">
+                    {assignedRule}
+                    {event.component_identifier && (
+                      <span className="event-component" title="Component identifier">{event.component_identifier}</span>
+                    )}
+                  </td>
 
                   <td className="event-col-actions">
                     <div className="event-row-actions">
@@ -3044,6 +3113,31 @@ const filteredEvents = [...events]
       setStatusRefresh((value) => value + 1);
       refreshAll();
       setActionNotice("Parameter saved.");
+    }}
+  />
+)}
+
+{notificationRuleId !== null && rules.some((item) => item.id === notificationRuleId) && (
+  <NotificationSettingsDialog
+    rule={rules.find((item) => item.id === notificationRuleId)}
+    onClose={() => setNotificationRuleId(null)}
+    onSaved={() => {
+      setNotificationRuleId(null);
+      refreshAll();
+      setActionNotice("Notification settings saved.");
+    }}
+  />
+)}
+
+{componentRuleId !== null && rules.some((item) => item.id === componentRuleId) && (
+  <ComponentIdentifierDialog
+    rule={rules.find((item) => item.id === componentRuleId)}
+    onClose={() => setComponentRuleId(null)}
+    onSaved={() => {
+      setComponentRuleId(null);
+      setStatusRefresh((value) => value + 1);
+      refreshAll();
+      setActionNotice("Component identifier saved.");
     }}
   />
 )}

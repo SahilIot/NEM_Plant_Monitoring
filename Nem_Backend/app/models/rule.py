@@ -219,6 +219,8 @@ class MonitoringRule(AuditNamesMixin, Base):
     threshold: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
     parameters: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Optional tag of the component this assigned rule monitors (see services/component_identifier.py).
+    component_identifier: Mapped[str | None] = mapped_column(String(100))
 
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
     lifecycle_status: Mapped[str] = mapped_column(

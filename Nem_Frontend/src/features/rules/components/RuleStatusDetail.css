@@ -189,3 +189,5 @@
 .rsd-param.is-paused { border-style: dotted; opacity: 0.86; }
 .rsd-param-menu { position: relative; display: inline-flex; }
 .rsd-param-error { position: absolute; right: 0; top: 100%; z-index: 5; max-width: 260px; margin-top: 4px; padding: 4px 8px; border: 1px solid var(--alert); border-radius: var(--r-ctl); background: var(--surface); color: var(--alert); font-size: 12px; }
+.rsd-param-notice { position: absolute; right: 0; top: 100%; z-index: 5; max-width: 260px; margin-top: 4px; padding: 4px 8px; border: 1px solid var(--ok); border-radius: var(--r-ctl); background: var(--surface); color: var(--ok); font-size: 12px; }
+.rsd-reset-all { white-space: nowrap; }

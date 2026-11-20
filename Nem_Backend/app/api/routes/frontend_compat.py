@@ -27,6 +27,8 @@ from docx.opc.exceptions import PackageNotFoundError
 
 from app.db.session import get_db
 from app.services.legacy_parameters import serialize_legacy_parameters
+from app.services.component_identifier import normalize_component_identifier
+from app.services.notification_settings import NOTIFICATION_SETTINGS_KEY, settings_for_rule
 from app.services import template_parameters as template_params
 from app.services.rule_parameters import ParameterConfigError, serialize_parameters
 from app.core.labels import normalize_label_names
@@ -406,6 +408,8 @@ def _rule_row(session: Session, rule: MonitoringRule) -> dict[str, Any]:
         "operator": rule.operator,
         "threshold": float(rule.threshold) if rule.threshold is not None else None,
         "parameters": rule.parameters,
+        "notifications": settings_for_rule(rule),
+        "component_identifier": rule.component_identifier,
         "evaluation_interval_seconds": rule.evaluation_interval_seconds,
         "stale_after_seconds": rule.stale_after_seconds,
     }
@@ -579,6 +583,7 @@ def _rule_definition(
         RULE_TYPE: source.rule_type,
         "target_asset_id": target_asset_id,
         "source_template_id": source.source_template_id,
+        "component_identifier": source.component_identifier,
         "variable_id": variable.id if variable else None,
         "operator": source.operator,
         "threshold": source.threshold,
@@ -590,9 +595,15 @@ def _rule_definition(
         "stale_after_seconds": source.stale_after_seconds,
     }
 
+# Per-rule notification settings are not part of what a rule monitors, so they never make two rules "different".
+def _definition_value(field: str, value: Any) -> Any:
+    if field == "parameters" and isinstance(value, dict):
+        return {key: item for key, item in value.items() if key != NOTIFICATION_SETTINGS_KEY}
+    return value
+
 def _same_rule_definition(rule: MonitoringRule, definition: dict[str, Any]) -> bool:
     return all(
-        getattr(rule, field) == definition[field]
+        _definition_value(field, getattr(rule, field)) == _definition_value(field, definition[field])
         for field in (
             "name",
             "description",
@@ -1150,6 +1161,9 @@ def apply_template_update(
     labels: list[str] | None,
 ) -> None:
 
+    # Lock order for every writer of rules.parameters on shared rules: the shared rule first, then its asset rules by id.
+    session.scalar(select(MonitoringRuleTemplate.id).where(MonitoringRuleTemplate.id == template.id)
+                   .with_for_update().execution_options(populate_existing=True))
     enforce_template_edit_permission(session, template, values,labels,)
     if values["collection_id"] != template.collection_id:
         _ensure_collection_keeps_rule(session, template.collection_id, template.id)
@@ -1181,7 +1195,7 @@ def apply_template_update(
         assigned_rules = session.scalars(
             select(MonitoringRule).where(
                 MonitoringRule.source_template_id == template.id,
-            )
+            ).order_by(MonitoringRule.id).with_for_update().execution_options(populate_existing=True)
         ).all()
         editor = request_user(session)
         is_admin = editor is not None and editor.role == ROLE_ADMINISTRATOR
@@ -1215,7 +1229,12 @@ def apply_template_update(
                     "evaluation_interval_seconds",
                     "stale_after_seconds",
                 ):
-                    setattr(rule, field, definition[field])
+                    value = definition[field]
+                    # The template does not know the asset rule's own notification settings; keep them.
+                    kept = (rule.parameters or {}).get(NOTIFICATION_SETTINGS_KEY) if field == "parameters" else None
+                    if kept is not None:
+                        value = {**(value or {}), NOTIFICATION_SETTINGS_KEY: kept}
+                    setattr(rule, field, value)
         session.flush()
         settings = request.app.state.settings
         for rule in assigned_rules:
@@ -1313,6 +1332,8 @@ def assign_template_to_assets(
         created = []
         for asset_id, definition in prepared:
             rule = template_params.instantiate(definition)
+            if payload.component_identifier:
+                rule.component_identifier = payload.component_identifier
             session.add(rule)
             session.flush()
             assign_labels(session, rule, template.labels)
@@ -1548,6 +1569,8 @@ def frontend_assign_predefined_rules(
     created = []
     for template, definition in prepared:
         rule = template_params.instantiate(definition)
+        if payload.component_identifier:
+            rule.component_identifier = payload.component_identifier
         session.add(rule)
         session.flush()
         assign_labels(session, rule, template.labels)
@@ -1750,6 +1773,8 @@ def frontend_copy_asset_rules(
     created = []
     for source, definition in prepared:
         rule = template_params.instantiate(definition)
+        if payload.component_identifier:
+            rule.component_identifier = payload.component_identifier
         session.add(rule)
         session.flush()
         assign_labels(session, rule, source.labels)
@@ -2350,7 +2375,7 @@ def frontend_add_logbook_entry(
 # its CSV / JSON export share this one definition.
 def _asset_event_log_select(asset_id: int):
     return (
-        select(MonitoringEvent, Asset.name, MonitoringRule.name)
+        select(MonitoringEvent, Asset.name, MonitoringRule.name, MonitoringRule.component_identifier)
         .outerjoin(Asset, Asset.id == MonitoringEvent.asset_id)
         .outerjoin(MonitoringRule, MonitoringRule.id == MonitoringEvent.rule_id)
         .where(MonitoringEvent.asset_id == asset_id)
@@ -2359,20 +2384,32 @@ def _asset_event_log_select(asset_id: int):
     )
 
 EVENT_EXPORT_COLUMNS = ("event_id", "occurred_at", "asset_id", "asset_name", "rule_id", "rule_name",
-                        "event_type", "severity", "message", "alert_id", "metadata")
+                        "component_identifier", "event_type", "severity", "message", "alert_id", "metadata")
 EVENT_EXPORT_BATCH = 1000
 
 # A spreadsheet treats a cell that starts with = + - @ (or a tab / CR) as a formula; a leading apostrophe defuses it.
 def _csv_safe(value: Any) -> Any:
     return "'" + value if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r") else value
 
-def _event_export_record(event: MonitoringEvent, asset_name: str | None, rule_name: str | None) -> dict[str, Any]:
+# Case-insensitive match on the rule's component identifier; shared by the event list and its export.
+def _filter_component(query, component_identifier: str | None):
+    if component_identifier is None or not component_identifier.strip():
+        return query
+    try:
+        wanted = normalize_component_identifier(component_identifier)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return query.where(func.lower(MonitoringRule.component_identifier) == wanted.lower())
+
+def _event_export_record(event: MonitoringEvent, asset_name: str | None, rule_name: str | None,
+                         component_identifier: str | None = None) -> dict[str, Any]:
     occurred = event.occurred_at
     if occurred.tzinfo is None:
         occurred = occurred.replace(tzinfo=timezone.utc)
     return {
         "event_id": event.id, "occurred_at": occurred.isoformat(), "asset_id": event.asset_id, "asset_name": asset_name,
-        "rule_id": event.rule_id, "rule_name": rule_name, "event_type": event.event_type, "severity": event.severity,
+        "rule_id": event.rule_id, "rule_name": rule_name, "component_identifier": component_identifier,
+        "event_type": event.event_type, "severity": event.severity,
         "message": event.message, "alert_id": event.alert_id, "metadata": event.event_metadata,
     }
 
@@ -2385,6 +2422,7 @@ def export_asset_events(
     event_type: str | None = Query(default=None, max_length=50),
     rule_id: int | None = Query(default=None, gt=0),
     severity: str | None = Query(default=None, max_length=20),
+    component_identifier: str | None = Query(default=None, max_length=200),
     start_time: datetime | None = None,
     end_time: datetime | None = None,
     session: Session = Depends(get_db),
@@ -2400,7 +2438,7 @@ def export_asset_events(
     start, end = utc(start_time), utc(end_time)
     if start is not None and end is not None and start > end:
         raise HTTPException(status_code=422, detail="start_time must not be later than end_time")
-    query = _asset_event_log_select(asset_id)
+    query = _filter_component(_asset_event_log_select(asset_id), component_identifier)
     if event_type:
         query = query.where(MonitoringEvent.event_type == event_type)
     if rule_id is not None:
@@ -2424,8 +2462,8 @@ def export_asset_events(
             writer.writerow(EVENT_EXPORT_COLUMNS)
         else:
             text.write("[")
-        for event, asset_name, rule_name in session.execute(query).yield_per(EVENT_EXPORT_BATCH):
-            record = _event_export_record(event, asset_name, rule_name)
+        for event, asset_name, rule_name, component in session.execute(query).yield_per(EVENT_EXPORT_BATCH):
+            record = _event_export_record(event, asset_name, rule_name, component)
             if format == "csv":
                 metadata = record["metadata"]
                 record["metadata"] = json.dumps(metadata, ensure_ascii=False, default=str) if metadata else ""
@@ -2460,12 +2498,13 @@ def export_asset_events(
 @router.get("/assets/{asset_id}/events")
 def frontend_asset_events(
     asset_id: int,
+    component_identifier: str | None = Query(default=None, max_length=200),
     session: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
     if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     events = session.execute(
-        _asset_event_log_select(asset_id)
+        _filter_component(_asset_event_log_select(asset_id), component_identifier)
         .order_by(MonitoringEvent.occurred_at.desc(), MonitoringEvent.id.desc())
         .limit(200)
     ).all()
@@ -2480,10 +2519,11 @@ def frontend_asset_events(
             "asset_name": asset_name,
             "rule_id": event.rule_id,
             "rule_name": rule_name,
+            "component_identifier": component,
             "alert_id": event.alert_id,
             "metadata": event.event_metadata,
         }
-        for event, asset_name, rule_name in events
+        for event, asset_name, rule_name, component in events
     ]
 
 #Bulk delete event logbook records for a specific asset.

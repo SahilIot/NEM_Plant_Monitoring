@@ -119,6 +119,15 @@ def rule_or_404(session: Session, rule_id: int) -> MonitoringRule:
         raise HTTPException(status_code=404, detail=f"Rule {rule_id} was not found")
     return rule
 
+# Takes the row lock of a rule and re-reads it, so a writer of rules.parameters (a read-modify-write of one JSON
+# column) always starts from the committed value and concurrent writers of the same rule are serialised.
+def lock_rule(session: Session, rule: MonitoringRule) -> MonitoringRule:
+    locked = session.scalar(select(MonitoringRule).where(MonitoringRule.id == rule.id)
+                            .with_for_update().execution_options(populate_existing=True))
+    if locked is None:
+        raise HTTPException(status_code=404, detail=f"Rule {rule.id} was not found")
+    return locked
+
 # make sure a rule refers to valid machine assets and variables, and its configuration makes sense
 def validate_targets(
     session: Session,
@@ -402,6 +411,11 @@ def update_rule(
     changes = payload.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status_code=422, detail=ERR_NO_FIELDS_TO_UPDATE)
+    # Same lock order as apply_template_update: shared rule first (only when its fields change), then this rule.
+    if rule.source_template_id is not None and set(changes) & SHARED_RULE_FIELDS:
+        session.scalar(select(MonitoringRuleTemplate.id).where(MonitoringRuleTemplate.id == rule.source_template_id)
+                       .with_for_update().execution_options(populate_existing=True))
+    rule = lock_rule(session, rule)
 
     # Nested parameters are merged into the stored ones so omitted keys
     # (for example activation_at) are never cleared by a partial update.

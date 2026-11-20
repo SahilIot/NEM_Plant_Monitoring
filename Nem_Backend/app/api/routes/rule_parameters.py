@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, object_session
 
 from app.api.routes.auth import get_current_user
 from app.api.routes.rules import (
+    lock_rule,
     configured_cycle_signal_mapping,
     configured_runtime_signal_mapping,
     is_mapping_bypass_enabled,
@@ -19,7 +20,9 @@ from app.api.routes.rules import (
 from app.db.session import get_db
 from app.models import Asset, InstructionDocument, MonitoringRule, RuleParameter, User, Variable
 from app.schemas.rule_parameters import (
+    ComponentIdentifierRequest,
     MultiParameterRuleCreate,
+    NotificationSettingsRequest,
     ParameterLifecycleAction,
     ProgressResetRequest,
     RuleParameterIn,
@@ -249,6 +252,7 @@ def create_multi_parameter_rule(
         is_enabled=payload.is_enabled,
         lifecycle_status=STATUS_IN_PROGRESS if payload.is_enabled else STATUS_DEACTIVATED,
         stale_after_seconds=payload.stale_after_seconds,
+        component_identifier=payload.component_identifier,
         parameters={
             "category": payload.category,
             "calculation_period_seconds": payload.calculation_period_seconds,
@@ -384,6 +388,65 @@ def reset_rule_progress(
             "reset": [_interval_view(item) for item in eligible], "skipped": skipped}
 
 
+# Per-rule email notification settings (Warning/Alert switches and custom message). Touches only the
+# "notifications" key: the rule, its parameters, activation state and alerts are left exactly as they were.
+@router.post("/rules/{rule_id}/notification-settings")
+def update_notification_settings(
+    rule_id: int,
+    payload: NotificationSettingsRequest,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    from app.services.notification_settings import (
+        NOTIFICATION_SETTINGS_KEY, NotificationSettingsError, normalize_notification_settings, settings_for_rule,
+    )
+
+    _require_editor(user)
+    rule = rule_or_404(session, rule_id)
+    require_rule_access(session, rule)
+    try:
+        normalized = normalize_notification_settings(payload.notifications)
+    except NotificationSettingsError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    rule = lock_rule(session, rule)  # read-modify-write of rules.parameters starts from the committed value
+    previous = settings_for_rule(rule)
+    if normalized != previous:
+        rule.parameters = {**(rule.parameters or {}), NOTIFICATION_SETTINGS_KEY: normalized}
+        emit_event(session, event_type="notification_settings_changed",
+                   occurred_at=datetime.now(timezone.utc),
+                   message=f"Notification settings of rule '{rule.name}' were changed by {user.username}.",
+                   asset_id=rule.target_asset_id, rule_id=rule.id,
+                   metadata={"rule_id": rule.id, "changed_by_id": user.id, "changed_by": user.username,
+                             "previous": previous, "current": normalized})
+    session.commit()
+    return {"rule_id": rule.id, "notifications": normalized}
+
+
+# Sets or clears the component identifier of an assigned rule. Touches only that column.
+@router.post("/rules/{rule_id}/component-identifier")
+def update_component_identifier(
+    rule_id: int,
+    payload: ComponentIdentifierRequest,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    _require_editor(user)
+    rule = rule_or_404(session, rule_id)
+    require_rule_access(session, rule)
+    previous = rule.component_identifier
+    if payload.component_identifier != previous:
+        rule.component_identifier = payload.component_identifier
+        emit_event(session, event_type="component_identifier_changed",
+                   occurred_at=datetime.now(timezone.utc),
+                   message=(f"Component identifier of rule '{rule.name}' was changed by {user.username}: "
+                            f"{previous or 'none'} -> {payload.component_identifier or 'none'}."),
+                   asset_id=rule.target_asset_id, rule_id=rule.id,
+                   metadata={"rule_id": rule.id, "changed_by_id": user.id, "changed_by": user.username,
+                             "previous": previous, "current": payload.component_identifier})
+    session.commit()
+    return {"rule_id": rule.id, "component_identifier": rule.component_identifier}
+
+
 # Replace all parameters , complicated endpoints , allows the frontend to submit an entire parameter collection.
 @router.put("/rules/{rule_id}/parameters")
 def replace_rule_parameters(
@@ -398,6 +461,7 @@ def replace_rule_parameters(
     require_rule_access(session, rule)
     if rule.rule_type != RULE_MULTI_PARAMETER:
         raise HTTPException(status_code=422, detail="Only multi-parameter rules have editable parameters")
+    rule = lock_rule(session, rule)  # this request rewrites rules.parameters and parameter rows
     asset = session.get(Asset, rule.target_asset_id) if rule.target_asset_id else None
     if asset is None or not access_scope(session).allows(asset.id):
         raise HTTPException(status_code=404, detail=f"Asset {rule.target_asset_id} was not found")

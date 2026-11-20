@@ -230,6 +230,14 @@ class MultiParameterRuleCreate(ORMModel):
     document_ids: list[int] = Field(default_factory=list, max_length=20)
     is_enabled: bool = True
     stale_after_seconds: int | None = Field(default=None, ge=1, le=31_536_000)
+    component_identifier: str | None = None
+
+    @field_validator("component_identifier")
+    @classmethod
+    def clean_component_identifier(cls, value: str | None) -> str | None:
+        from app.services.component_identifier import normalize_component_identifier
+
+        return normalize_component_identifier(value)
 
     @field_validator("name")
     @classmethod
@@ -277,6 +285,23 @@ class ParameterLifecycleAction(ORMModel):
     # Suspend / resume / deactivate / activate one parameter of a multi-parameter rule.
 
     action: Literal["suspend", "resume", "deactivate", "activate"]
+
+
+class ComponentIdentifierRequest(ORMModel):
+    # None or blank removes the identifier.
+    component_identifier: str | None = None
+
+    @field_validator("component_identifier")
+    @classmethod
+    def clean_component_identifier(cls, value: str | None) -> str | None:
+        from app.services.component_identifier import normalize_component_identifier
+
+        return normalize_component_identifier(value)
+
+
+class NotificationSettingsRequest(ORMModel):
+    # {"warning": {"enabled": bool, "message": str|null}, "alert": {...}}; validated by services.notification_settings.
+    notifications: dict[str, Any]
 
 
 class ProgressResetRequest(ORMModel):

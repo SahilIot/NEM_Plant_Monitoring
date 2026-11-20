@@ -5,6 +5,7 @@ import math
 from typing import Any, Literal
 from pydantic import Field, ValidationInfo, field_validator, model_validator
 from app.core.labels import normalize_label_names
+from app.services.component_identifier import normalize_component_identifier
 from app.schemas.common import ORMModel
 from app.core.constants import (
     RULE_BOOLEAN_COUNT_THRESHOLD,
@@ -83,6 +84,12 @@ class RuleCreate(ORMModel):
     is_enabled: bool = True
     evaluation_interval_seconds: int | None = Field(default=None, ge=1, le=31_536_000)
     stale_after_seconds: int | None = Field(default=None, ge=1, le=31_536_000)
+    component_identifier: str | None = None
+
+    @field_validator("component_identifier")
+    @classmethod
+    def clean_component_identifier(cls, value: str | None) -> str | None:
+        return normalize_component_identifier(value)
 #The threshold validator
     @field_validator("threshold")
     @classmethod
@@ -448,6 +455,13 @@ class RuleTemplateAssetAssignment(ORMModel):
     variable_mappings: dict[int, int] = Field(default_factory=dict)
     # Multi-parameter templates: asset id -> {parameter key -> variable id}.
     parameter_mappings: dict[int, dict[str, int]] = Field(default_factory=dict)
+    # Optional identifier of the component, applied to every rule created by this assignment.
+    component_identifier: str | None = None
+
+    @field_validator("component_identifier")
+    @classmethod
+    def clean_component_identifier(cls, value: str | None) -> str | None:
+        return normalize_component_identifier(value)
 
     @field_validator("asset_ids")
     @classmethod
@@ -561,6 +575,7 @@ class RuleRead(ORMModel):
     completed_at: datetime | None = None
     evaluation_interval_seconds: int | None
     stale_after_seconds: int | None
+    component_identifier: str | None = None
     created_at: datetime
     updated_at: datetime
     created_by_id: int | None = None
@@ -606,6 +621,14 @@ class RuleSelection(ORMModel):
     variable_mappings: dict[int, int] = Field(default_factory=dict)
     # Multi-parameter templates: template id -> {parameter key -> variable id}.
     parameter_mappings: dict[int, dict[str, int]] = Field(default_factory=dict)
+    # Optional identifier of the component, applied to every rule created by this request. A copy keeps the source
+    # rule's identifier unless one is given here.
+    component_identifier: str | None = None
+
+    @field_validator("component_identifier")
+    @classmethod
+    def clean_component_identifier(cls, value: str | None) -> str | None:
+        return normalize_component_identifier(value)
 
     @field_validator("rule_ids")
     @classmethod

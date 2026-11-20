@@ -6,6 +6,9 @@ import { captureNavigationOrigin } from "../../../utils/navigation.js";
 import { NUMBER_LIMITS, makeLimitScale, numberZone } from "./parameterRules.js";
 import { calendarProgress, formatCalendarMoment, formatCalendarSpan, formatDuration, liveHours, useDisplayClock } from "./durationClock.js";
 import ParameterCardMenu from "./ParameterCardMenu.jsx";
+import { confirmAndResetProgress } from "./intervalReset.js";
+import { useAuth } from "../../auth/AuthContext.jsx";
+import { useConfirmation } from "../../../components/common/UI.jsx";
 import "./IntervalDemo.css";
 import "./ParameterDemos.css";
 import "./RuleStatusDetail.css";
@@ -443,6 +446,9 @@ export default function RuleStatusDetail({ ruleId, refreshToken = 0, onEditParam
   const [lastSync, setLastSync] = useState(null);
   const [connected, setConnected] = useState(true);
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const confirm = useConfirmation();
+  const [resetState, setResetState] = useState({ busy: false, message: "", error: "" });
   const location = useLocation();
   const locationRef = useRef(location);
   locationRef.current = location;
@@ -528,6 +534,19 @@ export default function RuleStatusDetail({ ruleId, refreshToken = 0, onEditParam
   // The parent can ask for an immediate refetch (for example after one parameter was edited).
   useEffect(() => { if (refreshToken) load(); }, [refreshToken, load]);
 
+  // Manual reset of every eligible interval of this rule (the dialog names them first).
+  const resetAllIntervals = async () => {
+    if (resetState.busy) return;
+    setResetState({ busy: true, message: "", error: "" });
+    try {
+      const result = await confirmAndResetProgress({ confirm, url: `/rules/${ruleId}/reset-progress`, ruleName: detail.rule.name });
+      setResetState({ busy: false, message: result.cancelled ? "" : result.message, error: "" });
+      if (!result.cancelled) await load();
+    } catch (requestError) {
+      setResetState({ busy: false, message: "", error: requestError?.message || "Could not reset the intervals." });
+    }
+  };
+
   const staleLimit = Math.max(90, ((detail?.rule.stale_after_seconds) || 300));
   const overall = detail?.overall;
   const intervalRule = detail?.rule.type === "interval_based";
@@ -542,18 +561,28 @@ export default function RuleStatusDetail({ ruleId, refreshToken = 0, onEditParam
               <p className="rsd-meta">
                 {LIFECYCLE_LABEL[detail.rule.lifecycle_status] || detail.rule.lifecycle_status}
                 {detail.rule.lifecycle_status === "completed" && detail.rule.completed_at ? ` ${new Date(detail.rule.completed_at).toLocaleString()}` : ""}
+                {detail.rule.component_identifier ? ` · Component ${detail.rule.component_identifier}` : ""}
                 {" · "}{overall.parameter_count} parameter{overall.parameter_count === 1 ? "" : "s"}
                 {" · "}<span className="rsd-message">{summaryMessage(detail)}</span>
               </p>
             )}
           </div>
           <div className="rsd-top-right">
+            {detail && intervalRule && (user?.role === "Administrator" || user?.role === "Supervisor") && (
+              <button type="button" className="btn-outline rsd-reset-all" disabled={resetState.busy || detail.rule.lifecycle_status !== "in_progress"}
+                title={detail.rule.lifecycle_status !== "in_progress" ? "Activate the rule before resetting its intervals." : "Reset the progress of every eligible interval of this rule"}
+                onClick={resetAllIntervals}>
+                {resetState.busy ? "Resetting…" : "Reset all intervals"}
+              </button>
+            )}
             {detail && <span className={`rsd-chip big is-${overall.status}`}>{overallWord(overall, intervalRule)}</span>}
             <LiveStatus connected={connected} lastSync={lastSync} staleLimit={staleLimit} />
           </div>
         </header>
 
         {error && <p className="rsd-error" role="alert">{error} {detail ? "Showing the last loaded data." : ""}</p>}
+        {resetState.error && <p className="rsd-error" role="alert">{resetState.error}</p>}
+        {resetState.message && <p className="rsd-note" role="status">{resetState.message}</p>}
         {!detail && !error && <p className="rsd-note rsd-loading" role="status">Loading rule status…</p>}
 
         {detail && (

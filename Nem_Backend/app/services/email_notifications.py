@@ -27,6 +27,7 @@ from app.models import (
     MonitoringRule,
     User,
 )
+from app.services.notification_settings import custom_message, severity_enabled
 from app.core.constants import (
     NOTIFICATION_FAILED,
     NOTIFICATION_SENT,
@@ -197,11 +198,20 @@ def enqueue_alert_notifications(
         LOGGER.exception("Could not queue email notification for alert %s", alert.id)
         return 0
 
+def _is_maintenance_ready(payload: dict[str, Any] | None) -> bool:
+    return bool(payload) and payload.get("notification_kind") == "maintenance_ready"
+
+
 #Perfroms the actual preparation of email jobs
 def _enqueue(session: Session, alert: Alert, asset: Asset, rule: MonitoringRule | None, settings: Settings | None,
              extra: dict[str, Any] | None = None) -> int:
     #check whether notifications are enabled 
     if settings is not None and not settings.email_notifications_enabled:
+        return 0
+    # Per-rule Warning/Alert switch. Maintenance-ready notices are not a severity notification and are never gated.
+    if not _is_maintenance_ready(extra) and not severity_enabled(rule, alert.severity):
+        LOGGER.info("Notification for alert %s not queued: %s notifications are disabled for rule %s",
+                    alert.id, alert.severity, rule.id if rule is not None else None)
         return 0
     if alert.id is None:
         session.flush()
@@ -575,7 +585,18 @@ def deliver_pending(session_factory, settings: Settings, *, batch_size: int = 20
                     item.last_error = "Supervisor is inactive or has no valid email address"
                     LOGGER.warning("Notification %s skipped: %s", item.id, item.last_error)
                     continue
-                message = build_message(item.payload, sender=config["from_address"],
+                payload = item.payload
+                if not _is_maintenance_ready(payload):
+                    rule = session.get(MonitoringRule, alert.rule_id) if alert.rule_id is not None else None
+                    if not severity_enabled(rule, item.severity):
+                        item.status = NOTIFICATION_SKIPPED
+                        item.last_error = "Notifications for this severity were disabled for the rule"
+                        LOGGER.info("Notification %s skipped: %s", item.id, item.last_error)
+                        continue
+                    text = custom_message(rule, item.severity)
+                    if text:
+                        payload = {**payload, "message": text}
+                message = build_message(payload, sender=config["from_address"],
                                         recipient=user.email_address.strip(), settings=settings)
                 LOGGER.debug(
                     "Notification outbox delivery type=%s asset_id=%s "
