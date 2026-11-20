@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 import math
 from typing import Any, Literal
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 from app.core.labels import normalize_label_names
 from app.schemas.common import ORMModel
 from app.core.constants import (
@@ -290,7 +290,7 @@ class RuleTemplateCreate(ORMModel):
         return value
 #variable type validator to ensure that the required variable types are compatible with the rule type
     @model_validator(mode="after")
-    def validate_template_definition(self):
+    def validate_template_definition(self, info: ValidationInfo):
         required_types = self.required_variable_types
         if self.rule_type == RULE_MULTI_PARAMETER:
             # Parameter-based template: definitions live in parameters.parameter_defs; variables are chosen per asset.
@@ -298,7 +298,12 @@ class RuleTemplateCreate(ORMModel):
 
             if required_types or self.operator is not None or self.threshold is not None or self.variable_key:
                 raise ValueError("Multi-parameter templates keep their configuration in their parameters")
-            self.parameters = normalize_template_parameters(self.parameters)
+            self.parameters = normalize_template_parameters(
+                self.parameters,
+                allow_legacy_limits=bool(
+                    info.context and info.context.get("allow_legacy_limits")
+                ),
+            )
             self.required_variable_types = None
             return self
         if self.rule_type == RULE_PARAMETER_THRESHOLD:
@@ -627,4 +632,4 @@ class RuleSelection(ORMModel):
 # Copying rules between assets.
 class RuleCopyRequest(RuleSelection):
     source_asset_id: int = Field(gt=0)
-    include_disabled: bool = True
+    include_disabled: bool = True
