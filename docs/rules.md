@@ -177,14 +177,20 @@ seconds over the rule's calculation period (3600 seconds when unset); `last`
 uses the latest reading, which must lie inside the period when one is set.
 
 A parameter is `unknown`, never `normal`, when its stored configuration is
-invalid, its variable is missing or inactive, there is no reading, the latest
-reading is stale, or the value has the wrong type. The overall rule status is
+invalid, or when it uses a variable and that variable is missing or inactive,
+has no reading, has a stale latest reading, or has a value of the wrong type.
+Parameters without a PLC variable are not judged this way: an elapsed Time
+interval (no variable) counts hours since its start, and a Calendar Time
+interval is decided from calendar dates, so neither becomes `unknown` for
+missing or stale readings (an invalid stored configuration still does). The overall rule status is
 the most severe parameter status; `determined_by` lists the parameters that set
 it. Each parameter has its own alert and state.
 
 Each parameter has a lifecycle of `active`, `suspended` or `deactivated`
 (`POST /rules/{id}/parameters/{pid}/lifecycle`, actions `suspend`, `resume`,
-`deactivate`, `activate`). Suspending or deactivating resolves that
+`deactivate`, `activate`; `activate` needs an Administrator or Supervisor, the
+other actions an Administrator; for older single-parameter rules the call acts
+on the whole rule). Suspending or deactivating resolves that
 parameter's open alert, keeps its history and stops its evaluation and progress;
 a parameter must pass validation again before it is activated. Progress of an
 interval parameter counts from the later of the rule's creation/activation and

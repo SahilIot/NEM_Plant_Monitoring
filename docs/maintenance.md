@@ -39,7 +39,9 @@ Business rules in prose are also in [rules.md](rules.md#maintenance-rules).
 
 A rule-generated record is completed with an explicit choice of
 **Reset & Start Next Cycle** or **Complete Without Reset**; the backend requires
-`reset_progress` to be sent and never defaults it. A manual interval reset
+`reset_progress` to be sent and never defaults it. Completing without a reset
+keeps the progress but deactivates the source parameter (and the rule too when
+no active parameter remains, with a `rule_deactivated` event). A manual interval reset
 cancels an unstarted schedule with cancellation kind `progress_reset` and
 creates a fresh one. Details, including Calendar Time, are in
 [rule-operations.md](rule-operations.md).

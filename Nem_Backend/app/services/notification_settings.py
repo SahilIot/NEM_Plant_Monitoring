@@ -1,14 +1,7 @@
 # Per-rule email notification settings: Warning/Alert on-off switches and an optional custom message.
-#
-# Stored as MonitoringRule.parameters["notifications"] (no schema change):
-#   {"warning": {"enabled": true, "message": null}, "alert": {"enabled": true, "message": "Call the shift lead"}}
-# A rule without the key (every rule created before this feature) behaves as before: both severities enabled and
-# the default message. There is deliberately no Info severity. Maintenance-ready notices are never gated by these.
 from __future__ import annotations
-
 import re
 from typing import Any
-
 from app.core.constants import STATUS_ALERT, STATUS_WARNING
 
 NOTIFICATION_SETTINGS_KEY = "notifications"

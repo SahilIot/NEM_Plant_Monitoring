@@ -72,8 +72,9 @@ deployment configuration or field validation.
    accepts `boolean_condition`, while `RuleCreate` does not list that literal.
    `generic` and `boolean_condition` have no evaluator and report unknown.
 5. **Test coverage is limited.** The repository has no backend test suite
-   (`Nem_Backend/tests/` does not exist). The frontend has two Node test files
-   (`Nem_Frontend/tests/i18n.test.js` and `monitoringRuleFlow.test.js`).
+   (`Nem_Backend/tests/` does not exist). The frontend has three Node test files
+   (`Nem_Frontend/tests/i18n.test.js`, `Nem_Frontend/tests/monitoringRuleFlow.test.js`
+   and `Nem_Frontend/src/features/rules/rulePresentation.test.js`).
    Backend behaviour is validated with scratch-database checks outside the
    repository. Runtime and integration acceptance remain unverified.
 

@@ -864,8 +864,9 @@ upgrades or experiments against the production database. `TEST_DATABASE_URL`
 is only read from settings; if you create tests, point it at an isolated
 database.
 
-The frontend has Node test files (`Nem_Frontend/tests/*.test.js`, currently
-`i18n.test.js` and `monitoringRuleFlow.test.js`) run by `npm test` (Node's test
+The frontend has Node test files (`Nem_Frontend/tests/i18n.test.js`,
+`Nem_Frontend/tests/monitoringRuleFlow.test.js` and
+`Nem_Frontend/src/features/rules/rulePresentation.test.js`) run by `npm test` (Node's test
 runner). A successful build validates compilation, not PLC,
 database, SMTP, authorization, or operational behavior. Test those integrations
 in a controlled environment before deployment.

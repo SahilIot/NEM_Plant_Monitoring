@@ -98,7 +98,13 @@ NEM_Plant_Monitoring/
                                     pages/ (asset index/detail, rule and maintenance creation),
                                     rules/monitoringRuleFlow.js
         plc/                        pages/Plc.jsx, styles/Plc.css
-        rules/                      components/PredefinedRulesModal, pages/AlertRules, RuleCreatePage
+        rules/                      components/ (selected: ParameterRuleWizard, ParameterEditDialog,
+                                    RuleStatusDetail, NotificationSettingsDialog,
+                                    ComponentIdentifierDialog, PredefinedRulesModal,
+                                    RuleCollectionAssignmentModal, plus helpers such as
+                                    intervalConfig.js, intervalReset.js, parameterRules.js),
+                                    pages/ (AlertRules, MultiParameterRulePage, RuleCreatePage),
+                                    ruleCategories.js, rulePresentation.js (+ test)
         configuration/pages/        RuleLibrary, CollectionLibrary, visibility dialog,
                                     DocumentsPage / DocumentCreatePage / DocumentViewerPage /
                                     CreateInstructionPage (utils/documents.js helpers),

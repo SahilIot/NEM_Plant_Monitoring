@@ -19,15 +19,24 @@ completing maintenance.
 | `POST /rules/{rule_id}/reset-progress` | Reset every eligible interval of the rule in one transaction; other parameters are untouched. |
 
 Both accept `{"dry_run": true}` to preview what would be reset or skipped.
-Only **Administrators and Supervisors** may reset (others get 403). A parameter
-is skipped (409 for the single-parameter endpoint) when it is not an interval
-parameter of an interval-based rule, the rule is not active, the parameter is
-not active, or maintenance for that interval is already in progress (complete
-it instead).
+Only **Administrators and Supervisors** may reset (others get 403). Both
+endpoints return 404 for an unknown rule (or one outside the caller's asset
+scope), and 422 when the rule is not of type `multi_parameter`. The
+single-parameter endpoint also returns 404 for a parameter not in the rule.
+
+A parameter cannot be reset when it is not an interval parameter of an
+interval-based rule, the rule is not active, the parameter is not active, or
+maintenance for that interval is already in progress (complete it instead).
+For the single-parameter endpoint this answers **409** with the reason. **Reset
+All** resets the eligible intervals and lists the others under `skipped` with a
+reason; if none is eligible (including a rule with no interval parameters) it
+answers **409** and changes nothing. A `dry_run` never answers 409 for this: it
+returns the `reset` and `skipped` lists (possibly empty) and changes nothing.
 
 A reset sets the interval's cycle baseline to now, returns its state to Normal
 with a value of 0, and resolves its active alerts (an `alert_resolved` event
-records who reset it). An unstarted maintenance schedule for that interval is
+records who reset it). The audit event for the reset itself is
+`interval_progress_reset_manual`. An unstarted maintenance schedule for that interval is
 cancelled with cancellation kind `progress_reset` and a fresh one is created
 for the new cycle, so nothing is duplicated.
 
@@ -45,7 +54,11 @@ rejected for other maintenance kinds). It applies to
   intervals after that moment); other interval types use the cycle baseline.
 - **Complete Without Reset** (`reset_progress: false`): `progress_reset`
   becomes `retained`; accumulated progress is kept, no new cycle starts, and a
-  `maintenance_completed_without_reset` event is recorded.
+  `maintenance_completed_without_reset` event is recorded. The source parameter
+  is then **deactivated** (it stops being evaluated and must be activated again
+  to start a new cycle). If no active parameter remains in the rule, the rule
+  itself is deactivated too and a `rule_deactivated` event is recorded. Nothing
+  is deactivated if the rule or parameter has since been deleted.
 
 Completion registration fields (`actual_completed_at`, `performed_by`, `notes`,
 `completion_notes`, `parts_used`, `checklist`, `actual_values`) are described in
@@ -86,8 +99,16 @@ copying rules. Changes record a `component_identifier_changed` event.
 
 ## Event log filtering and export
 
-- `GET /assets/{asset_id}/events` lists events; `component_identifier` filters
-  case-insensitively by the rule's identifier.
+- `GET /assets/{asset_id}/events` lists the asset's events that belong to a rule,
+  excluding events whose type starts with `maintenance_` (maintenance events
+  are not part of this event-log selection or its export).
+  `component_identifier` filters case-insensitively by the identifier.
+- The identifier shown on, and used to filter, an event is the rule's
+  **current** identifier (read from the rule when the log is queried), not a
+  snapshot taken when the event happened. Changing a rule's identifier
+  therefore changes how its older eligible events display, filter and export.
+  Events without a rule are not in the log, and an event whose rule has no
+  identifier shows none.
 - `GET /assets/{asset_id}/events/export?format=csv|json` exports with the same
   filters (`event_type`, `rule_id`, `severity`, `component_identifier`,
   `start_time`, `end_time`). `start_time` must not be later than `end_time`.
@@ -99,8 +120,13 @@ has the same kind of Excel export for its filtered entries.
 ## Rule suspension and activation
 
 `POST /rules/{rule_id}/suspend` and `/resume` are Administrator only.
-`POST /rules/{rule_id}/parameters/{parameter_id}/lifecycle` changes a single
-parameter's lifecycle. A parameter's lifecycle value is `active`, `suspended`
+`POST /rules/{rule_id}/parameters/{parameter_id}/lifecycle` (body
+`{"action": "suspend" | "resume" | "deactivate" | "activate"}`) changes a single
+parameter's lifecycle. Permissions: **activate** is allowed for Administrators
+and Supervisors; **suspend, resume and deactivate** are Administrator only
+(others get 403). It is built for `multi_parameter` rules; for an older
+single-parameter rule the one parameter is the whole rule, so the call performs
+the rule-level lifecycle transition instead. A parameter's lifecycle value is `active`, `suspended`
 or `deactivated` (database check constraint); a rule's lifecycle value is `in_progress`,
 `suspended`, `deactivated` or `completed` (`ck_nem_monitoring_rules_lifecycle_status`
 in `app/models/rule.py`). Names are in `app/core/constants.py`.
