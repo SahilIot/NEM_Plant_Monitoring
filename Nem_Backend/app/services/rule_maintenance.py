@@ -1,7 +1,7 @@
 # Creation and sync of maintenance schedules from eligible rules.
 from __future__ import annotations
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 from sqlalchemy import event, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -36,7 +36,12 @@ from app.core.constants import (
     STATUS_RESOLVED,
     STATUS_SUSPENDED,
     STATUS_UNKNOWN,
+    TIME,
     STATUS_WARNING,
+)
+from app.services.rule_calendar import (
+    calculate_calendar_date,
+    calculate_next_calendar_cycle,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -63,7 +68,15 @@ def is_eligible_rule(rule: MonitoringRule) -> bool:
 
 
 def _unit(parameter: RuleParameter) -> str:
-    return "cycles" if (parameter.config or {}).get(INTERVAL_PARAMETER) == COUNTER else "hours"
+    config = parameter.config or {}
+
+    if (
+        config.get(INTERVAL_PARAMETER) == TIME
+        and config.get("time_mode") == "calendar"
+    ):
+        return config.get("time_unit", "days")
+
+    return "cycles" if config.get(INTERVAL_PARAMETER) == COUNTER else "hours"
 
 # Checks rule and parameter lifecycle.
 def _rule_running(rule: MonitoringRule, parameter: RuleParameter) -> bool:
@@ -152,6 +165,43 @@ def _create_schedule_unsafe(session: Session, rule: MonitoringRule, parameter: R
     config = parameter.config or {}
     today = now.date()
     parameter.maintenance_scheduled_at = now
+    is_calendar_time = (
+        parameter.kind == INTERVAL
+        and config.get(INTERVAL_PARAMETER) == TIME
+        and config.get("time_mode") == "calendar"
+    )
+
+    if is_calendar_time:
+        calendar_start = date.fromisoformat(config["start_date"])
+
+        last_completed_at = session.scalar(
+            select(MaintenanceSchedule.last_completed_at)
+            .where(
+                MaintenanceSchedule.source_parameter_id == parameter.id,
+                MaintenanceSchedule.progress_reset == PROGRESS_RESET,
+                MaintenanceSchedule.last_completed_at.is_not(None),
+            )
+            .order_by(MaintenanceSchedule.last_completed_at.desc())
+            .limit(1)
+        )
+
+        if last_completed_at is None:
+            calendar_first_due = calculate_calendar_date(
+                calendar_start,
+                interval=int(config["due"]),
+                unit=config["time_unit"],
+            )
+        else:
+            calendar_first_due, _ = calculate_next_calendar_cycle(
+                calendar_start,
+                due_interval=int(config["due"]),
+                overdue_interval=int(config["overdue"]),
+                unit=config["time_unit"],
+                after=_aware(last_completed_at).date(),
+            )
+    else:
+        calendar_start = today
+        calendar_first_due = today
     schedule = MaintenanceSchedule(
         asset_id=rule.target_asset_id,
         title=f"{rule.name} – {parameter.name}"[:200],
@@ -162,9 +212,9 @@ def _create_schedule_unsafe(session: Session, rule: MonitoringRule, parameter: R
         schedule_mode=MODE,
         status=STATUS_ACTIVE,
         approval_status=APPROVAL_NOT_REQUIRED,
-        schedule_start_date=today,
-        current_period_start_date=today,
-        first_due_date=today,
+        schedule_start_date=calendar_start,
+        current_period_start_date=calendar_start,
+        first_due_date=calendar_first_due,
         current_progress=0.0,
         recurrence_enabled=False,
         source_rule_id=rule.id,
@@ -184,7 +234,11 @@ def _create_schedule_unsafe(session: Session, rule: MonitoringRule, parameter: R
     job = MaintenanceRecord(
         asset_id=schedule.asset_id, summary=schedule.title, notes=schedule.description,
         performed_by="Unassigned", maintenance_type=schedule.maintenance_type, status=STATUS_PLANNED,
-        planned_start_at=now, planned_end_at=now, planned_due_date=None, priority=schedule.priority,
+        # Sets the initial planned dates, using the calculated calendar due date when applicable.
+        planned_start_at=now,
+        planned_end_at=now,
+        planned_due_date=calendar_first_due if is_calendar_time else None,
+        priority=schedule.priority,
         schedule_id=schedule.id, start_eligibility=ELIGIBILITY_NOT_DUE,
     )
     session.add(job)
@@ -495,14 +549,28 @@ def apply_completion_decision(session: Session, schedule: MaintenanceSchedule, *
         return None
     rule, parameter = prepare_progress_reset(session, schedule)
     schedule.progress_reset = PROGRESS_RESET
-    # The new cycle counts from this instant. Readings stamped earlier never count; readings from now on do.
-    parameter.cycle_baseline_at = now
+    config = parameter.config or {}
+
+    is_calendar_time = (
+        parameter.kind == INTERVAL
+        and config.get(INTERVAL_PARAMETER) == TIME
+        and config.get("time_mode") == "calendar"
+    )
+
+    # Calendar Time keeps its original recurrence anchor.
+    # Other interval types continue using the existing reset baseline.
+    if not is_calendar_time:
+        parameter.cycle_baseline_at = now
     state = session.scalar(select(RuleParameterState).where(RuleParameterState.parameter_id == parameter.id)
                            .with_for_update().execution_options(populate_existing=True))
     if state is not None:
         state.aggregate_state = None
         state.status, state.latest_value, state.error_message = STATUS_NORMAL, 0.0, None
-        state.message = f"Progress was reset after maintenance; counting restarted at {now.isoformat()}."
+        state.message = (
+            "Maintenance completed. The next calendar cycle continues from the original start date."
+            if is_calendar_time
+            else f"Progress was reset after maintenance; counting restarted at {now.isoformat()}."
+        )
         state.last_evaluated_at = now
         state.completed_at = None
     for alert in session.scalars(select(Alert).where(

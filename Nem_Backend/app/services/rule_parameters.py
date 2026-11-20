@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import and_, or_, select
@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from pydantic import ValidationError
 
-from app.models import Alert, Asset, MonitoringRule, Reading, RuleParameter, RuleParameterState, RuleState, Variable
+from app.models import Alert, Asset, MaintenanceSchedule, MonitoringRule, Reading, RuleParameter, RuleParameterState, RuleState, Variable
 from app.core.constants import (
     ACTIVATION_AT,
     AGGREGATION,
@@ -46,6 +46,10 @@ from app.core.constants import (
     EVENT_ALERT_SEVERITY_CHANGED,
     EVENT_STALE_DATA_DETECTED,
     EVENT_WARNING_TRIGGERED,
+)
+from app.services.rule_calendar import (
+    calculate_calendar_date,
+    calculate_next_calendar_cycle,
 )
 
 LOGGER = logging.getLogger("nem_backend.monitoring")
@@ -310,6 +314,69 @@ def _evaluate_parameter(
     if parameter.kind == INTERVAL:
         interval = config.get(INTERVAL_PARAMETER)
         unit = "cycles" if interval == COUNTER else "hours"
+        # Calendar-based Time uses fixed calendar dates, not elapsed hours.
+        if interval == TIME and config.get("time_mode") == "calendar": 
+            try:
+                start_date = date.fromisoformat(config["start_date"])
+                today = now.date()
+
+                last_completed_at = session.scalar(
+                    select(MaintenanceSchedule.last_completed_at)
+                    .where(
+                        MaintenanceSchedule.source_parameter_id == parameter.id,
+                        MaintenanceSchedule.last_completed_at.is_not(None),
+                        MaintenanceSchedule.progress_reset == PROGRESS_RESET,
+                    )
+                    .order_by(MaintenanceSchedule.last_completed_at.desc())
+                    .limit(1)
+                )
+                if last_completed_at is None:
+                    due_date = calculate_calendar_date(
+                        start_date,
+                        interval=int(config["due"]),
+                        unit=config["time_unit"],
+                    )
+                    overdue_date = calculate_calendar_date(
+                        start_date,
+                        interval=int(config["overdue"]),
+                        unit=config["time_unit"],
+                    )
+                else:
+                    due_date, overdue_date = calculate_next_calendar_cycle(
+                        start_date,
+                        due_interval=int(config["due"]),
+                        overdue_interval=int(config["overdue"]),
+                        unit=config["time_unit"],
+                        after=_aware(last_completed_at).date(),
+                    )
+                if today >= overdue_date:
+                    return (
+                        STATUS_ALERT,
+                        None,
+                        None,
+                        f"Calendar maintenance is overdue. Overdue date: {overdue_date.isoformat()}.",
+                        None,
+                    )
+                if today >= due_date:
+                    return (
+                        STATUS_WARNING,
+                        None,
+                        None,
+                        f"Calendar maintenance is due. Due date: {due_date.isoformat()}.",
+                        None,
+                    )
+                return (
+                    STATUS_NORMAL,
+                    None,
+                    None,
+                    f"Next maintenance is due on {due_date.isoformat()}.",
+                    None,
+                )
+            except (KeyError, TypeError, ValueError):
+                return unknown(
+                    "Calendar Time configuration is invalid.",
+                    "invalid_calendar_time",
+                )
         activation = config.get(ACTIVATION_AT)
         start = _aware(rule.created_at)
         if activation:
@@ -860,122 +927,395 @@ def build_status_detail(session: Session, rule: MonitoringRule, now: datetime | 
     parameters = serialize_parameters(rule)
     alerts_by_parameter: dict[int, list[Alert]] = {}
     for alert in session.scalars(
-        select(Alert).where(Alert.rule_id == rule.id, Alert.parameter_id.is_not(None))
-        .order_by(Alert.started_at.desc(), Alert.id.desc()).limit(200)
+        select(Alert)
+        .where(
+            Alert.rule_id == rule.id,
+            Alert.parameter_id.is_not(None)
+        )
+        .order_by(Alert.started_at.desc(), Alert.id.desc())
+        .limit(200)
     ).all():
         alerts_by_parameter.setdefault(alert.parameter_id, []).append(alert)
-    variables = {v.id: v for v in session.scalars(
-        select(Variable).where(Variable.id.in_([p["variable_id"] for p in parameters if p["variable_id"]]))
-    ).all()} if parameters else {}
 
-    active = rule.is_enabled and rule.lifecycle_status == STATUS_IN_PROGRESS
+    variables = {
+        v.id: v
+        for v in session.scalars(
+            select(Variable).where(
+                Variable.id.in_([
+                    p["variable_id"]
+                    for p in parameters
+                    if p["variable_id"]
+                ])
+            )
+        ).all()
+    } if parameters else {}
+
+    active = (
+        rule.is_enabled
+        and rule.lifecycle_status == STATUS_IN_PROGRESS
+    )
+
     for item in parameters:
+
+        # Initialize config before accessing it.
+        config = item["config"] or {}
+
         variable = variables.get(item["variable_id"])
         item["variable_name"] = variable.name if variable else None
-        item["unit"] = (variable.unit if variable else None) or (
-            "hours" if item[KIND] == INTERVAL and (item["config"] or {}).get(INTERVAL_PARAMETER) in {USAGE, TIME}
-            else "cycles" if item[KIND] == INTERVAL else None)
+
+        item["unit"] = (
+            config.get("time_unit")
+            if (
+                item[KIND] == INTERVAL
+                and config.get(INTERVAL_PARAMETER) == TIME
+                and config.get("time_mode") == "calendar"
+            )
+            else (variable.unit if variable else None) or (
+                "hours"
+                if item[KIND] == INTERVAL
+                and config.get(INTERVAL_PARAMETER) in {USAGE, TIME}
+                else "cycles"
+                if item[KIND] == INTERVAL
+                else None
+            )
+        )
+
         reading_at = item["reading_at"]
-        age = (now - _aware(reading_at)).total_seconds() if reading_at else None
+        age = (
+            (now - _aware(reading_at)).total_seconds()
+            if reading_at else None
+        )
+
         item["reading_age_seconds"] = age
-        item["is_stale"] = bool(item["variable_id"]) and (age is None or age > stale_after)
-        # A parameter that is not in a usable state is reported on its own and never counted as Normal.
+        item["is_stale"] = (
+            bool(item["variable_id"])
+            and (age is None or age > stale_after)
+        )
+
+        # Parameter lifecycle and availability.
         lifecycle = item[LIFECYCLE_STATUS]
         evaluating = active and lifecycle == STATUS_ACTIVE
         item["evaluating"] = evaluating
         if not active:
-            # A suspended/deactivated rule is not evaluating: never show a leftover value or status.
-            item["status"], item["value"], item["active_alert"] = STATUS_UNKNOWN, None, None
-        elif lifecycle != STATUS_ACTIVE:
-            # Suspended/deactivated parameter: no status, but its preserved progress stays visible.
             item["status"] = STATUS_UNKNOWN
-        item["availability"] = ("inactive" if not active else
-                                lifecycle if lifecycle != STATUS_ACTIVE else
-                                "available" if item["status"] != STATUS_UNKNOWN else
-                                "variable_inactive" if item["error"] == "variable_inactive" else
-                                "awaiting_reading" if item["error"] == "awaiting_fresh_reading" else
-                                "stale" if item["error"] == "stale_reading" else "unavailable")
+            item["value"] = None
+            item["active_alert"] = None
+
+        elif lifecycle != STATUS_ACTIVE:
+            item["status"] = STATUS_UNKNOWN
+
+        item["availability"] = (
+            "inactive" if not active else
+            lifecycle if lifecycle != STATUS_ACTIVE else
+            "available" if item["status"] != STATUS_UNKNOWN else
+            "variable_inactive" if item["error"] == "variable_inactive" else
+            "awaiting_reading" if item["error"] == "awaiting_fresh_reading" else
+            "stale" if item["error"] == "stale_reading" else
+            "unavailable"
+        )
+
+        # Maintenance schedule calculation
         item[SCHEDULE] = None
-        if item[KIND] == INTERVAL:
-            config = item["config"] or {}
+
+        # Calendar-based Time interval.
+        if (
+            item[KIND] == INTERVAL
+            and config.get(INTERVAL_PARAMETER) == TIME
+            and config.get("time_mode") == "calendar"
+        ):
+            try:
+                calendar_start = date.fromisoformat(config["start_date"])
+                last_completed_at = session.scalar(
+                    select(MaintenanceSchedule.last_completed_at)
+                    .where(
+                        MaintenanceSchedule.source_parameter_id == item["id"],
+                        MaintenanceSchedule.last_completed_at.is_not(None),
+                        MaintenanceSchedule.progress_reset == PROGRESS_RESET,
+                    )
+                    .order_by(MaintenanceSchedule.last_completed_at.desc())
+                    .limit(1)
+                )
+                if last_completed_at is None:
+                    calendar_due, calendar_overdue = (
+                        calculate_calendar_date(
+                            calendar_start,
+                            interval=int(config["due"]),
+                            unit=config["time_unit"],
+                            ),
+                        calculate_calendar_date(
+                            calendar_start,
+                            interval=int(config["overdue"]),
+                            unit=config["time_unit"],
+                            ),
+                        )
+                else:
+                    calendar_due, calendar_overdue = calculate_next_calendar_cycle(
+                        calendar_start,
+                        due_interval=int(config["due"]),
+                        overdue_interval=int(config["overdue"]),
+                        unit=config["time_unit"],
+                        after=_aware(last_completed_at).date(),
+                        )
+
+                item[SCHEDULE] = {
+                    "start_at": calendar_start,
+                    "due_at": calendar_due,
+                    "overdue_at": calendar_overdue,
+                    "mode": "calendar_date",
+                    }
+            except (KeyError, TypeError, ValueError):
+                item[SCHEDULE] = {
+                    "start_at": None,
+                    "due_at": None,
+                    "overdue_at": None,
+                    "mode": "calendar_date",
+                }
+        # Runtime, usage and elapsed-time intervals.
+        elif item[KIND] == INTERVAL:
             start = _aware(rule.created_at)
             if config.get(ACTIVATION_AT):
                 try:
-                    start = max(start, _aware(datetime.fromisoformat(str(config[ACTIVATION_AT]).replace("Z", "+00:00"))))
+                    activation = datetime.fromisoformat(
+                        str(config[ACTIVATION_AT]).replace("Z", "+00:00")
+                    )
+                    start = max(start, _aware(activation))
                 except ValueError:
                     pass
             if item.get("cycle_baseline_at") is not None:
-                start = max(start, _aware(item["cycle_baseline_at"]))
-            item[SCHEDULE] = {"start_at": start}
-            if config.get(INTERVAL_PARAMETER) == TIME and config.get("due") is not None:
-                # Calendar intervals: the dates the Due and Overdue limits fall on (hours after activation).
-                item[SCHEDULE]["due_at"] = start + timedelta(hours=float(config["due"]))
-                item[SCHEDULE]["overdue_at"] = start + timedelta(hours=float(config["overdue"]))
+                start = max(
+                    start,
+                    _aware(item["cycle_baseline_at"])
+                )
+
+            item[SCHEDULE] = {
+                "start_at": start
+            }
+
+            if (
+                config.get(INTERVAL_PARAMETER) == TIME
+                and config.get("due") is not None
+            ):
+                item[SCHEDULE]["due_at"] = (
+                    start + timedelta(hours=float(config["due"]))
+                )
+
+                item[SCHEDULE]["overdue_at"] = (
+                    start + timedelta(hours=float(config["overdue"]))
+                )
+
+        # Live progress calculation
         item["live"] = None
-        if item[KIND] == INTERVAL and evaluating and item["status"] != STATUS_UNKNOWN and item["last_evaluated_at"]:
-            config = item["config"] or {}
-            if item["variable_id"] is None and config.get(INTERVAL_PARAMETER) == TIME:
-                item["live"] = {"mode": CALENDAR, "baseline_at": item["last_evaluated_at"]}
-            elif item[AGGREGATION] == TIMER and config.get(INTERVAL_PARAMETER) in {USAGE, TIME}:
-                # Freshness comes from the newest reading (the collector re-reads running signals between two
-                # evaluations) and uses the same running-signal timeout as the evaluator's runtime credit.
-                newest = _latest_reading(session, variables[item["variable_id"]], not_after=now) if item["variable_id"] in variables else None
-                seen_at = _aware(newest.recorded_at) if newest else (_aware(item["reading_at"]) if item["reading_at"] else None)
-                limit = runtime_credit_limit(stale_after, newest.source_id if newest else None)
-                fresh_until = seen_at + timedelta(seconds=limit) if seen_at else None
-                state_value = newest.value if newest else item["raw_value"]
-                # The evaluator credits an ON segment up to its last reading's timestamp even when that stamp is a
-                # little later than the evaluation instant, so the value is exact as of the later of the two.
-                baseline = max(_aware(item["last_evaluated_at"]), _aware(item["reading_at"])) if item["reading_at"] else item["last_evaluated_at"]
+
+        if (
+            item[KIND] == INTERVAL
+            and evaluating
+            and item["status"] != STATUS_UNKNOWN
+            and item["last_evaluated_at"]
+        ):
+
+            # Calendar-free elapsed-time interval.
+            if (
+                item["variable_id"] is None
+                and config.get(INTERVAL_PARAMETER) == TIME
+                and config.get("time_mode") != "calendar"
+            ):
+                item["live"] = {
+                    "mode": CALENDAR,
+                    "baseline_at": item["last_evaluated_at"],
+                }
+
+            # PLC running-hours timer.
+            elif (
+                item[AGGREGATION] == TIMER
+                and config.get(INTERVAL_PARAMETER) in {USAGE, TIME}
+            ):
+
+                newest = (
+                    _latest_reading(
+                        session,
+                        variables[item["variable_id"]],
+                        not_after=now,
+                    )
+                    if item["variable_id"] in variables
+                    else None
+                )
+
+                seen_at = (
+                    _aware(newest.recorded_at)
+                    if newest
+                    else (
+                        _aware(item["reading_at"])
+                        if item["reading_at"]
+                        else None
+                    )
+                )
+
+                limit = runtime_credit_limit(
+                    stale_after,
+                    newest.source_id if newest else None
+                )
+
+                fresh_until = (
+                    seen_at + timedelta(seconds=limit)
+                    if seen_at else None
+                )
+
+                state_value = (
+                    newest.value
+                    if newest
+                    else item["raw_value"]
+                )
+
+                baseline = (
+                    max(
+                        _aware(item["last_evaluated_at"]),
+                        _aware(item["reading_at"]),
+                    )
+                    if item["reading_at"]
+                    else item["last_evaluated_at"]
+                )
+
                 item["live"] = {
                     "mode": TIMER,
                     "baseline_at": baseline,
-                    # Already credited up to the timeout: the stored value is final, the display must not move.
-                    "running": bool(_as_bool(state_value) is True and fresh_until is not None and fresh_until > _aware(baseline)),
+                    "running": bool(
+                        _as_bool(state_value) is True
+                        and fresh_until is not None
+                        and fresh_until > _aware(baseline)
+                    ),
                     "running_until": fresh_until,
                 }
-        history = [_alert_view(a) for a in alerts_by_parameter.get(item["id"], [])]
-        item["active_alert"] = next((a for a in history if a["status"] == STATUS_ACTIVE), None)
+
+        # Alert history
+        history = [
+            _alert_view(a)
+            for a in alerts_by_parameter.get(item["id"], [])
+        ]
+
+        item["active_alert"] = next(
+            (
+                a for a in history
+                if a["status"] == STATUS_ACTIVE
+            ),
+            None
+        )
         item["alert_history"] = history[:10]
 
-    # Only parameters that are actually being evaluated take part in the parent status.
-    evaluated_items = [p for p in parameters if p["evaluating"]]
-    summary = overall_summary([(p["name"], p["status"]) for p in evaluated_items])
-    determined_by = [p["id"] for p in evaluated_items if p["status"] == summary["status"]]
-    counts = {name: sum(1 for p in parameters if p[LIFECYCLE_STATUS] == name) for name in (STATUS_ACTIVE, STATUS_SUSPENDED, STATUS_DEACTIVATED)}
+    # Overall multi-parameter rule status
+    evaluated_items = [
+        p for p in parameters
+        if p["evaluating"]
+    ]
+
+    summary = overall_summary([
+        (p["name"], p["status"])
+        for p in evaluated_items
+    ])
+
+    determined_by = [
+        p["id"]
+        for p in evaluated_items
+        if p["status"] == summary["status"]
+    ]
+
+    counts = {
+        name: sum(
+            1 for p in parameters
+            if p[LIFECYCLE_STATUS] == name
+        )
+        for name in (
+            STATUS_ACTIVE,
+            STATUS_SUSPENDED,
+            STATUS_DEACTIVATED
+        )
+    }
+
     if not active:
         mode = "rule_inactive"
+
     elif evaluated_items:
         mode = "evaluating"
+
     elif parameters and counts[STATUS_DEACTIVATED] == len(parameters):
         mode = "all_deactivated"
+
     elif parameters and counts[STATUS_SUSPENDED] == len(parameters):
         mode = "all_suspended"
+
     else:
         mode = "no_active_parameters"
-    evaluated = [p["last_evaluated_at"] for p in parameters if p["last_evaluated_at"]]
+
+    evaluated = [
+        p["last_evaluated_at"]
+        for p in parameters
+        if p["last_evaluated_at"]
+    ]
+
     category = (rule.parameters or {}).get("category")
+
     return {
         "rule": {
-            "id": rule.id, "name": rule.name, RULE_TYPE: rule.rule_type,
-            "type": CATEGORY_INTERVAL_BASED if category == CATEGORY_INTERVAL_BASED else RULE_PARAMETER_THRESHOLD,
-            "is_enabled": rule.is_enabled, LIFECYCLE_STATUS: rule.lifecycle_status, "completed_at": rule.completed_at,
-            "asset_id": rule.target_asset_id, "asset_name": asset.name if asset else None,
-            "calculation_period_seconds": (rule.parameters or {}).get("calculation_period_seconds"),
+            "id": rule.id,
+            "name": rule.name,
+            RULE_TYPE: rule.rule_type,
+
+            "type": (
+                CATEGORY_INTERVAL_BASED
+                if category == CATEGORY_INTERVAL_BASED
+                else RULE_PARAMETER_THRESHOLD
+            ),
+
+            "is_enabled": rule.is_enabled,
+            LIFECYCLE_STATUS: rule.lifecycle_status,
+            "completed_at": rule.completed_at,
+
+            "asset_id": rule.target_asset_id,
+            "asset_name": asset.name if asset else None,
+
+            "calculation_period_seconds": (
+                (rule.parameters or {}).get(
+                    "calculation_period_seconds"
+                )
+            ),
+
             "stale_after_seconds": stale_after,
         },
+
         "overall": {
-            "status": summary["status"] if evaluated_items else STATUS_UNKNOWN,
+            "status": (
+                summary["status"]
+                if evaluated_items
+                else STATUS_UNKNOWN
+            ),
+
             "evaluating": bool(evaluated_items),
             "mode": mode,
             "counts": counts,
             "strategy": "worst_parameter_wins",
             "determined_by": determined_by,
-            "unavailable_ids": [p["id"] for p in evaluated_items if p["status"] == STATUS_UNKNOWN],
+
+            "unavailable_ids": [
+                p["id"]
+                for p in evaluated_items
+                if p["status"] == STATUS_UNKNOWN
+            ],
+
             "parameter_count": len(parameters),
-            "rule_state_status": rule_state.status if rule_state else None,
-            "message": rule_state.message if rule_state else "",
-            "last_evaluated_at": (rule_state.last_evaluated_at if rule_state else None) or (max(evaluated) if evaluated else None),
+
+            "rule_state_status": (
+                rule_state.status
+                if rule_state else None
+            ),
+
+            "message": (
+                rule_state.message
+                if rule_state else ""
+            ),
+
+            "last_evaluated_at": (
+                (rule_state.last_evaluated_at if rule_state else None)
+                or (max(evaluated) if evaluated else None)
+            ),
         },
         "parameters": parameters,
         "server_time": now,

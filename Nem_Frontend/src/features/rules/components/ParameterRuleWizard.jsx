@@ -350,12 +350,55 @@ export default function ParameterRuleWizard({
     );
   };
 
-  const intervalLimits = (p) => validateLimits(p.intervalParameter, p.due, p.overdue);
+  // Handles calendar-based intervals separately from variable-based intervals,
+  // validates whole-number limits, and displays the appropriate interval demo.
+  const intervalUnit = (p) =>
+  p.intervalParameter === "time" && p.timeMode === "calendar"
+    ? p.timeUnit || "days"
+    : parameterById(p.intervalParameter).unit;
+
+  const intervalLimits = (p) => {
+  const result = validateLimits(p.intervalParameter, p.due, p.overdue);
+
+  if (p.intervalParameter === "time" && p.timeMode === "calendar") {
+    if (result.due !== null && !Number.isSafeInteger(result.due)) {
+      result.errors.due = "Due must be a whole number.";
+      result.due = null;
+    }
+
+    if (result.overdue !== null && !Number.isSafeInteger(result.overdue)) {
+      result.errors.overdue = "Overdue must be a whole number.";
+      result.overdue = null;
+    }
+  }
+
+  return result;
+};
   const intervalDemo = (p) => {
-    const variable = variableOf(p);
-    const l = intervalLimits(p);
-    return <IntervalDemo parameterId={p.intervalParameter} due={l.due} overdue={l.overdue} actual={actualFor(p, variable, readings[variable?.id])} />;
-  };
+  const l = intervalLimits(p);
+
+  if (p.intervalParameter === "time" && p.timeMode === "calendar") {
+    return (
+      <IntervalDemo
+        parameterId="time"
+        due={l.due}
+        overdue={l.overdue}
+        calendarUnit={p.timeUnit || "days"}
+      />
+    );
+  }
+
+  const variable = variableOf(p);
+
+  return (
+    <IntervalDemo
+      parameterId={p.intervalParameter}
+      due={l.due}
+      overdue={l.overdue}
+      actual={actualFor(p, variable, readings[variable?.id])}
+    />
+  );
+};
 
   const intervalGeneralCard = (p, index) => (
     <section key={p.uid} className="pw-card" aria-label={`Parameter ${index + 1}`}>
@@ -368,11 +411,82 @@ export default function ParameterRuleWizard({
           </button>
         ))}
       </div>
-      {p.intervalParameter === "time" && !templateMode && (
-        <RuleField id={`act-${p.uid}`} label="Start counting on *" hint="Nothing is counted before this date and time.">
-          <input id={`act-${p.uid}`} type="datetime-local" value={p.activationAt} onChange={(e) => update(p.uid, { activationAt: e.target.value })} disabled={locked} />
+      {/* Allows selecting elapsed-time or calendar-based intervals.
+    Calendar mode uses a unit and start date; elapsed mode uses an activation date. */}
+      {p.intervalParameter === "time" && (
+        <>
+        <RuleField
+        id={`time-mode-${p.uid}`}
+        label="Time Mode *"
+        hint="Choose elapsed time or a fixed calendar-based schedule."
+        >
+          <select
+          id={`time-mode-${p.uid}`}
+          value={p.timeMode || "elapsed"}
+          onChange={(e) => {
+            const mode = e.target.value;
+            update(p.uid, mode === "calendar"
+              ? { timeMode: mode, aggregation: "none", variableId: "", variableKey: "" }
+              : { timeMode: mode }
+            );
+          }}
+          disabled={locked}
+          >
+            <option value="elapsed">Elapsed Time</option>
+            <option value="calendar">Calendar Time</option>
+          </select>
         </RuleField>
-      )}
+        {p.timeMode === "calendar" ? (
+          <>
+          <RuleField
+          id={`time-unit-${p.uid}`}
+          label="Calendar Unit *"
+          >
+            <select
+            id={`time-unit-${p.uid}`}
+            value={p.timeUnit || "days"}
+            onChange={(e) => update(p.uid, { timeUnit: e.target.value })}
+            disabled={locked}
+            >
+              <option value="days">Days</option>
+              <option value="weeks">Weeks</option>
+              <option value="months">Months</option>
+              <option value="years">Years</option>
+            </select>
+          </RuleField>
+          <RuleField
+          id={`start-date-${p.uid}`}
+          label="Calendar Start Date *"
+          hint="The recurring calendar schedule is anchored to this date."
+          >
+          <input
+            id={`start-date-${p.uid}`}
+            type="date"
+            value={p.startDate || ""}
+            onChange={(e) => update(p.uid, { startDate: e.target.value })}
+            disabled={locked}
+          />
+        </RuleField>
+      </>
+    ) : (
+      !templateMode && (
+        <RuleField
+          id={`act-${p.uid}`}
+          label="Start counting on *"
+          hint="Nothing is counted before this date and time."
+        >
+          <input
+            id={`act-${p.uid}`}
+            type="datetime-local"
+            value={p.activationAt}
+            onChange={(e) => update(p.uid, { activationAt: e.target.value })}
+            disabled={locked}
+          />
+        </RuleField>
+      )
+    )}
+  </>
+)}
       {intervalDemo(p)}
     </section>
   );
@@ -387,9 +501,21 @@ export default function ParameterRuleWizard({
     } else if (p.kind === "boolean") {
       detail = `Expected ${p.expected ? "TRUE" : "FALSE"}; otherwise ${p.severity}`;
     } else {
-      const l = intervalLimits(p);
-      detail = `Due ${formatAmount(l.due, p.intervalParameter)} · Overdue ${formatAmount(l.overdue, p.intervalParameter)}`;
-    }
+  // Formats due and overdue limits using calendar units or the parameter's measurement unit.
+  const l = intervalLimits(p);
+  const calendarTime =
+    p.intervalParameter === "time" && p.timeMode === "calendar";
+  const unit = intervalUnit(p);
+
+  const formatLimit = (value) => {
+    if (value === null || value === undefined) return "—";
+    return calendarTime
+      ? `${value} ${unit}`
+      : formatAmount(value, p.intervalParameter);
+  };
+
+  detail = `Due ${formatLimit(l.due)} · Overdue ${formatLimit(l.overdue)}`;
+}
     return (
       <li key={p.uid} className="pw-review-item">
         <strong>{p.name}</strong>
@@ -477,16 +603,24 @@ export default function ParameterRuleWizard({
         {stepName === "Variables" && (
           <div className="pw-section">
             {title("2 · Variable mapping")}
-            {values.parameters.map((p, index) => (
+            {/* Displays each configured parameter with its unit, aggregation,
+            PLC signal connection guidance, and validation messages. */}
+            {values.parameters.map((p, index) => {
+              const info = parameterById(p.intervalParameter);
+              const unit = intervalUnit(p);
+              return (
               <section key={p.uid} className="pw-card" aria-label={`Parameter ${index + 1}`}>
-                <div className="pw-card-head"><span className="pw-index" aria-hidden="true">{index + 1}</span><strong className="pw-static">{p.name}</strong><span className="iw-chip">{parameterById(p.intervalParameter).label}</span></div>
+                <div className="pw-card-head"><span className="pw-index" aria-hidden="true">{index + 1}</span><strong className="pw-static">{p.name}</strong><span className="iw-chip">{info.label} · {unit}</span></div>
                 {aggregationSelect(p)}
                 {p.intervalParameter === "time" && p.aggregation === "none" && !p.variableId
-                  ? <p className="iw-help">Calendar-based Time interval: no PLC variable is needed. Elapsed hours are counted from the start time.</p>
-                  : connect(p, "Choose the signal that drives this interval.")}
-                {cardProblems(p)}
-              </section>
-            ))}
+                  ? <p className="iw-help">{p.timeMode === "calendar"
+                    ? `Calendar Time: no PLC variable is needed. Due and Overdue are measured in ${p.timeUnit || "days"} from the selected calendar start date.`
+                    : "Elapsed Time: no PLC variable is needed. Elapsed hours are counted from the start time."}</p>
+                    : connect(p, "Choose the signal that drives this interval.")}
+                  {cardProblems(p)}
+                </section>
+              );
+            })}
           </div>
         )}
 
@@ -495,17 +629,24 @@ export default function ParameterRuleWizard({
             {title("3 · Due and Overdue limits")}
             {values.parameters.map((p, index) => {
               const info = parameterById(p.intervalParameter);
+              const unit = intervalUnit(p);
+              const wholeNumber = info.aggregation === "counter" ||
+              (p.intervalParameter === "time" && p.timeMode === "calendar");
               const l = intervalLimits(p);
               return (
                 <section key={p.uid} className="pw-card" aria-label={`Parameter ${index + 1}`}>
-                  <div className="pw-card-head"><span className="pw-index" aria-hidden="true">{index + 1}</span><strong className="pw-static">{p.name}</strong><span className="iw-chip">{info.label} · {info.unit}</span></div>
+                  <div className="pw-card-head"><span className="pw-index" aria-hidden="true">{index + 1}</span><strong className="pw-static">{p.name}</strong><span className="iw-chip">{info.label} · {unit}</span></div>
                   <div className="pw-limits">
-                    <RuleField id={`due-${p.uid}`} label={`Due limit (${info.unit}) *`} hint="Maintenance is due at this value.">
-                      <UnitInput unit={info.unit}><input id={`due-${p.uid}`} type="number" min="0" step={info.aggregation === "counter" ? "1" : "any"} value={p.due} onChange={(e) => update(p.uid, { due: e.target.value })} disabled={disabled} /></UnitInput>
+                    <RuleField id={`due-${p.uid}`} label={`Due limit (${unit}) *`} hint="Maintenance is due at this value.">
+                      <UnitInput unit={unit}>
+                        <input id={`due-${p.uid}`} type="number" min="0" step={wholeNumber ? "1" : "any"} value={p.due} onChange={(e) => update(p.uid, { due: e.target.value })} disabled={disabled} />
+                      </UnitInput>
                       <small className="rule-field-warning">{p.due !== "" ? l.errors.due : ""}</small>
                     </RuleField>
-                    <RuleField id={`over-${p.uid}`} label={`Overdue limit (${info.unit}) *`} hint="Maintenance is overdue once this value is reached.">
-                      <UnitInput unit={info.unit}><input id={`over-${p.uid}`} type="number" min="0" step={info.aggregation === "counter" ? "1" : "any"} value={p.overdue} onChange={(e) => update(p.uid, { overdue: e.target.value })} disabled={disabled} /></UnitInput>
+                    <RuleField id={`over-${p.uid}`} label={`Overdue limit (${unit}) *`} hint="Maintenance is overdue once this value is reached.">
+                      <UnitInput unit={unit}>
+                        <input id={`over-${p.uid}`} type="number" min="0" step={wholeNumber ? "1" : "any"} value={p.overdue} onChange={(e) => update(p.uid, { overdue: e.target.value })} disabled={disabled} />
+                      </UnitInput>
                       <small className="rule-field-warning">{p.overdue !== "" ? l.errors.overdue : ""}</small>
                     </RuleField>
                   </div>

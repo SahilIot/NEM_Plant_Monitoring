@@ -37,7 +37,19 @@ export const newKey = () =>
 export function newParameter(category, index = 1) {
   const base = { uid: newKey(), name: "", variableId: "", aggregation: "none" };
   if (category === "interval_based") {
-    return { ...base, kind: "interval", intervalParameter: "usage", aggregation: "timer", due: "", overdue: "", activationAt: "", name: `Interval ${index}` };
+    return {
+  ...base,
+  kind: "interval",
+  intervalParameter: "usage",
+  aggregation: "timer",
+  due: "",
+  overdue: "",
+  activationAt: "",
+  timeMode: "elapsed",
+  timeUnit: "days",
+  startDate: "",
+  name: `Interval ${index}`,
+};
   }
   return { ...base, kind: "number", name: `Parameter ${index}`, limits: { lower_alert: "", lower_warning: "", upper_warning: "", upper_alert: "" }, unit: "", expected: true, severity: "alert" };
 }
@@ -182,6 +194,31 @@ export function validateForm(values, category, variables, templateMode = false) 
       if (errors.overdue) list.push(errors.overdue);
       if (parameter.intervalParameter === "time" && !calendar && !parameter.activationAt && !templateMode) list.push("Choose when counting should start.");
     }
+    if (parameter.intervalParameter === "time" && parameter.timeMode === "calendar") {
+  if (!["days", "weeks", "months", "years"].includes(parameter.timeUnit)) {
+    list.push("Choose a valid calendar time unit.");
+  }
+
+  if (!parameter.startDate) {
+    list.push("Choose a calendar start date.");
+  } else if (!/^\d{4}-\d{2}-\d{2}$/.test(parameter.startDate)) {
+    list.push("Start date must use YYYY-MM-DD format.");
+  }
+
+  if (
+    parameter.due.trim() !== "" &&
+    !Number.isInteger(Number(parameter.due))
+  ) {
+    list.push("Calendar Due must be a whole number.");
+  }
+
+  if (
+    parameter.overdue.trim() !== "" &&
+    !Number.isInteger(Number(parameter.overdue))
+  ) {
+    list.push("Calendar Overdue must be a whole number.");
+  }
+}
   }
   return problems;
 }
@@ -215,6 +252,10 @@ export function buildMultiParameterPayload(values, category) {
         return { ...base, config: { expected: parameter.expected, severity: parameter.severity } };
       }
       const info = parameterById(parameter.intervalParameter);
+      const calendarTime =
+        parameter.intervalParameter === "time" &&
+        parameter.timeMode === "calendar";
+
       return {
         ...base,
         aggregation: info.aggregation === "counter" ? "counter" : parameter.variableId ? "timer" : "none",
@@ -222,7 +263,16 @@ export function buildMultiParameterPayload(values, category) {
           interval_parameter: parameter.intervalParameter,
           due: Number(parameter.due),
           overdue: Number(parameter.overdue),
-          ...(parameter.intervalParameter === "time" && parameter.activationAt ? { activation_at: new Date(parameter.activationAt).toISOString() } : {}),
+          ...(calendarTime
+            ? {
+                time_mode: "calendar",
+                time_unit: parameter.timeUnit,
+                start_date: parameter.startDate,
+              }
+            : {}),
+          ...(!calendarTime && parameter.intervalParameter === "time" && parameter.activationAt
+            ? { activation_at: new Date(parameter.activationAt).toISOString() }
+            : {}),
         },
       };
     }),
@@ -254,12 +304,34 @@ export function buildTemplateParameters(values, category) {
         return { ...base, config: { ...Object.fromEntries(Object.keys(parameter.limits).map((k) => [k, toNumber(parameter.limits[k])])), unit: parameter.unit || "" } };
       }
       if (parameter.kind === "boolean") return { ...base, config: { expected: parameter.expected, severity: parameter.severity } };
-      const calendar = parameter.intervalParameter === "time" && parameter.aggregation === "none";
+      // Builds the interval parameter payload, handling calendar-based intervals
+      // separately from PLC-variable-based intervals.
+      const calendarTime =
+        parameter.intervalParameter === "time" &&
+        parameter.timeMode === "calendar";
+
+      const calendarWithoutVariable =
+        parameter.intervalParameter === "time" &&
+        parameter.aggregation === "none";
+
       return {
         ...base,
-        aggregation: parameter.intervalParameter === "counter" ? "counter" : calendar ? "none" : "timer",
-        uses_variable: !calendar,
-        config: { interval_parameter: parameter.intervalParameter, due: Number(parameter.due), overdue: Number(parameter.overdue) },
+        aggregation: parameter.intervalParameter === "counter"
+          ? "counter"
+          : calendarWithoutVariable ? "none" : "timer",
+        uses_variable: !calendarWithoutVariable,
+        config: {
+          interval_parameter: parameter.intervalParameter,
+          due: Number(parameter.due),
+          overdue: Number(parameter.overdue),
+          ...(calendarTime
+            ? {
+                time_mode: "calendar",
+                time_unit: parameter.timeUnit,
+                start_date: parameter.startDate,
+              }
+            : {}),
+        },
       };
     }),
   };
@@ -284,7 +356,18 @@ export function valuesFromTemplate(template) {
       const base = { uid: def.key, key: def.key, name: def.name, variableId: "", variableKey: def.variable_key || "", aggregation: def.aggregation };
       const config = def.config || {};
       if (def.kind === "interval") {
-        return { ...base, kind: "interval", intervalParameter: config.interval_parameter, due: text(config.due), overdue: text(config.overdue), activationAt: "" };
+        // Restores saved interval settings, including calendar mode, time unit, and start date.
+        return {
+          ...base,
+          kind: "interval",
+          intervalParameter: config.interval_parameter,
+          due: text(config.due),
+          overdue: text(config.overdue),
+          activationAt: "",
+          timeMode: config.time_mode === "calendar" ? "calendar" : "elapsed",
+          timeUnit: config.time_unit || "days",
+          startDate: config.start_date || "",
+        };
       }
       if (def.kind === "boolean") return { ...base, kind: "boolean", limits: { lower_alert: "", lower_warning: "", upper_warning: "", upper_alert: "" }, unit: "", expected: config.expected !== false, severity: config.severity || "alert" };
       return { ...base, kind: "number", limits: Object.fromEntries(NUMBER_LIMITS.map(({ key }) => [key, text(config[key])])), unit: config.unit || "", expected: true, severity: "alert" };
