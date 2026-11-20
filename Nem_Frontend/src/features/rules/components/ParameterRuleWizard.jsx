@@ -258,7 +258,7 @@ export default function ParameterRuleWizard({
     <div className="pw-card-head">
       <span className="pw-index" aria-hidden="true">{index + 1}</span>
       <input aria-label={`Parameter ${index + 1} name`} className="pw-name" value={p.name} maxLength={200}
-        onChange={(e) => update(p.uid, { name: e.target.value })} disabled={locked} placeholder="Parameter name" />
+        onChange={(e) => update(p.uid, { name: e.target.value })} disabled={locked} placeholder="Enter parameter name" required aria-required="true" />
       {!singleParameter && <div className="pw-card-actions">
         <button type="button" className="btn-outline" aria-label={`Move ${p.name || "parameter"} up`} disabled={locked || index === 0} onClick={() => move(index, -1)}>↑</button>
         <button type="button" className="btn-outline" aria-label={`Move ${p.name || "parameter"} down`} disabled={locked || index === values.parameters.length - 1} onClick={() => move(index, 1)}>↓</button>

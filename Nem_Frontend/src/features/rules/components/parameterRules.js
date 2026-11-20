@@ -49,10 +49,10 @@ export function newParameter(category, index = 1) {
   timeUnit: "days",
   startDate: "",
   startTime: "",
-  name: `Interval ${index}`,
+  name: "", // never auto-named: the user must enter a parameter name
 };
   }
-  return { ...base, kind: "number", name: `Parameter ${index}`, limits: { lower_alert: "", lower_warning: "", upper_warning: "", upper_alert: "" }, unit: "", expected: true, severity: "alert" };
+  return { ...base, kind: "number", name: "", limits: { lower_alert: "", lower_warning: "", upper_warning: "", upper_alert: "" }, unit: "", expected: true, severity: "alert" };
 }
 
 /** Calendar Time is decided by the Time Mode alone (never by aggregation). */
@@ -216,7 +216,7 @@ export function validateForm(values, category, variables, templateMode = false) 
   for (const parameter of values.parameters) {
     const list = (problems[parameter.uid] = []);
     const name = parameter.name.trim();
-    if (!name) list.push("Enter a parameter name.");
+    if (!name) list.push("Please enter a parameter name.");
     else if (names.has(name.toLowerCase())) list.push("Parameter names must be unique within a rule.");
     names.add(name.toLowerCase());
 

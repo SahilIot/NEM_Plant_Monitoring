@@ -4,6 +4,7 @@ import { ArrowLeft, Pencil, X } from "lucide-react";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { RuleField, UnitInput } from "./RuleFormParts.jsx";
+import CalendarStartFields from "./CalendarStartFields.jsx";
 import VariableSelector from "./VariableSelector.jsx";
 import { parameterById, validateLimits } from "./intervalConfig.js";
 import {
@@ -206,7 +207,7 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
   const problems = useMemo(() => {
     if (!selected || !form) return [];
     const list = [];
-    if (!form.name.trim()) list.push("Enter a parameter name.");
+    if (!form.name.trim()) list.push("Please enter a parameter name.");
     else if (loaded.parameters.some((other) => other.id !== selected.id && other.name.trim().toLowerCase() === form.name.trim().toLowerCase())) {
       list.push("Another parameter in this rule already has this name.");
     }
@@ -371,7 +372,7 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
 
       <Section title="Parameter information">
         <RuleField id="pe-name" label="Parameter name *" wide>
-          <input id="pe-name" value={form.name} maxLength={200} disabled={saving || supervisor} autoComplete="off" onChange={(e) => patch({ name: e.target.value })} />
+          <input id="pe-name" value={form.name} maxLength={200} placeholder="Enter parameter name" disabled={saving || supervisor} autoComplete="off" onChange={(e) => patch({ name: e.target.value })} />
         </RuleField>
         <div className="form-group form-group-wide">
           <label>{calendar ? "Variable" : "Connected PLC variable *"}</label>

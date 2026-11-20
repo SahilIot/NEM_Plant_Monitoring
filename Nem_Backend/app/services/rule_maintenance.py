@@ -40,10 +40,7 @@ from app.core.constants import (
     STATUS_WARNING,
 )
 from app.services.rule_calendar import (
-    calculate_calendar_date,
-    calculate_next_calendar_cycle,
-    calendar_start_at,
-    calculate_calendar_cycle_at,
+    calendar_cycle,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -174,9 +171,6 @@ def _create_schedule_unsafe(session: Session, rule: MonitoringRule, parameter: R
     )
 
     if is_calendar_time:
-        start_at = calendar_start_at(config)
-        calendar_start = start_at.date() if start_at is not None else date.fromisoformat(config["start_date"])
-
         last_completed_at = session.scalar(
             select(MaintenanceSchedule.last_completed_at)
             .where(
@@ -187,29 +181,9 @@ def _create_schedule_unsafe(session: Session, rule: MonitoringRule, parameter: R
             .order_by(MaintenanceSchedule.last_completed_at.desc())
             .limit(1)
         )
-
-        if start_at is not None:
-            calendar_first_due = calculate_calendar_cycle_at(
-                start_at,
-                due_interval=int(config["due"]),
-                overdue_interval=int(config["overdue"]),
-                unit=config["time_unit"],
-                after=_aware(last_completed_at) if last_completed_at is not None else None,
-            )[0].date()
-        elif last_completed_at is None:
-            calendar_first_due = calculate_calendar_date(
-                calendar_start,
-                interval=int(config["due"]),
-                unit=config["time_unit"],
-            )
-        else:
-            calendar_first_due, _ = calculate_next_calendar_cycle(
-                calendar_start,
-                due_interval=int(config["due"]),
-                overdue_interval=int(config["overdue"]),
-                unit=config["time_unit"],
-                after=_aware(last_completed_at).date(),
-            )
+        baseline, first_due, _ = calendar_cycle(config, last_completed_at)
+        calendar_start = baseline.date() if isinstance(baseline, datetime) else baseline
+        calendar_first_due = first_due.date() if isinstance(first_due, datetime) else first_due
     else:
         calendar_start = today
         calendar_first_due = today

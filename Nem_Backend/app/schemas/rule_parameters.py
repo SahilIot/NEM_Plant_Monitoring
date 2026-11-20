@@ -46,7 +46,7 @@ def _number(value: Any) -> float | None:
 class RuleParameterIn(ORMModel):
     # Stable identity. Omit it for a new parameter; send it back unchanged to edit one in place.
     key: str | None = Field(default=None, min_length=8, max_length=36)
-    name: str = Field(min_length=1, max_length=200)
+    name: str = Field(max_length=200)
     kind: Literal["number", "boolean", "interval"]
     variable_id: int | None = Field(default=None, gt=0)
     aggregation: Literal["none", "counter", "last", "timer"] = "none"
@@ -57,7 +57,7 @@ class RuleParameterIn(ORMModel):
     def strip_name(cls, value: str) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("Parameter name cannot be empty")
+            raise ValueError("Please enter a parameter name.")
         return value
 
     @model_validator(mode="after")

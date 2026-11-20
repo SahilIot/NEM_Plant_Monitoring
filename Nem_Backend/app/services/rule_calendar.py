@@ -148,3 +148,37 @@ def calculate_calendar_cycle_at(
         at(low * due_interval),
         at(low * due_interval + (overdue_interval - due_interval)),
     )
+
+# One definition of a Calendar Time cycle, shared by the evaluator, the status card and maintenance scheduling.
+# Without a reset completion the cycle runs from the saved Calendar Start (a date only for rules saved before a
+# start time existed). After "Reset & Start Next Cycle" the baseline IS the actual completion timestamp: due and
+# overdue are the configured intervals after it, so elapsed progress restarts at zero. A completion that predates
+# the (possibly re-edited) Calendar Start is ignored. Returns (baseline, due, overdue), all dates or all datetimes.
+def calendar_cycle(config: dict[str, Any], last_reset_completed_at: datetime | None = None):
+    due_interval, overdue_interval, unit = int(config["due"]), int(config["overdue"]), config["time_unit"]
+    start_at = calendar_start_at(config)
+    start_date = start_at.date() if start_at is not None else date.fromisoformat(config["start_date"])
+    start_moment = start_at if start_at is not None else datetime.combine(start_date, time(0), tzinfo=timezone.utc)
+    completed = last_reset_completed_at
+    if completed is not None:
+        completed = completed.replace(tzinfo=timezone.utc) if completed.tzinfo is None else completed.astimezone(timezone.utc)
+        if completed < start_moment:
+            completed = None
+    if completed is None:
+        if start_at is None:
+            return (
+                start_date,
+                calculate_calendar_date(start_date, interval=due_interval, unit=unit),
+                calculate_calendar_date(start_date, interval=overdue_interval, unit=unit),
+            )
+        baseline = start_at
+    else:
+        baseline = completed
+    if due_interval < 1 or overdue_interval <= due_interval:
+        raise ValueError("Overdue interval must be greater than due interval")
+    anchor, moment = baseline.date(), baseline.timetz()
+    return (
+        baseline,
+        datetime.combine(calculate_calendar_date(anchor, interval=due_interval, unit=unit), moment),
+        datetime.combine(calculate_calendar_date(anchor, interval=overdue_interval, unit=unit), moment),
+    )
