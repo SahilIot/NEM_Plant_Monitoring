@@ -104,6 +104,38 @@ export function validateNumberLimits(limits) {
   return errors;
 }
 
+/**
+ * One value -> position (0..100) mapping for a limit gauge, used for the zones, the limit markers and
+ * the current-value pointer alike.
+ *
+ * A linear scale hides the lower limits when the upper ones are orders of magnitude larger (100 / 200 vs
+ * 10 000 / 20 000 puts 32, 100 and 200 within 1% of each other). So the scale is piecewise linear: every
+ * configured limit gets its own equal-width step, in numeric order, and the open-ended regions beyond the
+ * first and last limit take one step each. Inside a step the position is proportional; in an open-ended
+ * region a distance d from the nearest limit maps to d / (d + ref), where ref is the width of the adjacent
+ * limit step (or |limit| when there is only one), so values keep their order, never leave the region and
+ * a value well below a limit is drawn visibly away from it.
+ */
+export function makeLimitScale(limitValues) {
+  const b = [...new Set(limitValues.map(Number).filter(Number.isFinite))].sort((x, y) => x - y);
+  if (!b.length) return null;
+  const steps = b.length + 1;
+  const unit = 100 / steps;
+  const ref = (near, far) => (far !== undefined && far !== near ? Math.abs(far - near) : Math.max(Math.abs(near), 1));
+  const leftRef = ref(b[0], b[1]);
+  const rightRef = ref(b[b.length - 1], b[b.length - 2]);
+  const pct = (value) => {
+    const v = Number(value);
+    if (!Number.isFinite(v)) return 0;
+    if (v <= b[0]) { const d = b[0] - v; return unit * (1 - d / (d + leftRef)); }
+    if (v >= b[b.length - 1]) { const d = v - b[b.length - 1]; return unit * b.length + unit * (d / (d + rightRef)); }
+    let i = 1;
+    while (v > b[i]) i += 1;
+    return unit * i + unit * ((v - b[i - 1]) / (b[i] - b[i - 1]));
+  };
+  return { pct, limits: b, edges: [0, ...b.map((_, i) => unit * (i + 1)), 100] };
+}
+
 /** Zone of a value; boundaries are inclusive, as in the backend (>= for upper, <= for lower). */
 export function numberZone(value, limits) {
   const v = Number(value);
