@@ -414,7 +414,7 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
         {selected.kind === "number" && (
           <>
             {NUMBER_LIMITS.map(({ key, label }) => (
-              <RuleField key={key} id={`pe-${key}`} label={label} optional>
+              <RuleField key={key} id={`pe-${key}`} label={label}>
                 <UnitInput unit={numberUnit({ ...selected, ...form }, variable) || ""}>
                   <input id={`pe-${key}`} type="number" inputMode="decimal" step="any" value={form.limits[key]} disabled={saving || supervisor}
                     onChange={(e) => patch({ limits: { ...form.limits, [key]: e.target.value } })} />

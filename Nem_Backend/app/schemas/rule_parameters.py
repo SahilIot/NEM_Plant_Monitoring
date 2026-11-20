@@ -65,12 +65,28 @@ class RuleParameterIn(ORMModel):
         # context {"stored": True} re-checks an already stored parameter (activation, resume, evaluation): the same
         # limit / expected-state / Due-Overdue rules apply, but variable wiring is not re-judged here.
         stored = bool(info.context and info.context.get("stored"))
+        allow_legacy_limits = bool(
+            info.context and info.context.get("allow_legacy_limits")
+            )
         label = f"Parameter '{self.name}'"
         config = dict(self.config or {})
         if self.kind == NUMBER:
             limits = {key: _number(config.get(key)) for key in NUMBER_LIMIT_KEYS}
-            if all(value is None for value in limits.values()):
-                raise ValueError(f"{label}: configure at least one limit")
+            # Check whether at least one Warning limit is configured
+            has_warning = (
+                limits["lower_warning"] is not None
+                or limits["upper_warning"] is not None
+                )
+            # Check whether at least one Alert limit is configured
+            has_alert = (
+                limits["lower_alert"] is not None
+                or limits["upper_alert"] is not None
+                )
+            if not allow_legacy_limits:
+                if not has_warning:
+                    raise ValueError(f"{label}: configure at least one Warning limit")
+                if not has_alert:
+                    raise ValueError(f"{label}: configure at least one Alert limit")
             if self.variable_id is None and not stored:
                 raise ValueError(f"{label}: connect a variable")
             lower_alert, lower_warning = limits["lower_alert"], limits["lower_warning"]
@@ -270,7 +286,18 @@ class RuleParametersReplace(ORMModel):
     parameters: list[RuleParameterIn] = Field(min_length=1, max_length=MAX_PARAMETERS)
 
 
-def normalize_template_parameters(raw: dict[str, Any] | None) -> dict[str, Any]:
+def normalize_template_parameters(
+    raw: dict[str, Any] | None,
+    *,
+    allow_legacy_limits: bool = False,
+) -> dict[str, Any]:
+    """Validate and normalise the `parameters` JSON of a multi-parameter rule TEMPLATE.
+
+    A template keeps the parameter DEFINITIONS (name, type, aggregation, limits) in `parameter_defs`, each with a
+    stable `key`. It holds no variable ids: a variable is chosen per parameter when the template is assigned to an
+    asset (`variable_key` is only a hint for matching). Every definition is validated by the same rules as a real
+    parameter, so a template can never hold something an asset rule would reject.
+    """
     import uuid
 
     raw = dict(raw or {})
@@ -293,10 +320,17 @@ def normalize_template_parameters(raw: dict[str, Any] | None) -> dict[str, Any]:
         uses_variable = definition.get("uses_variable", True)
         if not isinstance(uses_variable, bool):
             raise ValueError("uses_variable must be true or false")
-        item = RuleParameterIn(
-            key=definition.get("key"), name=definition.get("name") or "", kind=definition.get("kind"),
-            variable_id=1 if uses_variable else None,
-            aggregation=definition.get("aggregation") or AGGREGATION_NONE, config=definition.get("config") or {})
+        item = RuleParameterIn.model_validate(
+            {
+                "key": definition.get("key"),
+                "name": definition.get("name") or "",
+                "kind": definition.get("kind"),
+                "variable_id": 1 if uses_variable else None,
+                "aggregation": definition.get("aggregation") or AGGREGATION_NONE,
+                "config": definition.get("config") or {},
+            },
+            context={"allow_legacy_limits": allow_legacy_limits},
+        )
         hint = str(definition.get("variable_key") or "").strip()[:200]
         normalised.append({
             "key": item.key or str(uuid.uuid4()), "name": item.name, "kind": item.kind,

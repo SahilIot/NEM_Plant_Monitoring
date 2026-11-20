@@ -767,14 +767,17 @@ def _template_rule_definition(
 #Listing templates - builds a db query and optionally filters by name,type,status
 def _template_read(session: Session, template: MonitoringRuleTemplate) -> RuleTemplateRead:
     # Shared rule payload; the Supervisor visibility list is shown to Administrators only.
-    data = RuleTemplateRead.model_validate(template)
+    data = RuleTemplateRead.model_validate(
+        template,
+        context={"allow_legacy_limits": True},
+        )
     user = request_user(session)
     if user is None or user.role != ROLE_ADMINISTRATOR:
         data = data.model_copy(update={"visibility_supervisor_ids": []})
     return data
 
 
-@router.get("/rule-templates", response_model=list[RuleTemplateRead])
+@router.get("/rule-templates", response_model=None)
 def list_rule_templates(
         search: str | None = None,
         rule_type: str | None = None,
@@ -1063,7 +1066,10 @@ def approve_rule_template_request(
         "status": "approved",
         "request_id": item.id,
         "suggestion_type": item.suggestion_type,
-        "template": RuleTemplateRead.model_validate(template).model_dump(mode="json"),
+        "template": RuleTemplateRead.model_validate(
+            template,
+            context={"allow_legacy_limits": True},
+        ).model_dump(mode="json"),
     }
 
 #Decline the suggestion 
@@ -1357,7 +1363,10 @@ def _multi_template_row(session: Session, request: Request, template: Monitoring
         except HTTPException as error:
             reason = str(error.detail)
     return {
-        **RuleTemplateRead.model_validate(template).model_dump(mode="json"),
+        **RuleTemplateRead.model_validate(
+            template,
+            context={"allow_legacy_limits": True},
+            ).model_dump(mode="json"),
         "labels": [{"id": label.id, "name": label.name} for label in (template.label_records or [])],
         "assigned": any(rule.source_template_id == template.id for rule in assigned),
         "unavailable_reason": reason,
@@ -1448,7 +1457,10 @@ def frontend_predefined_rules(
         )
         result.append(
     {
-        **RuleTemplateRead.model_validate(template).model_dump(mode="json"),
+        **RuleTemplateRead.model_validate(
+            template,
+            context={"allow_legacy_limits": True},
+        ).model_dump(mode="json"),
 
         "labels": [
             {

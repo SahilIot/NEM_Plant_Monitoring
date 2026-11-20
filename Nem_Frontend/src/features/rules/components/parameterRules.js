@@ -118,7 +118,12 @@ export function validateNumberLimits(limits) {
   }
   if (errors.length) return errors;
   const { lower_alert: la, lower_warning: lw, upper_warning: uw, upper_alert: ua } = values;
-  if (Object.values(values).every((v) => v === null)) return ["Configure at least one limit."];
+  // Ensure at least one Warning limit and one Alert limit are configured.
+  const hasWarning = lw !== null || uw !== null;
+  const hasAlert = la !== null || ua !== null;
+
+  if (!hasWarning) errors.push("Configure at least one Warning limit.");
+  if (!hasAlert) errors.push("Configure at least one Alert limit.");
   if (la !== null && lw !== null && !(la < lw)) errors.push("Lower Alert must be lower than Lower Warning.");
   if (uw !== null && ua !== null && !(uw < ua)) errors.push("Upper Warning must be lower than Upper Alert.");
   const lowers = [la, lw].filter((v) => v !== null);
