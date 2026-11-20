@@ -52,6 +52,12 @@ loads `src/styles/global.css`.
   Supervisors) and a "Supervisors with access" row; creation forms require
   an explicit visibility choice, and saving a shared rule asks for confirmation. A
   Supervisor sees no access-request control.
+- **Rule dialogs** (`features/rules/components/`): `NotificationSettingsDialog`
+  (Warning/Alert email switches and custom message), `ComponentIdentifierDialog`,
+  and the interval reset confirmations (`intervalReset.js`); the maintenance
+  completion dialog offers **Reset & Start Next Cycle** or **Complete Without
+  Reset** for rule-generated work. Behaviour is in
+  [rule-operations.md](rule-operations.md).
 - **Settings** (`features/settings/pages/`): profile, email server, usage,
   backup/restore, and other settings subsections. **User access** is routed to
   `features/auth/AdminUsersPage.jsx`.

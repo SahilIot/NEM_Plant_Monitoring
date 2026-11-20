@@ -84,8 +84,10 @@ ill-typed, or untrusted values do not refresh trustworthy running state.
 ## Monitoring rules and lifecycle
 
 The database constraint allows `parameter_threshold`, `runtime_duration`,
-`duration`, `generic`, `boolean_condition`, and `boolean_count_threshold`.
-`RuleCreate` accepts the same list except `boolean_condition`. `generic` and
+`duration`, `generic`, `boolean_condition`, `boolean_count_threshold` and
+`multi_parameter` (see [Multi-parameter rules](#multi-parameter-rules)).
+`RuleCreate` accepts the same list except `boolean_condition` and
+`multi_parameter`, which has its own endpoint. `generic` and
 `boolean_condition` have no evaluator; the engine reports them as unknown and
 they never raise or clear alerts. On startup the PostgreSQL constraint is
 widened if an older database lacks any of these types. Rules created for an
@@ -131,6 +133,67 @@ Lifecycle behavior in `frontend_compat.py` and `monitoring_engine.py`:
 Some endpoints and `set_rule_enabled_state` normalize enabled/disabled states
 without expressing every lifecycle label. Use lifecycle endpoints for
 suspend/resume/activate/deactivate and verify legacy rule records.
+
+## Multi-parameter rules
+
+Rules of type `multi_parameter` (created with
+`POST /assets/{id}/multi-parameter-rules`, replaced with `PUT /rules/{id}/parameters`,
+edited with `PATCH /rules/{id}/parameters/{pid}`) hold from one to 20 independently
+configured parameters. Validation is in `app/schemas/rule_parameters.py`,
+evaluation in `app/services/rule_parameters.py`. A rule has one **category**:
+`parameter_threshold` or `interval_based`, and an optional calculation period
+(`calculation_period_seconds`, 1 second to one year).
+
+Parameter kinds (`kind`):
+
+- **number:** at least one Warning and one Alert limit among `lower_alert`,
+  `lower_warning`, `upper_warning`, `upper_alert`. Lower Alert < Lower Warning,
+  Upper Warning < Upper Alert, and every lower limit below every upper limit.
+  Needs a variable. Limits are inclusive (`>=` upper, `<=` lower); alert limits
+  are checked before warning limits.
+- **boolean:** an `expected` state (true/false) and a `severity` of `warning` or
+  `alert` raised when the state differs. Needs a variable.
+- **interval:** a progress value compared with `due` and `overdue`
+  (Overdue must exceed Due). Reaching Due gives `warning`, reaching Overdue
+  gives `alert`. The `interval_parameter` is one of:
+  - `usage`: running hours from a Boolean running signal; needs a variable with
+    `timer` aggregation.
+  - `time` (elapsed): hours elapsed since the rule's creation or an optional
+    `activation_at`, with no variable, or from a running signal with `timer`
+    aggregation.
+  - `time` with `time_mode: calendar` (**Calendar Time**): Due and Overdue are
+    whole numbers of `time_unit` (`days`, `weeks`, `months` or `years`) after a
+    `start_date` / `start_at`; no PLC variable and aggregation `none`. After a
+    completion with reset, or a manual reset, the cycle restarts from that
+    moment. Its dates are computed by `calendar_cycle()`; the last reset is the
+    later of the latest reset-completed schedule's completion and the manual
+    baseline.
+  - `counter`: false-to-true cycles; Due and Overdue are whole numbers and the
+    parameter needs a variable with `counter` aggregation.
+
+Aggregation values are `none`, `counter`, `last` and `timer`. A number
+parameter with `counter` or `timer` aggregation evaluates the count or running
+seconds over the rule's calculation period (3600 seconds when unset); `last`
+uses the latest reading, which must lie inside the period when one is set.
+
+A parameter is `unknown`, never `normal`, when its stored configuration is
+invalid, its variable is missing or inactive, there is no reading, the latest
+reading is stale, or the value has the wrong type. The overall rule status is
+the most severe parameter status; `determined_by` lists the parameters that set
+it. Each parameter has its own alert and state.
+
+Each parameter has a lifecycle of `active`, `suspended` or `deactivated`
+(`POST /rules/{id}/parameters/{pid}/lifecycle`, actions `suspend`, `resume`,
+`deactivate`, `activate`). Suspending or deactivating resolves that
+parameter's open alert, keeps its history and stops its evaluation and progress;
+a parameter must pass validation again before it is activated. Progress of an
+interval parameter counts from the later of the rule's creation/activation and
+the start of its current cycle (`RuleParameter.cycle_baseline_at`, set only by a
+confirmed reset). Manual reset and completion behaviour are in
+[rule-operations.md](rule-operations.md).
+
+Interval-based rules generate maintenance schedules (schedule mode `rule`); see
+[maintenance.md](maintenance.md).
 
 ## Shared labels
 

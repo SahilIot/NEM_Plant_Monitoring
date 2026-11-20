@@ -65,6 +65,11 @@ assignments they see no assets. Administrators are unrestricted.
 | FR-13 | Assign reusable shared labels to rules, rule collections, and instruction documents; filter listings by one or more labels. | Implemented; PostgreSQL migration and deployment verification required |
 | FR-14 | Administrator-controlled visibility of shared rules (Admin Only or Specific Supervisors, chosen explicitly at creation; no all-Supervisors option) with grant and revoke; Supervisors see only authorized rules, enforced by the backend. | Implemented; no request workflow exists |
 | FR-15 | Record who created and last changed rules and maintenance, and keep field-level history of shared-rule edits and visibility changes. | Implemented |
+| FR-17 | Multi-parameter rules: up to 20 number, Boolean or interval (Usage, Time, Calendar Time, Counter) parameters per rule, each with its own alert and lifecycle. | Implemented; see `rules.md` |
+| FR-18 | Manually reset the progress of interval parameters (Administrator/Supervisor) and complete rule-generated maintenance either with a reset or without one. | Implemented; see `rule-operations.md` |
+| FR-19 | Per-rule Warning/Alert email switches with optional custom messages. | Implemented; see `rule-operations.md` |
+| FR-20 | Optional component identifier on an asset's rule, shown in the event log and used to filter and export events (CSV/JSON via API, Excel in the UI). | Implemented |
+| FR-21 | A document still referenced by a rule, shared rule, maintenance schedule or rule request cannot be deleted (409 with its references). | Implemented |
 | FR-16 | Administrators export and import monitoring rules, rule collections and maintenance rule definitions as a versioned, ID-free JSON package with preview, duplicate handling, Supervisor/asset mapping and all-or-nothing import. | Implemented; Administrator only |
 
 ## Principal workflows

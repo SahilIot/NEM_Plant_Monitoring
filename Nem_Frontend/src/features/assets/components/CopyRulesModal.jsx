@@ -13,7 +13,7 @@ import { api } from "../../../services/api.js";
 import { LoadingIndicator } from "../../../components/common/UI.jsx";
 import "./CopyRulesModal.css";
 import { ruleCategoryLabel } from "../../rules/ruleCategories.js";
-import { BackButton, ForwardButton } from "../../../components/common/NavButtons.jsx";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 // Display category only; the rule's stored type is not touched.
 const RULE_TYPE_LABELS = {

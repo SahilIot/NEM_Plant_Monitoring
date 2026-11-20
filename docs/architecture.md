@@ -34,7 +34,10 @@ NEM_Plant_Monitoring/
         assets.py                   Asset hierarchy CRUD and move
         variables.py                Asset-owned variables
         readings.py                 Single/batch ingestion, latest and history queries
-        rules.py                    Asset-specific rule creation, listing and update
+        rules.py                    Asset-specific rule creation, listing and update, lock_rule row locking
+        rule_parameters.py          Multi-parameter rules: create/replace/edit, parameter lifecycle,
+                                    manual interval reset, notification settings, component identifier
+        config_transfer.py          Administrator-only configuration export, preview and import
         rule_visibility.py          Admin-controlled shared-rule visibility, history, assignments
         monitoring.py               Evaluation, status, alerts, events
         maintenance.py              Work records, recurring schedules, occurrences
@@ -43,7 +46,9 @@ NEM_Plant_Monitoring/
         dashboard.py                Dashboard summary
         frontend_compat.py          Dashboard workflows: rule templates and suggestions, collections,
                                     documents, settings, import/export, lifecycle actions, backups
-      core/                         config.py (environment settings), labels.py (label normalization)
+      core/                         config.py (environment settings), labels.py (label normalization),
+                                    constants.py (shared names and values: rule types, parameter kinds,
+                                    statuses, severities, roles, event types, error messages)
       db/
         base.py, session.py         Declarative base, session factory, UTCDateTime
         init_db.py                  Startup schema creation and idempotent upgrades
@@ -60,6 +65,17 @@ NEM_Plant_Monitoring/
         access_scope.py             Asset-assignment scoping for REST and WebSocket
         rule_visibility.py          Shared-rule visibility, edit permission, change history
         maintenance_schedule.py     Calendar recurrence and due-date logic
+        maintenance_progress.py     Runtime/usage progress from machine signals
+        maintenance_registration.py Completion-dialog data: last values, checklist, validation
+        rule_parameters.py          Multi-parameter rule evaluation and status calculation
+        rule_maintenance.py         Rule-generated maintenance schedules, manual reset, completion decision
+        rule_calendar.py            Calendar Time cycle calculation
+        notification_settings.py    Per-rule Warning/Alert email switches and custom messages
+        component_identifier.py     Component identifier normalisation
+        template_parameters.py      Shared-rule (template) management
+        asset_deletion.py           Dependency discovery and ordered asset/variable deletion
+        config_transfer.py          Configuration export/import service
+        legacy_parameters.py        Presents legacy single-parameter rules as parameters
         email_notifications.py      Email outbox and SMTP delivery
         live_updates.py             Committed-change WebSocket hub
         auth_security.py            Password hashing, sessions

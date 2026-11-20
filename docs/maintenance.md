@@ -35,6 +35,15 @@ Business rules in prose are also in [rules.md](rules.md#maintenance-rules).
   cancelled them, reason when one exists, and record count).
 - **Current status**: due-today and in-progress scheduled work.
 
+## Completing rule-generated maintenance
+
+A rule-generated record is completed with an explicit choice of
+**Reset & Start Next Cycle** or **Complete Without Reset**; the backend requires
+`reset_progress` to be sent and never defaults it. A manual interval reset
+cancels an unstarted schedule with cancellation kind `progress_reset` and
+creates a fresh one. Details, including Calendar Time, are in
+[rule-operations.md](rule-operations.md).
+
 ## Cancellation
 
 - A schedule is cancelled by changing its status to `cancelled`

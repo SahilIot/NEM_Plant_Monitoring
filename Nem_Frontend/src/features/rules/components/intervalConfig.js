@@ -140,14 +140,3 @@ export function demoScale(value, due, overdue) {
   const pct = (amount) => Math.min(100, Math.max(0, (amount / max) * 100));
   return { max, duePct: pct(due), overduePct: pct(overdue), valuePct: pct(current) };
 }
-
-/** The sentence-level facts the tooltips and the summary line use. */
-export function describeValue(value, due, overdue, parameterId) {
-  const status = intervalStatus(value, due, overdue);
-  const number = Number(value);
-  let remaining = "";
-  if (status === "normal") remaining = `${formatAmount(due - number, parameterId)} until Due`;
-  else if (status === "due") remaining = `Due now. ${formatAmount(overdue - number, parameterId)} until Overdue`;
-  else if (status === "overdue") remaining = `Overdue by ${formatAmount(number - overdue, parameterId)}`;
-  return { status, remaining };
-}

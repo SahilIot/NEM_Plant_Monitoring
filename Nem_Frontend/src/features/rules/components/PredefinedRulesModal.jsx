@@ -19,7 +19,7 @@ import {
   AlertTriangle,
   CircleAlert,
 } from "lucide-react";
-import { BackButton, ForwardButton } from "../../../components/common/NavButtons.jsx";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 export default function PredefinedRulesModal({
   assetId,

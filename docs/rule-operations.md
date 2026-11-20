@@ -93,7 +93,8 @@ copying rules. Changes record a `component_identifier_changed` event.
   `start_time`, `end_time`). `start_time` must not be later than `end_time`.
   The export includes a `component_identifier` column.
 - The Event log tab in the UI also offers an **Excel** (`.xlsx`) export, built
-  in the browser from the displayed rows.
+  in the browser from the displayed (filtered) rows. The Maintenance logbook tab
+has the same kind of Excel export for its filtered entries.
 
 ## Rule suspension and activation
 

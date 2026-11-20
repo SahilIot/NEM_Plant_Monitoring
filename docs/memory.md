@@ -109,6 +109,21 @@ the rendered UI, a live login, PLC or SMTP, and the upgrades against the
 deployed database. Run `npm run build` and restart the backend before relying
 on them.
 
+## Constants and cleanup (latest session)
+
+- Shared backend names and values live in `Nem_Backend/app/core/constants.py`
+  (no imports, no models or logic). Values stored in the database or returned by
+  the API were not changed; added in this pass: `EVENT_ALERT_TRIGGERED`,
+  `NOTIFICATION_KIND_MAINTENANCE_READY` and `CANCELLATION_KIND_PROGRESS_RESET`.
+  Event types used in only one place stay as local literals on purpose.
+- Verified by checks run without a database: backend compilation, import of every
+  `app` module, and application creation with a dummy `DATABASE_URL`; the
+  OpenAPI route list was compared with the endpoints named in the docs. The
+  frontend tests and an unused-file/import scan were run. No behaviour was
+  exercised against PostgreSQL, a PLC or a browser in this pass.
+- `pytest` and `httpx` stay in `requirements.txt` although no test file in the
+  repository uses them (removal not verified against deployment tooling).
+
 ## Instructions, libraries and import/export (latest session)
 
 Implemented but **not run**: the backend changes (`entry_type`, `asset_id` and

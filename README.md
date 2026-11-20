@@ -422,6 +422,9 @@ asset. Supported behavior includes:
   interval-elapsed rules are also supported.
 - **Cycle/count thresholds:** count false-to-true transitions on the configured
   Boolean cycle signal and use a separate counter for each rule/asset.
+- **Multi-parameter rules:** one rule with up to 20 number, Boolean or interval
+  (Usage, Time, Calendar Time, Counter) parameters, each with its own limits,
+  alert and lifecycle; see [docs/rules.md](docs/rules.md#multi-parameter-rules).
 - **Reusable rule templates:** create, organize, assign, and copy compatible
   rules through the configuration and asset workflows. Administrators decide
   which Supervisors can see each shared rule (see
@@ -503,7 +506,7 @@ Deleting a collection deletes the rules inside it (the confirmation says so);
 rules already assigned to assets are not changed. Moving an existing library
 rule into a collection is not offered, because it would change ownership.
 
-#### Assigning  a collection on an asset
+#### Assigning and unassigning a collection on an asset
 
 The asset's rule-collection dialog assigns a collection's rules to the asset
 (a Supervisor's assignment is stored *Not Activated* for review; an

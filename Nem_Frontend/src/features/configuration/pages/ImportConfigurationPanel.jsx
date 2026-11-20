@@ -4,7 +4,7 @@ import { Check, Download, FileText, Upload, X } from "lucide-react";
 import { api } from "../../../services/api.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import "./ConfigTransfer.css";
-import { BackButton, ForwardButton } from "../../../components/common/NavButtons.jsx";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 const MAX_BYTES = 5 * 1024 * 1024; // matches the server limit for configuration packages
 

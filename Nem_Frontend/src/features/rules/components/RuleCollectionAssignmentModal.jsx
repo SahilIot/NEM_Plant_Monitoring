@@ -23,7 +23,7 @@ import TemplateParameterMapping, { isMultiTemplate, mappingIncomplete, parameter
 import "./TemplateParameterMapping.css";
 import { componentIdentifierProblem, normalizeComponentIdentifier } from "./componentIdentifier.js";
 import "./ComponentIdentifierField.css";
-import { BackButton, ForwardButton } from "../../../components/common/NavButtons.jsx";
+import { BackButton } from "../../../components/common/NavButtons.jsx";
 
 export default function RuleCollectionAssignmentModal({
   assetId,
