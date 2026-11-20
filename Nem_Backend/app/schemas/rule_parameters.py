@@ -258,13 +258,13 @@ class MultiParameterRuleCreate(ORMModel):
 
 
 class ParameterLifecycleAction(ORMModel):
-    """Suspend / resume / deactivate / activate one parameter of a multi-parameter rule."""
+    # Suspend / resume / deactivate / activate one parameter of a multi-parameter rule.
 
     action: Literal["suspend", "resume", "deactivate", "activate"]
 
 
 class RuleParametersReplace(ORMModel):
-    """Edit a rule's parameters in one transaction. Matching is by key, never by position."""
+   # Edit a rule's parameters in one transaction. Matching is by key, never by position.
 
     calculation_period_seconds: int | None = Field(default=None, ge=1, le=31_536_000)
     parameters: list[RuleParameterIn] = Field(min_length=1, max_length=MAX_PARAMETERS)
