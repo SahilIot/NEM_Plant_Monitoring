@@ -1,6 +1,7 @@
 # Maintenance records and schedules
 import logging
 from datetime import date, datetime, time, timedelta, timezone
+from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -9,6 +10,7 @@ from sqlalchemy.sql import Executable
 
 from pydantic import ValidationError
 
+from app.services.maintenance_registration import build_actual_values, normalize_checklist, registration_context
 from app.services.rule_maintenance import apply_completion_decision, cancel_unavailable, ensure_startable, prepare_progress_reset
 from app.core.config import get_settings
 from app.db.session import get_db
@@ -203,7 +205,7 @@ def _validate_instruction_documents(
     existing_ids = set(session.scalars(
         select(InstructionDocument.id).where(
             InstructionDocument.id.in_(normalized_ids)
-        )
+        ).with_for_update(read=True)  # shared lock: a document cannot be deleted while it is being attached
     ).all())
     missing_ids = [document_id for document_id in normalized_ids if document_id not in existing_ids]
     if missing_ids:
@@ -1412,6 +1414,12 @@ def list_maintenance_records(
         "offset": offset,
     }
 
+# What the registration dialog shows: the last valid process values of the rule's variables (previous 7 days) and the
+# checklist suggested by the rule's linked instructions. Read-only.
+@router.get("/{record_id}/registration-context")
+def get_registration_context(record_id: int, session: Session = Depends(get_db)) -> dict[str, Any]:
+    return registration_context(session, _record_or_404(session, record_id))
+
 # returns a single maintenanace record
 @router.get("/{record_id}", response_model=MaintenanceRead)
 def get_maintenance_record(
@@ -1678,7 +1686,16 @@ def complete_maintenance_record(
         if "parts_used" in payload.model_fields_set:
             record.parts_used = payload.parts_used
         if "checklist" in payload.model_fields_set:
-            record.checklist = payload.checklist
+            try:
+                record.checklist = normalize_checklist(payload.checklist)
+            except ValueError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+        if payload.actual_values is not None:
+            try:
+                record.actual_values = build_actual_values(
+                    session, record, [item.model_dump() for item in payload.actual_values], _user_label(user))
+            except ValueError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
 
     is_usage_based = (schedule is not None
         and schedule.schedule_mode in {RUNTIME, USAGE} )

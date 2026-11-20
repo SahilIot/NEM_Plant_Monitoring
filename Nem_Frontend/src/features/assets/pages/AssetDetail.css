@@ -512,6 +512,13 @@
   opacity: 0.5;
 }
 
+.asset-page .export-icon.export-format {
+  width: auto;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .asset-page .maintenance-log-notes-panel .maintenance-delete-icon {
   display: inline-flex;
   width: 34px;

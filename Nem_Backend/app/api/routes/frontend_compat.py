@@ -3,9 +3,12 @@
 # React Frontend <-> FASTAPI router(this file) <-> POSTGRESQL database
 from datetime import datetime, timezone
 from html import escape
+import csv
+import io
 import json
 import logging
 import mimetypes
+import tempfile
 from pathlib import Path
 from uuid import uuid4
 from zipfile import BadZipFile
@@ -13,7 +16,7 @@ from typing import Annotated, Any, Literal
 
 from cryptography.fernet import Fernet # encrypts and decrypts sensitive values, such as a saved email password
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, StrictInt, ValidationError, field_validator, model_validator
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError # Handles database constraint failures,such as duplicate collection name
@@ -2051,6 +2054,63 @@ def activate_rule(
 
 
 @router.post(
+    "/assets/{asset_id}/rules/activate-all",
+    # Same roles as activating a single rule.
+    dependencies=[Depends(require_roles(ROLE_ADMINISTRATOR, ROLE_SUPERVISOR))],
+)
+def activate_all_rules(
+    asset_id: int,
+    request: Request,
+    include_children: bool = False,
+    dry_run: bool = False,
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
+        raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+    asset_ids = _descendant_ids(session, asset_id) if include_children else {asset_id}
+    scope = access_scope(session)
+    candidates = [
+        (rule.id, rule.name, rule.target_asset_id)
+        for rule in session.scalars(
+            select(MonitoringRule)
+            .where(
+                MonitoringRule.target_asset_id.in_(asset_ids),
+                MonitoringRule.lifecycle_status == STATUS_DEACTIVATED,
+                MonitoringRule.is_enabled.is_(False),
+            )
+            .order_by(MonitoringRule.id)
+        ).all()
+        if scope.allows(rule.target_asset_id)
+    ]
+    if dry_run:
+        return {"eligible": len(candidates), "activated": 0, "skipped": [], "dry_run": True}
+
+    activated: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for rule_id, name, _rule_asset_id in candidates:
+        try:
+            # Re-checks the state under a row lock, so a rule changed meanwhile is skipped.
+            _transition_rule_lifecycle(rule_id, "activate", request, session)
+            activated.append({"rule_id": rule_id, "name": name})
+        except HTTPException as error:
+            session.rollback()
+            skipped.append({"rule_id": rule_id, "name": name, "reason": str(error.detail)})
+    emit_event(
+        session,
+        event_type="rules_activate_all",
+        message=(f"Activate All: {len(activated)} rule(s) activated, {len(skipped)} skipped"
+                 f"{' (including child assets)' if include_children else ''}."),
+        occurred_at=datetime.now(timezone.utc),
+        asset_id=asset_id,
+        metadata={"activated_rule_ids": [item["rule_id"] for item in activated],
+                  "skipped": skipped, "include_children": include_children},
+    )
+    session.commit()
+    return {"eligible": len(candidates), "activated": len(activated), "activated_rules": activated,
+            "skipped": skipped, "dry_run": False}
+
+
+@router.post(
     "/rules/{rule_id}/deactivate",
     dependencies=[Depends(require_roles(ROLE_ADMINISTRATOR))],
 )
@@ -2142,6 +2202,7 @@ def frontend_asset_logbook(
             "completion_notes": record.completion_notes,
             "parts_used": record.parts_used,
             "checklist": record.checklist,
+            "actual_values": record.actual_values,
             "actual_started_at": (
                 record.actual_started_at.isoformat()
                 if record.actual_started_at
@@ -2285,6 +2346,116 @@ def frontend_add_logbook_entry(
     session.refresh(record)
     return {"id": record.id, "time": record.performed_at.isoformat(), "text": text_value}
 
+# The events shown in an asset's event log (rule events; maintenance events belong to the logbook). The visible log and
+# its CSV / JSON export share this one definition.
+def _asset_event_log_select(asset_id: int):
+    return (
+        select(MonitoringEvent, Asset.name, MonitoringRule.name)
+        .outerjoin(Asset, Asset.id == MonitoringEvent.asset_id)
+        .outerjoin(MonitoringRule, MonitoringRule.id == MonitoringEvent.rule_id)
+        .where(MonitoringEvent.asset_id == asset_id)
+        .where(MonitoringEvent.rule_id.is_not(None))
+        .where(~MonitoringEvent.event_type.like("maintenance_%"))
+    )
+
+EVENT_EXPORT_COLUMNS = ("event_id", "occurred_at", "asset_id", "asset_name", "rule_id", "rule_name",
+                        "event_type", "severity", "message", "alert_id", "metadata")
+EVENT_EXPORT_BATCH = 1000
+
+# A spreadsheet treats a cell that starts with = + - @ (or a tab / CR) as a formula; a leading apostrophe defuses it.
+def _csv_safe(value: Any) -> Any:
+    return "'" + value if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r") else value
+
+def _event_export_record(event: MonitoringEvent, asset_name: str | None, rule_name: str | None) -> dict[str, Any]:
+    occurred = event.occurred_at
+    if occurred.tzinfo is None:
+        occurred = occurred.replace(tzinfo=timezone.utc)
+    return {
+        "event_id": event.id, "occurred_at": occurred.isoformat(), "asset_id": event.asset_id, "asset_name": asset_name,
+        "rule_id": event.rule_id, "rule_name": rule_name, "event_type": event.event_type, "severity": event.severity,
+        "message": event.message, "alert_id": event.alert_id, "metadata": event.event_metadata,
+    }
+
+# Exports the event log of one asset as CSV or JSON. It honours the same filters as the on-screen log, returns every
+# matching event (not one page) and is written to a temporary file in batches, so memory stays bounded.
+@router.get("/assets/{asset_id}/events/export")
+def export_asset_events(
+    asset_id: int,
+    format: Literal["csv", "json"] = Query(),
+    event_type: str | None = Query(default=None, max_length=50),
+    rule_id: int | None = Query(default=None, gt=0),
+    severity: str | None = Query(default=None, max_length=20),
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+    session: Session = Depends(get_db),
+):
+    if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
+        raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
+
+    def utc(value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+    start, end = utc(start_time), utc(end_time)
+    if start is not None and end is not None and start > end:
+        raise HTTPException(status_code=422, detail="start_time must not be later than end_time")
+    query = _asset_event_log_select(asset_id)
+    if event_type:
+        query = query.where(MonitoringEvent.event_type == event_type)
+    if rule_id is not None:
+        query = query.where(MonitoringEvent.rule_id == rule_id)
+    if severity:
+        query = query.where(MonitoringEvent.severity == severity)
+    if start is not None:
+        query = query.where(MonitoringEvent.occurred_at >= start)
+    if end is not None:
+        query = query.where(MonitoringEvent.occurred_at <= end)
+    query = query.order_by(MonitoringEvent.occurred_at.desc(), MonitoringEvent.id.desc())
+
+    # A real temporary file (SpooledTemporaryFile is not accepted by TextIOWrapper before Python 3.11).
+    spool = tempfile.TemporaryFile(mode="w+b")
+    try:
+        text = io.TextIOWrapper(spool, encoding="utf-8", newline="", write_through=True)
+        first = True
+        if format == "csv":
+            text.write("\ufeff")  # byte-order mark: spreadsheets then read the file as UTF-8
+            writer = csv.writer(text, lineterminator="\r\n")
+            writer.writerow(EVENT_EXPORT_COLUMNS)
+        else:
+            text.write("[")
+        for event, asset_name, rule_name in session.execute(query).yield_per(EVENT_EXPORT_BATCH):
+            record = _event_export_record(event, asset_name, rule_name)
+            if format == "csv":
+                metadata = record["metadata"]
+                record["metadata"] = json.dumps(metadata, ensure_ascii=False, default=str) if metadata else ""
+                writer.writerow([_csv_safe("" if record[column] is None else record[column]) for column in EVENT_EXPORT_COLUMNS])
+            else:
+                text.write(("" if first else ",") + "\n  " + json.dumps(record, ensure_ascii=False, default=str))
+                first = False
+        if format == "json":
+            text.write("\n]\n" if not first else "]\n")
+        text.flush()
+        text.detach()  # keep the spool open for streaming
+        spool.seek(0)
+    except Exception:
+        spool.close()
+        raise
+
+    def stream():
+        try:
+            while chunk := spool.read(64 * 1024):
+                yield chunk
+        finally:
+            spool.close()
+
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return StreamingResponse(
+        stream(),
+        media_type="text/csv; charset=utf-8" if format == "csv" else "application/json; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="nem-asset-{asset_id}-event-log-{stamp}.{format}"'},
+    )
+
 #Machine events -> Returns the selected monitoring events for an asset
 @router.get("/assets/{asset_id}/events")
 def frontend_asset_events(
@@ -2294,12 +2465,7 @@ def frontend_asset_events(
     if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     events = session.execute(
-        select(MonitoringEvent, Asset.name, MonitoringRule.name)
-        .outerjoin(Asset, Asset.id == MonitoringEvent.asset_id)
-        .outerjoin(MonitoringRule, MonitoringRule.id == MonitoringEvent.rule_id)
-        .where(MonitoringEvent.asset_id == asset_id)
-        .where(MonitoringEvent.rule_id.is_not(None))
-        .where(~MonitoringEvent.event_type.like("maintenance_%"))
+        _asset_event_log_select(asset_id)
         .order_by(MonitoringEvent.occurred_at.desc(), MonitoringEvent.id.desc())
         .limit(200)
     ).all()
@@ -2960,15 +3126,24 @@ async def replace_document_file(
 
 
 # Remove one attachment from a document (Administrator only); the document itself is kept.
-@router.delete("/documents/{document_id}/files/{file_id}", status_code=204)
-def delete_document_file(document_id: int, file_id: int, session: Session = Depends(get_db)) -> None:
-    document = session.get(InstructionDocument, document_id)
+@router.delete("/documents/{document_id}/files/{file_id}", status_code=204,
+               dependencies=[Depends(require_roles(ROLE_ADMINISTRATOR))])
+def delete_document_file(document_id: int, file_id: int, session: Session = Depends(get_db)):
+    # The document row is locked first, so a reference cannot be added between the check below and the delete.
+    document = session.scalar(select(InstructionDocument).where(InstructionDocument.id == document_id).with_for_update())
     attachment = session.scalar(select(InstructionDocumentFile).where(
         InstructionDocumentFile.id == file_id,
         InstructionDocumentFile.document_id == document_id,
     ))
     if document is None or attachment is None or document_id in hidden_document_ids(session):
         raise HTTPException(status_code=404, detail=ERR_DOCUMENT_ATTACHMENT_NOT_FOUND)
+    remaining = session.scalar(select(func.count()).select_from(InstructionDocumentFile).where(
+        InstructionDocumentFile.document_id == document_id)) or 0
+    if remaining <= 1:
+        # Removing the last file would leave a referenced document empty: protect it exactly like the document itself.
+        references = _document_references(session, document_id)
+        if references:
+            return _document_in_use_response(document, references, last_file=True)
     stored_path = UPLOAD_DIR / attachment.stored_name
     session.delete(attachment)
     flag_modified(document, "updated_at")
@@ -2976,12 +3151,59 @@ def delete_document_file(document_id: int, file_id: int, session: Session = Depe
     stored_path.unlink(missing_ok=True)
 
 
+DOCUMENT_REFERENCE_PREVIEW = 10
+
+def _lists_document(ids: Any, document_id: int) -> bool:
+    return isinstance(ids, (list, tuple)) and any(
+        isinstance(item, int) and not isinstance(item, bool) and item == document_id for item in ids)
+
+# Every place that stores this document's id. Document links live in JSON columns (no foreign key), so each is scanned.
+def _document_references(session: Session, document_id: int) -> list[dict[str, Any]]:
+    references: list[dict[str, Any]] = []
+    for rule_id, name, asset_id, parameters in session.execute(
+            select(MonitoringRule.id, MonitoringRule.name, MonitoringRule.target_asset_id, MonitoringRule.parameters)):
+        if _lists_document((parameters or {}).get("document_ids"), document_id):
+            references.append({"type": "monitoring_rule", "id": rule_id, "name": name, "asset_id": asset_id})
+    for template_id, name, parameters in session.execute(
+            select(MonitoringRuleTemplate.id, MonitoringRuleTemplate.name, MonitoringRuleTemplate.parameters)):
+        if _lists_document((parameters or {}).get("document_ids"), document_id):
+            references.append({"type": "shared_rule", "id": template_id, "name": name, "asset_id": None})
+    for schedule_id, title, asset_id, ids in session.execute(
+            select(MaintenanceSchedule.id, MaintenanceSchedule.title, MaintenanceSchedule.asset_id,
+                   MaintenanceSchedule.instruction_document_ids)):
+        if _lists_document(ids, document_id):
+            references.append({"type": "maintenance_schedule", "id": schedule_id, "name": title, "asset_id": asset_id})
+    for request_id, name, details in session.execute(
+            select(MonitoringRuleTemplateRequest.id, MonitoringRuleTemplateRequest.name,
+                   MonitoringRuleTemplateRequest.maintenance_details)):
+        if _lists_document((details or {}).get("instruction_document_ids"), document_id):
+            references.append({"type": "rule_request", "id": request_id, "name": name, "asset_id": None})
+    return references
+
+_REFERENCE_LABEL = {"monitoring_rule": "rule", "shared_rule": "shared rule", "maintenance_schedule": "maintenance schedule",
+                    "rule_request": "rule request"}
+
+# 409 for a document that is still in use. Nothing is changed; the body lists what uses it.
+def _document_in_use_response(document: InstructionDocument, references: list[dict[str, Any]], last_file: bool = False) -> JSONResponse:
+    shown = ", ".join(f"{_REFERENCE_LABEL[item['type']]} \"{item['name']}\"" for item in references[:DOCUMENT_REFERENCE_PREVIEW])
+    more = len(references) - DOCUMENT_REFERENCE_PREVIEW
+    subject = "The last file of this document cannot be deleted" if last_file else "This document cannot be deleted"
+    message = (f"{subject} because it is currently referenced by monitoring rules or maintenance schedules. "
+               f"Remove those references first. Used by: {shown}" + (f" and {more} more." if more > 0 else "."))
+    return JSONResponse(status_code=409, content={
+        "detail": message, "document_id": document.id, "reference_count": len(references), "references": references})
+
 #Delete a document
-@router.delete("/documents/{document_id}", status_code=204)
-def delete_document(document_id: int, session: Session = Depends(get_db)) -> None:
-    document = session.get(InstructionDocument, document_id)
+@router.delete("/documents/{document_id}", status_code=204,
+               dependencies=[Depends(require_roles(ROLE_ADMINISTRATOR))])
+def delete_document(document_id: int, session: Session = Depends(get_db)):
+    # Locking the document row serialises this check with the paths that attach a document (they take a shared lock).
+    document = session.scalar(select(InstructionDocument).where(InstructionDocument.id == document_id).with_for_update())
     if document is None:
         raise HTTPException(status_code=404, detail="Document was not found")
+    references = _document_references(session, document_id)
+    if references:
+        return _document_in_use_response(document, references)
     attachments = session.scalars(select(InstructionDocumentFile).where(
         InstructionDocumentFile.document_id == document_id
     )).all()

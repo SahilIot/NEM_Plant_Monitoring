@@ -1,5 +1,6 @@
 import React from "react";
 import { auditUser, formatAuditTime, formatTime } from "../../../utils/format.js";
+import { ActualValuesView, ChecklistView } from "./MaintenanceRecordData.jsx";
 
 function displayDate(value) {
   if (!value) return "—";
@@ -189,15 +190,8 @@ export default function MaintenanceDetails({ record, now = Date.now() }) {
             ) : (
               <p>No work details provided.</p>
             )}
-            {Array.isArray(record.checklist) && record.checklist.length > 0 && (
-              <ul>
-                {record.checklist.map((item, index) => (
-                  <li key={`${item.item}-${index}`}>
-                    {item.completed ? "Complete" : "Incomplete"}: {item.item}
-                  </li>
-                ))}
-              </ul>
-            )}
+            <ChecklistView checklist={record.checklist} />
+            <ActualValuesView actualValues={record.actual_values} />
           </div>
         </section>
       </div>

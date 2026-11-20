@@ -234,7 +234,7 @@ def create_multi_parameter_rule(
     document_ids = sorted(set(payload.document_ids))
     hidden = hidden_document_ids(session)
     for document_id in document_ids:
-        document = session.get(InstructionDocument, document_id)
+        document = session.get(InstructionDocument, document_id, with_for_update={"read": True})  # see delete_document
         if document is None or document_id in hidden or document.asset_id not in (None, asset_id):
             raise HTTPException(status_code=422, detail=f"Document {document_id} is not available for this asset")
 

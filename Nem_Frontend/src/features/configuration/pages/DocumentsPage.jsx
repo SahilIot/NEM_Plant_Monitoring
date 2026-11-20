@@ -388,7 +388,7 @@ export default function DocumentsPage() {
 
   const remove = async (item) => {
     const ok = await confirm(
-      `Delete "${item.title}"? Its ${item.files.length ? `${item.files.length} stored file(s) and ` : ""}details will be permanently removed. Maintenance schedules that reference it will no longer list it.`,
+      `Delete "${item.title}"? Its ${item.files.length ? `${item.files.length} stored file(s) and ` : ""}details will be permanently removed. A document that is still used by a rule or maintenance schedule cannot be deleted.`,
       { title: "Delete document", confirmLabel: "Delete", destructive: true }
     );
     if (!ok) return;

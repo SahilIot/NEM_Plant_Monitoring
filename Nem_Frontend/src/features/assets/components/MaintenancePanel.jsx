@@ -28,6 +28,7 @@ import RuleLiveHours from "./RuleLiveHours.jsx";
 import { auditUser, formatAuditTime, formatDurationHours, formatTime, isHoursUnit } from "../../../utils/format.js";
 import MaintenanceDetails from "./MaintenanceDetails.jsx";
 import MaintenanceRegistrationDialog from "./MaintenanceRegistrationDialog.jsx";
+import { ActualValuesView, ChecklistView } from "./MaintenanceRecordData.jsx";
 import { recordDeleteConfirmation, recordDeleteState, scheduleDeleteState } from "../maintenanceDeletion.js";
 import "./MaintenancePanel.css";
 import { BackButton } from "../../../components/common/NavButtons.jsx";
@@ -791,18 +792,21 @@ export default function MaintenancePanel({
       return;
     }
 
-    // Keep the "completed" flag of checklist items that already existed.
-    const completedByText = new Map(
+    // Keep the "completed" flag, id and note of checklist items that already existed.
+    const existingByText = new Map(
       (dialog.kind === "edit" ? dialog.record.checklist || [] : []).map((item) => [
         item.item,
-        Boolean(item.completed),
+        item,
       ])
     );
     const checklist = values.checklist
       .split(/\r?\n/)
       .map((item) => item.trim())
       .filter(Boolean)
-      .map((item) => ({ item, completed: completedByText.get(item) ?? false }));
+      .map((item) => {
+        const existing = existingByText.get(item);
+        return existing ? { ...existing, item, completed: Boolean(existing.completed) } : { item, completed: false };
+      });
 
     const payload = isSupervisor
       ? {
@@ -1982,24 +1986,10 @@ export default function MaintenancePanel({
                   {Array.isArray(record.checklist) && record.checklist.length > 0 && (
                     <div className="schedule-history-checklist">
                       <strong>Checklist / inspection</strong>
-                      <ul>
-                        {record.checklist.map((item, index) => (
-                          <li key={`${record.id}-${item.item}-${index}`}>
-                            <span
-                              className={
-                                item.completed
-                                  ? "schedule-history-checklist-result is-complete"
-                                  : "schedule-history-checklist-result"
-                              }
-                            >
-                              {item.completed ? "Complete" : "Incomplete"}
-                            </span>
-                            {item.item}
-                          </li>
-                        ))}
-                      </ul>
+                      <ChecklistView checklist={record.checklist} />
                     </div>
                   )}
+                  <ActualValuesView actualValues={record.actual_values} />
                 </li>
               ))}
           </ul>

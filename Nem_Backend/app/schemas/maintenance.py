@@ -104,6 +104,7 @@ class MaintenanceRead(ORMModel):
     completion_notes: str | None
     parts_used: str | None
     checklist: list[dict[str, object]] | None
+    actual_values: list[dict[str, Any]] | None = None
     schedule_id: int | None = None
     planned_due_date: date | None = None
     start_eligibility: str | None = None
@@ -163,6 +164,16 @@ class MaintenanceUpdate(ORMModel):
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
 
+# What the technician confirmed or entered for one parameter's variable. Everything else in the stored
+# actual_values snapshot (names, units, the last recorded reading) is taken from the server, not from the client.
+class ActualValueIn(ORMModel):
+    model_config = ConfigDict(extra="forbid")
+
+    parameter_id: int = Field(gt=0)
+    # A number or TRUE/FALSE, checked against the parameter's type by the service; null leaves it unconfirmed.
+    confirmed_value: Any = None
+
+
 # Optional request body keeps legacy completion callers working while validating
 # complete registration details whenever a caller submits registration data.
 class MaintenanceCompletion(ORMModel):
@@ -174,6 +185,7 @@ class MaintenanceCompletion(ORMModel):
     completion_notes: str | None = Field(default=None, max_length=10_000)
     parts_used: str | None = Field(default=None, max_length=10_000)
     checklist: list[dict[str, object]] | None = None
+    actual_values: list[ActualValueIn] | None = Field(default=None, max_length=50)
     # Required (true or false) when completing a rule-generated job, rejected for every other kind of maintenance.
     # It is never defaulted: a client that does not send it cannot trigger or decline a reset by accident.
     reset_progress: bool | None = None

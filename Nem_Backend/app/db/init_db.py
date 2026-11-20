@@ -592,6 +592,7 @@ def _upgrade_rule_maintenance(engine: Engine) -> None:
     record_columns = {
         "start_eligibility": "VARCHAR(20)",
         "rule_context": "JSON",
+        "actual_values": "JSON",  # process-value snapshot taken when maintenance is registered
         "started_by_id": "INTEGER",
         "started_by_name": "VARCHAR(200)",
         "completed_by_id": "INTEGER",

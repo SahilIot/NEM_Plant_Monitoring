@@ -542,8 +542,9 @@ def apply_completion_decision(session: Session, schedule: MaintenanceSchedule, *
         and config.get("time_mode") == "calendar"
     )
 
-    # Calendar Time keeps its original recurrence anchor.
-    # Other interval types continue using the existing reset baseline.
+    # Calendar Time does not use cycle_baseline_at: its next cycle is derived by calendar_cycle() from the actual
+    # completion time of this reset (schedule.last_completed_at, flushed above), so Due and Overdue are the
+    # configured intervals after that moment. Other interval types use the cycle baseline below.
     if not is_calendar_time:
         parameter.cycle_baseline_at = now
     state = session.scalar(select(RuleParameterState).where(RuleParameterState.parameter_id == parameter.id)
@@ -552,7 +553,8 @@ def apply_completion_decision(session: Session, schedule: MaintenanceSchedule, *
         state.aggregate_state = None
         state.status, state.latest_value, state.error_message = STATUS_NORMAL, 0.0, None
         state.message = (
-            "Maintenance completed. The next calendar cycle continues from the original start date."
+            f"Maintenance completed. The next calendar cycle starts from the maintenance completion time "
+            f"({_aware(completed_at).astimezone(timezone.utc).isoformat()})."
             if is_calendar_time
             else f"Progress was reset after maintenance; counting restarted at {now.isoformat()}."
         )

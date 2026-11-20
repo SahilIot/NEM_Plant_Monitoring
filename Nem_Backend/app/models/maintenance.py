@@ -189,6 +189,7 @@ class MaintenanceRecord(AuditNamesMixin, Base):
     completion_notes: Mapped[str | None] = mapped_column(Text)
     parts_used: Mapped[str | None] = mapped_column(Text)
     checklist: Mapped[list[dict[str, object]] | None] = mapped_column(JSON)
+    actual_values: Mapped[list[dict[str, object]] | None] = mapped_column(JSON)
     schedule_id: Mapped[int | None] = mapped_column(ForeignKey("nem_maintenance_schedules.id", ondelete="RESTRICT"), index=True)
     planned_due_date: Mapped[date | None] = mapped_column(Date)
     start_eligibility: Mapped[str | None] = mapped_column(String(20), nullable=True)

@@ -60,6 +60,7 @@ import {
   ChevronDown,
 } from "../../../components/common/Icons.jsx";
 import { BackButton } from "../../../components/common/NavButtons.jsx";
+import { actualValuesText, checklistText } from "../components/MaintenanceRecordData.jsx";
 
 const ORDER = { alert: 0, warning: 1, ok: 2 };
 
@@ -1116,6 +1117,26 @@ const filteredEvents = [...events]
       new Date(a.time || a.occurred_at || 0).getTime()
   );
  
+  // CSV / JSON export of the event log. The server applies the same asset, type and date filters as the on-screen log
+  // and returns every matching event, not just the page that is loaded.
+  const exportEventsFile = async (format) => {
+    const params = new URLSearchParams({ format });
+    if (eventTypeFilter) params.set("event_type", eventTypeFilter);
+    for (const [key, value] of [["start_time", eventStartDateTime], ["end_time", eventEndDateTime]]) {
+      const date = value ? new Date(value) : null;
+      if (date && !Number.isNaN(date.getTime())) params.set(key, date.toISOString());
+    }
+    setExportError("");
+    setExporting(true);
+    try {
+      await api.download(`/assets/${assetId}/events/export?${params}`, `${assetFileName}-event-log-${exportFileDate}.${format}`);
+    } catch (error) {
+      setExportError(error.message || `Could not export the event log as ${format.toUpperCase()}.`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const exportExcel = async ({
     rows,
     headers,
@@ -1370,6 +1391,49 @@ const filteredEvents = [...events]
     } finally {
       permanentDeleteRequest.current = false;
       setDeletingRuleId(null);
+    }
+  };
+
+  // Activate All: only Not Activated rules of this asset (child assets only when included).
+  const activateAll = async () => {
+    if (!canManageRules || bulkRequest.current || bulkSaving) return;
+    setMenu(false);
+    setLoadError("");
+    setActionNotice("");
+    bulkRequest.current = true;
+    setBulkSaving(true);
+    try {
+      const query = `include_children=${children}`;
+      const preview = await api.post(`/assets/${assetId}/rules/activate-all?${query}&dry_run=true`, {});
+      if (!preview.eligible) {
+        setActionNotice("There are no Not Activated rules to activate.");
+        return;
+      }
+      const scope = children ? "this asset and its included child assets" : "this asset only";
+      bulkRequest.current = false;
+      setBulkSaving(false);
+      if (!(await confirm(
+        `Activate ${preview.eligible} rule(s) on ${scope}? Rules that are suspended or completed are not changed, and rules that cannot be activated are skipped with a reason.`,
+        { title: `Activate all rules — ${asset?.name || "asset"}`, confirmLabel: "Activate all" }
+      ))) {
+        return;
+      }
+      bulkRequest.current = true;
+      setBulkSaving(true);
+      const result = await api.post(`/assets/${assetId}/rules/activate-all?${query}`, {});
+      await refreshAll();
+      const skipped = result.skipped || [];
+      setActionNotice(
+        `${result.activated} rule(s) activated.` +
+          (skipped.length
+            ? ` ${skipped.length} skipped: ${skipped.map((item) => `${item.name} (${item.reason})`).join("; ")}`
+            : "")
+      );
+    } catch (error) {
+      setLoadError(error.message || "Could not activate the rules.");
+    } finally {
+      bulkRequest.current = false;
+      setBulkSaving(false);
     }
   };
 
@@ -2060,10 +2124,10 @@ const filteredEvents = [...events]
                       <button
                       type="button"
                       className="rule-bulk-menu-item"
-                      disabled={bulkSaving || !canChangeRuleLifecycle}
-                      title={!canChangeRuleLifecycle ? "Only Administrators can change monitoring rule states." : undefined}
+                      disabled={bulkSaving || !canManageRules}
+                      title={!canManageRules ? "Only Administrators and Supervisors can activate rules." : undefined}
                       role="menuitem"
-                      onClick={() => bulk("activated")}
+                      onClick={activateAll}
                       >
                         <Power size={16} aria-hidden="true" />
                         <span>{bulkSaving ? "Updating rules…" : "Activate all rules"}</span>
@@ -2249,7 +2313,7 @@ const filteredEvents = [...events]
       disabled={filteredLogs.length === 0 || exporting}
       onClick={() =>
         exportExcel({
-          headers: ["Date and time", "Entry", "Entry type", "Technician"],
+          headers: ["Date and time", "Entry", "Entry type", "Technician", "Checklist", "Actual process values"],
           rows: filteredLogs.map((entry) => [
             entry.time || entry.created_at
               ? formatTime(entry.time || entry.created_at)
@@ -2257,6 +2321,8 @@ const filteredEvents = [...events]
             entry.text || entry.title || entry.summary || "",
             entry.maintenance_type || "Note",
             entry.assigned_technician || "",
+            checklistText(entry.checklist),
+            actualValuesText(entry.actual_values),
           ]),
           sheetName: "Maintenance logbook",
           fileName: `${assetFileName}-maintenance-logbook-${exportFileDate}.xlsx`,
@@ -2543,6 +2609,19 @@ const filteredEvents = [...events]
       >
         <Download size={17} aria-hidden="true" />
       </button>
+      {["csv", "json"].map((format) => (
+        <button
+          key={format}
+          type="button"
+          className="icon-outline sm export-icon export-format"
+          title={`Export filtered events as ${format.toUpperCase()}`}
+          aria-label={`Export event log as ${format.toUpperCase()}`}
+          disabled={exporting}
+          onClick={() => exportEventsFile(format)}
+        >
+          {format.toUpperCase()}
+        </button>
+      ))}
     </div>
     {exportError && <p className="notice error" role="alert">{exportError}</p>}
     {eventDeleteError && (

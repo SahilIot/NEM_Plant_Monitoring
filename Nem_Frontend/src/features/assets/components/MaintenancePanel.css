@@ -2726,3 +2726,130 @@ html[data-theme="dark"] .maintenance-detail-symbol svg {
     width: 100%;
   }
 }
+
+/* Maintenance registration: actual process values and structured checklist */
+.maintenance-process-values,
+.maintenance-checklist-editor {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  margin: 0 0 14px;
+  border: 1px solid var(--border-color, var(--line, #d1d5db));
+  border-radius: 10px;
+}
+
+.maintenance-process-values legend,
+.maintenance-checklist-editor legend {
+  padding: 0 6px;
+  font-weight: 650;
+}
+
+.maintenance-process-value {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border-color, var(--line, #e5e7eb));
+  border-radius: 8px;
+  background: var(--surface-secondary, var(--surface-2, transparent));
+}
+
+.maintenance-process-value-head,
+.maintenance-process-value-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 14px;
+}
+
+.maintenance-process-value-line label {
+  display: grid;
+  gap: 4px;
+  min-width: 180px;
+}
+
+.maintenance-reading-status {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--ok, #16804a);
+  background: var(--ok-soft, transparent);
+}
+
+.maintenance-reading-status.is-stale,
+.maintenance-reading-status.is-inactive {
+  color: var(--warn, #a16207);
+  background: var(--warn-soft, transparent);
+}
+
+.maintenance-reading-status.is-missing,
+.maintenance-reading-status.is-invalid {
+  color: var(--danger, #c0392b);
+  background: transparent;
+  border: 1px solid currentColor;
+}
+
+.maintenance-checklist-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+}
+
+.maintenance-checklist-row > input[type="checkbox"] {
+  width: auto;
+  margin-top: 10px;
+}
+
+.maintenance-checklist-fields {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.maintenance-record-checklist {
+  display: grid;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.maintenance-record-checklist li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+
+.maintenance-record-note {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.maintenance-record-values {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.maintenance-record-values ul {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.maintenance-record-values li {
+  display: grid;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+
+.maintenance-record-value-name {
+  font-weight: 650;
+}
