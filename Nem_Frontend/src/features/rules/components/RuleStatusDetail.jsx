@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../../../services/api.js";
 import { createLiveUpdateScheduler, shareInFlight, subscribeLiveUpdates } from "../../../services/liveUpdates.js";
 import { captureNavigationOrigin } from "../../../utils/navigation.js";
-import { NUMBER_LIMITS, numberZone } from "./parameterRules.js";
+import { NUMBER_LIMITS, makeLimitScale, numberZone } from "./parameterRules.js";
 import { formatDuration, liveHours, useDisplayClock } from "./durationClock.js";
 import ParameterCardMenu from "./ParameterCardMenu.jsx";
 import "./IntervalDemo.css";
@@ -128,17 +128,13 @@ function NumberVisual({ p }) {
   const unit = p.unit || "";
   const hasValue = (p.status !== "unknown" || p.paused) && p.value !== null && p.value !== undefined;
   const current = hasValue ? Number(p.value) : null;
-  const values = points.map((x) => x.value);
-  const lo = Math.min(...values, ...(hasValue ? [current] : []));
-  const hi = Math.max(...values, ...(hasValue ? [current] : []));
-  const span = hi - lo || Math.abs(hi) || 10;
-  const min = lo - span * 0.25, max = hi + span * 0.25;
-  const pct = (v) => Math.min(100, Math.max(0, ((v - min) / (max - min)) * 100));
-  const edges = [min, ...[...new Set(values)].sort((a, b) => a - b), max];
-  const zones = edges.slice(0, -1).map((from, i) => {
-    const zone = numberZone((from + edges[i + 1]) / 2, active);
-    return { from: pct(from), to: pct(edges[i + 1]), cls: ZONE_CLASS[zone] || "region-normal", label: "" };
-  });
+  const scale = makeLimitScale(points.map((x) => x.value));
+  const pct = scale.pct;
+  // One zone per gap between consecutive limits, plus the open-ended regions before the first / after the last.
+  const probes = [scale.limits[0] - 1, ...scale.limits.slice(1).map((v, i) => (v + scale.limits[i]) / 2), scale.limits[scale.limits.length - 1] + 1];
+  const zones = probes.map((probe, i) => ({
+    from: scale.edges[i], to: scale.edges[i + 1], cls: ZONE_CLASS[numberZone(probe, active)] || "region-normal", label: "",
+  }));
   const markers = points.map((x) => ({
     key: x.key, name: x.label, pct: pct(x.value),
     cls: `interval-demo-limit ${x.key.endsWith("alert") ? "limit-overdue" : "limit-due"}`,
