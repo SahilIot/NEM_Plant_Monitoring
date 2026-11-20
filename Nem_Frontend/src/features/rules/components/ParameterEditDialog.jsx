@@ -41,12 +41,25 @@ function periodLabel(seconds) {
 /** One line describing a saved parameter, built only from its stored configuration. */
 export function describeParameter(parameter) {
   const config = parameter.config || {};
+
   if (parameter.kind === "interval") {
     const info = parameterById(config.interval_parameter);
-    return `${info.label} interval · Due ${config.due} ${info.unitLabel} · Overdue ${config.overdue} ${info.unitLabel}`;
+    const unit =
+      config.interval_parameter === "time" && config.time_mode === "calendar"
+        ? config.time_unit || "days"
+        : info.unitLabel;
+
+    return `${info.label} interval · Due ${config.due} ${unit} · Overdue ${config.overdue} ${unit}`;
   }
-  if (parameter.kind === "boolean") return `Boolean · expects ${config.expected ? "TRUE" : "FALSE"}`;
-  const limits = NUMBER_LIMITS.filter(({ key }) => config[key] !== null && config[key] !== undefined).length;
+
+  if (parameter.kind === "boolean") {
+    return `Boolean · expects ${config.expected ? "TRUE" : "FALSE"}`;
+  }
+
+  const limits = NUMBER_LIMITS.filter(
+    ({ key }) => config[key] !== null && config[key] !== undefined
+  ).length;
+
   return `Number · ${limits} limit${limits === 1 ? "" : "s"}${config.unit ? ` · ${config.unit}` : ""}`;
 }
 
@@ -72,6 +85,9 @@ function formFrom(parameter) {
     due: text(config.due),
     overdue: text(config.overdue),
     activationAt: toLocalInput(config.activation_at),
+    timeMode: config.time_mode === "calendar" ? "calendar" : "elapsed",
+    timeUnit: config.time_unit || "days",
+    startDate: config.start_date || "",
   };
 }
 
@@ -164,6 +180,7 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
   const interval = selected?.kind === "interval";
   const intervalType = interval ? selected.config?.interval_parameter : null;
   const calendar = interval && intervalType === "time" && selected.aggregation === "none";
+  const calendarTime = interval && intervalType === "time" && selected.config?.time_mode === "calendar";
 
   // The saved variable is always listed, even if it is no longer in the active list.
   const selectableVariables = useMemo(() => {
@@ -207,9 +224,23 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
       if (errors.overdue) list.push(errors.overdue);
       // A stored Time interval that never had a start time stays editable without inventing one.
       if (intervalType === "time" && !calendar && !form.activationAt && selected.config?.activation_at) list.push("Choose when counting should start.");
+            if (calendarTime) {
+        if (!["days", "weeks", "months", "years"].includes(form.timeUnit)) {
+          list.push("Choose a valid calendar unit.");
+        }
+        if (!form.startDate || !/^\d{4}-\d{2}-\d{2}$/.test(form.startDate)) {
+          list.push("Choose a valid calendar start date.");
+        }
+        if (form.due.trim() !== "" && !Number.isSafeInteger(Number(form.due))) {
+          list.push("Due must be a whole number for Calendar Time.");
+        }
+        if (form.overdue.trim() !== "" && !Number.isSafeInteger(Number(form.overdue))) {
+          list.push("Overdue must be a whole number for Calendar Time.");
+        }
+      }
     }
     return list;
-  }, [selected, form, shape, variables, loaded.parameters, calendar, interval, intervalType]);
+  }, [selected, form, shape, variables, loaded.parameters, calendar, calendarTime, interval, intervalType]);
 
   const save = async (event) => {
     event.preventDefault();
@@ -223,6 +254,16 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
         return { ...Object.fromEntries(NUMBER_LIMITS.map(({ key }) => [key, toNumber(form.limits[key])])), unit: form.unit || "" };
       }
       if (selected.kind === "boolean") return { expected: form.expected, severity: form.severity };
+      if (calendarTime) {
+        return {
+          interval_parameter: intervalType,
+          due: Number(form.due),
+          overdue: Number(form.overdue),
+          time_mode: "calendar",
+          time_unit: form.timeUnit,
+          start_date: form.startDate,
+        };
+      }
       const saved = selected.config || {};
       const untouched = form.activationAt === toLocalInput(saved.activation_at);
       const start = intervalType === "time" && form.activationAt
@@ -302,7 +343,7 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
     );
   }
 
-  // --- single parameter form -----------------------------------------------------------------------
+  // single parameter form 
   const variable = variables.find((item) => String(item.id) === form.variableId);
   const aggregations = selected.kind === "boolean" ? THRESHOLD_AGGREGATIONS.filter((a) => a.id === "none" || a.id === "last") : THRESHOLD_AGGREGATIONS;
   const intervalInfo = interval ? parameterById(intervalType) : null;
@@ -351,7 +392,17 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
             </select>
           </RuleField>
         )}
-        {interval && <Fixed label="Calculation" value="Cumulative since the rule was activated" wide />}
+        {interval && (
+          <Fixed
+          label="Calculation"
+          value={
+            calendarTime
+            ? "Fixed calendar recurrence from the selected start date"
+            : "Cumulative since the rule was activated"
+          }
+          wide
+          />
+        )}
         {periodShown && <Fixed label="Calculation period" value={periodShown} hint="Set for the whole rule." />}
       </Section>
 
@@ -391,20 +442,81 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
         {interval && (
           <>
             <RuleField id="pe-due" label="Due *">
-              <UnitInput unit={intervalInfo.unitLabel}>
-                <input id="pe-due" type="number" inputMode="decimal" step="any" min="0" value={form.due} disabled={saving} onChange={(e) => patch({ due: e.target.value })} />
+              <UnitInput unit={calendarTime ? form.timeUnit : intervalInfo.unitLabel}>
+                <input
+                id="pe-due"
+                type="number"
+                inputMode={calendarTime ? "numeric" : "decimal"}
+                step={calendarTime ? "1" : "any"}
+                min="0"
+                value={form.due}
+                disabled={saving}
+                onChange={(e) => patch({ due: e.target.value })}
+                />
               </UnitInput>
             </RuleField>
             <RuleField id="pe-overdue" label="Overdue *">
-              <UnitInput unit={intervalInfo.unitLabel}>
-                <input id="pe-overdue" type="number" inputMode="decimal" step="any" min="0" value={form.overdue} disabled={saving} onChange={(e) => patch({ overdue: e.target.value })} />
+              <UnitInput unit={calendarTime ? form.timeUnit : intervalInfo.unitLabel}>
+                <input
+                id="pe-overdue"
+                type="number"
+                inputMode={calendarTime ? "numeric" : "decimal"}
+                step={calendarTime ? "1" : "any"}
+                min="0"
+                value={form.overdue}
+                disabled={saving}
+                onChange={(e) => patch({ overdue: e.target.value })}
+                />
               </UnitInput>
             </RuleField>
-            {intervalType === "time" && (
-              <RuleField id="pe-start" label="Start" optional={calendar} hint="Counting starts from this date and time." wide>
-                <input id="pe-start" type="datetime-local" value={form.activationAt} disabled={saving || supervisor} onChange={(e) => patch({ activationAt: e.target.value })} />
+            {calendarTime ? (
+              <>
+                <RuleField id="pe-time-unit" label="Calendar Unit *">
+                  <select
+                    id="pe-time-unit"
+                    value={form.timeUnit}
+                    disabled={saving || supervisor}
+                    onChange={(e) => patch({ timeUnit: e.target.value })}
+                  >
+                    <option value="days">Days</option>
+                    <option value="weeks">Weeks</option>
+                    <option value="months">Months</option>
+                    <option value="years">Years</option>
+                  </select>
+                </RuleField>
+
+                <RuleField
+                  id="pe-calendar-start"
+                  label="Calendar Start Date *"
+                  hint="Recurring maintenance dates remain anchored to this date."
+                  wide
+                >
+                  <input
+                    id="pe-calendar-start"
+                    type="date"
+                    value={form.startDate}
+                    disabled={saving || supervisor}
+                    onChange={(e) => patch({ startDate: e.target.value })}
+                  />
+                </RuleField>
+              </>
+            ) : intervalType === "time" ? (
+              <RuleField
+                id="pe-start"
+                label="Start"
+                optional={calendar}
+                hint="Counting starts from this date and time."
+                wide
+              >
+                <input
+                  id="pe-start"
+                  type="datetime-local"
+                  value={form.activationAt}
+                  disabled={saving || supervisor}
+                  onChange={(e) => patch({ activationAt: e.target.value })}
+                />
               </RuleField>
-            )}
+            ) : null}
           </>
         )}
       </Section>
@@ -432,7 +544,9 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
         </p>
       )}
       <p className="pe-note">
-        Only this parameter is changed. Changing the variable, aggregation or start time restarts this parameter's progress; the name and limits keep it. Other parameters and alert history are kept.
+        {calendarTime
+        ? "Only this parameter is changed. Changing the calendar unit or start date updates its recurrence. Due and Overdue values apply only to this parameter. Other parameters and alert history are kept."
+        : "Only this parameter is changed. Changing the variable, aggregation or start time restarts this parameter's progress; the name and limits keep it. Other parameters and alert history are kept."}
       </p>
       {showErrors && problems.length > 0 && (
         <ul className="pe-problems" role="alert">{problems.map((message) => <li key={message}>{message}</li>)}</ul>

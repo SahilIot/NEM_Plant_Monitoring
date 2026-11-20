@@ -3,8 +3,8 @@ import {
   SAMPLE_VALUES,
   STATUS_LABEL,
   demoScale,
-  describeValue,
   formatAmount,
+  intervalStatus,
   parameterById,
 } from "./intervalConfig.js";
 import "./IntervalDemo.css";
@@ -17,10 +17,20 @@ import "./IntervalDemo.css";
  * - `actual`: null when no variable is connected, otherwise { state, value, detail } where state is
  *   "loading" | "ok" | "unavailable" | "invalid". A real value is shown only when state is "ok".
  */
-export default function IntervalDemo({ parameterId, due, overdue, actual = null }) {
+export default function IntervalDemo({ parameterId, due, overdue, actual = null, calendarUnit = null }) {
   const parameter = parameterById(parameterId);
   const counter = parameter.aggregation === "counter";
-  const sample = SAMPLE_VALUES[parameter.unit];
+  const calendarTime = Boolean(calendarUnit);
+  const calendarSamples = {
+  days: { current: 5, due: 10, overdue: 12 },
+  weeks: { current: 2, due: 4, overdue: 5 },
+  months: { current: 2, due: 3, overdue: 4 },
+  years: { current: 1, due: 2, overdue: 3 },
+};
+
+const sample = calendarUnit
+  ? calendarSamples[calendarUnit] || calendarSamples.days
+  : SAMPLE_VALUES[parameter.unit];
   const sampleLimits = !(due && overdue);
   const limits = sampleLimits ? { due: sample.due, overdue: sample.overdue } : { due, overdue };
   const actualReady = actual?.state === "ok";
@@ -34,19 +44,44 @@ export default function IntervalDemo({ parameterId, due, overdue, actual = null 
   // A different parameter or unit starts the explorer from its own default again.
   useEffect(() => {
     setTryValue(null);
-  }, [parameterId]);
+  }, [parameterId, calendarUnit]);
 
-  const defaultTry = sampleLimits ? sample.current : Math.round(limits.due * 0.65 * 100) / 100;
+  const defaultTry = sampleLimits
+  ? sample.current
+  : calendarTime
+    ? Math.round(limits.due * 0.65)
+    : Math.round(limits.due * 0.65 * 100) / 100;
+  const sliderStep = counter || calendarTime ? 1 : "any";
   const explorerValue = tryValue ?? defaultTry;
   const showActual = actualReady && mode === "live";
   const value = showActual ? Number(actual.value) : explorerValue;
   const scale = demoScale(value, limits.due, limits.overdue);
-  const { status, remaining } = describeValue(value, limits.due, limits.overdue, parameterId);
+  const status = intervalStatus(value, limits.due, limits.overdue); 
+
+  const fmt = (amount) => {
+    if (!calendarTime) return formatAmount(amount, parameterId);
+
+    const number = Number(amount);
+    if (!Number.isFinite(number)) return "—";
+
+    const rounded = Number.isInteger(number)
+      ? String(number)
+      : String(Math.round(number * 100) / 100);
+
+    return `${rounded} ${calendarUnit}`;
+  };
+
+  let remaining = "";
+  if (status === "normal") {
+    remaining = `${fmt(limits.due - value)} until Due`;
+  } else if (status === "due") {
+    remaining = `Due now. ${fmt(limits.overdue - value)} until Overdue`;
+  } else if (status === "overdue") {
+    remaining = `Overdue by ${fmt(value - limits.overdue)}`;
+  }
   const sliderMax = Math.max(limits.overdue * 1.5, value);
-  const sliderStep = counter ? 1 : "any";
 
   const open = pinned || active;
-  const fmt = (amount) => formatAmount(amount, parameterId);
   const tooltips = {
     value: {
       title: showActual ? "Current value (live)" : "Current value (sample)",
@@ -206,7 +241,7 @@ export default function IntervalDemo({ parameterId, due, overdue, actual = null 
 
       {!showActual && (
         <label className="interval-demo-try">
-          <span>Try a value ({parameter.unitLabel})</span>
+          <span>Try a value ({calendarTime ? calendarUnit : parameter.unitLabel})</span>
           <input
             type="range"
             min="0"

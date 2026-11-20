@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import Field, ValidationInfo, field_validator, model_validator
@@ -19,6 +19,7 @@ from app.core.constants import (
     COUNTER,
     INTERVAL,
     NUMBER,
+    PROGRESS_RESET,
     RULE_PARAMETER_THRESHOLD,
     STATUS_ALERT,
     STATUS_WARNING,
@@ -109,30 +110,100 @@ class RuleParameterIn(ORMModel):
                     raise ValueError(f"{label}: Due and Overdue must be whole numbers of cycles")
                 due, overdue = int(due), int(overdue)
             activation_at = config.get("activation_at")
-            if parameter == TIME and activation_at is not None and not isinstance(activation_at, str):
-                raise ValueError(f"{label}: start time must be an ISO-8601 timestamp")
-            if parameter == TIME and activation_at:
+
+            # Existing Time configuration: preserve elapsed-hours behaviour.
+            # New calendar Time configuration: use an explicit start date and calendar unit.
+            time_mode = config.get("time_mode", "elapsed")
+
+            if parameter == TIME and time_mode not in {"elapsed", "calendar"}:
+                raise ValueError(f"{label}: Time mode must be elapsed or calendar")
+
+            time_unit = config.get("time_unit", "days")
+            start_date = config.get("start_date")
+
+            if parameter == TIME and time_mode == "calendar":
+                if time_unit not in {"days", "weeks", "months", "years"}:
+                    raise ValueError(
+                        f"{label}: Time unit must be days, weeks, months or years"
+                    )
+
+                if not float(due).is_integer() or not float(overdue).is_integer():
+                    raise ValueError(
+                        f"{label}: Calendar Due and Overdue must be whole numbers"
+                    )
+
+                due, overdue = int(due), int(overdue)
+
+                if not isinstance(start_date, str):
+                    raise ValueError(
+                        f"{label}: Calendar Time needs a start date (YYYY-MM-DD)"
+                    )
+
                 try:
-                    datetime.fromisoformat(activation_at.replace("Z", "+00:00"))
+                    date.fromisoformat(start_date)
                 except ValueError:
-                    raise ValueError(f"{label}: start time must be an ISO-8601 timestamp") from None
+                    raise ValueError(
+                        f"{label}: Start date must use YYYY-MM-DD format"
+                    ) from None
+
+            elif parameter == TIME:
+                if activation_at is not None and not isinstance(activation_at, str):
+                    raise ValueError(
+                        f"{label}: start time must be an ISO-8601 timestamp"
+                    )
+
+                if activation_at:
+                    try:
+                        datetime.fromisoformat(
+                            activation_at.replace("Z", "+00:00")
+                        )
+                    except ValueError:
+                        raise ValueError(
+                            f"{label}: start time must be an ISO-8601 timestamp"
+                        ) from None
+
             self.config = {
                 "interval_parameter": parameter,
                 "due": due,
                 "overdue": overdue,
-                **({"activation_at": activation_at} if parameter == TIME and activation_at else {}),
+                **(
+                    {
+                        "time_mode": "calendar",
+                        "time_unit": time_unit,
+                        "start_date": start_date,
+                    }
+                    if parameter == TIME and time_mode == "calendar"
+                    else (
+                        {"activation_at": activation_at}
+                        if parameter == TIME and activation_at
+                        else {}
+                    )
+                ),
             }
             if stored:
                 return self
             if parameter == COUNTER:
                 if self.aggregation != COUNTER or self.variable_id is None:
-                    raise ValueError(f"{label}: Counter intervals need a variable with Counter aggregation")
+                    raise ValueError(
+                        f"{label}: Counter intervals need a variable with Counter aggregation"
+                    )
+
+            elif parameter == TIME and time_mode == "calendar":
+                if self.variable_id is not None or self.aggregation != AGGREGATION_NONE:
+                    raise ValueError(
+                        f"{label}: Calendar Time must not use a PLC variable"
+                    )
+
             elif self.variable_id is None:
-                # Calendar-based Time interval: no PLC variable; elapsed hours since the start time.
                 if parameter != TIME or self.aggregation != AGGREGATION_NONE:
-                    raise ValueError(f"{label}: Usage intervals need a variable with Timer aggregation")
+                    raise ValueError(
+                        f"{label}: Usage intervals need a variable with Timer aggregation"
+                    )
+
             elif self.aggregation != TIMER:
-                raise ValueError(f"{label}: Usage and Time intervals with a variable need Timer aggregation")
+                raise ValueError(
+                    f"{label}: Usage and Time intervals with a variable need Timer aggregation"
+                )
         return self
 
 
