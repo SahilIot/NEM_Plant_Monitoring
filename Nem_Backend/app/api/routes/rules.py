@@ -15,9 +15,12 @@ from app.schemas.rule import RuleCreate, RuleRead, RuleTemplateCreate, RuleUpdat
 from app.services.rule_visibility import can_view_template, request_user
 from app.services.access_scope import access_scope, rule_asset_id
 from app.services.labels import apply_label_filter, assign_labels
-from app.services.monitoring_engine import emit_event, evaluate_rules, set_rule_enabled_state
+from app.services.event_log import emit_event
+from app.services.monitoring_engine import evaluate_rules, set_rule_enabled_state
 from app.services.monitoring_engine import utc_now
 from app.services.rule_parameters import ParameterConfigError
+from app.services.signal_mappings import (configured_cycle_signal_mapping, configured_runtime_signal_mapping,
+                                          is_mapping_bypass_enabled)
 from app.core.constants import (
     BOOLEAN,
     CYCLE,
@@ -75,41 +78,6 @@ def _validation_message(error: ValidationError) -> str:
         message = str(item["msg"]).removeprefix("Value error, ")
         parts.append(f"{location}: {message}" if location else message)
     return "; ".join(parts)
-
-# Check whether the OPC UA mapping bypass feature is enabled in application settings.
-def is_mapping_bypass_enabled(request: Request) -> bool:
-    settings = getattr(request.app.state, "settings", None)
-    return bool(getattr(settings, "opc_ua_mapping_bypass_enabled", False))
-
-#Configured PLC cycle signal
-def configured_cycle_signal_mapping(request: Request,variable_id: int | None,) -> tuple[int, int] | None:
-    collector = request.app.state.opcua_collector
-    return next(
-        (
-            (mapping.asset_id, mapping.cycle_signal.variable_id)
-            for mapping in collector.mappings
-            if mapping.cycle_signal is not None
-            and mapping.cycle_signal.variable_id == variable_id
-        ),
-        None,
-    )
-
-# Rules need to know whether a selected variable is already configured as the machine`s cycle or running signal.`
-def configured_runtime_signal_mapping(
-    request: Request,
-    variable_id: int | None,
-) -> tuple[int, int] | None:
-    collector = request.app.state.opcua_collector
-    return next(
-        (
-            (mapping.asset_id, mapping.running_signal.variable_id)
-            for mapping in collector.mappings
-            if mapping.running_signal is not None
-            and mapping.running_signal.variable_id == variable_id
-        ),
-        None,
-    )
-
 
 #Find the rule safely - whether rule exists and is within the caller`s access scope. If not, raise a 404 error.
 def rule_or_404(session: Session, rule_id: int) -> MonitoringRule:
@@ -313,9 +281,9 @@ def create_rule(
     validate_targets(
         session, payload.target_asset_id, payload.variable_id, payload.rule_type,
         payload.operator, payload.threshold, payload.parameters,
-        configured_cycle_signal_mapping(request, payload.variable_id),
-        configured_runtime_signal_mapping(request, payload.variable_id),
-        is_mapping_bypass_enabled(request),
+        configured_cycle_signal_mapping(request.app.state, payload.variable_id),
+        configured_runtime_signal_mapping(request.app.state, payload.variable_id),
+        is_mapping_bypass_enabled(request.app.state),
     )
     rule_data = payload.model_dump(exclude={"labels"})
     rule_data[LIFECYCLE_STATUS] = (STATUS_IN_PROGRESS if payload.is_enabled else STATUS_DEACTIVATED)
@@ -466,9 +434,9 @@ def update_rule(
     validate_targets(
         session, validated.target_asset_id, validated.variable_id, validated.rule_type,
         validated.operator, validated.threshold, validated.parameters,
-        configured_cycle_signal_mapping(request, validated.variable_id),
-        configured_runtime_signal_mapping(request, validated.variable_id),
-        is_mapping_bypass_enabled(request),
+        configured_cycle_signal_mapping(request.app.state, validated.variable_id),
+        configured_runtime_signal_mapping(request.app.state, validated.variable_id),
+        is_mapping_bypass_enabled(request.app.state),
     )
     # prevent changing targets after evaluation state exits
     target_fields = {"target_asset_id", "variable_id"}

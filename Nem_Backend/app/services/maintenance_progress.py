@@ -15,7 +15,7 @@ from app.models.reading import Reading
 from app.models.rule import Alert
 from app.models.variable import Variable
 from app.services.email_notifications import enqueue_alert_notifications
-from app.services.monitoring_engine import emit_event
+from app.services.event_log import emit_event
 from app.core.constants import (
     BOOLEAN,
     CYCLE,

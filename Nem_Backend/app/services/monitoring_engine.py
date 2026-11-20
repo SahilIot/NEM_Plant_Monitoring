@@ -23,8 +23,10 @@ from app.models import (
 )
 
 from app.services.email_notifications import enqueue_alert_notifications
+from app.services.event_log import emit_event
 from app.core.constants import (
     ACTIVATION_AT,
+    OPCUA_SOURCE_ID,
     BOOLEAN,
     INTERVAL,
     NUMBER,
@@ -56,10 +58,6 @@ LOGGER = logging.getLogger("nem_backend.monitoring")
 
 # Rule types the database accepts but the engine cannot evaluate yet.
 UNEVALUATED_RULE_TYPES = frozenset({RULE_GENERIC, RULE_BOOLEAN_CONDITION})
-
-# Readings written by the OPC UA collector carry this source id; they are the only ones held to the
-# short runtime freshness limit. API and manually entered readings keep the rule/default stale limit.
-OPCUA_SOURCE_ID = "opcua_subscription"
 
 OPERATORS: dict[str, Callable[[Any, Any], bool]] = {
     ">": operator.gt,
@@ -94,32 +92,6 @@ def runtime_activation_at(rule: MonitoringRule) -> datetime | None:
     if activation_at.tzinfo is None or activation_at.utcoffset() is None:
         raise ValueError("Runtime activation timestamp must include a timezone")
     return activation_at.astimezone(timezone.utc)
-
-
-def emit_event(
-    session: Session,
-    *,
-    event_type: str,
-    message: str,
-    occurred_at: datetime,
-    asset_id: int | None = None,
-    rule_id: int | None = None,
-    alert_id: int | None = None,
-    severity: str | None = None,
-    metadata: dict[str, Any] | None = None,
-) -> MonitoringEvent:
-    event = MonitoringEvent(
-        event_type=event_type,
-        message=message,
-        occurred_at=occurred_at,
-        asset_id=asset_id,
-        rule_id=rule_id,
-        alert_id=alert_id,
-        severity=severity,
-        event_metadata=metadata,
-    )
-    session.add(event)
-    return event
 
 
 def get_rule_asset(
@@ -1200,6 +1172,7 @@ def evaluate_rule(
 
     if rule.rule_type == RULE_MULTI_PARAMETER:
         # Several independently evaluated parameters; the rule shows the worst of them.
+        # Retained lazy import (domain cycle: monitoring_engine <-> rule_parameters <-> rule_maintenance, see docs/architecture.md).
         from app.services.rule_parameters import evaluate_multi_parameter
 
         return evaluate_multi_parameter(session, rule, asset, state, now, stale_after_seconds, skip_unchanged)
@@ -1789,6 +1762,7 @@ def set_rule_enabled_state(
 
     if enabled and rule.rule_type == RULE_MULTI_PARAMETER:
         # Checked before anything changes, so a rejected enable leaves the rule exactly as it was.
+        # Retained lazy import (domain cycle: monitoring_engine <-> rule_parameters <-> rule_maintenance, see docs/architecture.md).
         from app.services.rule_parameters import require_valid_parameters
 
         require_valid_parameters([p for p in rule.parameter_items if p.lifecycle_status == STATUS_ACTIVE])
@@ -1822,6 +1796,7 @@ def set_rule_enabled_state(
             counter.updated_at = now
 
     if rule.rule_type == RULE_MULTI_PARAMETER:
+        # Retained lazy import (domain cycle: monitoring_engine <-> rule_parameters <-> rule_maintenance, see docs/architecture.md).
         from app.services.rule_parameters import pause_parameters, resume_parameters
 
         (resume_parameters if enabled else pause_parameters)(session, rule, now)

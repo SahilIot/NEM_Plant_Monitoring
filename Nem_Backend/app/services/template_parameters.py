@@ -9,6 +9,9 @@ from sqlalchemy.orm import Session
 
 from app.models import Alert, Asset, MonitoringRule, MonitoringRuleTemplate, RuleParameter, Variable
 from app.schemas.rule_parameters import RuleParameterIn
+from app.services.parameter_validation import check_parameters, measured_source
+from app.services.rule_parameters import archive_removed_parameter, reset_parameter_baseline
+from app.services.signal_mappings import configured_cycle_signal_mapping, configured_runtime_signal_mapping, is_mapping_bypass_enabled
 from app.core.constants import (
     AGGREGATION,
     BOOLEAN,
@@ -59,9 +62,6 @@ def candidates_for(session: Session, request: Request, asset: Asset, definition:
                    keep_variable_ids: set[int] | None = None) -> list[Variable]:
     if not definition.get("uses_variable", True):
         return []
-    from app.api.routes.rules import (
-        configured_cycle_signal_mapping, configured_runtime_signal_mapping, is_mapping_bypass_enabled)
-
     variables = session.scalars(select(Variable).where(
         Variable.asset_id == asset.id,
         or_(Variable.is_active.is_(True), Variable.id.in_(keep_variable_ids or {0})),
@@ -70,8 +70,8 @@ def candidates_for(session: Session, request: Request, asset: Asset, definition:
         return list(variables)
     counter = (definition["config"] or {}).get(INTERVAL_PARAMETER) == COUNTER
     mapping = configured_cycle_signal_mapping if counter else configured_runtime_signal_mapping
-    bypass = is_mapping_bypass_enabled(request)
-    return [v for v in variables if mapping(request, v.id) == (asset.id, v.id)
+    bypass = is_mapping_bypass_enabled(request.app.state)
+    return [v for v in variables if mapping(request.app.state, v.id) == (asset.id, v.id)
             or (bypass and v.opcua_node_id is not None and v.signal_role in {None, CYCLE if counter else RUNNING})]
 
 # Automatically suggests a variable when creating a rule.
@@ -106,8 +106,6 @@ def resolve_variable(session: Session, request: Request, asset: Asset, definitio
 def build_items(session: Session, request: Request, asset: Asset, template: MonitoringRuleTemplate,
                 mappings: dict[str, int] | None) -> list[dict[str, Any]]:
     # RuleParameter column values for an asset rule made from the template, validated like a hand-made rule.
-    from app.api.routes.rule_parameters import _check_parameters
-
     mappings = mappings or {}
     unknown = set(mappings) - {d["key"] for d in template_defs(template)}
     if unknown:
@@ -121,7 +119,7 @@ def build_items(session: Session, request: Request, asset: Asset, template: Moni
         items.append({"key": definition["key"], "name": definition["name"], "position": position,
                       KIND: definition[KIND], "variable_id": variable.id if variable else None,
                       AGGREGATION: definition[AGGREGATION], "config": definition["config"]})
-    _check_parameters(session, request, asset,
+    check_parameters(session, request.app.state, asset,
                       [RuleParameterIn(key=i["key"], name=i["name"], kind=i[KIND], variable_id=i["variable_id"],
                                        aggregation=i[AGGREGATION], config=i["config"]) for i in items],
                       (template.parameters or {}).get("category"))
@@ -160,9 +158,6 @@ def instantiate(definition: dict[str, Any]) -> MonitoringRule:
 # This func. sync. an existing asset rule with changes made to its shared template.
 def sync_instance(session: Session, request: Request, rule: MonitoringRule, template: MonitoringRuleTemplate) -> None:
 
-    from app.api.routes.rule_parameters import _check_parameters, _measured_source
-    from app.services.rule_parameters import reset_parameter_baseline
-
     asset = session.get(Asset, rule.target_asset_id)
     meta = rule_meta(template)
     kept = {k: v for k, v in (rule.parameters or {}).items() if k in {"document_ids", "notifications"}}
@@ -173,8 +168,6 @@ def sync_instance(session: Session, request: Request, rule: MonitoringRule, temp
     for key in set(existing) - set(defs):
         for alert in session.scalars(select(Alert).where(Alert.parameter_id == existing[key].id, Alert.status == STATUS_ACTIVE)).all():
             alert.status, alert.resolved_at, alert.last_updated_at = STATUS_RESOLVED, now, now
-        from app.services.rule_parameters import archive_removed_parameter
-
         archive_removed_parameter(session, rule, existing[key], "removed from the shared rule")
         rule.parameter_items.remove(existing[key])
     taken = {(p.variable_id, p.aggregation) for key, p in existing.items() if key in defs and p.variable_id}
@@ -197,14 +190,14 @@ def sync_instance(session: Session, request: Request, rule: MonitoringRule, temp
             if variable_id not in allowed:
                 raise HTTPException(status_code=409, detail=(f"Parameter '{definition['name']}': the connected variable on asset {asset.name} is not compatible "
                     "with the new configuration"))
-        changed = _measured_source(parameter.variable_id, parameter.aggregation, parameter.config) != _measured_source(
+        changed = measured_source(parameter.variable_id, parameter.aggregation, parameter.config) != measured_source(
             variable_id, definition[AGGREGATION], definition["config"])
         parameter.name, parameter.position = definition["name"], position
         parameter.variable_id, parameter.aggregation, parameter.config = variable_id, definition[AGGREGATION], definition["config"]
         if changed:
             reset_parameter_baseline(session, parameter)
     session.flush()
-    _check_parameters(session, request, asset,
+    check_parameters(session, request.app.state, asset,
                       [RuleParameterIn(key=p.key, name=p.name, kind=p.kind, variable_id=p.variable_id,
                                        aggregation=p.aggregation, config=p.config) for p in rule.parameter_items],
                       meta.get("category"), current={p.key: p.variable_id for p in rule.parameter_items})

@@ -31,6 +31,7 @@ from app.schemas.maintenance import MaintenanceScheduleCreate
 from app.schemas.rule import RuleTemplateCreate
 from app.core.labels import normalize_label_names
 from app.services.labels import assign_labels
+from app.services.maintenance_creation import create_maintenance_schedule
 from app.services.rule_visibility import apply_visibility
 from app.core.constants import (
     ACTIVATION_AT,
@@ -663,8 +664,6 @@ def _create_template(session, admin, payload, visibility, collection_id, import_
 # Actual import operation
 def apply_import(session: Session, package: Any, options: ImportOptions, admin: User) -> dict[str, Any]:
     # Create the validated records inside the caller's transaction and commit once at the end.
-    from app.api.routes.maintenance import _create_maintenance_schedule
-
     report = analyse(session, package, options)
     if report["totals"]["invalid"] and not options.skip_invalid:
         problems = [
@@ -691,7 +690,7 @@ def apply_import(session: Session, package: Any, options: ImportOptions, admin: 
             item = entry["item"]
             ref = f"{item['category']}:{item['ref']}"
             if SCHEDULE in entry:
-                schedule = _create_maintenance_schedule(
+                schedule = create_maintenance_schedule(
                     session, entry[SCHEDULE].model_copy(update={"asset_id": entry["asset_id"]}))
                 created.append({"category": item["category"], "name": item["final_name"], "id": schedule.id})
             elif "collection" in entry:

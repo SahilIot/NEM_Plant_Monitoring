@@ -12,13 +12,10 @@ from sqlalchemy.orm import Session, object_session
 from app.api.routes.auth import get_current_user
 from app.api.routes.rules import (
     lock_rule,
-    configured_cycle_signal_mapping,
-    configured_runtime_signal_mapping,
-    is_mapping_bypass_enabled,
     rule_or_404,
 )
 from app.db.session import get_db
-from app.models import Asset, InstructionDocument, MonitoringRule, RuleParameter, User, Variable
+from app.models import Asset, InstructionDocument, MonitoringRule, RuleParameter, User
 from app.schemas.rule_parameters import (
     ComponentIdentifierRequest,
     MultiParameterRuleCreate,
@@ -30,8 +27,9 @@ from app.schemas.rule_parameters import (
 )
 from app.services.access_scope import access_scope, hidden_document_ids
 from app.services.labels import assign_labels
-from app.services.monitoring_engine import emit_event
+from app.services.event_log import emit_event
 from app.services.access_scope import require_rule_access
+from app.services.parameter_validation import check_parameters, measured_source
 from app.services.legacy_parameters import (
     build_legacy_status_detail,
     legacy_parameter_id,
@@ -43,22 +41,14 @@ from app.services.rule_parameters import (
 from app.services.rule_visibility import SUPERVISOR_EDITABLE_LIMITS, enforce_template_edit_permission
 from app.core.constants import (
     AGGREGATION,
-    BOOLEAN,
-    COUNTER,
-    CYCLE,
     INTERVAL,
     INTERVAL_PARAMETER,
-    NUMBER,
     RULE_MULTI_PARAMETER,
-    RUNNING,
     STATUS_ACTIVE,
     STATUS_ALERT,
     STATUS_DEACTIVATED,
     STATUS_IN_PROGRESS,
     STATUS_RESOLVED,
-    TIMER,
-    AGGREGATION_LAST,
-    AGGREGATION_NONE,
     CATEGORY_INTERVAL_BASED,
     ERR_SUPERVISOR_PARAMETER_EDIT,
     EVENT_RULE_CREATED,
@@ -69,19 +59,10 @@ from app.core.constants import (
 
 router = APIRouter(tags=["multi-parameter rules"])
 
-NUMERIC_TYPES = {NUMBER, "integer"}
-# Config keys that only change how the value is judged. Editing them re-evaluates on the next cycle but
-# never discards accumulated progress; every other key (interval type, start time) changes what is measured.
-LIMIT_CONFIG_KEYS = {"lower_alert", "lower_warning", "upper_warning", "upper_alert", "unit", "due", "overdue", "expected", "severity"}
-
-# It creates a representation of the measurement configuration
-def _measured_source(variable_id: int | None, aggregation: str, config: dict[str, Any]) -> tuple:
-    return (variable_id, aggregation, {key: value for key, value in (config or {}).items() if key not in LIMIT_CONFIG_KEYS})
-
 # Compare the existing parameter with the incoming parameter
 def _measurement_changed(parameter: RuleParameter, item: RuleParameterIn) -> bool:
-    return (parameter.kind, *_measured_source(parameter.variable_id, parameter.aggregation, parameter.config)) != (
-        item.kind, *_measured_source(item.variable_id, item.aggregation, item.config))
+    return (parameter.kind, *measured_source(parameter.variable_id, parameter.aggregation, parameter.config)) != (
+        item.kind, *measured_source(item.variable_id, item.aggregation, item.config))
 
 # Converts an existing db params into a RuleParamIN schema object
 def _stored_definition(parameter: RuleParameter) -> RuleParameterIn:
@@ -104,49 +85,6 @@ def _enforce_supervisor_edit(user: User, parameter: RuleParameter, item: RulePar
     if (old.name, old.kind, old.variable_id, old.aggregation, strip(old.config)) != (
             item.name, item.kind, item.variable_id, item.aggregation, strip(item.config)):
         raise HTTPException(status_code=403, detail=ERR_SUPERVISOR_PARAMETER_EDIT)
-
-# Imp -> Its responsibility is to ensure that every param references a valid var and that the var is suitable for the param config.
-def _check_parameters(session: Session,request: Request,asset: Asset,items: list[RuleParameterIn],category: str,
-                      current: dict[str, int | None] | None = None) -> None:
-    bypass = is_mapping_bypass_enabled(request)
-    seen: dict[tuple[int, str], str] = {}
-    for item in items:
-        label = f"Parameter '{item.name}'"
-        if item.variable_id is None:
-            continue
-        variable = session.get(Variable, item.variable_id)
-        if variable is None or not access_scope(session).allows(variable.asset_id):
-            raise HTTPException(status_code=404, detail=f"{label}: variable {item.variable_id} was not found")
-        if variable.asset_id != asset.id:
-            raise HTTPException(status_code=422, detail=f"{label}: the variable does not belong to this asset")
-        if not variable.is_active and not (item.key and (current or {}).get(item.key) == variable.id):
-            raise HTTPException(status_code=422, detail=f"{label}: the variable is inactive")
-
-        boolean = variable.data_type == BOOLEAN
-        if item.kind == NUMBER:
-            if item.aggregation in {AGGREGATION_NONE, AGGREGATION_LAST} and variable.data_type not in NUMERIC_TYPES:
-                raise HTTPException(status_code=422, detail=f"{label}: Number parameters with {item.aggregation.capitalize()} aggregation need a numeric variable")
-            if item.aggregation in {COUNTER, TIMER} and not boolean:
-                raise HTTPException(status_code=422, detail=f"{label}: {item.aggregation.capitalize()} aggregation needs a Boolean variable")
-        elif item.kind == BOOLEAN:
-            if not boolean:
-                raise HTTPException(status_code=422, detail=f"{label}: Boolean parameters need a Boolean variable")
-            if item.aggregation not in {AGGREGATION_NONE, AGGREGATION_LAST}:
-                raise HTTPException(status_code=422, detail=f"{label}: Boolean parameters support None or Last aggregation only")
-        else:
-            if not boolean:
-                raise HTTPException(status_code=422, detail=f"{label}: interval parameters need a Boolean variable")
-            counter = item.config.get(INTERVAL_PARAMETER) == COUNTER
-            mapping = (configured_cycle_signal_mapping if counter else configured_runtime_signal_mapping)(request, variable.id)
-            bypass_ok = bypass and variable.opcua_node_id is not None and variable.signal_role in {None, CYCLE if counter else RUNNING}
-            if mapping != (asset.id, variable.id) and not bypass_ok:
-                raise HTTPException(status_code=422, detail=(f"{label}: the variable must be this asset's configured "
-                    f"{CYCLE if counter else RUNNING} signal"))
-
-        pair = (variable.id, item.aggregation)
-        if pair in seen:
-            raise HTTPException(status_code=422, detail=f"{label}: the same variable and aggregation are already used by '{seen[pair]}'")
-        seen[pair] = item.name
 
 # This func handles a special case for Time-Based interval params.
 def _require_time_start(items: list[RuleParameterIn], existing: dict[str, RuleParameter] | None = None) -> None:
@@ -233,7 +171,7 @@ def create_multi_parameter_rule(
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
     if not asset.is_active:
         raise HTTPException(status_code=422, detail="Rules cannot be created for an inactive asset")
-    _check_parameters(session, request, asset, payload.parameters, payload.category)
+    check_parameters(session, request.app.state, asset, payload.parameters, payload.category)
     _require_time_start(payload.parameters)
     document_ids = sorted(set(payload.document_ids))
     hidden = hidden_document_ids(session)
@@ -491,7 +429,7 @@ def replace_rule_parameters(
             raise HTTPException(status_code=403, detail=ERR_SUPERVISOR_PARAMETER_EDIT)
         for item in payload.parameters:
             _enforce_supervisor_edit(user, existing[item.key], item)
-    _check_parameters(session, request, asset, payload.parameters, category,
+    check_parameters(session, request.app.state, asset, payload.parameters, category,
                       current={key: parameter.variable_id for key, parameter in existing.items()})
     if rule.source_template_id is None:
         _require_time_start(payload.parameters, existing)
@@ -534,7 +472,7 @@ def update_rule_parameter(
         raise HTTPException(status_code=422, detail="Parameter names must be unique within a rule")
     _enforce_supervisor_edit(user, parameter, payload)
     category = (rule.parameters or {}).get("category")
-    _check_parameters(session, request, asset, [payload.model_copy(update={"key": parameter.key})], category,
+    check_parameters(session, request.app.state, asset, [payload.model_copy(update={"key": parameter.key})], category,
                       current={parameter.key: parameter.variable_id})
     if rule.source_template_id is None:
         _require_time_start([payload.model_copy(update={"key": parameter.key})], {parameter.key: parameter})

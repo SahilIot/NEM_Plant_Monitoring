@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, attributes
 from app.models import Alert, Asset, MaintenanceRecord, MaintenanceSchedule, MonitoringRule, RuleParameter, RuleParameterState
 from app.services.email_notifications import enqueue_alert_notifications
 from app.core.config import get_settings
-from app.services.monitoring_engine import emit_event
+from app.services.event_log import emit_event
 from app.services.rule_parameters import (_aware, _refresh_rule_state, calendar_last_reset_at, change_parameter_lifecycle, effective_stale_after,)
 from app.core.constants import (
     APPROVAL_NOT_REQUIRED,
@@ -499,6 +499,7 @@ def _stop_retained_cycle(session: Session, schedule: MaintenanceSchedule, now: d
     if parameter.lifecycle_status in (STATUS_ACTIVE, STATUS_SUSPENDED):
         change_parameter_lifecycle(session, rule, parameter, "deactivate", now)
     if rule.is_enabled and not any(item.lifecycle_status == STATUS_ACTIVE for item in rule.parameter_items):
+        # Retained lazy import (domain cycle with monitoring_engine, see docs/architecture.md).
         from app.services.monitoring_engine import set_rule_enabled_state
 
         set_rule_enabled_state(session, rule, False, at=now)  # also deactivates the rule and closes its open alerts

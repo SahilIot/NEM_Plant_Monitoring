@@ -101,3 +101,7 @@ ERR_TEMPLATE_NOT_FOUND = "Rule template was not found"
 ERR_DOCUMENT_ATTACHMENT_NOT_FOUND = "Document attachment was not found"
 ERR_SUPERVISOR_PARAMETER_EDIT = "Supervisors may only change the Due and Overdue values of a parameter"
 ERR_ASSET_HIERARCHY_CYCLE = "Existing asset hierarchy contains a cycle"
+
+# Readings written by the OPC UA collector carry this source id; they are the only ones held to the
+# short runtime freshness limit. API and manually entered readings keep the rule/default stale limit.
+OPCUA_SOURCE_ID = "opcua_subscription"

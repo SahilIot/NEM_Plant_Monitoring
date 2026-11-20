@@ -60,6 +60,7 @@ NEM_Plant_Monitoring/
       services/
         reading_ingestion.py        Validated single/batch reading ingestion
         monitoring_engine.py        Rule evaluation, alerts, events, lifecycle helpers
+        event_log.py                emit_event: writes an audit event row in the caller's transaction
         opcua_client.py             Read-only OPC UA client, transport security
         opcua_collector.py          Reconnecting subscription collector
         access_scope.py             Asset-assignment scoping for REST and WebSocket
@@ -73,6 +74,9 @@ NEM_Plant_Monitoring/
         notification_settings.py    Per-rule Warning/Alert email switches and custom messages
         component_identifier.py     Component identifier normalisation
         template_parameters.py      Shared-rule (template) management
+        parameter_validation.py     Variable checks for rule parameters (shared by routes and templates)
+        signal_mappings.py          Configured OPC UA cycle/running signal lookups
+        maintenance_creation.py     Maintenance schedule creation (routes, suggestions, config import)
         asset_deletion.py           Dependency discovery and ordered asset/variable deletion
         config_transfer.py          Configuration export/import service
         legacy_parameters.py        Presents legacy single-parameter rules as parameters
@@ -140,6 +144,31 @@ NEM_Plant_Monitoring/
   WebSocket traffic to `127.0.0.1:8000` during development. A production build
   is served by FastAPI from `Nem_Frontend/dist` at `/ui/` when that directory
   exists; `/` redirects to `/ui/` or `/docs`.
+
+### Service dependency rules and retained cycles
+
+- Services never import `app.api.routes.*`; routes call services. Shared logic that
+  both layers need lives in a service (`parameter_validation`, `signal_mappings`,
+  `maintenance_creation`). `emit_event` lives in `event_log` and `OPCUA_SOURCE_ID` in
+  `core/constants.py`, so low-level services do not depend on the monitoring engine.
+- **Retained domain cycle (Cycle B, not resolved).** `monitoring_engine`,
+  `rule_parameters` and `rule_maintenance` still depend on each other. The engine calls
+  `rule_parameters` (`evaluate_multi_parameter`, `require_valid_parameters`,
+  `pause_parameters`/`resume_parameters`), `rule_parameters` calls
+  `rule_maintenance.apply_evaluation` inside its per-parameter savepoint, and
+  `rule_maintenance` calls `monitoring_engine.set_rule_enabled_state`. Only the
+  `rule_maintenance` -> `rule_parameters` dependency is a module-level import; the other
+  cycle-closing dependencies above are function-level (lazy) imports, each local to the
+  function that needs it and marked in the code. The cycle exists only because those
+  imports are lazy. Rules and Maintenance genuinely call each other, so it is retained
+  deliberately, and the lazy imports must not be hoisted to module level (that could
+  fail at import time). Resolving it (domain events or splitting `rule_maintenance`) is
+  a separate architectural phase.
+- **Deferred route-to-route cycle (Cycle C).** `routes/rules.py` lazily imports only
+  `apply_template_update` from `routes/frontend_compat.py`. `routes/rule_parameters.py`
+  lazily imports `apply_template_update`, `_rule_row` and `_transition_rule_lifecycle`
+  from it. `routes/frontend_compat.py` imports `routes.rules` at module level, which
+  closes the cycle. It belongs to the `frontend_compat` split.
 
 The dependency manifests identify FastAPI, SQLAlchemy 2, Pydantic Settings,
 psycopg, asyncua, cryptography and python-multipart on the backend, and React

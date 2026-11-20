@@ -35,8 +35,8 @@ from app.services.access_scope import (
     require_rule_access,
     rule_clause,
 )
+from app.services.event_log import emit_event
 from app.services.monitoring_engine import (
-    emit_event,
     evaluate_rules,
     set_rule_enabled_state,
     utc_now,

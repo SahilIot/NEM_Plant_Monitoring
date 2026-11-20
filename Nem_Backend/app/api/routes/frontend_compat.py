@@ -76,12 +76,13 @@ from app.services.frontend_backup import (
     retry_recovery,
     storage_report,
 )
-from app.services.monitoring_engine import (emit_event, evaluate_rules, set_rule_enabled_state,)
-from app.api.routes.rules import (
+from app.services.event_log import emit_event
+from app.services.monitoring_engine import (evaluate_rules, set_rule_enabled_state,)
+from app.api.routes.rules import validate_targets
+from app.services.signal_mappings import (
     configured_cycle_signal_mapping,
     configured_runtime_signal_mapping,
     is_mapping_bypass_enabled,
-    validate_targets,
 )
 from app.api.routes.monitoring import state_for_rule
 from app.api.routes.auth import get_current_user, require_roles
@@ -555,7 +556,7 @@ def _multi_copy_definition(session: Session, request: Request, source: Monitorin
     # Copy of a multi-parameter rule: every parameter is connected to the same-key variable on the target asset.
     # Lifecycle, progress and alerts are not copied; parameter keys are kept so a copy of a shared rule stays in step with it.
     
-    from app.api.routes.rule_parameters import _check_parameters
+    from app.services.parameter_validation import check_parameters
     from app.schemas.rule_parameters import RuleParameterIn
 
     items = []
@@ -564,7 +565,7 @@ def _multi_copy_definition(session: Session, request: Request, source: Monitorin
         items.append({"key": parameter.key, "name": parameter.name, "position": parameter.position, KIND: parameter.kind,
                       "variable_id": mapped.id if mapped else None, AGGREGATION: parameter.aggregation,
                       "config": parameter.config})
-    _check_parameters(session, request, session.get(Asset, target_asset_id),
+    check_parameters(session, request.app.state, session.get(Asset, target_asset_id),
                       [RuleParameterIn(**{k: v for k, v in item.items() if k != "position"}) for item in items],
                       (source.parameters or {}).get("category"))
     definition = _rule_definition(source, target_asset_id, None)
@@ -665,7 +666,7 @@ def _template_variables(
             configured_variable_ids = {
                 variable.id
                 for variable in candidates
-                if mapping_function(request, variable.id)
+                if mapping_function(request.app.state, variable.id)
                 == (asset_id, variable.id)
             }
         return [
@@ -741,7 +742,7 @@ def _template_rule_definition(
             session,
             template,
             asset_id,
-            mapping_bypass_enabled=is_mapping_bypass_enabled(request),
+            mapping_bypass_enabled=is_mapping_bypass_enabled(request.app.state),
             request=request,
         )
         variable = _mapped_template_variable(template, candidates, requested_variable_id)
@@ -773,9 +774,9 @@ def _template_rule_definition(
             validated.operator,
             validated.threshold,
             validated.parameters,
-            configured_cycle_signal_mapping(request, validated.variable_id),
-            configured_runtime_signal_mapping(request, validated.variable_id),
-            is_mapping_bypass_enabled(request),
+            configured_cycle_signal_mapping(request.app.state, validated.variable_id),
+            configured_runtime_signal_mapping(request.app.state, validated.variable_id),
+            is_mapping_bypass_enabled(request.app.state),
         )
         return definition
 
@@ -929,11 +930,11 @@ def submit_rule_template_request(
         maintenance = payload.maintenance
         if session.get(Asset, maintenance.asset_id) is None or not access_scope(session).allows(maintenance.asset_id):
             raise HTTPException(status_code=404,detail=f"Asset {maintenance.asset_id} was not found",)
-        from app.api.routes.maintenance import _validate_instruction_documents
+        from app.services.maintenance_creation import validate_instruction_documents
 
         maintenance = maintenance.model_copy(
             update={
-                "instruction_document_ids": _validate_instruction_documents(
+                "instruction_document_ids": validate_instruction_documents(
                     session,
                     maintenance.instruction_document_ids,
                 )
@@ -1025,11 +1026,11 @@ def approve_rule_template_request(
     if item.suggestion_type == "maintenance":
         if not item.maintenance_details:
             raise HTTPException(status_code=409,detail="The maintenance suggestion is missing its schedule details.",)
-        from app.api.routes.maintenance import _create_maintenance_schedule
+        from app.services.maintenance_creation import create_maintenance_schedule
 
         try:
             maintenance = MaintenanceScheduleCreate.model_validate(item.maintenance_details)
-            schedule = _create_maintenance_schedule(session, maintenance)
+            schedule = create_maintenance_schedule(session, maintenance)
             item.status = "approved"
             item.reviewed_by = user.id
             item.reviewed_at = datetime.now(timezone.utc)
@@ -1433,7 +1434,7 @@ def frontend_predefined_rules(
             session,
             template,
             asset_id,
-            mapping_bypass_enabled=is_mapping_bypass_enabled(request),
+            mapping_bypass_enabled=is_mapping_bypass_enabled(request.app.state),
             request=request,
         )
         mapped = _suggested_template_variable(template, candidates)
@@ -1457,7 +1458,7 @@ def frontend_predefined_rules(
                     if template.rule_type == RULE_BOOLEAN_COUNT_THRESHOLD
                     else None
                 )
-                if is_mapping_bypass_enabled(request) and required_role:
+                if is_mapping_bypass_enabled(request.app.state) and required_role:
                     raise HTTPException(status_code=422,detail=(f"Set an active Boolean variable's purpose to '{required_role}' in the asset's Variables panel"),)
                 raise HTTPException(status_code=422,detail=(f"No active compatible variable is available for '{template.name}' on the target asset"),)
             if not mapping_required:
@@ -1761,9 +1762,9 @@ def frontend_copy_asset_rules(
             validated.operator,
             validated.threshold,
             validated.parameters,
-            configured_cycle_signal_mapping(request, validated.variable_id),
-            configured_runtime_signal_mapping(request, validated.variable_id),
-            is_mapping_bypass_enabled(request),
+            configured_cycle_signal_mapping(request.app.state, validated.variable_id),
+            configured_runtime_signal_mapping(request.app.state, validated.variable_id),
+            is_mapping_bypass_enabled(request.app.state),
         )
         if any(_same_rule_definition(rule, definition) for rule in existing):
             already_copied.append(source.id)
@@ -1808,9 +1809,9 @@ def frontend_create_asset_rule(
     validate_targets(
         session, payload.target_asset_id, payload.variable_id, payload.rule_type,
         payload.operator, payload.threshold, payload.parameters,
-        configured_cycle_signal_mapping(request, payload.variable_id),
-        configured_runtime_signal_mapping(request, payload.variable_id),
-        is_mapping_bypass_enabled(request),
+        configured_cycle_signal_mapping(request.app.state, payload.variable_id),
+        configured_runtime_signal_mapping(request.app.state, payload.variable_id),
+        is_mapping_bypass_enabled(request.app.state),
     )
     rule_data = payload.model_dump(exclude={"labels"})
     rule_data[LIFECYCLE_STATUS] = (
@@ -1869,9 +1870,9 @@ def frontend_create_usage_rule(
         rule_payload.operator,
         rule_payload.threshold,
         rule_payload.parameters,
-        configured_cycle_signal_mapping(request, rule_payload.variable_id),
-        configured_runtime_signal_mapping(request, rule_payload.variable_id),
-        is_mapping_bypass_enabled(request),
+        configured_cycle_signal_mapping(request.app.state, rule_payload.variable_id),
+        configured_runtime_signal_mapping(request.app.state, rule_payload.variable_id),
+        is_mapping_bypass_enabled(request.app.state),
     )
     rule = MonitoringRule(**rule_payload.model_dump(exclude={"labels"}))
     session.add(rule)
@@ -1950,9 +1951,9 @@ def frontend_bulk_rule_state(
                     rule.operator,
                     rule.threshold,
                     rule.parameters,
-                    configured_cycle_signal_mapping(request, rule.variable_id),
-                    configured_runtime_signal_mapping(request, rule.variable_id),
-                    is_mapping_bypass_enabled(request),
+                    configured_cycle_signal_mapping(request.app.state, rule.variable_id),
+                    configured_runtime_signal_mapping(request.app.state, rule.variable_id),
+                    is_mapping_bypass_enabled(request.app.state),
                 )
             except HTTPException as error:
                 skipped.append({"rule_id": rule.id, "name": rule.name, "reason": str(error.detail)})
@@ -2006,9 +2007,9 @@ def _transition_rule_lifecycle(
             rule.operator,
             rule.threshold,
             rule.parameters,
-            configured_cycle_signal_mapping(request, rule.variable_id),
-            configured_runtime_signal_mapping(request, rule.variable_id),
-            is_mapping_bypass_enabled(request),
+            configured_cycle_signal_mapping(request.app.state, rule.variable_id),
+            configured_runtime_signal_mapping(request.app.state, rule.variable_id),
+            is_mapping_bypass_enabled(request.app.state),
         )
         try:
             set_rule_enabled_state(session, rule, True, at=now)

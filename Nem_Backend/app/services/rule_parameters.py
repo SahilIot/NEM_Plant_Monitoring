@@ -15,6 +15,7 @@ from app.models import Alert, Asset, MaintenanceSchedule, MonitoringRule, Readin
 from app.core.constants import (
     ACTIVATION_AT,
     AGGREGATION,
+    OPCUA_SOURCE_ID,
     BOOLEAN,
     CALENDAR,
     COUNTER,
@@ -48,6 +49,7 @@ from app.core.constants import (
     EVENT_STALE_DATA_DETECTED,
     EVENT_WARNING_TRIGGERED,
 )
+from app.services.event_log import emit_event
 from app.services.rule_calendar import (
     calendar_cycle,
 )
@@ -84,7 +86,6 @@ def effective_stale_after(rule: MonitoringRule, default: int | None = None) -> i
 def runtime_credit_limit(stale_after: int, source_id: str | None) -> int:
 
     from app.core.config import get_settings
-    from app.services.monitoring_engine import OPCUA_SOURCE_ID
 
     if source_id != OPCUA_SOURCE_ID:
         return stale_after
@@ -473,7 +474,6 @@ def _sync_parameter_alert(
 ) -> None:
    # Raise, update or resolve THIS parameter's alert only. Unknown never resolves or hides an alert.
     from app.services.email_notifications import enqueue_alert_notifications
-    from app.services.monitoring_engine import emit_event
 
     active = session.scalar(
         select(Alert).where(
@@ -624,6 +624,7 @@ def evaluate_multi_parameter(
                 if parameter.kind == INTERVAL and status != STATUS_UNKNOWN:
                     try:
                         with session.begin_nested():
+                            # Retained lazy import (domain cycle with rule_maintenance, see docs/architecture.md).
                             from app.services.rule_maintenance import apply_evaluation
                             ready_now = apply_evaluation(session, rule, parameter, status, value, now)
                     except Exception:  # noqa: BLE001 - a maintenance problem must never stop rule evaluation
@@ -631,7 +632,6 @@ def evaluate_multi_parameter(
                 _sync_parameter_alert(session, rule, asset, parameter, parameter_state, status, value, message, now,
                                       notify=not (ready_now and status == STATUS_WARNING))  # an Overdue alert always sends its own email
                 if error == "stale_reading" and previous_error != "stale_reading":
-                    from app.services.monitoring_engine import emit_event
                     emit_event(session, event_type=EVENT_STALE_DATA_DETECTED, message=f"{parameter.name}: {message}",
                                occurred_at=now, asset_id=asset.id, rule_id=rule.id,
                                metadata={"parameter_id": parameter.id, "parameter_name": parameter.name})
@@ -769,7 +769,6 @@ PARAMETER_LIFECYCLE_ACTIONS = {
 # Suspends, resumes, deactivates or deactivates one parameter.
 def change_parameter_lifecycle(session: Session, rule: MonitoringRule, parameter: RuleParameter, action: str,
                                now: datetime) -> None:
-    from app.services.monitoring_engine import emit_event
 
     allowed, target = PARAMETER_LIFECYCLE_ACTIONS[action]
     if parameter.lifecycle_status not in allowed:
@@ -837,7 +836,6 @@ def reset_parameter_baseline(session: Session, parameter: RuleParameter) -> bool
 
 # Preserve the removed parameter`s history`
 def archive_removed_parameter(session: Session, rule: MonitoringRule, parameter: RuleParameter, reason: str) -> None:
-    from app.services.monitoring_engine import emit_event
 
     def plain(value: Any) -> Any:
         if isinstance(value, datetime):

@@ -28,8 +28,9 @@ from app.models import (Alert,Asset,
 )
 from app.schemas.opcua import OpcUaMachineMapping, OpcUaTagMapping
 from app.schemas.reading import ReadingCreate
+from app.services.event_log import emit_event
 from app.services.monitoring_engine import (acquire_scheduler_lease,
-    emit_event,evaluate_reading_rules,evaluate_interval_parameter_rules,utc_now,OPCUA_SOURCE_ID,
+    evaluate_reading_rules,evaluate_interval_parameter_rules,utc_now,
 )
 from app.services.opcua_client import (OpcUaConfigurationError, OpcUaConnectionError,
     create_configured_opcua_client, opcua_security_summary,
@@ -44,6 +45,7 @@ from app.core.constants import (
     RUNTIME,
     STATUS_ACTIVE,
     STATUS_UNKNOWN,
+    OPCUA_SOURCE_ID,
 )
 
 LOGGER = logging.getLogger("nem_backend.opcua.collector")

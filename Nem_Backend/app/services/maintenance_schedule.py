@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Alert, Asset, MaintenanceRecord, MaintenanceSchedule
 from app.services.email_notifications import enqueue_alert_notifications
-from app.services.monitoring_engine import emit_event
+from app.services.event_log import emit_event
 from app.core.constants import (
     CALENDAR,
     RUNTIME,
