@@ -16,14 +16,17 @@ import {
   aggregationOptions,
   calculationPeriodSeconds,
   hasProblems,
+  isCalendarTime,
   newParameter,
   numberUnit,
+  timeModePatch,
   validateForm,
   variableCompatibility,
 } from "./parameterRules.js";
 import "./IntervalRuleWizard.css";
 import "./ParameterRuleWizard.css";
 import { BackButton, ForwardButton } from "../../../components/common/NavButtons.jsx";
+import CalendarStartFields from "./CalendarStartFields.jsx";
 
 const STEPS = {
   parameter_threshold: ["General", "Parameters", "Instructions", "Review"],
@@ -175,15 +178,17 @@ export default function ParameterRuleWizard({
     : { kind, aggregation: "none", expected: p.expected ?? true, severity: p.severity || "alert" });
   const setInterval = (p, id) => {
     const info = parameterById(id);
-    const patch = { intervalParameter: id, aggregation: info.aggregation === "counter" ? "counter" : p.variableId ? "timer" : id === "time" ? p.aggregation : "timer", due: p.intervalParameter === id ? p.due : "", overdue: p.intervalParameter === id ? p.overdue : "" };
+    const stayingOnTime = id === "time" && p.intervalParameter === "time";
+    // Time Mode follows the interval type: Time keeps its mode, entering Time starts Elapsed (Timer), leaving Time clears it.
+    const patch = { intervalParameter: id, timeMode: stayingOnTime ? p.timeMode || "elapsed" : "elapsed", aggregation: info.aggregation === "counter" ? "counter" : stayingOnTime ? (isCalendarTime(p) ? "none" : p.aggregation) : "timer", due: p.intervalParameter === id ? p.due : "", overdue: p.intervalParameter === id ? p.overdue : "" };
     if (info.unit !== parameterById(p.intervalParameter).unit) { patch.due = ""; patch.overdue = ""; }
     if (parameterById(p.intervalParameter).signalRole !== info.signalRole) patch.variableId = "";
     update(p.uid, patch);
   };
   const setIntervalAggregation = (p, id) => {
     if (id === "counter") setInterval({ ...p, aggregation: "counter" }, "counter");
-    else if (id === "none") update(p.uid, { intervalParameter: "time", aggregation: "none", variableId: "", due: p.intervalParameter === "time" ? p.due : "", overdue: p.intervalParameter === "time" ? p.overdue : "" });
-    else update(p.uid, { aggregation: "timer", intervalParameter: p.intervalParameter === "counter" ? "usage" : p.intervalParameter, variableId: p.intervalParameter === "counter" ? "" : p.variableId, ...(p.intervalParameter === "counter" ? { due: "", overdue: "" } : {}) });
+    else if (id === "none") update(p.uid, { intervalParameter: "time", timeMode: p.intervalParameter === "time" ? p.timeMode || "elapsed" : "elapsed", aggregation: "none", variableId: "", due: p.intervalParameter === "time" ? p.due : "", overdue: p.intervalParameter === "time" ? p.overdue : "" });
+    else update(p.uid, { aggregation: "timer", ...(isCalendarTime(p) ? { timeMode: "elapsed" } : {}), intervalParameter: p.intervalParameter === "counter" ? "usage" : p.intervalParameter, variableId: p.intervalParameter === "counter" ? "" : p.variableId, ...(p.intervalParameter === "counter" ? { due: "", overdue: "" } : {}) });
   };
 
   const reasonFor = (p) => (variable) => {
@@ -253,7 +258,7 @@ export default function ParameterRuleWizard({
     <div className="pw-card-head">
       <span className="pw-index" aria-hidden="true">{index + 1}</span>
       <input aria-label={`Parameter ${index + 1} name`} className="pw-name" value={p.name} maxLength={200}
-        onChange={(e) => update(p.uid, { name: e.target.value })} disabled={locked} placeholder="Parameter name" />
+        onChange={(e) => update(p.uid, { name: e.target.value })} disabled={locked} placeholder="Enter parameter name" required aria-required="true" />
       {!singleParameter && <div className="pw-card-actions">
         <button type="button" className="btn-outline" aria-label={`Move ${p.name || "parameter"} up`} disabled={locked || index === 0} onClick={() => move(index, -1)}>↑</button>
         <button type="button" className="btn-outline" aria-label={`Move ${p.name || "parameter"} down`} disabled={locked || index === values.parameters.length - 1} onClick={() => move(index, 1)}>↓</button>
@@ -267,7 +272,7 @@ export default function ParameterRuleWizard({
 
   const aggregationSelect = (p) => {
     const options = aggregationOptions(p, category);
-    const current = interval ? (p.aggregation === "none" ? "none" : p.intervalParameter === "counter" ? "counter" : "timer") : p.aggregation;
+    const current = interval ? (p.aggregation === "none" || isCalendarTime(p) ? "none" : p.intervalParameter === "counter" ? "counter" : "timer") : p.aggregation;
     const info = options.find((o) => o.id === current);
     return (
       <RuleField id={`agg-${p.uid}`} label="Aggregation *" hint={info?.help || (current === "timer" ? "Timer adds up the time the signal is ON." : current === "counter" ? "Counter counts each OFF-to-ON cycle." : current === "none" ? "No variable: elapsed calendar time since the start time." : "")}>
@@ -425,10 +430,7 @@ export default function ParameterRuleWizard({
           value={p.timeMode || "elapsed"}
           onChange={(e) => {
             const mode = e.target.value;
-            update(p.uid, mode === "calendar"
-              ? { timeMode: mode, aggregation: "none", variableId: "", variableKey: "" }
-              : { timeMode: mode }
-            );
+            if (mode !== (p.timeMode || "elapsed")) update(p.uid, timeModePatch(mode));
           }}
           disabled={locked}
           >
@@ -454,19 +456,13 @@ export default function ParameterRuleWizard({
               <option value="years">Years</option>
             </select>
           </RuleField>
-          <RuleField
-          id={`start-date-${p.uid}`}
-          label="Calendar Start Date *"
-          hint="The recurring calendar schedule is anchored to this date."
-          >
-          <input
-            id={`start-date-${p.uid}`}
-            type="date"
-            value={p.startDate || ""}
-            onChange={(e) => update(p.uid, { startDate: e.target.value })}
-            disabled={locked}
-          />
-        </RuleField>
+        <CalendarStartFields
+          idPrefix={`cal-${p.uid}`}
+          startDate={p.startDate}
+          startTime={p.startTime}
+          onChange={(patch) => update(p.uid, patch)}
+          disabled={locked}
+        />
       </>
     ) : (
       !templateMode && (
@@ -521,7 +517,7 @@ export default function ParameterRuleWizard({
         <strong>{p.name}</strong>
         <span>{p.kind === "interval" ? parameterById(p.intervalParameter).label : p.kind === "number" ? "Number" : "Boolean"}</span>
         <dl className="iw-details">
-          <div><dt>Variable</dt><dd>{templateMode ? (p.intervalParameter === "time" && p.aggregation === "none" ? "None (calendar-based)" : `Chosen when assigned${p.variableKey ? ` (key ${p.variableKey})` : ""}`) : variable ? variable.name : "None (calendar-based)"}</dd></div>
+          <div><dt>Variable</dt><dd>{templateMode ? ((isCalendarTime(p) || (p.intervalParameter === "time" && p.aggregation === "none")) ? "None (calendar-based)" : `Chosen when assigned${p.variableKey ? ` (key ${p.variableKey})` : ""}`) : variable ? variable.name : "None (calendar-based)"}</dd></div>
           <div><dt>Aggregation</dt><dd>{(aggregationOptions(p, category).find((o) => (o.selected ?? o.id === p.aggregation)) || {}).label || p.aggregation}</dd></div>
           <div className="pw-wide"><dt>{p.kind === "boolean" ? "Condition" : p.kind === "interval" ? "Limits" : "Thresholds"}</dt><dd>{detail}</dd></div>
         </dl>
@@ -612,7 +608,7 @@ export default function ParameterRuleWizard({
               <section key={p.uid} className="pw-card" aria-label={`Parameter ${index + 1}`}>
                 <div className="pw-card-head"><span className="pw-index" aria-hidden="true">{index + 1}</span><strong className="pw-static">{p.name}</strong><span className="iw-chip">{info.label} · {unit}</span></div>
                 {aggregationSelect(p)}
-                {p.intervalParameter === "time" && p.aggregation === "none" && !p.variableId
+                {p.intervalParameter === "time" && (isCalendarTime(p) || p.aggregation === "none") && !p.variableId
                   ? <p className="iw-help">{p.timeMode === "calendar"
                     ? `Calendar Time: no PLC variable is needed. Due and Overdue are measured in ${p.timeUnit || "days"} from the selected calendar start date.`
                     : "Elapsed Time: no PLC variable is needed. Elapsed hours are counted from the start time."}</p>
