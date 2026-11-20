@@ -1,46 +1,47 @@
 # create,view,update and filter machine monitoring rules
 from decimal import Decimal
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import ValidationError
-from asyncua import ua
-from asyncua.ua.uaerrors import UaStringParsingError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.routes.auth import get_current_user
+from app.api.routes.monitoring import state_for_rule
 from app.db.session import get_db
 from app.models import Asset, Alert, MonitoringRule, MonitoringRuleTemplate, RuleState, Variable, User
 from app.schemas.rule import RuleCreate, RuleRead, RuleTemplateCreate, RuleUpdate
+from app.services.legacy_parameters import serialize_legacy_parameters
+from app.services.notification_settings import settings_for_rule
 from app.services.rule_visibility import can_view_template, request_user
 from app.services.access_scope import access_scope, rule_asset_id
 from app.services.labels import apply_label_filter, assign_labels
 from app.services.event_log import emit_event
 from app.services.monitoring_engine import evaluate_rules, set_rule_enabled_state
 from app.services.monitoring_engine import utc_now
-from app.services.rule_parameters import ParameterConfigError
+from app.services.parameter_validation import validate_targets
+from app.services.rule_parameters import ParameterConfigError, serialize_parameters
+from app.services.template_parameters import apply_template_update
 from app.services.signal_mappings import (configured_cycle_signal_mapping, configured_runtime_signal_mapping,
                                           is_mapping_bypass_enabled)
 from app.core.constants import (
-    BOOLEAN,
-    CYCLE,
     LIFECYCLE_STATUS,
-    NUMBER,
     RULE_BOOLEAN_COUNT_THRESHOLD,
-    RULE_PARAMETER_THRESHOLD,
+    RULE_MULTI_PARAMETER,
     RULE_RUNTIME_DURATION,
     RULE_TYPE,
-    RUNNING,
     STATUS_ACTIVE,
     STATUS_COMPLETED,
     STATUS_DEACTIVATED,
     STATUS_IN_PROGRESS,
+    STATUS_NORMAL,
+    STATUS_UNKNOWN,
     ERR_NO_FIELDS_TO_UPDATE,
     EVENT_RULE_CREATED,
     ROLE_ADMINISTRATOR,
     ROLE_OPERATOR,
     ROLE_SUPERVISOR,
-    RULE_DURATION,
 )
 
 router = APIRouter(prefix="/rules", tags=["monitoring rules"])
@@ -96,179 +97,77 @@ def lock_rule(session: Session, rule: MonitoringRule) -> MonitoringRule:
         raise HTTPException(status_code=404, detail=f"Rule {rule.id} was not found")
     return locked
 
-# make sure a rule refers to valid machine assets and variables, and its configuration makes sense
-def validate_targets(
-    session: Session,
-    target_asset_id: int | None,
-    variable_id: int | None,
-    rule_type: str,
-    operator: str | None,
-    threshold,
-    parameters: dict | None,
-    cycle_signal_mapping: tuple[int, int] | None,
-    runtime_signal_mapping: tuple[int, int] | None = None,
-    mapping_bypass_enabled: bool = False,
-) -> None:
-    #Check that asset exits
-    scope = access_scope(session)
-    asset = session.get(Asset, target_asset_id) if target_asset_id is not None else None
-    if target_asset_id is not None and (asset is None or not scope.allows(asset.id)):
-        raise HTTPException(status_code=404, detail=f"Asset {target_asset_id} was not found")
-    #Varibale exists
-    variable = session.get(Variable, variable_id) if variable_id is not None else None
-    if variable_id is not None and (variable is None or not scope.allows(variable.asset_id)):
-        raise HTTPException(status_code=404, detail=f"Variable {variable_id} was not found")
-    if variable is not None and target_asset_id is not None:
-        if variable.asset_id != target_asset_id:
-            raise HTTPException(status_code=422, detail="Target variable does not belong to target asset")
-    if rule_type == RULE_PARAMETER_THRESHOLD:
-        expected_value = (parameters or {}).get("expected_value")
-        if isinstance(expected_value, bool):
-            if (
-                variable is None
-                or not variable.is_active
-                or variable.data_type != BOOLEAN
-                or operator not in {"==", "!=", "eq", "ne"}
-                or threshold is not None
-            ):
-                raise HTTPException(status_code=422,detail=("Boolean parameter thresholds require an active Boolean "
-                        "variable, an equality operator, and a Boolean expected_value"),)
-        else:
-            if variable is None or variable.data_type not in {NUMBER, "integer"}:
-                raise HTTPException(status_code=422,detail="Parameter threshold rules require a numeric variable",)
-            if operator is None or threshold is None:
-                raise HTTPException(status_code=422, detail="Parameter threshold rules require an operator and threshold",)
-    if rule_type in {RULE_RUNTIME_DURATION, RULE_DURATION}:
-        interval_elapsed = (
-            rule_type == RULE_DURATION
-            and parameters is not None
-            and parameters.get("condition") == "interval_elapsed"
-        )
-        if interval_elapsed:
-            interval_seconds = parameters.get("interval_seconds")
-            if (
-                asset is None
-                or not isinstance(interval_seconds, int)
-                or isinstance(interval_seconds, bool)
-                or interval_seconds <= 0
-                or variable_id is not None
-            ):
-                raise HTTPException(status_code=422,detail=("Interval-based rules require an asset target, a positive "
-                        "interval_seconds value, and no variable target"),)
-            return
-        duration = parameters.get("duration_seconds") if parameters else None
-        if rule_type == RULE_RUNTIME_DURATION and parameters and ("warning_thresholds_seconds" in parameters):
-            if (
-                asset is None
-                or not asset.is_active
-                or variable is None
-                or not variable.is_active
-                or variable.data_type != BOOLEAN
-            ):
-                raise HTTPException(status_code=422,detail="Running-time rules require an active Boolean variable on an active asset",)
-            bypass_signal_is_valid = (
-                mapping_bypass_enabled
-                and variable is not None
-                and variable.opcua_node_id is not None
-                and variable.signal_role in {None, RUNNING}
-            )
-            if bypass_signal_is_valid:
-                try:
-                    ua.NodeId.from_string(variable.opcua_node_id)
-                except (TypeError, ValueError, UaStringParsingError) as error:
-                    raise HTTPException(status_code=422,detail="Running-time rules require a valid OPC UA NodeId",) from error
-            if (
-                runtime_signal_mapping != (target_asset_id, variable_id)
-                and not bypass_signal_is_valid
-            ):
-                raise HTTPException(status_code=422,detail=("Running-time rules must target this asset's configured "
-                        "OPC UA running signal or an asset-owned declared Boolean "
-                        "running signal while mapping bypass is enabled"),)
-        else:
-            if (
-                not isinstance(duration, int)
-                or isinstance(duration, bool)
-                or duration <= 0
-            ):
-                raise HTTPException(status_code=422,detail="Runtime rules require a positive parameters.duration_seconds",)
-            if rule_type == RULE_DURATION:
-                condition = (parameters or {}).get("condition", "equals")
-                expected = (parameters or {}).get("expected_value")
-                if condition == "threshold":
-                    if variable is None or variable.data_type not in {NUMBER, "integer"}:
-                        raise HTTPException(status_code=422, detail="Threshold duration rules require a numeric variable.",)
-                elif isinstance(expected, bool):
-                    if (
-                        asset is None
-                        or not asset.is_active
-                        or variable is None
-                        or not variable.is_active
-                        or variable.data_type != BOOLEAN
-                    ):
-                        raise HTTPException( status_code=422, detail="Boolean duration rules require an active Boolean variable on an active asset.",)
-                    bypass_signal_is_valid = (
-                        mapping_bypass_enabled
-                        and variable.opcua_node_id is not None
-                        and variable.signal_role == RUNNING
-                    )
-                    if bypass_signal_is_valid:
-                        try:
-                            ua.NodeId.from_string(variable.opcua_node_id)
-                        except (TypeError, ValueError, UaStringParsingError) as error:
-                            raise HTTPException(status_code=422,detail="Boolean duration rules require a valid OPC UA NodeId.",) from error
-                    if (
-                        runtime_signal_mapping != (target_asset_id, variable_id)
-                        and not bypass_signal_is_valid
-                    ):
-                        raise HTTPException(status_code=422,detail=("Boolean duration rules must target this asset's "
-                                "configured running signal or a declared variable "
-                                "marked as Machine running state."),)
-    if rule_type == RULE_BOOLEAN_COUNT_THRESHOLD:
-        if (
-            asset is None
-            or not asset.is_active
-            or variable is None
-            or not variable.is_active
-            or variable.data_type != BOOLEAN
-        ):
-            raise HTTPException(status_code=422,detail=("Boolean count threshold rules require an active Boolean variable"),)
-        bypass_signal_is_valid = (
-            mapping_bypass_enabled
-            and variable is not None
-            and variable.opcua_node_id is not None
-            and variable.signal_role in {None, CYCLE}
-        )
-        if bypass_signal_is_valid:
-            try:
-                ua.NodeId.from_string(variable.opcua_node_id)
-            except (TypeError, ValueError, UaStringParsingError) as error:
-                raise HTTPException(status_code=422,detail="Boolean count threshold rules require a valid OPC UA NodeId",) from error
-        if (
-            cycle_signal_mapping != (target_asset_id, variable_id)
-            and not bypass_signal_is_valid
-        ):
-            raise HTTPException(status_code=422,detail=("Boolean count threshold rules must target the active Boolean "
-                    "variable configured as this asset's OPC UA cycle signal, or "
-                    "an asset-owned declared Boolean variable while mapping bypass is enabled." ),)
-        parameters = parameters or {}
-        warning_thresholds = parameters.get("warning_thresholds")
-        alert_threshold = parameters.get("alert_threshold")
+def _visible_source_template_id(session: Session, rule: MonitoringRule) -> int | None:
+    if rule.source_template_id is None:
+        return None
+    template = session.get(MonitoringRuleTemplate, rule.source_template_id)
+    if template is None or not can_view_template(session, request_user(session), template):
+        return None
+    return rule.source_template_id
 
-        if (
-            not isinstance(warning_thresholds, list)
-            or len(warning_thresholds) != 2
-            or any(
-                not isinstance(value, int)
-                or isinstance(value, bool)
-                or value <= 0
-                for value in warning_thresholds
-            )
-            or warning_thresholds[0] >= warning_thresholds[1]
-            or not isinstance(alert_threshold, int)
-            or isinstance(alert_threshold, bool)
-            or alert_threshold <= warning_thresholds[1]
-        ):
-            raise HTTPException(status_code=422,detail=("Configure two increasing positive warning thresholds and a larger positive alert threshold"),)
+#converts a MonitoringRule db object into py dict that fastapi can return as JSON to the frontend
+def rule_row(session: Session, rule: MonitoringRule) -> dict[str, Any]:
+    state = state_for_rule(session, rule)
+    asset = session.get(Asset, rule.target_asset_id) if rule.target_asset_id else None
+    variable = session.get(Variable, rule.variable_id) if rule.variable_id else None
+    return {
+        "id": rule.id,
+        "name": rule.name,
+        "description": rule.description,
+        "labels": rule.labels,
+        "asset_id": rule.target_asset_id,
+        "asset_name": asset.name if asset else "",
+        "severity": rule.severity,
+        "state": "activated" if rule.is_enabled else rule.lifecycle_status,
+        "is_enabled": rule.is_enabled,
+        LIFECYCLE_STATUS: rule.lifecycle_status,
+        "completed_at": rule.completed_at,
+        "created_at": rule.created_at,
+        "updated_at": rule.updated_at,
+        # Audit attribution comes from the user foreign keys; None means it was never stored.
+        "created_by": rule.created_by,
+        "updated_by": rule.updated_by,
+        "status": (
+            "evaluated"
+            if rule.lifecycle_status == STATUS_COMPLETED
+            else {STATUS_NORMAL: "ok"}.get(state.status, state.status)
+            if rule.is_enabled
+            else STATUS_UNKNOWN
+        ),
+        "current_status": (
+            "evaluated"
+            if rule.lifecycle_status == STATUS_COMPLETED
+            else state.status
+        ),
+        "evaluation_status": state.status,
+        "evaluation_message": state.message,
+        "evaluation_error": state.error_message,
+        "latest_value": state.latest_value,
+        "last_evaluated_at": state.last_evaluated_at,
+        "condition_started_at": state.condition_started_at,
+        RULE_TYPE: rule.rule_type,
+        # Parameter rows exist only for multi-parameter rules; other rule types omit the key.
+        # Every rule has a parameter list: parameter rows for multi-parameter rules, one adapted parameter for older ones.
+        "parameter_items": (serialize_parameters(rule) if rule.rule_type == RULE_MULTI_PARAMETER
+                            else serialize_legacy_parameters(session, rule)),
+        # The id of a shared rule is only disclosed to roles that may see shared rules.
+        "source_template_id": _visible_source_template_id(session, rule),
+        # True when this rule is an asset use of a shared rule: edits change every asset using it.
+        "shared_rule": rule.source_template_id is not None,
+        "variable_id": rule.variable_id,
+        "variable_name": variable.name if variable else None,
+        "variable_key": variable.key if variable else None,
+        "variable_data_type": variable.data_type if variable else None,
+        "variable_unit": variable.unit if variable else None,
+        "operator": rule.operator,
+        "threshold": float(rule.threshold) if rule.threshold is not None else None,
+        "parameters": rule.parameters,
+        "notifications": settings_for_rule(rule),
+        "component_identifier": rule.component_identifier,
+        "evaluation_interval_seconds": rule.evaluation_interval_seconds,
+        "stale_after_seconds": rule.stale_after_seconds,
+    }
+
 
 # Create a new rule
 @router.post("", response_model=RuleRead, status_code=status.HTTP_201_CREATED)
@@ -458,8 +357,6 @@ def update_rule(
     if template is not None:
         if not can_view_template(session, request_user(session), template):
             raise HTTPException(status_code=403,detail="This rule is shared and its configuration is managed by an Administrator",)
-        from app.api.routes.frontend_compat import apply_template_update
-
         values = {field: getattr(template, field) for field in TEMPLATE_VALUE_FIELDS}
         for field, value in shared_changes.items():
             values[field] = {**(template.parameters or {}), **(payload.parameters or {})} if field == "parameters" else value

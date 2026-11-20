@@ -74,7 +74,8 @@ NEM_Plant_Monitoring/
         notification_settings.py    Per-rule Warning/Alert email switches and custom messages
         component_identifier.py     Component identifier normalisation
         template_parameters.py      Shared-rule (template) management
-        parameter_validation.py     Variable checks for rule parameters (shared by routes and templates)
+        parameter_validation.py     Rule target and variable validation (`validate_targets`), shared by routes and services
+        rule_lifecycle.py           Rule lifecycle transitions (activate, suspend, deactivate, complete)
         signal_mappings.py          Configured OPC UA cycle/running signal lookups
         maintenance_creation.py     Maintenance schedule creation (routes, suggestions, config import)
         asset_deletion.py           Dependency discovery and ordered asset/variable deletion
@@ -164,11 +165,12 @@ NEM_Plant_Monitoring/
   deliberately, and the lazy imports must not be hoisted to module level (that could
   fail at import time). Resolving it (domain events or splitting `rule_maintenance`) is
   a separate architectural phase.
-- **Deferred route-to-route cycle (Cycle C).** `routes/rules.py` lazily imports only
-  `apply_template_update` from `routes/frontend_compat.py`. `routes/rule_parameters.py`
-  lazily imports `apply_template_update`, `_rule_row` and `_transition_rule_lifecycle`
-  from it. `routes/frontend_compat.py` imports `routes.rules` at module level, which
-  closes the cycle. It belongs to the `frontend_compat` split.
+- **Route-to-route cycle (Cycle C) - resolved.** The former `frontend_compat` <-> `rules` cycle
+  no longer exists. `apply_template_update` and the template helpers live in
+  `services/template_parameters.py`, `validate_targets` in `services/parameter_validation.py`,
+  the rule lifecycle transition in `services/rule_lifecycle.py`, and `rule_row` in
+  `routes/rules.py`. `routes/rules.py` and `routes/rule_parameters.py` import all of these at
+  module level and neither imports `routes/frontend_compat.py`. Cycle B is the only retained cycle.
 
 The dependency manifests identify FastAPI, SQLAlchemy 2, Pydantic Settings,
 psycopg, asyncua, cryptography and python-multipart on the backend, and React
@@ -305,7 +307,7 @@ all-Supervisors value). Selected Supervisors live in `nem_rule_template_supervis
 `app/services/rule_visibility.py` is the single authorization point: Administrators see everything,
 Supervisors see only `specific_supervisors` rules that list them, Operators and everyone else see none.
 Edits to a rule created from a shared rule (`PATCH /rules/{id}`) are applied to the shared rule and
-propagated to every asset using it (`apply_template_update` in `frontend_compat.py`), so there is one
+propagated to every asset using it (`apply_template_update` in `services/template_parameters.py`), so there is one
 threshold per shared rule. `app/services/config_transfer.py` and `app/api/routes/config_transfer.py`
 implement the Administrator-only JSON export (optional `categories`/`asset_ids` filters, `export/summary`)/preview/import (`/api/v1/config-transfer/*`, gated in the
 `main.py` middleware and re-checked in each handler); imports are logged in `nem_configuration_imports`. It is enforced in `GET /rule-templates`,

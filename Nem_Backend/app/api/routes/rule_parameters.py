@@ -13,6 +13,7 @@ from app.api.routes.auth import get_current_user
 from app.api.routes.rules import (
     lock_rule,
     rule_or_404,
+    rule_row,
 )
 from app.db.session import get_db
 from app.models import Asset, InstructionDocument, MonitoringRule, RuleParameter, User
@@ -30,6 +31,8 @@ from app.services.labels import assign_labels
 from app.services.event_log import emit_event
 from app.services.access_scope import require_rule_access
 from app.services.parameter_validation import check_parameters, measured_source
+from app.services.rule_lifecycle import transition_rule_lifecycle
+from app.services.template_parameters import apply_template_update
 from app.services.legacy_parameters import (
     build_legacy_status_detail,
     legacy_parameter_id,
@@ -208,9 +211,7 @@ def create_multi_parameter_rule(
                occurred_at=datetime.now(timezone.utc), asset_id=asset_id, rule_id=rule.id)
     _commit(session)  # rule and all parameters are saved together or not at all
     session.refresh(rule)
-    from app.api.routes.frontend_compat import _rule_row  # deferred: frontend_compat imports the rule routes
-
-    return _rule_row(session, rule)
+    return rule_row(session, rule)
 
 # Returns all parameters associated with a rule.
 @router.get("/rules/{rule_id}/parameters")
@@ -508,7 +509,6 @@ def update_rule_parameter(
 # Checks template edit permissions , applies the template updates.
 def _apply_shared_parameter_edit(rule, parameter, payload, request, session) -> None:
     from app.api.routes import rules as rules_module
-    from app.api.routes.frontend_compat import apply_template_update
     from app.models import MonitoringRuleTemplate
     from app.schemas.rule import RuleTemplateCreate
     from pydantic import ValidationError
@@ -577,12 +577,10 @@ def update_parameter_lifecycle(
     require_rule_access(session, rule)
     if rule.rule_type != RULE_MULTI_PARAMETER:
         # One parameter == the whole rule, so the rule-level lifecycle transition is the parameter's.
-        from app.api.routes.frontend_compat import _transition_rule_lifecycle
-
         if parameter_id != legacy_parameter_id(rule):
             raise HTTPException(status_code=404, detail=f"Parameter {parameter_id} was not found in rule {rule_id}")
         # Nothing is pending on this session, so the transition commits only its own change.
-        _transition_rule_lifecycle(rule_id, payload.action, request, session)
+        transition_rule_lifecycle(session, rule_id, payload.action, request.app.state)
         rule = rule_or_404(session, rule_id)
         return {"rule_id": rule.id, "parameter": serialize_legacy_parameters(session, rule)[0]}
     rule = session.scalar(select(MonitoringRule).where(MonitoringRule.id == rule_id).with_for_update()

@@ -105,3 +105,11 @@ ERR_ASSET_HIERARCHY_CYCLE = "Existing asset hierarchy contains a cycle"
 # Readings written by the OPC UA collector carry this source id; they are the only ones held to the
 # short runtime freshness limit. API and manually entered readings keep the rule/default stale limit.
 OPCUA_SOURCE_ID = "opcua_subscription"
+
+# Rule collections: every collection holds at least one and at most five rules.
+COLLECTION_NEEDS_RULE_MESSAGE = "Add at least one monitoring rule to the collection."
+COLLECTION_MAX_RULES = 5
+COLLECTION_FULL_MESSAGE = "A rule collection can contain no more than five rules"
+COLLECTION_KEEP_RULE_MESSAGE = (
+    "A collection must keep at least one monitoring rule. Add another rule first, or delete the collection."
+)

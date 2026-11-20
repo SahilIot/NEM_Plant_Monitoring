@@ -4,17 +4,27 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, Request
-from sqlalchemy import or_, select
+from pydantic import ValidationError
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Alert, Asset, MonitoringRule, MonitoringRuleTemplate, RuleParameter, Variable
+from app.models import Alert, Asset, MonitoringRule, MonitoringRuleTemplate, RuleCollection, RuleParameter, Variable
+from app.schemas.rule import RuleCreate
 from app.schemas.rule_parameters import RuleParameterIn
-from app.services.parameter_validation import check_parameters, measured_source
+from app.services.access_scope import internal_propagation_scope
+from app.services.labels import assign_labels
+from app.services.monitoring_engine import evaluate_rules
+from app.services.notification_settings import NOTIFICATION_SETTINGS_KEY
+from app.services.parameter_validation import check_parameters, measured_source, validate_targets
 from app.services.rule_parameters import archive_removed_parameter, reset_parameter_baseline
+from app.services.rule_visibility import enforce_template_edit_permission, record_template_changes, request_user
 from app.services.signal_mappings import configured_cycle_signal_mapping, configured_runtime_signal_mapping, is_mapping_bypass_enabled
 from app.core.constants import (
     AGGREGATION,
     BOOLEAN,
+    COLLECTION_FULL_MESSAGE,
+    COLLECTION_KEEP_RULE_MESSAGE,
+    COLLECTION_MAX_RULES,
     COUNTER,
     CYCLE,
     INTERVAL,
@@ -22,7 +32,10 @@ from app.core.constants import (
     KIND,
     LIFECYCLE_STATUS,
     NUMBER,
+    ROLE_ADMINISTRATOR,
+    RULE_BOOLEAN_COUNT_THRESHOLD,
     RULE_MULTI_PARAMETER,
+    RULE_RUNTIME_DURATION,
     RULE_TYPE,
     RUNNING,
     STATUS_ACTIVE,
@@ -201,3 +214,276 @@ def sync_instance(session: Session, request: Request, rule: MonitoringRule, temp
                       [RuleParameterIn(key=p.key, name=p.name, kind=p.kind, variable_id=p.variable_id,
                                        aggregation=p.aggregation, config=p.config) for p in rule.parameter_items],
                       meta.get("category"), current={p.key: p.variable_id for p in rule.parameter_items})
+
+# Checks whether a rule template can be assigned to a particular rule collection.
+def validate_template_collection(
+    session: Session,
+    collection_id: int | None,
+    excluded_template_id: int | None = None,
+) -> None:
+        if collection_id is None:
+            return
+        if session.get(RuleCollection, collection_id) is None:
+            raise HTTPException(status_code=404, detail="Rule collection was not found")
+        query = select(func.count()).select_from(MonitoringRuleTemplate).where(MonitoringRuleTemplate.collection_id == collection_id)
+        if excluded_template_id is not None:
+            query = query.where(MonitoringRuleTemplate.id != excluded_template_id)
+        if (session.scalar(query) or 0) >= COLLECTION_MAX_RULES:
+            raise HTTPException(status_code=422,detail=COLLECTION_FULL_MESSAGE,)
+
+# A rule may only leave a collection (be moved out or deleted) if at least one other rule stays in it.
+# The collection row is locked so two concurrent removals cannot both pass the check.
+def ensure_collection_keeps_rule(session: Session, collection_id: int | None, leaving_template_id: int) -> None:
+    if collection_id is None:
+        return
+    if session.scalar(select(RuleCollection.id).where(RuleCollection.id == collection_id).with_for_update()) is None:
+        return
+    remaining = session.scalar(
+        select(func.count()).select_from(MonitoringRuleTemplate).where(
+            MonitoringRuleTemplate.collection_id == collection_id,
+            MonitoringRuleTemplate.id != leaving_template_id,
+        )
+    ) or 0
+    if remaining == 0:
+        raise HTTPException(status_code=422, detail=COLLECTION_KEEP_RULE_MESSAGE)
+
+#Helper function for assigning templates -> finds variables on a target asset that are compatible with a template
+def template_variables(
+    session: Session,
+    template: MonitoringRuleTemplate,
+    asset_id: int,
+    *,
+    mapping_bypass_enabled: bool = False,
+    request: Request | None = None,
+) -> list[Variable]:
+        if not template.required_variable_types:
+            return []
+        query = select(Variable)
+        query = query.where(
+                Variable.asset_id == asset_id,
+                Variable.is_active.is_(True),
+                Variable.data_type.in_(template.required_variable_types),
+            )
+        candidates = session.scalars(
+            query.order_by(Variable.name, Variable.id)
+        ).all()
+        if not mapping_bypass_enabled:
+            return candidates
+        required_role = (
+            RUNNING
+            if template.rule_type == RULE_RUNTIME_DURATION
+            or (
+                template.rule_type == "duration"
+                and isinstance(
+                    (template.parameters or {}).get("expected_value"), bool
+                )
+            )
+            else CYCLE
+            if template.rule_type == RULE_BOOLEAN_COUNT_THRESHOLD
+            else None
+        )
+        if required_role is None:
+            return candidates
+        configured_variable_ids = set()
+        if request is not None:
+            mapping_function = (
+                configured_runtime_signal_mapping
+                if required_role == RUNNING
+                else configured_cycle_signal_mapping
+            )
+            configured_variable_ids = {
+                variable.id
+                for variable in candidates
+                if mapping_function(request.app.state, variable.id)
+                == (asset_id, variable.id)
+            }
+        return [
+            variable
+            for variable in candidates
+            if variable.signal_role == required_role
+            or variable.id in configured_variable_ids
+        ]
+
+#Function decides which compatible variable to use
+def _mapped_template_variable(
+        template: MonitoringRuleTemplate,
+        candidates: list[Variable],
+        requested_variable_id: int | None,
+) -> Variable | None:
+        if not template.required_variable_types:
+            if requested_variable_id is not None:
+                raise HTTPException(status_code=422,detail=f"Rule '{template.name}' does not require a variable",)
+            return None
+        if requested_variable_id is not None:
+            mapped = next((item for item in candidates if item.id == requested_variable_id), None)
+            if mapped is None:
+                raise HTTPException(status_code=422,detail=(f"Variable {requested_variable_id} is not an active compatible "
+                        f"variable on the target asset for '{template.name}'"),)
+            return mapped
+
+        if template.variable_key:
+            key_matches = [item
+                for item in candidates
+                if item.key.casefold() == template.variable_key.casefold()
+            ]
+            if len(key_matches) == 1:
+                return key_matches[0]
+        if len(candidates) == 1:
+            return candidates[0]
+        if not candidates:
+            raise HTTPException(status_code=422,detail=(f"No active compatible variable is available for "
+                    f"'{template.name}' on the target asset"),)
+        raise HTTPException(status_code=422,detail=f"Choose a variable for '{template.name}' on the target asset",)
+
+#function converts a reusable template into the definition of a rule for a specific asset
+def template_rule_definition(
+        session: Session,
+        template: MonitoringRuleTemplate,
+        asset_id: int,
+        request: Request,
+        requested_variable_id: int | None,
+        *,
+        allow_disabled: bool = False,
+        activate: bool = False,
+        parameter_mappings: dict[str, int] | None = None,
+) -> dict[str, Any]:
+        if not template.is_enabled and not allow_disabled:
+            raise HTTPException(status_code=422, detail=f"Rule template '{template.name}' is disabled")
+        if is_multi(template):
+            return instance_definition(
+                session, request, template, asset_id, parameter_mappings, activate=activate)
+        candidates = template_variables(
+            session,
+            template,
+            asset_id,
+            mapping_bypass_enabled=is_mapping_bypass_enabled(request.app.state),
+            request=request,
+        )
+        variable = _mapped_template_variable(template, candidates, requested_variable_id)
+        definition = {
+            "name": template.name,
+            "description": template.description,
+            RULE_TYPE: template.rule_type,
+            "target_asset_id": asset_id,
+            "variable_id": variable.id if variable else None,
+            "operator": template.operator,
+            "threshold": template.threshold,
+            "parameters": template.parameters,
+            "severity": template.severity,
+            "is_enabled": activate,
+            LIFECYCLE_STATUS: STATUS_IN_PROGRESS if activate else STATUS_DEACTIVATED,
+            "evaluation_interval_seconds": template.evaluation_interval_seconds,
+            "stale_after_seconds": template.stale_after_seconds,
+            "source_template_id": template.id,
+        }
+        try:
+            validated = RuleCreate.model_validate(definition)
+        except ValidationError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        validate_targets(
+            session,
+            validated.target_asset_id,
+            validated.variable_id,
+            validated.rule_type,
+            validated.operator,
+            validated.threshold,
+            validated.parameters,
+            configured_cycle_signal_mapping(request.app.state, validated.variable_id),
+            configured_runtime_signal_mapping(request.app.state, validated.variable_id),
+            is_mapping_bypass_enabled(request.app.state),
+        )
+        return definition
+
+#Update the shared rule -> main business-logic function.
+def apply_template_update(
+    session: Session,
+    request: Request,
+    template: MonitoringRuleTemplate,
+    values: dict[str, Any],
+    labels: list[str] | None,
+) -> None:
+
+    # Lock order for every writer of rules.parameters on shared rules: the shared rule first, then its asset rules by id.
+    session.scalar(select(MonitoringRuleTemplate.id).where(MonitoringRuleTemplate.id == template.id)
+                   .with_for_update().execution_options(populate_existing=True))
+    enforce_template_edit_permission(session, template, values,labels,)
+    if values["collection_id"] != template.collection_id:
+        ensure_collection_keeps_rule(session, template.collection_id, template.id)
+        validate_template_collection(session, values["collection_id"], excluded_template_id=template.id)
+    semantic_fields = (
+        RULE_TYPE,
+        "required_variable_types",
+        "variable_key",
+        "operator",
+        "threshold",
+        "parameters",
+        "severity",
+        "evaluation_interval_seconds",
+        "stale_after_seconds",
+    )
+    definition_changed = any(
+        getattr(template, field) != values[field]
+        for field in semantic_fields
+    )
+    if (values[RULE_TYPE] == RULE_MULTI_PARAMETER) != is_multi(template) and session.scalar(
+        select(MonitoringRule.id).where(MonitoringRule.source_template_id == template.id).limit(1)):
+        raise HTTPException(status_code=409, detail="A shared rule that is already assigned cannot switch between single-parameter and multi-parameter")
+    record_template_changes(session, template, values,labels,)
+    for field, value in values.items():
+        setattr(template, field, value)
+    if labels is not None:
+        assign_labels(session, template, labels)
+    if definition_changed:
+        assigned_rules = session.scalars(
+            select(MonitoringRule).where(
+                MonitoringRule.source_template_id == template.id,
+            ).order_by(MonitoringRule.id).with_for_update().execution_options(populate_existing=True)
+        ).all()
+        editor = request_user(session)
+        is_admin = editor is not None and editor.role == ROLE_ADMINISTRATOR
+
+        with internal_propagation_scope(session):
+            for rule in assigned_rules:
+                try:
+                    if is_multi(template):
+                        sync_instance(session, request, rule, template)
+                        continue
+                    definition = template_rule_definition(
+                        session,
+                        template,
+                        rule.target_asset_id,
+                        request,
+                        rule.variable_id,
+                        allow_disabled=True,
+                    )
+                except HTTPException:
+                    if is_admin:
+                        raise
+                    raise HTTPException(status_code=409,detail="The change could not be applied to every asset using this shared rule. Contact an Administrator.",) from None
+                for field in (
+                    "name",
+                    "description",
+                    RULE_TYPE,
+                    "operator",
+                    "threshold",
+                    "parameters",
+                    "severity",
+                    "evaluation_interval_seconds",
+                    "stale_after_seconds",
+                ):
+                    value = definition[field]
+                    # The template does not know the asset rule's own notification settings; keep them.
+                    kept = (rule.parameters or {}).get(NOTIFICATION_SETTINGS_KEY) if field == "parameters" else None
+                    if kept is not None:
+                        value = {**(value or {}), NOTIFICATION_SETTINGS_KEY: kept}
+                    setattr(rule, field, value)
+        session.flush()
+        settings = request.app.state.settings
+        for rule in assigned_rules:
+            if rule.is_enabled:
+                evaluate_rules(
+                    session,
+                    rule_id=rule.id,
+                    stale_after_seconds=settings.monitoring_default_stale_after_seconds,
+                    runtime_gap_seconds=settings.runtime_freshness_seconds,
+                )

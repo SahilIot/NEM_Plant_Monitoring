@@ -117,7 +117,7 @@ evaluation error. A per-rule evaluation interval can defer scheduled
 evaluation. The default global evaluator interval is 15 seconds and the
 default stale window is 300 seconds.
 
-Lifecycle behavior in `frontend_compat.py` and `monitoring_engine.py`:
+Lifecycle behavior in `services/rule_lifecycle.py` (called from `frontend_compat.py` and `rule_parameters.py`) and `monitoring_engine.py`:
 
 - **In progress:** enabled/evaluated.
 - **Suspended:** disabled by the suspend lifecycle action; can be resumed.
