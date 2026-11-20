@@ -21,6 +21,7 @@ from app.models import Asset, InstructionDocument, MonitoringRule, RuleParameter
 from app.schemas.rule_parameters import (
     MultiParameterRuleCreate,
     ParameterLifecycleAction,
+    ProgressResetRequest,
     RuleParameterIn,
     RuleParametersReplace,
 )
@@ -293,6 +294,95 @@ def rule_status_detail(rule_id: int, session: Session = Depends(get_db)) -> dict
     if rule.rule_type != RULE_MULTI_PARAMETER:
         return build_legacy_status_detail(session, rule)
     return build_status_detail(session, rule)
+
+def _require_reset_role(user: User) -> None:
+    if user.role not in {ROLE_ADMINISTRATOR, ROLE_SUPERVISOR}:
+        raise HTTPException(status_code=403, detail="Only Administrators and Supervisors can reset interval progress.")
+
+
+# Locks and returns a multi-parameter rule the user may reset intervals of.
+def _rule_for_reset(session: Session, rule_id: int) -> MonitoringRule:
+    rule = session.get(MonitoringRule, rule_id)
+    if rule is None:
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id} was not found")
+    require_rule_access(session, rule)
+    if rule.rule_type != RULE_MULTI_PARAMETER:
+        raise HTTPException(status_code=422, detail="Only interval-based multi-parameter rules have progress to reset.")
+    return session.scalar(select(MonitoringRule).where(MonitoringRule.id == rule_id).with_for_update()
+                          .execution_options(populate_existing=True))
+
+
+def _interval_view(parameter: RuleParameter, reason: str | None = None) -> dict[str, Any]:
+    return {"parameter_id": parameter.id, "name": parameter.name, "reason": reason}
+
+
+# Manual reset of one interval parameter (Administrator or Supervisor). Reuses the maintenance reset core.
+@router.post("/rules/{rule_id}/parameters/{parameter_id}/reset-progress")
+def reset_parameter_progress(
+    rule_id: int,
+    parameter_id: int,
+    payload: ProgressResetRequest,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    from app.services.rule_maintenance import manual_reset_parameter, manual_reset_problem
+
+    _require_reset_role(user)
+    rule = _rule_for_reset(session, rule_id)
+    parameter = next((item for item in rule.parameter_items if item.id == parameter_id), None)
+    if parameter is None:
+        raise HTTPException(status_code=404, detail=f"Parameter {parameter_id} was not found in rule {rule_id}")
+    if payload.dry_run:
+        problem = manual_reset_problem(session, rule, parameter)
+        session.rollback()
+        return {"rule_id": rule_id, "scope": "parameter", "dry_run": True,
+                "reset": [] if problem else [_interval_view(parameter)],
+                "skipped": [_interval_view(parameter, problem)] if problem else []}
+    try:
+        manual_reset_parameter(session, rule, parameter, user_id=user.id, user_name=user.username, scope="parameter")
+    except ValueError as error:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    session.commit()
+    return {"rule_id": rule_id, "scope": "parameter", "dry_run": False, "reset": [_interval_view(parameter)], "skipped": []}
+
+
+# Manual reset of every eligible interval of a rule, in one transaction. Other parameters are never touched.
+@router.post("/rules/{rule_id}/reset-progress")
+def reset_rule_progress(
+    rule_id: int,
+    payload: ProgressResetRequest,
+    session: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    from app.services.rule_maintenance import manual_reset_parameter, manual_reset_problem
+
+    _require_reset_role(user)
+    rule = _rule_for_reset(session, rule_id)
+    intervals = [item for item in rule.parameter_items if item.kind == INTERVAL]
+    eligible, skipped = [], []
+    for parameter in intervals:
+        problem = manual_reset_problem(session, rule, parameter)
+        (skipped if problem else eligible).append(_interval_view(parameter, problem) if problem else parameter)
+    if payload.dry_run:
+        session.rollback()
+        return {"rule_id": rule_id, "scope": "rule", "dry_run": True,
+                "reset": [_interval_view(item) for item in eligible], "skipped": skipped}
+    if not eligible:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=(
+            "None of this rule's intervals can be reset right now."
+            + (" " + "; ".join(f"{item['name']}: {item['reason']}" for item in skipped) if skipped else "")))
+    try:
+        for parameter in eligible:
+            manual_reset_parameter(session, rule, parameter, user_id=user.id, user_name=user.username, scope="rule")
+    except ValueError as error:  # checked above; a concurrent change aborts the whole reset
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    session.commit()
+    return {"rule_id": rule_id, "scope": "rule", "dry_run": False,
+            "reset": [_interval_view(item) for item in eligible], "skipped": skipped}
+
 
 # Replace all parameters , complicated endpoints , allows the frontend to submit an entire parameter collection.
 @router.put("/rules/{rule_id}/parameters")

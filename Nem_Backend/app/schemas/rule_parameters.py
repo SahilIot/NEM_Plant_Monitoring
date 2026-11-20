@@ -279,6 +279,11 @@ class ParameterLifecycleAction(ORMModel):
     action: Literal["suspend", "resume", "deactivate", "activate"]
 
 
+class ProgressResetRequest(ORMModel):
+    # dry_run only lists what a reset would affect (for the confirmation dialog); it changes nothing.
+    dry_run: bool = False
+
+
 class RuleParametersReplace(ORMModel):
    # Edit a rule's parameters in one transaction. Matching is by key, never by position.
 

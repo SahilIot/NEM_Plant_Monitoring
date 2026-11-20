@@ -10,7 +10,9 @@ from app.models import Alert, Asset, MaintenanceRecord, MaintenanceSchedule, Mon
 from app.services.email_notifications import enqueue_alert_notifications
 from app.core.config import get_settings
 from app.services.monitoring_engine import emit_event
-from app.services.rule_parameters import _aware, _refresh_rule_state, change_parameter_lifecycle, effective_stale_after
+from app.services.rule_parameters import (
+    _aware, _refresh_rule_state, calendar_last_reset_at, change_parameter_lifecycle, effective_stale_after,
+)
 from app.core.constants import (
     APPROVAL_NOT_REQUIRED,
     CATEGORY_INTERVAL_BASED,
@@ -171,16 +173,7 @@ def _create_schedule_unsafe(session: Session, rule: MonitoringRule, parameter: R
     )
 
     if is_calendar_time:
-        last_completed_at = session.scalar(
-            select(MaintenanceSchedule.last_completed_at)
-            .where(
-                MaintenanceSchedule.source_parameter_id == parameter.id,
-                MaintenanceSchedule.progress_reset == PROGRESS_RESET,
-                MaintenanceSchedule.last_completed_at.is_not(None),
-            )
-            .order_by(MaintenanceSchedule.last_completed_at.desc())
-            .limit(1)
-        )
+        last_completed_at = calendar_last_reset_at(session, parameter.id, parameter.cycle_baseline_at)
         baseline, first_due, _ = calendar_cycle(config, last_completed_at)
         calendar_start = baseline.date() if isinstance(baseline, datetime) else baseline
         calendar_first_due = first_due.date() if isinstance(first_due, datetime) else first_due
@@ -518,6 +511,83 @@ def _stop_retained_cycle(session: Session, schedule: MaintenanceSchedule, now: d
     session.flush()
 
 
+# The one implementation of "restart this interval's progress", used by the maintenance reset below and by the manual
+# reset: the cycle baseline (unless the caller derives it elsewhere), the saved checkpoint, the parameter state, and the
+# alerts of THIS parameter only. Callers emit their own audit event and decide about the maintenance schedule.
+def _reset_interval_progress(session: Session, rule: MonitoringRule, parameter: RuleParameter, *, now: datetime,
+                             set_baseline: bool, state_message: str, alert_note: str, outcome: str,
+                             asset_id: int | None, meta: dict[str, Any]) -> None:
+    if set_baseline:
+        parameter.cycle_baseline_at = now
+    state = session.scalar(select(RuleParameterState).where(RuleParameterState.parameter_id == parameter.id)
+                           .with_for_update().execution_options(populate_existing=True))
+    if state is not None:
+        state.aggregate_state = None
+        state.status, state.latest_value, state.error_message = STATUS_NORMAL, 0.0, None
+        state.message = state_message
+        state.last_evaluated_at = now
+        state.completed_at = None
+    for alert in session.scalars(select(Alert).where(
+            Alert.rule_id == rule.id, Alert.parameter_id == parameter.id, Alert.status == STATUS_ACTIVE).with_for_update()).all():
+        alert.status, alert.resolved_at, alert.last_updated_at = STATUS_RESOLVED, now, now
+        emit_event(session, event_type=EVENT_ALERT_RESOLVED, occurred_at=now,
+                   message=f"Alert resolved: {rule.name} — {parameter.name} ({alert_note}).",
+                   asset_id=asset_id, rule_id=rule.id, alert_id=alert.id, severity=alert.severity,
+                   metadata={**meta, "outcome": outcome})
+
+
+# Why an interval cannot be reset manually right now (None = it can). Locks the parameter's open schedule.
+def manual_reset_problem(session: Session, rule: MonitoringRule, parameter: RuleParameter) -> str | None:
+    if not is_eligible_rule(rule) or parameter.kind != INTERVAL:
+        return "Only interval parameters of interval-based rules have progress to reset."
+    if not _valid_relationship(session, rule, parameter):
+        return "The rule and parameter are inconsistent, so the progress cannot be reset."
+    if not rule.is_enabled or rule.lifecycle_status != STATUS_IN_PROGRESS:
+        return f"The rule is {rule.lifecycle_status.replace('_', ' ')}; activate it before resetting progress."
+    if parameter.lifecycle_status != STATUS_ACTIVE:
+        return f"The parameter is {parameter.lifecycle_status}; activate it before resetting progress."
+    job = _job(session, schedule) if (schedule := _open_schedule(session, parameter.id)) is not None else None
+    if job is not None and job.status == STATUS_IN_PROGRESS:
+        return "Maintenance for this interval is in progress. Complete it (with or without a reset) instead."
+    return None
+
+
+# Manual reset of one interval: no maintenance is completed. An unstarted maintenance schedule of the interval is
+# cancelled (its ready alert resolved) and a fresh one is created for the new cycle, so nothing is duplicated.
+def manual_reset_parameter(session: Session, rule: MonitoringRule, parameter: RuleParameter, *, user_id: int | None,
+                           user_name: str, scope: str, now: datetime | None = None) -> dict[str, Any]:
+    now = now or _now()
+    problem = manual_reset_problem(session, rule, parameter)
+    if problem:
+        raise ValueError(problem)
+    state = session.scalar(select(RuleParameterState).where(RuleParameterState.parameter_id == parameter.id))
+    meta = {"rule_id": rule.id, "rule_name": rule.name, "parameter_id": parameter.id, "parameter_key": parameter.key,
+            "parameter_name": parameter.name, "reset_by_id": user_id, "reset_by": user_name, "reset_at": now.isoformat(),
+            "scope": scope, "previous_status": state.status if state else None,
+            "previous_value": state.latest_value if state else None, "cycle_baseline_at": now.isoformat()}
+    schedule = _open_schedule(session, parameter.id)
+    if schedule is not None:
+        _close(session, schedule, _job(session, schedule), now,
+               "Progress was reset manually before this maintenance was started.")
+        schedule.cancelled_at, schedule.cancelled_by_id, schedule.cancelled_by_name = now, user_id, user_name
+        schedule.cancellation_reason, schedule.cancellation_kind = "Progress was reset manually.", "progress_reset"
+        meta["cancelled_schedule_id"] = schedule.id
+        session.flush()
+    _reset_interval_progress(
+        session, rule, parameter, now=now, set_baseline=True,
+        state_message=f"Progress was reset manually by {user_name}; counting restarted at {now.isoformat()}.",
+        alert_note="progress reset manually", outcome="manual_progress_reset", asset_id=rule.target_asset_id, meta=meta)
+    emit_event(session, event_type="interval_progress_reset_manual", occurred_at=now,
+               message=f"Progress of '{parameter.name}' in rule '{rule.name}' was reset manually by {user_name} ({scope}).",
+               asset_id=rule.target_asset_id, rule_id=rule.id, metadata=meta)
+    session.flush()
+    _refresh_rule_state(session, rule, now)
+    if _rule_running(rule, parameter) and _open_schedule(session, parameter.id) is None:
+        new = _create_schedule(session, rule, parameter, now)
+        meta["new_schedule_id"] = new.id if new is not None else None
+    return meta
+
+
 # Main decision making func. decides what happens after the operator completes maintenance.
 def apply_completion_decision(session: Session, schedule: MaintenanceSchedule, *, reset_progress: bool,
                               completed_at: datetime, now: datetime, user_name: str) -> MaintenanceSchedule | None:
@@ -542,31 +612,19 @@ def apply_completion_decision(session: Session, schedule: MaintenanceSchedule, *
         and config.get("time_mode") == "calendar"
     )
 
-    # Calendar Time does not use cycle_baseline_at: its next cycle is derived by calendar_cycle() from the actual
+    # Calendar Time does not use cycle_baseline_at here: its next cycle is derived by calendar_cycle() from the actual
     # completion time of this reset (schedule.last_completed_at, flushed above), so Due and Overdue are the
-    # configured intervals after that moment. Other interval types use the cycle baseline below.
-    if not is_calendar_time:
-        parameter.cycle_baseline_at = now
-    state = session.scalar(select(RuleParameterState).where(RuleParameterState.parameter_id == parameter.id)
-                           .with_for_update().execution_options(populate_existing=True))
-    if state is not None:
-        state.aggregate_state = None
-        state.status, state.latest_value, state.error_message = STATUS_NORMAL, 0.0, None
-        state.message = (
+    # configured intervals after that moment. Other interval types use the cycle baseline.
+    _reset_interval_progress(
+        session, rule, parameter, now=now, set_baseline=not is_calendar_time,
+        state_message=(
             f"Maintenance completed. The next calendar cycle starts from the maintenance completion time "
             f"({_aware(completed_at).astimezone(timezone.utc).isoformat()})."
             if is_calendar_time
             else f"Progress was reset after maintenance; counting restarted at {now.isoformat()}."
-        )
-        state.last_evaluated_at = now
-        state.completed_at = None
-    for alert in session.scalars(select(Alert).where(
-            Alert.rule_id == rule.id, Alert.parameter_id == parameter.id, Alert.status == STATUS_ACTIVE).with_for_update()).all():
-        alert.status, alert.resolved_at, alert.last_updated_at = STATUS_RESOLVED, now, now
-        emit_event(session, event_type=EVENT_ALERT_RESOLVED, occurred_at=now,
-                   message=f"Alert resolved: {rule.name} — {parameter.name} (maintenance completed and progress reset).",
-                   asset_id=schedule.asset_id, rule_id=rule.id, alert_id=alert.id, severity=alert.severity,
-                   metadata={**meta, "outcome": "maintenance_progress_reset"})
+        ),
+        alert_note="maintenance completed and progress reset", outcome="maintenance_progress_reset",
+        asset_id=schedule.asset_id, meta=meta)
     emit_event(session, event_type="maintenance_completed_progress_reset", occurred_at=now,
                message=f"{schedule.title}: maintenance completed and progress reset. A new maintenance cycle starts from zero.",
                asset_id=schedule.asset_id, rule_id=rule.id, metadata={**meta, "cycle_baseline_at": now.isoformat()})

@@ -122,6 +122,22 @@ def _with_cycle_baseline(start: datetime, parameter: RuleParameter) -> datetime:
     baseline = parameter.cycle_baseline_at
     return max(start, _aware(baseline)) if baseline is not None else start
 
+# The moment a Calendar Time cycle was last reset: the latest of (a) a maintenance completed WITH a reset and (b) a manual
+# reset (RuleParameter.cycle_baseline_at). None means the cycle still runs from the saved Calendar Start.
+def calendar_last_reset_at(session: Session, parameter_id: int, cycle_baseline_at: datetime | None = None) -> datetime | None:
+    completed = session.scalar(
+        select(MaintenanceSchedule.last_completed_at)
+        .where(
+            MaintenanceSchedule.source_parameter_id == parameter_id,
+            MaintenanceSchedule.last_completed_at.is_not(None),
+            MaintenanceSchedule.progress_reset == PROGRESS_RESET,
+        )
+        .order_by(MaintenanceSchedule.last_completed_at.desc())
+        .limit(1)
+    )
+    moments = [_aware(value) for value in (completed, cycle_baseline_at) if value is not None]
+    return max(moments) if moments else None
+
 # Evaluates number thresholds.
 def number_status(value: float, config: dict[str, Any]) -> tuple[str, str]:
     upper_alert, upper_warning = config.get("upper_alert"), config.get("upper_warning")
@@ -318,16 +334,7 @@ def _evaluate_parameter(
         # Calendar-based Time uses fixed calendar dates, not elapsed hours.
         if interval == TIME and config.get("time_mode") == "calendar": 
             try:
-                last_completed_at = session.scalar(
-                    select(MaintenanceSchedule.last_completed_at)
-                    .where(
-                        MaintenanceSchedule.source_parameter_id == parameter.id,
-                        MaintenanceSchedule.last_completed_at.is_not(None),
-                        MaintenanceSchedule.progress_reset == PROGRESS_RESET,
-                    )
-                    .order_by(MaintenanceSchedule.last_completed_at.desc())
-                    .limit(1)
-                )
+                last_completed_at = calendar_last_reset_at(session, parameter.id, parameter.cycle_baseline_at)
                 _, due_date, overdue_date = calendar_cycle(config, last_completed_at)
                 today = _aware(now) if isinstance(due_date, datetime) else now.date()
                 if today >= overdue_date:
@@ -1005,16 +1012,7 @@ def build_status_detail(session: Session, rule: MonitoringRule, now: datetime | 
             and config.get("time_mode") == "calendar"
         ):
             try:
-                last_completed_at = session.scalar(
-                    select(MaintenanceSchedule.last_completed_at)
-                    .where(
-                        MaintenanceSchedule.source_parameter_id == item["id"],
-                        MaintenanceSchedule.last_completed_at.is_not(None),
-                        MaintenanceSchedule.progress_reset == PROGRESS_RESET,
-                    )
-                    .order_by(MaintenanceSchedule.last_completed_at.desc())
-                    .limit(1)
-                )
+                last_completed_at = calendar_last_reset_at(session, item["id"], item.get("cycle_baseline_at"))
                 calendar_start, calendar_due, calendar_overdue = calendar_cycle(config, last_completed_at)
 
                 item[SCHEDULE] = {
