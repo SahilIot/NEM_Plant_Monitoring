@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.types import TypeDecorator
 
 from app.core.config import get_settings, validate_postgresql_database_url
+from app.core.timeutils import to_utc
 
 #this class customizes how SQLAlchemy converts timestamps between Python and the database.
 class UTCDateTime(TypeDecorator[datetime]):
@@ -26,11 +27,7 @@ class UTCDateTime(TypeDecorator[datetime]):
         return value.replace(tzinfo=None)
 # reads a datetime from the database and converts it into a py value
     def process_result_value(self, value: datetime | None, dialect) -> datetime | None:
-        if value is None:
-            return None
-        if value.tzinfo is None or value.utcoffset() is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
+        return to_utc(value)
 
 # engine that your backend uses to communicate with PostgreSQL 
 def create_database_engine(database_url: str | None = None) -> Engine:

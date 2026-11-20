@@ -92,3 +92,17 @@ export function formatDurationHours(hours) {
 
 // True for the unit names the backend uses for time-based progress (rule schedules report "hours").
 export const isHoursUnit = (unit) => /^hours?$/i.test(String(unit || "").trim());
+
+// Today's date in the user's local timezone as YYYY-MM-DD, the format of <input type="date">.
+export function todayDateInput() {
+  const now = new Date();
+  const offset = now.getTimezoneOffset() * 60_000;
+  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+}
+
+// A YYYY-MM-DD date shown in the user's locale; "—" when empty, the raw value when it cannot be parsed.
+export function displayDate(value) {
+  if (!value) return "—";
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+}

@@ -1,8 +1,9 @@
 #Pydantic schemas for maintenance records and recurring maintenance schedules
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import Any, Literal #restrict a field to specific permitted values
 from pydantic import ConfigDict, Field, field_validator, model_validator
+from app.core.timeutils import to_utc
 from app.schemas.common import ORMModel
 
 #Creates an individual maintenance record
@@ -48,11 +49,7 @@ class MaintenanceCreate(ORMModel):
     )
     @classmethod
     def normalize_timestamp(cls, value: datetime | None) -> datetime | None:
-        if value is None:
-            return None
-        if value.tzinfo is None or value.utcoffset() is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
+        return to_utc(value)
 
 #Schema checks that the planned end is not earlier than the planned start
     @model_validator(mode="after")
@@ -158,11 +155,7 @@ class MaintenanceUpdate(ORMModel):
     )
     @classmethod
     def normalize_timestamp(cls, value: datetime | None) -> datetime | None:
-        if value is None:
-            return None
-        if value.tzinfo is None or value.utcoffset() is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
+        return to_utc(value)
 
 # What the technician confirmed or entered for one parameter's variable. Everything else in the stored
 # actual_values snapshot (names, units, the last recorded reading) is taken from the server, not from the client.
@@ -193,11 +186,7 @@ class MaintenanceCompletion(ORMModel):
     @field_validator("actual_completed_at")
     @classmethod
     def normalize_completion_timestamp(cls, value: datetime | None) -> datetime | None:
-        if value is None:
-            return None
-        if value.tzinfo is None or value.utcoffset() is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
+        return to_utc(value)
 
     # Technician, work performed and remarks are optional; a blank value means "leave the existing detail as it is".
     @field_validator("performed_by", "notes", "completion_notes")

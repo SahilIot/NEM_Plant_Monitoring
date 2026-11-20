@@ -1,23 +1,8 @@
 import React, { useId, useState } from "react";
+import { useTips } from "./useTips.js";
 import { ZONE_LABEL, NUMBER_LIMITS, nearestLimit, numberZone } from "./parameterRules.js";
 import "./IntervalDemo.css";
 import "./ParameterDemos.css";
-
-// Tooltip open-state shared by the demos: hover, keyboard focus and tap all open the same tooltip.
-function useTips() {
-  const [active, setActive] = useState(null);
-  const [pinned, setPinned] = useState(null);
-  const point = (key, baseId) => ({
-    onMouseEnter: () => setActive(key),
-    onMouseLeave: () => setActive((c) => (c === key ? null : c)),
-    onFocus: () => setActive(key),
-    onBlur: () => { setActive((c) => (c === key ? null : c)); setPinned((c) => (c === key ? null : c)); },
-    onClick: () => setPinned((c) => (c === key ? null : key)),
-    onKeyDown: (e) => { if (e.key === "Escape") { setActive(null); setPinned(null); } },
-    "aria-describedby": `${baseId}-tip-${key}`,
-  });
-  return { open: pinned || active, point };
-}
 
 const fmt = (value, unit) => `${Math.round(Number(value) * 1000) / 1000}${unit ? ` ${unit}` : ""}`;
 const SAMPLE_LIMITS = { lower_alert: 10, lower_warning: 20, upper_warning: 80, upper_alert: 100 };

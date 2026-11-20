@@ -1,5 +1,5 @@
 # Lets user evaluate monitoring rules,inspect machine status,view active alerts,acknowledge alerts and review the event history
-from datetime import datetime, timezone # work with timestamps and UTC
+from datetime import datetime # work with timestamps
 # Groups API Endpoints
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 #func -> SQL Function, or_ -> Combines SQL Condition using OR, select -> constructs SQL queries
@@ -41,6 +41,7 @@ from app.services.monitoring_engine import (
     set_rule_enabled_state,
     utc_now,
 )
+from app.core.timeutils import to_utc
 from app.core.constants import (
     STATUS_ACTIVE,
     STATUS_COMPLETED,
@@ -62,12 +63,6 @@ def _alert_in_scope(session: Session, alert: Alert | None, alert_id: int) -> Ale
     if alert is None or not access_scope(session).allows(alert.target_asset_id):
         raise HTTPException(status_code=404, detail=f"Alert {alert_id} was not found")
     return alert
-
-# normalized -> Ensures that a datetime value is in UTC format, converting it if necessary. If the input is None, it returns None. This is useful for consistent timestamp handling across the application.
-def normalized(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 #  state_for_rule -> Retrieves the current state of a given monitoring rule. It checks if the rule is associated with an asset or variable, fetches the corresponding RuleState from the database, and returns it in a structured format. If no state is found, it returns a default "unknown" state indicating that the rule has not yet been evaluated.
 # reads the stored state
@@ -207,7 +202,7 @@ def alert_query(
     start_time: datetime | None,
     end_time: datetime | None,
 ):
-    start, end = normalized(start_time), normalized(end_time)
+    start, end = to_utc(start_time), to_utc(end_time)
     if start is not None and end is not None and start > end:
         raise HTTPException(status_code=422, detail=ERR_START_AFTER_END)
     query = select(Alert)
@@ -513,7 +508,7 @@ def list_events(
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
-    start, end = normalized(start_time), normalized(end_time)
+    start, end = to_utc(start_time), to_utc(end_time)
     if start is not None and end is not None and start > end:
         raise HTTPException(status_code=422, detail=ERR_START_AFTER_END)
     query = (

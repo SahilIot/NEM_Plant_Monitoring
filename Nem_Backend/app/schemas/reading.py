@@ -1,11 +1,12 @@
 # controls what data your api accepts,validate plc reading before they stored
 # PLC -> OPC UA Client -> ReadingCreate -> validation -> reading_ingestion.py -> database -> dashboard
-from datetime import datetime, timezone
+from datetime import datetime
 import math
 # any -> allows metadata or returned values to contain different data types
 # Union -> means a value can belong to one of several allowed types
 from typing import Any, Union
 from pydantic import AliasChoices, Field, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator
+from app.core.timeutils import to_utc
 from app.schemas.common import ORMModel
  # what values can a plc reading contains
 ReadingValue = Union[StrictStr, StrictBool, StrictInt, StrictFloat]
@@ -22,9 +23,7 @@ class ReadingCreate(ORMModel):
     @field_validator("recorded_at")
     @classmethod
     def utc_timestamp(cls, value: datetime | None) -> datetime | None:
-        if value is None:
-            return None
-        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+        return to_utc(value)
 
 # prevents invalid floating-point measurements from being accepted
     @field_validator("value")

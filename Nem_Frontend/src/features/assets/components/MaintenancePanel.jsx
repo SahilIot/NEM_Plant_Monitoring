@@ -25,7 +25,7 @@ import {
 } from "../../../components/common/UI.jsx";
 import { DotsIcon, RefreshIcon } from "../../../components/common/Icons.jsx";
 import RuleLiveHours from "./RuleLiveHours.jsx";
-import { auditUser, formatAuditTime, formatDurationHours, formatTime, isHoursUnit } from "../../../utils/format.js";
+import { auditUser, displayDate, formatAuditTime, formatDurationHours, formatTime, isHoursUnit, todayDateInput } from "../../../utils/format.js";
 import MaintenanceDetails from "./MaintenanceDetails.jsx";
 import MaintenanceRegistrationDialog from "./MaintenanceRegistrationDialog.jsx";
 import { ActualValuesView, ChecklistView } from "./MaintenanceRecordData.jsx";
@@ -106,18 +106,6 @@ const TYPES = ["preventive", "corrective", "inspection", "unplanned"];
 const STATUSES = ["planned", "in_progress", "completed", "cancelled"];
 const PRIORITIES = ["low", "medium", "high", "critical"];
 const RECURRENCE_UNITS = ["days", "weeks", "months", "years"];
-
-function todayDateInput() {
-  const now = new Date();
-  const offset = now.getTimezoneOffset() * 60_000;
-  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
-}
-
-function displayDate(value) {
-  if (!value) return "—";
-  const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
-}
 
 // "Overdue by 3 days" / "Due today" / "Due in 12 days" for a YYYY-MM-DD due date.
 function dueLabel(value) {

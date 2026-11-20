@@ -12,6 +12,7 @@ import { useConfirmation } from "../../../components/common/UI.jsx";
 import "./IntervalDemo.css";
 import "./ParameterDemos.css";
 import "./RuleStatusDetail.css";
+import { useTips } from "./useTips.js";
 
 /*
  * Current Status detail view of one parent multi-parameter rule.
@@ -65,21 +66,6 @@ function mergeDetail(previous, next) {
     parameters: next.parameters.map((p) => (byId.has(p.id) && same(byId.get(p.id), p) ? byId.get(p.id) : p)),
     server_time: next.server_time,
   };
-}
-
-function useTips() {
-  const [active, setActive] = useState(null);
-  const [pinned, setPinned] = useState(null);
-  const point = (key, baseId) => ({
-    onMouseEnter: () => setActive(key),
-    onMouseLeave: () => setActive((c) => (c === key ? null : c)),
-    onFocus: () => setActive(key),
-    onBlur: () => { setActive((c) => (c === key ? null : c)); setPinned((c) => (c === key ? null : c)); },
-    onClick: () => setPinned((c) => (c === key ? null : key)),
-    onKeyDown: (e) => { if (e.key === "Escape") { setActive(null); setPinned(null); } },
-    "aria-describedby": `${baseId}-tip-${key}`,
-  });
-  return { open: pinned || active, point };
 }
 
 /** Scale with coloured zones, boundary markers and the value marker. All positions are layout only. */

@@ -32,6 +32,7 @@ from app.services.notification_settings import NOTIFICATION_SETTINGS_KEY, settin
 from app.services import template_parameters as template_params
 from app.services.rule_parameters import ParameterConfigError, serialize_parameters
 from app.core.labels import normalize_label_names
+from app.core.timeutils import to_utc
 from app.models import (
     Alert,
     Asset,
@@ -2430,12 +2431,7 @@ def export_asset_events(
     if session.get(Asset, asset_id) is None or not access_scope(session).allows(asset_id):
         raise HTTPException(status_code=404, detail=f"Asset {asset_id} was not found")
 
-    def utc(value: datetime | None) -> datetime | None:
-        if value is None:
-            return None
-        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
-
-    start, end = utc(start_time), utc(end_time)
+    start, end = to_utc(start_time), to_utc(end_time)
     if start is not None and end is not None and start > end:
         raise HTTPException(status_code=422, detail="start_time must not be later than end_time")
     query = _filter_component(_asset_event_log_select(asset_id), component_identifier)

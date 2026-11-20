@@ -1,6 +1,6 @@
 #Readings API router.Focusing on receiving PLC readings,saving them to postgreSQL,retrieving the lastest or historical readings for the frontend
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
@@ -14,6 +14,7 @@ from app.services.monitoring_engine import evaluate_reading_rules
 from app.services.reading_ingestion import (ingest_reading as persist_reading,make_reading,validate_reading,)
 from app.services.maintenance_progress import update_maintenance_progress
 from app.core.constants import ERR_START_AFTER_END
+from app.core.timeutils import to_utc
 
 router = APIRouter(prefix="/readings", tags=["readings"])
 MAX_BATCH_SIZE = 100
@@ -143,13 +144,7 @@ def list_variable_readings(
     variable = session.get(Variable, variable_id)
     if variable is None or not access_scope(session).allows(variable.asset_id):
         raise HTTPException(status_code=404, detail=f"Variable {variable_id} was not found")
-    #Converts timestamps to UTC
-    def normalize(value: datetime | None) -> datetime | None:
-        if value is None:
-            return None
-        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
-
-    start, end = normalize(start_time), normalize(end_time)
+    start, end = to_utc(start_time), to_utc(end_time)
     if start is not None and end is not None and start > end:
         raise HTTPException(status_code=422, detail=ERR_START_AFTER_END)
     query = select(Reading).where(Reading.variable_id == variable_id)

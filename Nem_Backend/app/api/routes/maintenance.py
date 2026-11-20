@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from app.services.maintenance_registration import build_actual_values, normalize_checklist, registration_context
 from app.services.rule_maintenance import apply_completion_decision, cancel_unavailable, ensure_startable, prepare_progress_reset
 from app.core.config import get_settings
+from app.core.timeutils import to_utc
 from app.db.session import get_db
 from app.api.routes.auth import get_current_user, require_roles
 from app.models import (
@@ -400,14 +401,6 @@ def _emit_schedule_event(
         },
     )
 
-# This standardizes datetimes to UTC
-def _normalized(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if value.tzinfo is None or value.utcoffset() is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
-
 #Similar to schedule_or_404, but it looks up a single maintenance record instead of schedule
 def _record_or_404(session: Session, record_id: int) -> MaintenanceRecord:
     record = session.get(MaintenanceRecord, record_id)
@@ -431,10 +424,10 @@ def _validate_alert(
 
 #Checks that the dates are logically ordered
 def _validate_record_dates(record: MaintenanceRecord) -> None:
-    planned_start = _normalized(record.planned_start_at)
-    planned_end = _normalized(record.planned_end_at)
-    actual_start = _normalized(record.actual_started_at)
-    actual_end = _normalized(record.actual_completed_at)
+    planned_start = to_utc(record.planned_start_at)
+    planned_end = to_utc(record.planned_end_at)
+    actual_start = to_utc(record.actual_started_at)
+    actual_end = to_utc(record.actual_completed_at)
     if planned_start is not None and planned_end is not None and planned_end < planned_start:
         raise HTTPException(status_code=422,detail="planned_end_at must not precede planned_start_at",) 
     if actual_start is not None and actual_end is not None and actual_end < actual_start:
@@ -1377,7 +1370,7 @@ def list_maintenance_records(
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
-    start, end = _normalized(start_time), _normalized(end_time)
+    start, end = to_utc(start_time), to_utc(end_time)
     if start is not None and end is not None and start > end:
         raise HTTPException(status_code=422,detail=ERR_START_AFTER_END,)
 
@@ -1722,8 +1715,8 @@ def complete_maintenance_record(
     record.completed_by_id = user.id
     record.completed_by_name = _user_label(user)
 
-    actual_start = _normalized(record.actual_started_at)
-    normalized_completed_at = _normalized(completed_at)
+    actual_start = to_utc(record.actual_started_at)
+    normalized_completed_at = to_utc(completed_at)
 
     if schedule is not None:
 

@@ -6,7 +6,7 @@ import { shareInFlight } from "../../../services/liveUpdates.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
 import { captureNavigationOrigin } from "../../../utils/navigation.js";
 import RuleLiveHours from "./RuleLiveHours.jsx";
-import { formatDurationHours, isHoursUnit } from "../../../utils/format.js";
+import { displayDate, formatDurationHours, isHoursUnit, todayDateInput } from "../../../utils/format.js";
 import { recordDeleteConfirmation, recordDeleteState } from "../maintenanceDeletion.js";
 import {
   EmptyState,
@@ -19,18 +19,6 @@ import MaintenanceDetails from "./MaintenanceDetails.jsx";
 import MaintenanceRegistrationDialog from "./MaintenanceRegistrationDialog.jsx";
 import { DotsIcon } from "../../../components/common/Icons.jsx";
 import "./MaintenancePanel.css";
-
-function todayDateInput() {
-  const now = new Date();
-  const offset = now.getTimezoneOffset() * 60_000;
-  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
-}
-
-function displayDate(value) {
-  if (!value) return "—";
-  const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
-}
 
 // A job created from a monitoring rule cannot be started until its rule reaches Due (the server enforces this too).
 const isLockedUntilDue = (record) => record?.start_eligibility === "not_due";

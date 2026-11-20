@@ -10,6 +10,7 @@ import {
   returnToNavigationOrigin,
 } from "../../../utils/navigation.js";
 import { BackButton } from "../../../components/common/NavButtons.jsx";
+import { todayDateInput } from "../../../utils/format.js";
 
 // Available maintenance types, priorities, and recurrence units.
 const TYPES = [
@@ -24,15 +25,6 @@ const PRIORITIES = ["low", "medium", "high", "critical"];
 const RECURRENCE_UNITS = ["days", "weeks", "months", "years"];
 
 // Returns today's date in YYYY-MM-DD format using the local timezone.
-function todayDateInput() {
-  const now = new Date();
-  const offset = now.getTimezoneOffset() * 60000;
-
-  return new Date(now.getTime() - offset)
-    .toISOString()
-    .slice(0, 10);
-}
-
 // Converts a date value into the format required by datetime-local inputs.
 function localDateTimeInput(value) {
   if (!value) return "";

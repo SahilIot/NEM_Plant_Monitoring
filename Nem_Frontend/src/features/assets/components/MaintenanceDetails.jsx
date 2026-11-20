@@ -1,12 +1,6 @@
 import React from "react";
-import { auditUser, formatAuditTime, formatTime } from "../../../utils/format.js";
+import { auditUser, displayDate, formatAuditTime, formatTime } from "../../../utils/format.js";
 import { ActualValuesView, ChecklistView } from "./MaintenanceRecordData.jsx";
-
-function displayDate(value) {
-  if (!value) return "—";
-  const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
-}
 
 function actualDuration(record, now) {
   if (!record.actual_started_at) return "—";
