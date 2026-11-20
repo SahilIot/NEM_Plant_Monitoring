@@ -90,6 +90,9 @@ EVENT_STALE_DATA_DETECTED = "stale_data_detected"
 EVENT_RULE_PERMANENTLY_DELETED = "rule_permanently_deleted"
 EVENT_MAINTENANCE_COMPLETED = "maintenance_completed"
 EVENT_MAINTENANCE_RECORD_PERMANENTLY_DELETED = "maintenance_record_permanently_deleted"
+EVENT_ALERT_TRIGGERED = "alert_triggered"
+NOTIFICATION_KIND_MAINTENANCE_READY = "maintenance_ready"
+CANCELLATION_KIND_PROGRESS_RESET = "progress_reset"
 
 # Error messages returned in several places
 ERR_NO_FIELDS_TO_UPDATE = "Provide at least one field to update"

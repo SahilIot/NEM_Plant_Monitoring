@@ -71,15 +71,11 @@ deployment configuration or field validation.
    UI uses “Cycle Clock” while README text uses “Motor Rotation”; the model
    accepts `boolean_condition`, while `RuleCreate` does not list that literal.
    `generic` and `boolean_condition` have no evaluator and report unknown.
-5. **Test coverage is limited.** `Nem_Backend/tests/` holds seven pytest files
-   (some need `DATABASE_URL`/`TEST_DATABASE_URL` for PostgreSQL) and the
-   frontend has Node tests (`Nem_Frontend/tests`, `rulePresentation.test.js`,
-   `maintenanceDeletion` rules are covered only by manual checks). Some
-   backend tests fail in the current tree because their fake user objects lack
-   an `id` used by newer code (`test_maintenance_completion.py`,
-   `test_maintenance_progress_postgres.py`) and `test_reading_api_maintenance.py`
-   needs a complete `Settings` environment to be collected. Runtime and
-   integration acceptance remain unverified.
+5. **Test coverage is limited.** The repository has no backend test suite
+   (`Nem_Backend/tests/` does not exist). The frontend has two Node test files
+   (`Nem_Frontend/tests/i18n.test.js` and `monitoringRuleFlow.test.js`).
+   Backend behaviour is validated with scratch-database checks outside the
+   repository. Runtime and integration acceptance remain unverified.
 
 ## Verification required
 
@@ -141,8 +137,9 @@ unnecessary:
   `asset_deletion.py`) do not call `record_bulk_change`, so they do not publish
   live-update events.
 - Dependencies checked and kept: `@e965/xlsx` is the only spreadsheet package
-  in `package.json` and is imported; backend `pytest` and `httpx` are used by
-  the tests, `python-dotenv` is required by `pydantic-settings` for `.env`
+  in `package.json` and is imported; backend `pytest` and `httpx` are listed in
+  `requirements.txt` but no test file in the repository currently uses them (kept;
+  removal not verified against deployment scripts), `python-dotenv` is required by `pydantic-settings` for `.env`
   loading, `python-docx` and `python-multipart` are used by document upload
   and `cryptography` by the OPC UA and settings encryption code.
 - `LOG_LEVEL` in `.env` is not read by `config.py`; the `npm test` script has

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import and_, or_, select
@@ -31,7 +31,6 @@ from app.core.constants import (
     STATUS_ALERT,
     STATUS_COMPLETED,
     STATUS_DEACTIVATED,
-    PROGRESS_RESET,
     STATUS_IN_PROGRESS,
     STATUS_NORMAL,
     STATUS_RESOLVED,

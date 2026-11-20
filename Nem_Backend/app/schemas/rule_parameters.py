@@ -18,7 +18,6 @@ from app.core.constants import (
     COUNTER,
     INTERVAL,
     NUMBER,
-    PROGRESS_RESET,
     RULE_PARAMETER_THRESHOLD,
     STATUS_ALERT,
     STATUS_WARNING,

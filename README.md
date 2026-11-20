@@ -206,8 +206,6 @@ NEM_Plant_Monitoring/
         auth_security.py            Password hashing, sessions
         labels.py                   Shared label catalog service
         frontend_backup.py          Dashboard backup/restore snapshots
-    tests/                          pytest suite (maintenance progress, completion, schedules,
-                                    reading API, backup confirmation, collection unassign)
     scripts/create_admin.py         Interactive first-Administrator setup
     seed.py                         Idempotent simulated demo data
     requirements.txt
@@ -247,7 +245,7 @@ documentation is in [docs/architecture.md](docs/architecture.md),
 [docs/design.md](docs/design.md), [docs/prd.md](docs/prd.md),
 [docs/rules.md](docs/rules.md), [docs/maintenance.md](docs/maintenance.md),
 [docs/realtime-updates.md](docs/realtime-updates.md),
-[docs/memory.md](docs/memory.md), and [docs/tasks.md](docs/tasks.md).
+[docs/rule-operations.md](docs/rule-operations.md), [docs/memory.md](docs/memory.md), and [docs/tasks.md](docs/tasks.md).
 
 ## Requirements and local setup
 
@@ -340,6 +338,7 @@ variables and `Nem_Backend/.env`. Common options:
 | `OPCUA_RECONNECT_DELAY_SECONDS` | Collector reconnect delay; 5 seconds by default. |
 | `OPCUA_SUBSCRIPTION_PUBLISHING_INTERVAL_MS` | Requested OPC UA publishing interval; 1000 ms by default. Server negotiation may change it. |
 | `OPCUA_RUNTIME_CHECKPOINT_SECONDS` | Running-signal refresh/runtime checkpoint; 10 seconds by default. |
+| `OPCUA_RUNNING_SIGNAL_TIMEOUT_SECONDS` | Running-signal timeout; 15 seconds by default; must be greater than the checkpoint interval. |
 | `OPCUA_MACHINE_MAPPINGS` | JSON array of configured asset-to-NodeId mappings; empty by default. |
 | `OPC_UA_MAPPING_BYPASS_ENABLED` | Optional mapping-bypass test mode; `false` by default. |
 | `EMAIL_NOTIFICATIONS_ENABLED` | Enables the background email delivery loop; `true` by default. |
@@ -753,7 +752,7 @@ API routers are mounted under `/api/v1`:
 | Assets | `/assets` CRUD, children, hierarchy, and move |
 | Variables | `/assets/{asset_id}/variables`, `/variables/{variable_id}` |
 | Readings | `POST /readings`, `POST /readings/batch`, latest and history queries |
-| Rules | `/rules`, rule status, template assignment/copy, lifecycle operations |
+| Rules | `/rules`, rule status, template assignment/copy, lifecycle operations, `POST /rules/{id}/reset-progress`, `POST /rules/{id}/parameters/{pid}/reset-progress`, `POST /rules/{id}/notification-settings`, `POST /rules/{id}/component-identifier`, `POST /rules/{id}/suspend` and `/resume` (details in [docs/rule-operations.md](docs/rule-operations.md)) |
 | Shared rules | `/rule-templates`, `/rule-templates/{id}/visibility` (Administrator), `/rule-templates/{id}/history`, `/rule-templates/{id}/assignments`, `/rule-visibility/supervisors`, `/rule-template-requests` (suggestions) |
 | Monitoring | `/monitoring/status`, `/monitoring/evaluate`, alerts and events |
 | Maintenance | `/maintenance`, `/maintenance/schedules` (calendar, runtime and usage modes), start/complete (optional registration body)/cancel and next-date actions |
@@ -852,32 +851,18 @@ npm test
 npm run build
 ```
 
-### Backend tests
+### Backend checks
 
-`Nem_Backend/tests/` contains a pytest suite (`pytest` is in `requirements.txt`):
+The repository does not currently contain a backend test suite (`pytest` and
+`httpx` remain in `requirements.txt` for local use). Validate backend changes by
+compiling (`python -m compileall app`), importing `app.main`, and exercising
+behaviour against a dedicated scratch PostgreSQL database. Never run startup
+upgrades or experiments against the production database. `TEST_DATABASE_URL`
+is only read from settings; if you create tests, point it at an isolated
+database.
 
-| Test file | Covers |
-|---|---|
-| `test_maintenance_progress.py` | Runtime accumulation, cycle edges, stale gaps, single alert/occurrence, pause/resume (fake session) |
-| `test_maintenance_completion.py` | Completion resets progress; completion registration schema |
-| `test_rule_collection_assignment.py` | Collection unassign role guard and safety checks |
-| `test_frontend_backup_confirmation.py` | Backup restore confirmation token |
-| `test_maintenance_progress_postgres.py` | Runtime/usage progress and next cycle on PostgreSQL |
-| `test_maintenance_schedule_creation_postgres.py` | Schedule creation, deletion, signal validation, proposal recalculation, cancellation |
-| `test_reading_api_maintenance.py` | Reading API (single and batch) triggering maintenance, authentication and roles |
-
-```powershell
-cd C:\path\to\NEM_Plant_Monitoring\Nem_Backend
-.\.venv\Scripts\python.exe -m pytest
-```
-
-The `*_postgres.py` tests and `test_reading_api_maintenance.py` need
-`TEST_DATABASE_URL` pointing to a dedicated PostgreSQL database named
-`plc_monitoring_runtime_test`. They refuse to run against any other database or
-against the application database, and they roll back their changes afterwards.
-
-The frontend has Node test files (`Nem_Frontend/tests/*.test.js` and
-`src/features/rules/rulePresentation.test.js`) run by `npm test` (Node's test
+The frontend has Node test files (`Nem_Frontend/tests/*.test.js`, currently
+`i18n.test.js` and `monitoringRuleFlow.test.js`) run by `npm test` (Node's test
 runner). A successful build validates compilation, not PLC,
 database, SMTP, authorization, or operational behavior. Test those integrations
 in a controlled environment before deployment.
@@ -889,6 +874,7 @@ in a controlled environment before deployment.
 - [Product requirements](docs/prd.md)
 - [Business rules](docs/rules.md)
 - [Maintenance lifecycle](docs/maintenance.md)
+- [Rule operations: manual reset, notifications, component identifiers, event export](docs/rule-operations.md)
 - [Real-time updates](docs/realtime-updates.md)
 - [Implementation memory and verification notes](docs/memory.md)
 - [Development status and tasks](docs/tasks.md)

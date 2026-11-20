@@ -41,8 +41,10 @@ from app.core.constants import (
     STATUS_RESOLVED,
     STATUS_UNKNOWN,
     STATUS_WARNING,
+    EVENT_ALERT_COMPLETED,
     EVENT_ALERT_RESOLVED,
     EVENT_ALERT_SEVERITY_CHANGED,
+    EVENT_ALERT_TRIGGERED,
     EVENT_STALE_DATA_DETECTED,
     EVENT_WARNING_TRIGGERED,
     RULE_BOOLEAN_CONDITION,
@@ -478,9 +480,9 @@ def _transition_state(
             emit_event(
                 session,
                 event_type=(
-                    "warning_triggered"
+                    EVENT_WARNING_TRIGGERED
                     if next_status == STATUS_WARNING
-                    else "alert_triggered"
+                    else EVENT_ALERT_TRIGGERED
                 ),
                 message=message,
                 occurred_at=evaluated_at,
@@ -578,7 +580,7 @@ def _is_new_alert_occurrence(
 
     last_completion = session.scalar(
         select(func.max(MonitoringEvent.occurred_at)).where(
-            MonitoringEvent.event_type == "alert_completed",
+            MonitoringEvent.event_type == EVENT_ALERT_COMPLETED,
             MonitoringEvent.rule_id == rule.id,
             MonitoringEvent.asset_id == asset.id,
         )

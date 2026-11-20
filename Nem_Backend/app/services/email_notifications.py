@@ -30,6 +30,7 @@ from app.models import (
 from app.services.notification_settings import custom_message, severity_enabled
 from app.core.constants import (
     NOTIFICATION_FAILED,
+    NOTIFICATION_KIND_MAINTENANCE_READY,
     NOTIFICATION_SENT,
     NOTIFICATION_SKIPPED,
     ROLE_SUPERVISOR,
@@ -199,7 +200,7 @@ def enqueue_alert_notifications(
         return 0
 
 def _is_maintenance_ready(payload: dict[str, Any] | None) -> bool:
-    return bool(payload) and payload.get("notification_kind") == "maintenance_ready"
+    return bool(payload) and payload.get("notification_kind") == NOTIFICATION_KIND_MAINTENANCE_READY
 
 
 #Perfroms the actual preparation of email jobs
@@ -376,7 +377,7 @@ def _maintenance_ready_rows(payload: dict[str, Any], settings: Settings) -> list
 def build_message(payload: dict[str, Any], *, sender: str, recipient: str, settings: Settings) -> EmailMessage:
     kind = "Alert" if payload["severity"] == STATUS_ALERT else "Warning"
     asset_name = _clean(payload["asset_name"])
-    ready = payload.get("notification_kind") == "maintenance_ready"
+    ready = payload.get("notification_kind") == NOTIFICATION_KIND_MAINTENANCE_READY
     rows = _maintenance_ready_rows(payload, settings) if ready else [
         ("Event type", kind),
         ("Asset", f"{asset_name} (ID {payload['asset_id']})"),

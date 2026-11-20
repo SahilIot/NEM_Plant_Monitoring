@@ -1,7 +1,7 @@
 # Creation and sync of maintenance schedules from eligible rules.
 from __future__ import annotations
 import logging
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from typing import Any
 from sqlalchemy import event, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -13,6 +13,8 @@ from app.services.monitoring_engine import emit_event
 from app.services.rule_parameters import (_aware, _refresh_rule_state, calendar_last_reset_at, change_parameter_lifecycle, effective_stale_after,)
 from app.core.constants import (
     APPROVAL_NOT_REQUIRED,
+    CANCELLATION_KIND_PROGRESS_RESET,
+    NOTIFICATION_KIND_MAINTENANCE_READY,
     CATEGORY_INTERVAL_BASED,
     COUNTER,
     ELIGIBILITY_NOT_DUE,
@@ -416,7 +418,7 @@ def _make_ready(session: Session, rule: MonitoringRule, parameter: RuleParameter
     settings = get_settings()
     base = (settings.frontend_base_url or "").rstrip("/")
     enqueue_alert_notifications(session, alert, asset, None, None, extra={
-        "notification_kind": "maintenance_ready",
+        "notification_kind": NOTIFICATION_KIND_MAINTENANCE_READY,
         "rule_name": rule.name,
         RULE_TYPE: "Interval based",
         "parameter_name": parameter.name,
@@ -566,7 +568,7 @@ def manual_reset_parameter(session: Session, rule: MonitoringRule, parameter: Ru
         _close(session, schedule, _job(session, schedule), now,
                "Progress was reset manually before this maintenance was started.")
         schedule.cancelled_at, schedule.cancelled_by_id, schedule.cancelled_by_name = now, user_id, user_name
-        schedule.cancellation_reason, schedule.cancellation_kind = "Progress was reset manually.", "progress_reset"
+        schedule.cancellation_reason, schedule.cancellation_kind = "Progress was reset manually.", CANCELLATION_KIND_PROGRESS_RESET
         meta["cancelled_schedule_id"] = schedule.id
         session.flush()
     _reset_interval_progress(
