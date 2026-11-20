@@ -31,6 +31,7 @@ from app.core.constants import (
     STATUS_ALERT,
     STATUS_COMPLETED,
     STATUS_DEACTIVATED,
+    PROGRESS_RESET,
     STATUS_IN_PROGRESS,
     STATUS_NORMAL,
     STATUS_RESOLVED,
@@ -49,8 +50,7 @@ from app.core.constants import (
     EVENT_WARNING_TRIGGERED,
 )
 from app.services.rule_calendar import (
-    calculate_calendar_date,
-    calculate_next_calendar_cycle,
+    calendar_cycle,
 )
 
 LOGGER = logging.getLogger("nem_backend.monitoring")
@@ -318,9 +318,6 @@ def _evaluate_parameter(
         # Calendar-based Time uses fixed calendar dates, not elapsed hours.
         if interval == TIME and config.get("time_mode") == "calendar": 
             try:
-                start_date = date.fromisoformat(config["start_date"])
-                today = now.date()
-
                 last_completed_at = session.scalar(
                     select(MaintenanceSchedule.last_completed_at)
                     .where(
@@ -331,25 +328,8 @@ def _evaluate_parameter(
                     .order_by(MaintenanceSchedule.last_completed_at.desc())
                     .limit(1)
                 )
-                if last_completed_at is None:
-                    due_date = calculate_calendar_date(
-                        start_date,
-                        interval=int(config["due"]),
-                        unit=config["time_unit"],
-                    )
-                    overdue_date = calculate_calendar_date(
-                        start_date,
-                        interval=int(config["overdue"]),
-                        unit=config["time_unit"],
-                    )
-                else:
-                    due_date, overdue_date = calculate_next_calendar_cycle(
-                        start_date,
-                        due_interval=int(config["due"]),
-                        overdue_interval=int(config["overdue"]),
-                        unit=config["time_unit"],
-                        after=_aware(last_completed_at).date(),
-                    )
+                _, due_date, overdue_date = calendar_cycle(config, last_completed_at)
+                today = _aware(now) if isinstance(due_date, datetime) else now.date()
                 if today >= overdue_date:
                     return (
                         STATUS_ALERT,
@@ -1025,7 +1005,6 @@ def build_status_detail(session: Session, rule: MonitoringRule, now: datetime | 
             and config.get("time_mode") == "calendar"
         ):
             try:
-                calendar_start = date.fromisoformat(config["start_date"])
                 last_completed_at = session.scalar(
                     select(MaintenanceSchedule.last_completed_at)
                     .where(
@@ -1036,27 +1015,7 @@ def build_status_detail(session: Session, rule: MonitoringRule, now: datetime | 
                     .order_by(MaintenanceSchedule.last_completed_at.desc())
                     .limit(1)
                 )
-                if last_completed_at is None:
-                    calendar_due, calendar_overdue = (
-                        calculate_calendar_date(
-                            calendar_start,
-                            interval=int(config["due"]),
-                            unit=config["time_unit"],
-                            ),
-                        calculate_calendar_date(
-                            calendar_start,
-                            interval=int(config["overdue"]),
-                            unit=config["time_unit"],
-                            ),
-                        )
-                else:
-                    calendar_due, calendar_overdue = calculate_next_calendar_cycle(
-                        calendar_start,
-                        due_interval=int(config["due"]),
-                        overdue_interval=int(config["overdue"]),
-                        unit=config["time_unit"],
-                        after=_aware(last_completed_at).date(),
-                        )
+                calendar_start, calendar_due, calendar_overdue = calendar_cycle(config, last_completed_at)
 
                 item[SCHEDULE] = {
                     "start_at": calendar_start,

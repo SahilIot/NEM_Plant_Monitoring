@@ -48,11 +48,24 @@ export function newParameter(category, index = 1) {
   timeMode: "elapsed",
   timeUnit: "days",
   startDate: "",
-  name: `Interval ${index}`,
+  startTime: "",
+  name: "", // never auto-named: the user must enter a parameter name
 };
   }
-  return { ...base, kind: "number", name: `Parameter ${index}`, limits: { lower_alert: "", lower_warning: "", upper_warning: "", upper_alert: "" }, unit: "", expected: true, severity: "alert" };
+  return { ...base, kind: "number", name: "", limits: { lower_alert: "", lower_warning: "", upper_warning: "", upper_alert: "" }, unit: "", expected: true, severity: "alert" };
 }
+
+/** Calendar Time is decided by the Time Mode alone (never by aggregation). */
+export const isCalendarTime = (parameter) =>
+  parameter.kind === "interval" && parameter.intervalParameter === "time" && parameter.timeMode === "calendar";
+
+/**
+ * Time Mode change as one consistent patch. Calendar Time never uses a PLC variable (aggregation "none").
+ * Elapsed Time starts from the Timer aggregation; it may still be switched to None (no variable) afterwards.
+ */
+export const timeModePatch = (mode) => (mode === "calendar"
+  ? { timeMode: "calendar", aggregation: "none", variableId: "", variableKey: "" }
+  : { timeMode: "elapsed", aggregation: "timer" });
 
 /** Aggregation options a parameter may use, with the reason for any that are unavailable. */
 export function aggregationOptions(parameter, category) {
@@ -61,7 +74,7 @@ export function aggregationOptions(parameter, category) {
     const calendar = parameter.intervalParameter === "time" && !parameter.variableId && parameter.aggregation === "none";
     return [
       { id: "none", label: "None", disabled: !(parameter.intervalParameter === "time"), reason: "None is only for a calendar-based Time interval that has no variable." },
-      { id: "timer", label: "Timer", disabled: counter, reason: "Counter intervals count cycles, not time." },
+      { id: "timer", label: "Timer", disabled: counter || isCalendarTime(parameter), reason: counter ? "Counter intervals count cycles, not time." : "Calendar Time does not use a PLC variable; choose Elapsed Time to use a Timer." },
       { id: "counter", label: "Counter", disabled: parameter.intervalParameter !== "counter", reason: "Counter aggregation is used by Counter intervals." },
     ].map((item) => ({ ...item, selected: item.id === parameter.aggregation || (calendar && item.id === "none") }));
   }
@@ -208,12 +221,14 @@ export function validateForm(values, category, variables, templateMode = false) 
   for (const parameter of values.parameters) {
     const list = (problems[parameter.uid] = []);
     const name = parameter.name.trim();
-    if (!name) list.push("Enter a parameter name.");
+    if (!name) list.push("Please enter a parameter name.");
     else if (names.has(name.toLowerCase())) list.push("Parameter names must be unique within a rule.");
     names.add(name.toLowerCase());
 
     const variable = variables.find((item) => String(item.id) === String(parameter.variableId));
-    const calendar = parameter.kind === "interval" && parameter.intervalParameter === "time" && parameter.aggregation === "none";
+    // Calendar Time is decided by Time Mode. An Elapsed Time interval with aggregation None has no variable either.
+    const calendarTime = isCalendarTime(parameter);
+    const calendar = calendarTime || (parameter.kind === "interval" && parameter.intervalParameter === "time" && parameter.aggregation === "none");
     if (!calendar && !templateMode) {
       if (!variable) list.push("Connect a variable.");
       else {
@@ -229,18 +244,14 @@ export function validateForm(values, category, variables, templateMode = false) 
       const { errors } = validateLimits(parameter.intervalParameter, parameter.due, parameter.overdue);
       if (errors.due) list.push(errors.due);
       if (errors.overdue) list.push(errors.overdue);
-      if (parameter.intervalParameter === "time" && !calendar && !parameter.activationAt && !templateMode) list.push("Choose when counting should start.");
+      if (parameter.intervalParameter === "time" && !calendarTime && !calendar && !parameter.activationAt && !templateMode) list.push("Choose when counting should start.");
     }
     if (parameter.intervalParameter === "time" && parameter.timeMode === "calendar") {
   if (!["days", "weeks", "months", "years"].includes(parameter.timeUnit)) {
     list.push("Choose a valid calendar time unit.");
   }
 
-  if (!parameter.startDate) {
-    list.push("Choose a calendar start date.");
-  } else if (!/^\d{4}-\d{2}-\d{2}$/.test(parameter.startDate)) {
-    list.push("Start date must use YYYY-MM-DD format.");
-  }
+  list.push(...validateCalendarStart(parameter));
 
   if (
     parameter.due.trim() !== "" &&
@@ -295,7 +306,8 @@ export function buildMultiParameterPayload(values, category) {
 
       return {
         ...base,
-        aggregation: info.aggregation === "counter" ? "counter" : parameter.variableId ? "timer" : "none",
+        aggregation: info.aggregation === "counter" ? "counter" : parameter.variableId && !calendarTime ? "timer" : "none",
+        ...(calendarTime ? { variable_id: null } : {}),
         config: {
           interval_parameter: parameter.intervalParameter,
           due: Number(parameter.due),
@@ -304,7 +316,7 @@ export function buildMultiParameterPayload(values, category) {
             ? {
                 time_mode: "calendar",
                 time_unit: parameter.timeUnit,
-                start_date: parameter.startDate,
+                ...calendarStartConfig(parameter),
               }
             : {}),
           ...(!calendarTime && parameter.intervalParameter === "time" && parameter.activationAt
@@ -349,7 +361,7 @@ export function buildTemplateParameters(values, category) {
 
       const calendarWithoutVariable =
         parameter.intervalParameter === "time" &&
-        parameter.aggregation === "none";
+        (calendarTime || parameter.aggregation === "none");
 
       return {
         ...base,
@@ -365,7 +377,7 @@ export function buildTemplateParameters(values, category) {
             ? {
                 time_mode: "calendar",
                 time_unit: parameter.timeUnit,
-                start_date: parameter.startDate,
+                ...calendarStartConfig(parameter),
               }
             : {}),
         },
@@ -398,12 +410,13 @@ export function valuesFromTemplate(template) {
           ...base,
           kind: "interval",
           intervalParameter: config.interval_parameter,
+          ...(config.interval_parameter === "time" && config.time_mode === "calendar" ? { aggregation: "none" } : {}),
           due: text(config.due),
           overdue: text(config.overdue),
           activationAt: "",
           timeMode: config.time_mode === "calendar" ? "calendar" : "elapsed",
           timeUnit: config.time_unit || "days",
-          startDate: config.start_date || "",
+          ...calendarStartValues(config),
         };
       }
       if (def.kind === "boolean") return { ...base, kind: "boolean", limits: { lower_alert: "", lower_warning: "", upper_warning: "", upper_alert: "" }, unit: "", expected: config.expected !== false, severity: config.severity || "alert" };
@@ -413,3 +426,67 @@ export function valuesFromTemplate(template) {
 }
 
 export { INTERVAL_PARAMETERS };
+
+// ---- Calendar Start (date + time of day) --------------------------------------------------------------
+const CALENDAR_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const CALENDAR_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const pad2 = (value) => String(value).padStart(2, "0");
+
+/** Local date ("YYYY-MM-DD") and time ("HH:MM") of an ISO timestamp, or null when it is missing / invalid. */
+export function localDateTimeParts(iso) {
+  if (!iso) return null;
+  const moment = new Date(iso);
+  if (Number.isNaN(moment.getTime())) return null;
+  return {
+    startDate: `${moment.getFullYear()}-${pad2(moment.getMonth() + 1)}-${pad2(moment.getDate())}`,
+    startTime: `${pad2(moment.getHours())}:${pad2(moment.getMinutes())}`,
+  };
+}
+
+/** Combine a local date and time into one ISO-8601 UTC timestamp; null unless both are real values. */
+export function combineLocalDateTime(startDate, startTime) {
+  if (!CALENDAR_DATE_RE.test(startDate || "") || !CALENDAR_TIME_RE.test(startTime || "")) return null;
+  const [year, month, day] = startDate.split("-").map(Number);
+  const [hour, minute] = startTime.split(":").map(Number);
+  const moment = new Date(year, month - 1, day, hour, minute, 0, 0);
+  // Rejects dates such as 31 February and local times skipped by a clock change.
+  if (moment.getFullYear() !== year || moment.getMonth() !== month - 1 || moment.getDate() !== day
+    || moment.getHours() !== hour || moment.getMinutes() !== minute) return null;
+  return moment.toISOString();
+}
+
+/** Form values (local date and time) for a saved calendar configuration. Old rules have a date but no time. */
+export function calendarStartValues(config = {}) {
+  return localDateTimeParts(config.start_at) || { startDate: config.start_date || "", startTime: "" };
+}
+
+/**
+ * Messages for an incomplete or invalid Calendar Start. A rule saved before a start time existed
+ * (`legacy`: only start_date) may keep its date unchanged without a time; changing the date needs a time.
+ */
+export function validateCalendarStart({ startDate, startTime }, legacy = null) {
+  if (legacy && startTime === "" && startDate === legacy.startDate) return [];
+  const list = [];
+  if (!startDate) list.push("Choose a calendar start date.");
+  else if (!CALENDAR_DATE_RE.test(startDate)) list.push("Start date must use YYYY-MM-DD format.");
+  if (!startTime) list.push("Choose a calendar start time.");
+  else if (!CALENDAR_TIME_RE.test(startTime)) list.push("Start time must use HH:MM format.");
+  if (!list.length && !combineLocalDateTime(startDate, startTime)) list.push("The chosen start date and time do not exist.");
+  return list;
+}
+
+/**
+ * Calendar Start part of an interval config: the date plus the complete timestamp (`start_at`, UTC).
+ * A saved start that was not edited is sent back unchanged so saving never shifts it; a legacy date-only
+ * start stays date-only; a missing time is never replaced by midnight.
+ */
+export function calendarStartConfig({ startDate, startTime }, saved = {}) {
+  if (saved.start_at) {
+    const savedParts = localDateTimeParts(saved.start_at);
+    if (savedParts && savedParts.startDate === startDate && savedParts.startTime === startTime) {
+      return { start_date: saved.start_date || startDate, start_at: saved.start_at };
+    }
+  }
+  const startAt = combineLocalDateTime(startDate, startTime);
+  return startAt ? { start_date: startDate, start_at: startAt } : { start_date: startDate };
+}

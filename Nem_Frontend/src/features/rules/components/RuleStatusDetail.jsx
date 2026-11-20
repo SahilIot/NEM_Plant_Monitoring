@@ -4,7 +4,7 @@ import { api } from "../../../services/api.js";
 import { createLiveUpdateScheduler, shareInFlight, subscribeLiveUpdates } from "../../../services/liveUpdates.js";
 import { captureNavigationOrigin } from "../../../utils/navigation.js";
 import { NUMBER_LIMITS, makeLimitScale, numberZone } from "./parameterRules.js";
-import { formatDuration, liveHours, useDisplayClock } from "./durationClock.js";
+import { calendarProgress, formatCalendarMoment, formatCalendarSpan, formatDuration, liveHours, useDisplayClock } from "./durationClock.js";
 import ParameterCardMenu from "./ParameterCardMenu.jsx";
 import "./IntervalDemo.css";
 import "./ParameterDemos.css";
@@ -191,6 +191,51 @@ function IntervalVisual({ p }) {
   );
 }
 
+const isCalendarParameter = (p) => p.kind === "interval" && p.config?.time_mode === "calendar" && p.schedule?.mode === "calendar_date";
+
+// Calendar Time card body: baseline, live elapsed time and exact Due / Overdue moments. Everything is derived from the
+// backend's saved Calendar Start and calendar-computed due/overdue instants; the shared clock only drives re-renders.
+function CalendarVisual({ p }) {
+  const c = p.calendar;
+  if (!c) return <p className="rsd-note">Calendar Start or limits are not available.</p>;
+  const paused = Boolean(p.paused);
+  const moment = (ms) => formatCalendarMoment(ms, c.dateOnly);
+  const span = c.overdue - c.start;
+  const pct = (ms) => Math.min(100, Math.max(0, ((ms - c.start) / span) * 100));
+  const nowPct = pct(c.start + c.elapsedMs);
+  const zones = [
+    { from: 0, to: pct(c.due), cls: "region-normal", label: "Normal" },
+    { from: pct(c.due), to: pct(c.overdue), cls: "region-due", label: "Due" },
+    { from: pct(c.overdue), to: 100, cls: "region-overdue", label: "Overdue" },
+  ];
+  const remaining = c.phase === "normal" ? `Due in ${formatCalendarSpan(c.toDueMs)}`
+    : c.phase === "due" ? `Overdue in ${formatCalendarSpan(c.toOverdueMs)}` : `Overdue for ${formatCalendarSpan(c.pastOverdueMs)}`;
+  const markers = [
+    { key: "due", name: "Due boundary", pct: pct(c.due), cls: "interval-demo-limit limit-due", lines: [`Due: ${moment(c.due)}`] },
+    { key: "overdue", name: "Overdue boundary", pct: Math.min(99.5, pct(c.overdue)), cls: "interval-demo-limit limit-overdue", lines: [`Overdue: ${moment(c.overdue)}`] },
+  ];
+  if (!c.notStarted) {
+    markers.push({ key: "value", name: "Current progress", pct: Math.min(99.5, nowPct), cls: "interval-demo-marker",
+      lines: [`Elapsed: ${formatCalendarSpan(c.elapsedMs)}`, paused ? "Paused" : remaining] });
+  }
+  return (
+    <>
+      <p className="rsd-value">
+        <span>{c.notStarted ? "Starts in" : paused ? "Elapsed when paused" : "Elapsed"}</span>
+        <b>{formatCalendarSpan(c.notStarted ? c.toStartMs : c.elapsedMs)}</b>
+      </p>
+      <LimitGauge zones={zones} markers={markers} label={`${p.name} calendar progress`} />
+      <dl className="rsd-facts rsd-calendar-facts">
+        <div><dt>Calendar Start</dt><dd>{moment(c.start)}</dd></div>
+        <div><dt>Due</dt><dd>{moment(c.due)}</dd></div>
+        <div><dt>Overdue</dt><dd>{moment(c.overdue)}</dd></div>
+        {!paused && <div><dt>{c.phase === "overdue" ? "Overdue for" : c.phase === "due" ? "Overdue in" : "Due in"}</dt>
+          <dd>{formatCalendarSpan(c.phase === "overdue" ? c.pastOverdueMs : c.phase === "due" ? c.toOverdueMs : c.toDueMs)}</dd></div>}
+      </dl>
+    </>
+  );
+}
+
 function BooleanVisual({ p }) {
   const expected = Boolean((p.config || {}).expected);
   const valid = p.status !== "unknown" && typeof p.value === "boolean";
@@ -238,6 +283,10 @@ function ClockedParameterCard({ p, getOffsetMs, ...rest }) {
   if (frozen) {
     return <ParameterCardView p={{ ...p, value: previous.hours, frozen: true }} {...rest} />;
   }
+  if (isCalendarParameter(p)) {
+    const now = clock + getOffsetMs();
+    return <ParameterCardView p={{ ...p, value: null, calendarNow: now, calendar: calendarProgress(p.schedule, now) }} {...rest} />;
+  }
   const computed = liveHours(p, clock + getOffsetMs());
   let hours = computed;
   if (typeof computed === "number" && previous.hours !== null) {
@@ -259,7 +308,8 @@ function ParameterCardView({ p: source, rule, ruleId, determining, onEdit, onCha
   const interval = p.kind === "interval";
   const unit = p.unit || "";
   const hasValue = (p.status !== "unknown" || p.frozen || paused) && p.value !== null && p.value !== undefined;
-  const valueText = p.kind === "boolean" ? null : hasValue ? amount(p.value, unit) : "—";
+  const calendarCard = p.calendar !== undefined;
+  const valueText = p.kind === "boolean" || calendarCard ? null : hasValue ? amount(p.value, unit) : "—";
   const sched = p.schedule || {};
   const [scheduleNote, setScheduleNote] = useState("");
   const [openingSchedule, setOpeningSchedule] = useState(false);
@@ -311,7 +361,7 @@ function ParameterCardView({ p: source, rule, ruleId, determining, onEdit, onCha
         </p>
       )}
       {p.kind === "number" && <NumberVisual p={p} />}
-      {interval && <IntervalVisual p={p} />}
+      {interval && (calendarCard ? <CalendarVisual p={p} /> : <IntervalVisual p={p} />)}
       {p.kind === "boolean" && <BooleanVisual p={p} />}
       {p.active_alert && (
         <p className={`rsd-active-alert is-${p.active_alert.severity}`} role="status">
@@ -329,7 +379,7 @@ function ParameterCardView({ p: source, rule, ruleId, determining, onEdit, onCha
             <div><dt>Last valid reading</dt><dd>{p.last_valid_at ? `${fmt(p.last_valid_value)} · ${when(p.last_valid_at)}` : "None yet"}</dd></div>
             <div><dt>Signal freshness</dt><dd className={p.is_stale ? "is-bad" : ""}>{p.variable_id ? `${p.is_stale ? "Stale — " : "Fresh — "}latest reading ${age(p.reading_age_seconds)}` : "Calendar based"}</dd></div>
             <div><dt>Last evaluation</dt><dd>{when(p.last_evaluated_at)}</dd></div>
-            {sched.start_at && <div><dt>Counting since</dt><dd>{when(sched.start_at)}</dd></div>}
+            {sched.start_at && <div><dt>{calendarCard ? "Calendar Start" : "Counting since"}</dt><dd>{calendarCard ? formatCalendarMoment(sched.start_at, /^\d{4}-\d{2}-\d{2}$/.test(String(sched.start_at))) : when(sched.start_at)}</dd></div>}
             {sched.due_at && <div><dt>Due date</dt><dd>{when(sched.due_at)}</dd></div>}
             {sched.overdue_at && <div><dt>Overdue date</dt><dd>{when(sched.overdue_at)}</dd></div>}
           </dl>
