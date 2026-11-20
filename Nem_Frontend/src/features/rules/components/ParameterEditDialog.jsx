@@ -9,7 +9,10 @@ import { parameterById, validateLimits } from "./intervalConfig.js";
 import {
   NUMBER_LIMITS,
   THRESHOLD_AGGREGATIONS,
+  calendarStartConfig,
+  calendarStartValues,
   numberUnit,
+  validateCalendarStart,
   validateNumberLimits,
   variableCompatibility,
 } from "./parameterRules.js";
@@ -87,7 +90,7 @@ function formFrom(parameter) {
     activationAt: toLocalInput(config.activation_at),
     timeMode: config.time_mode === "calendar" ? "calendar" : "elapsed",
     timeUnit: config.time_unit || "days",
-    startDate: config.start_date || "",
+    ...calendarStartValues(config),
   };
 }
 
@@ -228,9 +231,9 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
         if (!["days", "weeks", "months", "years"].includes(form.timeUnit)) {
           list.push("Choose a valid calendar unit.");
         }
-        if (!form.startDate || !/^\d{4}-\d{2}-\d{2}$/.test(form.startDate)) {
-          list.push("Choose a valid calendar start date.");
-        }
+        // A rule saved before a start time existed keeps its date without one; any change needs a time.
+        const savedConfig = selected.config || {};
+        list.push(...validateCalendarStart(form, savedConfig.start_at ? null : { startDate: savedConfig.start_date || "" }));
         if (form.due.trim() !== "" && !Number.isSafeInteger(Number(form.due))) {
           list.push("Due must be a whole number for Calendar Time.");
         }
@@ -261,7 +264,7 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
           overdue: Number(form.overdue),
           time_mode: "calendar",
           time_unit: form.timeUnit,
-          start_date: form.startDate,
+          ...calendarStartConfig(form, selected.config || {}),
         };
       }
       const saved = selected.config || {};
@@ -485,20 +488,13 @@ export default function ParameterEditDialog({ ruleId, parameterId = null, always
                   </select>
                 </RuleField>
 
-                <RuleField
-                  id="pe-calendar-start"
-                  label="Calendar Start Date *"
-                  hint="Recurring maintenance dates remain anchored to this date."
-                  wide
-                >
-                  <input
-                    id="pe-calendar-start"
-                    type="date"
-                    value={form.startDate}
-                    disabled={saving || supervisor}
-                    onChange={(e) => patch({ startDate: e.target.value })}
-                  />
-                </RuleField>
+                <CalendarStartFields
+                  idPrefix="pe-calendar"
+                  startDate={form.startDate}
+                  startTime={form.startTime}
+                  onChange={patch}
+                  disabled={saving || supervisor}
+                />
               </>
             ) : intervalType === "time" ? (
               <RuleField

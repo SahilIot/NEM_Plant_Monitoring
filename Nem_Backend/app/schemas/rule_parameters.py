@@ -1,11 +1,10 @@
 # Request/response schemas and pure validation for 'multi_parameter' rules.
-#
 # One rule holds several independently configured parameters. Parameters are validated here without
 # touching the database; the route adds the checks that need it (variables, assets, signal mappings).
 from __future__ import annotations
 
 import math
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Literal
 
 from pydantic import Field, ValidationInfo, field_validator, model_validator
@@ -123,44 +122,45 @@ class RuleParameterIn(ORMModel):
 
             if parameter == TIME and time_mode == "calendar":
                 if time_unit not in {"days", "weeks", "months", "years"}:
-                    raise ValueError(
-                        f"{label}: Time unit must be days, weeks, months or years"
-                    )
+                    raise ValueError(f"{label}: Time unit must be days, weeks, months or years")
 
                 if not float(due).is_integer() or not float(overdue).is_integer():
-                    raise ValueError(
-                        f"{label}: Calendar Due and Overdue must be whole numbers"
-                    )
+                    raise ValueError(f"{label}: Calendar Due and Overdue must be whole numbers")
 
                 due, overdue = int(due), int(overdue)
 
+                start_at = config.get("start_at")
+                if start_at is not None:
+                    # Complete Calendar Start timestamp: validated, stored in UTC; start_date follows it.
+                    if not isinstance(start_at, str) or not start_at.strip():
+                        raise ValueError(f"{label}: Calendar start must be an ISO-8601 timestamp")
+                    try:
+                        parsed_start = datetime.fromisoformat(start_at.replace("Z", "+00:00"))
+                    except ValueError:
+                        raise ValueError(f"{label}: Calendar start must be an ISO-8601 timestamp") from None
+                    if parsed_start.tzinfo is None or parsed_start.utcoffset() is None:
+                        raise ValueError(f"{label}: Calendar start must include a timezone")
+                    parsed_start = parsed_start.astimezone(timezone.utc)
+                    start_at = parsed_start.isoformat()
+                    start_date = parsed_start.date().isoformat()
+
                 if not isinstance(start_date, str):
-                    raise ValueError(
-                        f"{label}: Calendar Time needs a start date (YYYY-MM-DD)"
-                    )
+                    raise ValueError(f"{label}: Calendar Time needs a start date (YYYY-MM-DD)")
 
                 try:
                     date.fromisoformat(start_date)
                 except ValueError:
-                    raise ValueError(
-                        f"{label}: Start date must use YYYY-MM-DD format"
-                    ) from None
+                    raise ValueError(f"{label}: Start date must use YYYY-MM-DD format") from None
 
             elif parameter == TIME:
                 if activation_at is not None and not isinstance(activation_at, str):
-                    raise ValueError(
-                        f"{label}: start time must be an ISO-8601 timestamp"
-                    )
+                    raise ValueError(f"{label}: start time must be an ISO-8601 timestamp")
 
                 if activation_at:
                     try:
-                        datetime.fromisoformat(
-                            activation_at.replace("Z", "+00:00")
-                        )
+                        datetime.fromisoformat( activation_at.replace("Z", "+00:00"))
                     except ValueError:
-                        raise ValueError(
-                            f"{label}: start time must be an ISO-8601 timestamp"
-                        ) from None
+                        raise ValueError(f"{label}: start time must be an ISO-8601 timestamp") from None
 
             self.config = {
                 "interval_parameter": parameter,
@@ -171,6 +171,7 @@ class RuleParameterIn(ORMModel):
                         "time_mode": "calendar",
                         "time_unit": time_unit,
                         "start_date": start_date,
+                        **({"start_at": start_at} if start_at else {}),
                     }
                     if parameter == TIME and time_mode == "calendar"
                     else (
@@ -184,26 +185,18 @@ class RuleParameterIn(ORMModel):
                 return self
             if parameter == COUNTER:
                 if self.aggregation != COUNTER or self.variable_id is None:
-                    raise ValueError(
-                        f"{label}: Counter intervals need a variable with Counter aggregation"
-                    )
+                    raise ValueError(f"{label}: Counter intervals need a variable with Counter aggregation")
 
             elif parameter == TIME and time_mode == "calendar":
                 if self.variable_id is not None or self.aggregation != AGGREGATION_NONE:
-                    raise ValueError(
-                        f"{label}: Calendar Time must not use a PLC variable"
-                    )
+                    raise ValueError(f"{label}: Calendar Time must not use a PLC variable")
 
             elif self.variable_id is None:
                 if parameter != TIME or self.aggregation != AGGREGATION_NONE:
-                    raise ValueError(
-                        f"{label}: Usage intervals need a variable with Timer aggregation"
-                    )
+                    raise ValueError(f"{label}: Usage intervals need a variable with Timer aggregation")
 
             elif self.aggregation != TIMER:
-                raise ValueError(
-                    f"{label}: Usage and Time intervals with a variable need Timer aggregation"
-                )
+                raise ValueError(f"{label}: Usage and Time intervals with a variable need Timer aggregation")
         return self
 
 
@@ -278,13 +271,6 @@ class RuleParametersReplace(ORMModel):
 
 
 def normalize_template_parameters(raw: dict[str, Any] | None) -> dict[str, Any]:
-    """Validate and normalise the `parameters` JSON of a multi-parameter rule TEMPLATE.
-
-    A template keeps the parameter DEFINITIONS (name, type, aggregation, limits) in `parameter_defs`, each with a
-    stable `key`. It holds no variable ids: a variable is chosen per parameter when the template is assigned to an
-    asset (`variable_key` is only a hint for matching). Every definition is validated by the same rules as a real
-    parameter, so a template can never hold something an asset rule would reject.
-    """
     import uuid
 
     raw = dict(raw or {})

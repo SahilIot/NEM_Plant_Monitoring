@@ -50,6 +50,8 @@ from app.core.constants import (
 from app.services.rule_calendar import (
     calculate_calendar_date,
     calculate_next_calendar_cycle,
+    calendar_start_at,
+    calculate_calendar_cycle_at,
 )
 
 LOGGER = logging.getLogger("nem_backend.monitoring")
@@ -317,7 +319,11 @@ def _evaluate_parameter(
         # Calendar-based Time uses fixed calendar dates, not elapsed hours.
         if interval == TIME and config.get("time_mode") == "calendar": 
             try:
-                start_date = date.fromisoformat(config["start_date"])
+                start_at = calendar_start_at(config)
+                start_date = (
+                    start_at.date() if start_at is not None
+                    else date.fromisoformat(config["start_date"])
+                )
                 today = now.date()
 
                 last_completed_at = session.scalar(
@@ -330,7 +336,17 @@ def _evaluate_parameter(
                     .order_by(MaintenanceSchedule.last_completed_at.desc())
                     .limit(1)
                 )
-                if last_completed_at is None:
+                if start_at is not None:
+                    # Calendar Start with a time of day: compare exact moments, not dates.
+                    due_date, overdue_date = calculate_calendar_cycle_at(
+                        start_at,
+                        due_interval=int(config["due"]),
+                        overdue_interval=int(config["overdue"]),
+                        unit=config["time_unit"],
+                        after=_aware(last_completed_at) if last_completed_at is not None else None,
+                    )
+                    today = _aware(now)
+                elif last_completed_at is None:
                     due_date = calculate_calendar_date(
                         start_date,
                         interval=int(config["due"]),
@@ -1024,7 +1040,11 @@ def build_status_detail(session: Session, rule: MonitoringRule, now: datetime | 
             and config.get("time_mode") == "calendar"
         ):
             try:
-                calendar_start = date.fromisoformat(config["start_date"])
+                start_at = calendar_start_at(config)
+                calendar_start = (
+                    start_at if start_at is not None
+                    else date.fromisoformat(config["start_date"])
+                )
                 last_completed_at = session.scalar(
                     select(MaintenanceSchedule.last_completed_at)
                     .where(
@@ -1035,7 +1055,15 @@ def build_status_detail(session: Session, rule: MonitoringRule, now: datetime | 
                     .order_by(MaintenanceSchedule.last_completed_at.desc())
                     .limit(1)
                 )
-                if last_completed_at is None:
+                if start_at is not None:
+                    calendar_due, calendar_overdue = calculate_calendar_cycle_at(
+                        start_at,
+                        due_interval=int(config["due"]),
+                        overdue_interval=int(config["overdue"]),
+                        unit=config["time_unit"],
+                        after=_aware(last_completed_at) if last_completed_at is not None else None,
+                    )
+                elif last_completed_at is None:
                     calendar_due, calendar_overdue = (
                         calculate_calendar_date(
                             calendar_start,
