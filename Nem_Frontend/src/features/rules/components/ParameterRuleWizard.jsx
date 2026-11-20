@@ -300,7 +300,7 @@ export default function ParameterRuleWizard({
   const limitInputs = (p) => (
     <div className="pw-limits">
       {NUMBER_LIMITS.map(({ key, label }) => (
-        <RuleField key={key} id={`${key}-${p.uid}`} label={label} optional>
+        <RuleField key={key} id={`${key}-${p.uid}`} label={label}>
           <UnitInput unit={numberUnit(p, variableOf(p)) || ""}>
             <input id={`${key}-${p.uid}`} type="number" inputMode="decimal" step="any" value={p.limits[key]}
               onChange={(e) => update(p.uid, { limits: { ...p.limits, [key]: e.target.value } })} disabled={locked} />

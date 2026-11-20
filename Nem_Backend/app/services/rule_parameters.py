@@ -24,6 +24,7 @@ from app.core.constants import (
     LIFECYCLE_STATUS,
     NUMBER,
     RULE_PARAMETER_THRESHOLD,
+    PROGRESS_RESET,
     RULE_TYPE,
     SCHEDULE,
     STATUS_ACTIVE,
