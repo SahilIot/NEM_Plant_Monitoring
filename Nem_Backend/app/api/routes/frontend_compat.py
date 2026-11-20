@@ -64,6 +64,7 @@ from app.schemas.rule import (
     UsageRuleCreate,
 )
 from app.schemas.maintenance import MaintenanceScheduleCreate
+from app.schemas.rule_parameters import RuleParameterIn
 from app.services.frontend_backup import (
     analyze_restore,
     backup_summary,
@@ -77,8 +78,10 @@ from app.services.frontend_backup import (
 )
 from app.services.event_log import emit_event
 from app.services.monitoring_engine import (set_rule_enabled_state,)
+from app.api.routes.dashboard import dashboard_summary
 from app.api.routes.rules import rule_row
-from app.services.parameter_validation import validate_targets
+from app.services.parameter_validation import check_parameters, validate_targets
+from app.services.maintenance_creation import create_maintenance_schedule, validate_instruction_documents
 from app.services.rule_lifecycle import transition_rule_lifecycle
 from app.services.signal_mappings import (
     configured_cycle_signal_mapping,
@@ -358,7 +361,6 @@ def _fernet(request: Request) -> Fernet:
 #Dashboard summary endpoint
 @router.get("/summary")
 def frontend_summary(session: Session = Depends(get_db)) -> dict[str, Any]:
-    from app.api.routes.dashboard import dashboard_summary
 
     summary = dashboard_summary(session)
     lifecycle_counts = {
@@ -473,8 +475,6 @@ def _multi_copy_definition(session: Session, request: Request, source: Monitorin
     # Copy of a multi-parameter rule: every parameter is connected to the same-key variable on the target asset.
     # Lifecycle, progress and alerts are not copied; parameter keys are kept so a copy of a shared rule stays in step with it.
     
-    from app.services.parameter_validation import check_parameters
-    from app.schemas.rule_parameters import RuleParameterIn
 
     items = []
     for parameter in source.parameter_items:
@@ -668,7 +668,6 @@ def submit_rule_template_request(
         maintenance = payload.maintenance
         if session.get(Asset, maintenance.asset_id) is None or not access_scope(session).allows(maintenance.asset_id):
             raise HTTPException(status_code=404,detail=f"Asset {maintenance.asset_id} was not found",)
-        from app.services.maintenance_creation import validate_instruction_documents
 
         maintenance = maintenance.model_copy(
             update={
@@ -764,7 +763,6 @@ def approve_rule_template_request(
     if item.suggestion_type == "maintenance":
         if not item.maintenance_details:
             raise HTTPException(status_code=409,detail="The maintenance suggestion is missing its schedule details.",)
-        from app.services.maintenance_creation import create_maintenance_schedule
 
         try:
             maintenance = MaintenanceScheduleCreate.model_validate(item.maintenance_details)
