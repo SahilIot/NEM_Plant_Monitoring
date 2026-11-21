@@ -47,6 +47,7 @@ NEM_Plant_Monitoring/
         frontend_compat.py          Dashboard workflows: rule templates and suggestions, collections,
                                     documents, settings, import/export, lifecycle actions, backups
       core/                         config.py (environment settings), labels.py (label normalization),
+                                    component_identifier.py (component identifier normalisation),
                                     constants.py (shared names and values: rule types, parameter kinds,
                                     statuses, severities, roles, event types, error messages)
       db/
@@ -72,7 +73,6 @@ NEM_Plant_Monitoring/
         rule_maintenance.py         Rule-generated maintenance schedules, manual reset, completion decision
         rule_calendar.py            Calendar Time cycle calculation
         notification_settings.py    Per-rule Warning/Alert email switches and custom messages
-        component_identifier.py     Component identifier normalisation
         template_parameters.py      Shared-rule (template) management
         parameter_validation.py     Rule target and variable validation (`validate_targets`), shared by routes and services
         rule_lifecycle.py           Rule lifecycle transitions (activate, suspend, deactivate, complete)
@@ -154,6 +154,8 @@ NEM_Plant_Monitoring/
   both layers need lives in a service (`parameter_validation`, `signal_mappings`,
   `maintenance_creation`). `emit_event` lives in `event_log` and `OPCUA_SOURCE_ID` in
   `core/constants.py`, so low-level services do not depend on the monitoring engine.
+- Pure validation helpers that schemas need live in `core/` (`labels`, `component_identifier`), so
+  schemas use them without importing a service.
 - **Retained domain cycle (Cycle B, not resolved).** `monitoring_engine`,
   `rule_parameters` and `rule_maintenance` still depend on each other. The engine calls
   `rule_parameters` (`evaluate_multi_parameter`, `require_valid_parameters`,

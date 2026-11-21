@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from pydantic import Field, ValidationInfo, field_validator, model_validator
 
+from app.core.component_identifier import normalize_component_identifier
 from app.core.labels import normalize_label_names
 from app.schemas.common import ORMModel
 from app.core.constants import (
@@ -234,8 +235,6 @@ class MultiParameterRuleCreate(ORMModel):
     @field_validator("component_identifier")
     @classmethod
     def clean_component_identifier(cls, value: str | None) -> str | None:
-        from app.services.component_identifier import normalize_component_identifier
-
         return normalize_component_identifier(value)
 
     @field_validator("name")
@@ -293,8 +292,6 @@ class ComponentIdentifierRequest(ORMModel):
     @field_validator("component_identifier")
     @classmethod
     def clean_component_identifier(cls, value: str | None) -> str | None:
-        from app.services.component_identifier import normalize_component_identifier
-
         return normalize_component_identifier(value)
 
 

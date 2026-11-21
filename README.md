@@ -177,7 +177,8 @@ NEM_Plant_Monitoring/
         dashboard.py                Dashboard summary
         frontend_compat.py          Dashboard workflows: rule templates and suggestions, collections,
                                     documents, settings, import/export, lifecycle actions, backups
-      core/                         config.py (environment settings), labels.py (label normalization)
+      core/                         config.py (environment settings), labels.py (label normalization),
+                                    component_identifier.py (component identifier normalisation)
       db/
         base.py, session.py         Declarative base, session factory, UTCDateTime
         init_db.py                  Startup schema creation and idempotent upgrades

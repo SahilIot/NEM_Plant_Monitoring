@@ -4,8 +4,8 @@ from decimal import Decimal
 import math
 from typing import Any, Literal
 from pydantic import Field, ValidationInfo, field_validator, model_validator
+from app.core.component_identifier import normalize_component_identifier
 from app.core.labels import normalize_label_names
-from app.services.component_identifier import normalize_component_identifier
 from app.schemas.common import ORMModel
 from app.core.constants import (
     RULE_BOOLEAN_COUNT_THRESHOLD,

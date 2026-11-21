@@ -3,7 +3,7 @@
 This document describes behaviour that exists in the code. Authoritative
 sources: `Nem_Backend/app/api/routes/rule_parameters.py`,
 `app/services/rule_maintenance.py`, `notification_settings.py`,
-`component_identifier.py`, `email_notifications.py`,
+`app/core/component_identifier.py`, `email_notifications.py`,
 `app/api/routes/frontend_compat.py`, and shared names in
 `app/core/constants.py`. All endpoints are under `/api/v1`; use `/docs` for
 exact schemas.

@@ -26,7 +26,7 @@ from docx import Document as WordDocument
 from docx.opc.exceptions import PackageNotFoundError
 
 from app.db.session import get_db
-from app.services.component_identifier import normalize_component_identifier
+from app.core.component_identifier import normalize_component_identifier
 from app.services import template_parameters as template_params
 from app.services import instruction_documents
 from app.services.instruction_documents import UPLOAD_DIR
