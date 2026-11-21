@@ -117,7 +117,7 @@ def resolve_variable(session: Session, request: Request, asset: Asset, definitio
 
 # This function prepare the parameter rows when creating a rule from a template.
 def build_items(session: Session, request: Request, asset: Asset, template: MonitoringRuleTemplate,
-                mappings: dict[str, int] | None) -> list[dict[str, Any]]:
+                mappings: dict[str, int] | None, *, allow_legacy_limits: bool = False) -> list[dict[str, Any]]:
     # RuleParameter column values for an asset rule made from the template, validated like a hand-made rule.
     mappings = mappings or {}
     unknown = set(mappings) - {d["key"] for d in template_defs(template)}
@@ -132,20 +132,45 @@ def build_items(session: Session, request: Request, asset: Asset, template: Moni
         items.append({"key": definition["key"], "name": definition["name"], "position": position,
                       KIND: definition[KIND], "variable_id": variable.id if variable else None,
                       AGGREGATION: definition[AGGREGATION], "config": definition["config"]})
-    check_parameters(session, request.app.state, asset,
-                      [RuleParameterIn(key=i["key"], name=i["name"], kind=i[KIND], variable_id=i["variable_id"],
-                                       aggregation=i[AGGREGATION], config=i["config"]) for i in items],
-                      (template.parameters or {}).get("category"))
-    return items
+        parameters = [
+            RuleParameterIn.model_validate(
+                {
+                    "key": i["key"],
+                    "name": i["name"],
+                    "kind": i[KIND],
+                    "variable_id": i["variable_id"],
+                    "aggregation": i[AGGREGATION],
+                    "config": i["config"],
+                },
+                context={"allow_legacy_limits": allow_legacy_limits},
+            )
+            for i in items
+        ]
+        
+        check_parameters(
+            session,
+            request.app.state,
+            asset,
+            parameters,
+            (template.parameters or {}).get("category"),
+            )
 
 # This function builds the complete rule definition for a specific asset.
 def instance_definition(session: Session, request: Request, template: MonitoringRuleTemplate, asset_id: int,
-                        mappings: dict[str, int] | None, *, activate: bool) -> dict[str, Any]:
+                        mappings: dict[str, int] | None, *, activate: bool,
+                        allow_legacy_limits: bool = False) -> dict[str, Any]:
     # Definition dict for MonitoringRule (the private _parameter_items key is popped by instantiate).
     if not template.is_enabled:
         raise HTTPException(status_code=422, detail=f"Rule template '{template.name}' is disabled")
     asset = session.get(Asset, asset_id)
-    items = build_items(session, request, asset, template, mappings)
+    items = build_items(
+        session,
+        request,
+        asset,
+        template,
+        mappings,
+        allow_legacy_limits=allow_legacy_limits,
+    )
     return {
         "name": template.name, "description": template.description, RULE_TYPE: RULE_MULTI_PARAMETER,
         "target_asset_id": asset_id, "variable_id": None, "operator": None, "threshold": None,
