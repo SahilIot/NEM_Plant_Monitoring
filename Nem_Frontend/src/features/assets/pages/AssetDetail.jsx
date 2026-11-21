@@ -751,9 +751,11 @@ export default function AssetDetail() {
     };
   }, [assetId, scheduleId, loadVariables, loadLogs]);
 
+  // Declared after the reset effect above, which clears the rule list when the asset or the routed schedule changes:
+  // the list must be read again for every such change, not only when loadLive itself changes.
   useEffect(() => {
     loadLive();
-  }, [loadLive]);
+  }, [loadLive, scheduleId]);
 
   useEffect(() => {
     if (
