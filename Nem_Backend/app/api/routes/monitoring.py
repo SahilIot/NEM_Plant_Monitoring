@@ -19,7 +19,6 @@ from app.models import (
     MonitoringEvent,
     MonitoringRule,
     RuleParameterState,
-    RuleState, # stores the current state associated with a rule and target
     User, # stores the current state associated with a rule and target
     Variable, # represents a monitored variable belonging to an asset
 )
@@ -42,6 +41,7 @@ from app.services.monitoring_engine import (
     evaluate_rules,
     set_rule_enabled_state,
 )
+from app.services.rule_state import state_for_rule
 from app.core.timeutils import to_utc, utc_now
 from app.core.constants import (
     STATUS_ACTIVE,
@@ -49,7 +49,6 @@ from app.core.constants import (
     STATUS_IN_PROGRESS,
     STATUS_PLANNED,
     STATUS_RESOLVED,
-    STATUS_UNKNOWN,
     ERR_START_AFTER_END,
     EVENT_ALERT_COMPLETED,
     ROLE_ADMINISTRATOR,
@@ -64,29 +63,6 @@ def _alert_in_scope(session: Session, alert: Alert | None, alert_id: int) -> Ale
     if alert is None or not access_scope(session).allows(alert.target_asset_id):
         raise HTTPException(status_code=404, detail=f"Alert {alert_id} was not found")
     return alert
-
-#  state_for_rule -> Retrieves the current state of a given monitoring rule. It checks if the rule is associated with an asset or variable, fetches the corresponding RuleState from the database, and returns it in a structured format. If no state is found, it returns a default "unknown" state indicating that the rule has not yet been evaluated.
-# reads the stored state
-def state_for_rule(session: Session, rule: MonitoringRule) -> RuleStateRead:
-    asset_id = rule.target_asset_id
-    if asset_id is None and rule.variable_id is not None:
-        variable = session.get(Variable, rule.variable_id)
-        asset_id = variable.asset_id if variable else None
-    state = session.scalar(
-        select(RuleState).where(
-            RuleState.rule_id == rule.id,
-            RuleState.target_asset_id == asset_id,
-        )
-    ) if asset_id is not None else None
-    if state is None:
-        return RuleStateRead(
-            rule_id=rule.id,
-            target_asset_id=asset_id,
-            target_variable_id=rule.variable_id,
-            status=STATUS_UNKNOWN,
-            message="Rule has not yet been evaluated.",
-        )
-    return RuleStateRead.model_validate(state)
 
 # Manually evaluating monitoring rules
 @router.post("/monitoring/evaluate", response_model=EvaluationResult)

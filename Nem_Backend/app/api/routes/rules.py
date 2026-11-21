@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.routes.auth import get_current_user
-from app.api.routes.monitoring import state_for_rule
+from app.services.rule_state import state_for_rule
 from app.db.session import get_db
 from app.models import Asset, MonitoringRule, MonitoringRuleTemplate, Variable, User
 from app.schemas.rule import RuleCreate, RuleRead, RuleUpdate
