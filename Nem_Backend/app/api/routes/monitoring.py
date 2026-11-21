@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.routes.auth import require_roles
+from app.api.routes.maintenance import _authorize_operator_due_occurrence, complete_maintenance_record
 from app.db.session import get_db
 from app.models import (
     Alert, 
@@ -17,6 +18,7 @@ from app.models import (
     MaintenanceSchedule,
     MonitoringEvent,
     MonitoringRule,
+    RuleParameterState,
     RuleState, # stores the current state associated with a rule and target
     User, # stores the current state associated with a rule and target
     Variable, # represents a monitored variable belonging to an asset
@@ -386,8 +388,6 @@ def complete_alert(
             or occurrence.status not in {STATUS_PLANNED, STATUS_IN_PROGRESS}
         ):
             raise HTTPException(status_code=409,detail="The maintenance occurrence is no longer available to complete.",)
-        from app.api.routes.maintenance import ( _authorize_operator_due_occurrence, complete_maintenance_record,)
-
         _authorize_operator_due_occurrence(
             session,
             occurrence,
@@ -434,8 +434,6 @@ def complete_alert(
         if alert.parameter_id is not None:
             # One parameter of a multi-parameter rule: complete only this parameter's alert. The rule and
             # its other parameters keep running; this parameter re-arms once it returns to Normal.
-            from app.models import RuleParameterState
-
             parameter_state = session.scalar(select(RuleParameterState).where(RuleParameterState.parameter_id == alert.parameter_id))
             if parameter_state is not None:
                 parameter_state.completed_at = now

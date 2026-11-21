@@ -9,14 +9,17 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, object_session
 
+from app.api.routes import rules as rules_module
 from app.api.routes.auth import get_current_user
 from app.api.routes.rules import (
     lock_rule,
     rule_or_404,
     rule_row,
+    update_rule,
 )
 from app.db.session import get_db
-from app.models import Asset, InstructionDocument, MonitoringRule, RuleParameter, User
+from app.models import Alert, Asset, InstructionDocument, MonitoringRule, MonitoringRuleTemplate, RuleParameter, User
+from app.schemas.rule import RuleTemplateCreate, RuleUpdate
 from app.schemas.rule_parameters import (
     ComponentIdentifierRequest,
     MultiParameterRuleCreate,
@@ -31,7 +34,11 @@ from app.services.labels import assign_labels
 from app.services.event_log import emit_event
 from app.services.access_scope import require_rule_access
 from app.services.parameter_validation import check_parameters, measured_source
+from app.services.notification_settings import (
+    NOTIFICATION_SETTINGS_KEY, NotificationSettingsError, normalize_notification_settings, settings_for_rule,
+)
 from app.services.rule_lifecycle import transition_rule_lifecycle
+from app.services.rule_maintenance import manual_reset_parameter, manual_reset_problem
 from app.services.template_parameters import apply_template_update
 from app.services.legacy_parameters import (
     build_legacy_status_detail,
@@ -40,7 +47,7 @@ from app.services.legacy_parameters import (
     serialize_legacy_parameters,
 )
 from app.services.rule_parameters import (
-    ParameterConfigError, build_status_detail, change_parameter_lifecycle, reset_parameter_baseline, serialize_parameters)
+    ParameterConfigError, archive_removed_parameter, build_status_detail, change_parameter_lifecycle, reset_parameter_baseline, serialize_parameters)
 from app.services.rule_visibility import SUPERVISOR_EDITABLE_LIMITS, enforce_template_edit_permission
 from app.core.constants import (
     AGGREGATION,
@@ -110,16 +117,12 @@ def _apply(rule: MonitoringRule, items: list[RuleParameterIn]) -> None:
     if unknown:
         raise HTTPException(status_code=422, detail="One or more parameter keys do not belong to this rule")
     for key in set(existing) - incoming_keys:  # removed by the user
-        from app.models import Alert
-
         session = object_session(rule)
         now = datetime.now(timezone.utc)
         # The parameter's own active alerts end with it; other parameters' alerts are untouched.
         for alert in session.scalars(select(Alert).where(
                 Alert.parameter_id == existing[key].id, Alert.status == STATUS_ACTIVE)).all():
             alert.status, alert.resolved_at, alert.last_updated_at = STATUS_RESOLVED, now, now
-        from app.services.rule_parameters import archive_removed_parameter
-
         archive_removed_parameter(session, rule, existing[key], "removed by the user")
         rule.parameter_items.remove(existing[key])
     for position, item in enumerate(items):
@@ -268,8 +271,6 @@ def reset_parameter_progress(
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    from app.services.rule_maintenance import manual_reset_parameter, manual_reset_problem
-
     _require_reset_role(user)
     rule = _rule_for_reset(session, rule_id)
     parameter = next((item for item in rule.parameter_items if item.id == parameter_id), None)
@@ -298,8 +299,6 @@ def reset_rule_progress(
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    from app.services.rule_maintenance import manual_reset_parameter, manual_reset_problem
-
     _require_reset_role(user)
     rule = _rule_for_reset(session, rule_id)
     intervals = [item for item in rule.parameter_items if item.kind == INTERVAL]
@@ -336,10 +335,6 @@ def update_notification_settings(
     session: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    from app.services.notification_settings import (
-        NOTIFICATION_SETTINGS_KEY, NotificationSettingsError, normalize_notification_settings, settings_for_rule,
-    )
-
     _require_editor(user)
     rule = rule_or_404(session, rule_id)
     require_rule_access(session, rule)
@@ -508,9 +503,6 @@ def update_rule_parameter(
 # This func retrieves shared temp , check if temp exist , check access to template , finding matching params definition , validates the resulting template ,
 # Checks template edit permissions , applies the template updates.
 def _apply_shared_parameter_edit(rule, parameter, payload, request, session) -> None:
-    from app.api.routes import rules as rules_module
-    from app.models import MonitoringRuleTemplate
-    from app.schemas.rule import RuleTemplateCreate
     from pydantic import ValidationError
 
     template = session.get(MonitoringRuleTemplate, rule.source_template_id)
@@ -540,9 +532,6 @@ def _apply_shared_parameter_edit(rule, parameter, payload, request, session) -> 
 # This handles requests involving order single-param rules.
 # Instead of converting them into multi-param rules, it transalte the param edit into the existing RuleUpdate format and delegates to the original rule endpoint
 def _update_legacy_parameter(rule, parameter_id, payload, request, session, user) -> dict[str, Any]:
-    from app.api.routes.rules import update_rule
-    from app.schemas.rule import RuleUpdate
-
     if parameter_id != legacy_parameter_id(rule):
         raise HTTPException(status_code=404, detail=f"Parameter {parameter_id} was not found in rule {rule.id}")
     if payload.key is not None and payload.key != f"legacy-{rule.id}":
