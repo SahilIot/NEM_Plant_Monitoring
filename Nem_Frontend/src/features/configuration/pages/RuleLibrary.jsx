@@ -530,7 +530,7 @@ const reviewRequest = async (request, action) => {
   return (
     <main className="rule-library-page">
       <BackButton
-        label="Back"
+        label="Configuration"
         onClick={() =>
           returnToNavigationOrigin(
             navigate,
