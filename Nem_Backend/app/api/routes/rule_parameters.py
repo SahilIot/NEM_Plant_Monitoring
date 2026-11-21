@@ -15,7 +15,6 @@ from app.api.routes.rules import (
     lock_rule,
     rule_or_404,
     rule_row,
-    update_rule,
 )
 from app.db.session import get_db
 from app.models import Alert, Asset, InstructionDocument, MonitoringRule, MonitoringRuleTemplate, RuleParameter, User
@@ -39,6 +38,7 @@ from app.services.notification_settings import (
 )
 from app.services.rule_lifecycle import transition_rule_lifecycle
 from app.services.rule_maintenance import manual_reset_parameter, manual_reset_problem
+from app.services.rule_update import apply_rule_update
 from app.services.template_parameters import apply_template_update
 from app.services.legacy_parameters import (
     build_legacy_status_detail,
@@ -542,7 +542,7 @@ def _update_legacy_parameter(rule, parameter_id, payload, request, session, user
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     if changes:
-        update_rule(rule.id, RuleUpdate(**changes), request, session, user)
+        apply_rule_update(session, request.app.state, rule.id, RuleUpdate(**changes), user)
         session.refresh(rule)
     return {"rule_id": rule.id, "parameter": serialize_legacy_parameters(session, rule)[0], "state_reset": False}
 
