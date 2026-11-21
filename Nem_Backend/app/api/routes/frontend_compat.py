@@ -944,7 +944,15 @@ def _multi_template_row(session: Session, request: Request, template: Monitoring
         reason = f"Rule template '{template.name}' is disabled"
     if reason is None and not mapping_required:
         try:
-            template_params.instance_definition(session, request, template, asset.id, suggested, activate=False)
+            template_params.instance_definition(
+                session,
+                request,
+                template,
+                asset.id,
+                suggested,
+                activate=False,
+                allow_legacy_limits=True,
+            )
         except HTTPException as error:
             reason = str(error.detail)
     return {
