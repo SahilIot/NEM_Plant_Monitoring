@@ -48,7 +48,8 @@ from app.services.legacy_parameters import (
 )
 from app.services.rule_parameters import (
     ParameterConfigError, archive_removed_parameter, build_status_detail, change_parameter_lifecycle, reset_parameter_baseline, serialize_parameters)
-from app.services.rule_visibility import SUPERVISOR_EDITABLE_LIMITS, enforce_template_edit_permission
+from app.services.rule_visibility import (
+    SUPERVISOR_EDITABLE_LIMITS, can_view_template, enforce_template_edit_permission, request_user)
 from app.core.constants import (
     AGGREGATION,
     INTERVAL,
@@ -508,7 +509,7 @@ def _apply_shared_parameter_edit(rule, parameter, payload, request, session) -> 
     template = session.get(MonitoringRuleTemplate, rule.source_template_id)
     if template is None or template.rule_type != RULE_MULTI_PARAMETER:
         raise HTTPException(status_code=409, detail="The shared rule behind this rule is unavailable")
-    if not rules_module.can_view_template(session, rules_module.request_user(session), template):
+    if not can_view_template(session, request_user(session), template):
         raise HTTPException(status_code=403, detail="This rule is shared and its configuration is managed by an Administrator")
     defs = [dict(item) for item in (template.parameters or {}).get("parameter_defs", [])]
     target = next((item for item in defs if item["key"] == parameter.key), None)
