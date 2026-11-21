@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import sqltypes
 import app.models
+from app.core.config import get_settings
 from app.db.base import Base
 from app.models import (
     FrontendConfig,
@@ -622,7 +623,6 @@ def _upgrade_rule_maintenance(engine: Engine) -> None:
                 "UPDATE nem_maintenance_records SET start_eligibility = NULL "
                 "WHERE start_eligibility IS NOT NULL AND rule_context IS NULL AND (schedule_id IS NULL OR schedule_id NOT IN "
                 "(SELECT id FROM nem_maintenance_schedules WHERE schedule_mode = 'rule'))"))
-            from app.core.config import get_settings
             settings = get_settings()
             connection.execute(text(
                 "UPDATE nem_maintenance_schedules s SET eligibility = CASE WHEN s.source_parameter_id IS NOT NULL AND EXISTS ("

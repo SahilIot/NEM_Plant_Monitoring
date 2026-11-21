@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import Field, ValidationInfo, field_validator, model_validator
 from app.core.component_identifier import normalize_component_identifier
 from app.core.labels import normalize_label_names
+from app.schemas.rule_parameters import normalize_template_parameters
 from app.schemas.common import ORMModel
 from app.core.constants import (
     RULE_BOOLEAN_COUNT_THRESHOLD,
@@ -301,8 +302,6 @@ class RuleTemplateCreate(ORMModel):
         required_types = self.required_variable_types
         if self.rule_type == RULE_MULTI_PARAMETER:
             # Parameter-based template: definitions live in parameters.parameter_defs; variables are chosen per asset.
-            from app.schemas.rule_parameters import normalize_template_parameters
-
             if required_types or self.operator is not None or self.threshold is not None or self.variable_key:
                 raise ValueError("Multi-parameter templates keep their configuration in their parameters")
             self.parameters = normalize_template_parameters(

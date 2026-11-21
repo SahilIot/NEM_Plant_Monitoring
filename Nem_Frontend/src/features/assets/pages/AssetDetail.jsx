@@ -180,34 +180,6 @@ const VARIABLE_FIELDS = [
     placeholder: "e.g. ns=2;s=Machine.Cycle",
     hint: "Optional. Enter the exact NodeId from the PLC. Restart the backend after changing it so the collector can subscribe.",
   },
-    {
-  key: "data_source",
-  label: "Data source",
-  type: "select",
-  default: "none",
-  options: [
-    ["none", "No source"],
-    ["connector", "Connector"],
-  ],
-},
-  {
-  key: "connector_id",
-  label: "Select connector",
-  type: "select",
-  default: "",
-  options: [
-    ["opcua", "OPC UA Connector"],
-    ["mqtt", "MQTT Connector"],
-    ["modbus_tcp", "Modbus TCP Connector"],
-    ["http", "HTTP / REST API Connector"],
-    ["database", "Database Connector"],
-  ],
-  showWhen: {
-    key: "data_source",
-    equals: "connector",
-  },
-  hint: "Choose the connector that provides this variable's data.",
-},
 ];
 
 // "Parameters: 3 · 1 Normal · 1 Due · 1 Overdue" for a rule card. Suspended and deactivated parameters are
@@ -930,7 +902,7 @@ export default function AssetDetail() {
         setScheduleProgressKey((current) => current + 1);
         setMaintenanceRefreshKey((current) => current + 1);
         setMaintenanceRecordsKey((current) => current + 1);
-        if (tab === "events") eventsScheduler();
+        if (tabRef.current === "events") eventsScheduler();
         return;
       }
       if (update.type === "disconnected") return;
@@ -1713,18 +1685,12 @@ const filteredEvents = [...events]
       unit: values.unit?.trim() || null,
       is_active: String(values.is_active) !== "false",
       opcua_node_id: values.opcua_node_id?.trim() || null,
-    // Data source and connector
-    data_source: values.data_source || "none",
-    connector_id:
-      values.data_source === "connector"
-        ? values.connector_id || null
-        : null,
-  });
+    });
 
-  setEditingVariable(null);
-  setModal("variables");
-  await loadVariables();
-};
+    setEditingVariable(null);
+    setModal("variables");
+    await loadVariables();
+  };
 
   const updateVariable = async (values) => {
     if (!isAdministrator || !editingVariable) return;

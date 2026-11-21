@@ -1491,8 +1491,11 @@ def complete_maintenance_record(
         if schedule.current_occurrence_id != record.id:
             raise HTTPException(status_code=409,detail="Only the current scheduled maintenance occurrence can be completed.",)
 
+        # Rule-generated jobs are tied to the parameter's cycle, not a calendar date: the schedule keeps no
+        # current_due_date, so only the current-occurrence check above applies to them.
         if (
             not is_usage_based
+            and schedule.schedule_mode != SCHEDULE_MODE_RULE
             and schedule.current_due_date != record.planned_due_date
         ):
             raise HTTPException(status_code=409,detail="Only the current scheduled maintenance occurrence can be completed.",)

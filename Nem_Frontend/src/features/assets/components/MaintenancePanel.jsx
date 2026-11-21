@@ -15,7 +15,7 @@ import {
 import { api, getAuthToken } from "../../../services/api.js";
 import { shareInFlight } from "../../../services/liveUpdates.js";
 import { useAuth } from "../../auth/AuthContext.jsx";
-import { captureNavigationOrigin } from "../../../utils/navigation.js";
+import { captureNavigationOrigin, returnToNavigationOrigin } from "../../../utils/navigation.js";
 import {
   EmptyState,
   FloatingMenu,
@@ -693,7 +693,11 @@ export default function MaintenancePanel({
     if (busy) return;
     setDialog(null);
     if (scheduleId) {
-      navigate(`/assets/${assetId}`, { state: { activeTab: "logbook" } });
+      // Restore the captured origin (keeps the asset page, tab and filters); fall back to the logbook.
+      returnToNavigationOrigin(navigate, location.state?.from, {
+        pathname: `/assets/${assetId}`,
+        state: { ...navigationState, activeTab: "logbook" },
+      });
     }
   };
 
@@ -948,6 +952,7 @@ export default function MaintenancePanel({
     if (isStarting && startRequestRef.current) return;
     if (isStarting) startRequestRef.current = true;
     let startSucceeded = false;
+    let completionSucceeded = false;
     setBusy(true);
     setError("");
     setNotice("");
@@ -961,7 +966,14 @@ export default function MaintenancePanel({
         onActionNotification?.("Maintenance started.", "success", assetId);
       } else {
         // Confirm registration to the user after the existing completion API succeeds.
+        completionSucceeded = true;
         onActionNotification?.("Maintenance registered successfully.", "success", assetId);
+        // Leave the completion form now so a failing refresh below never invites a repeat request.
+        setNotice("Maintenance registered successfully.");
+        setDialog({ kind: "details", record: updatedRecord });
+        setRecords((previous) =>
+          previous.map((item) => (item.id === updatedRecord.id ? updatedRecord : item))
+        );
       }
       if (!isStarting && updatedRecord.schedule_id) {
         const result = await api.getAll(`/maintenance/schedules?asset_id=${assetId}`);
@@ -1003,6 +1015,13 @@ export default function MaintenancePanel({
           requestError.message || "Could not start maintenance.",
           "error",
           assetId
+        );
+      } else if (completionSucceeded) {
+        // The completion already succeeded; only refreshing the lists failed.
+        setError(
+          `Maintenance was registered successfully, but refreshing the data failed${
+            requestError.message ? ` (${requestError.message})` : ""
+          }. Do not register it again; reload to see the latest data.`
         );
       } else {
         setError(

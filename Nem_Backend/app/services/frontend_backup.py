@@ -29,6 +29,7 @@ from sqlalchemy.types import TypeDecorator, TypeEngine
 
 from app.core.config import Settings
 from app.db.base import Base
+from app.db.init_db import _migrate_existing_rule_counters, _migrate_legacy_rule_templates
 from app.models import (
     Alert,
     Asset,
@@ -1357,8 +1358,6 @@ def _report_warnings(context: _Context, missing_attachments: list[str], failed_f
 
 
 def _post_restore_migrations(engine: Engine) -> list[str]:
-
-    from app.db.init_db import _migrate_existing_rule_counters, _migrate_legacy_rule_templates
 
     warnings = []
     for step in (_migrate_legacy_rule_templates, _migrate_existing_rule_counters):
