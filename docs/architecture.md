@@ -34,7 +34,7 @@ NEM_Plant_Monitoring/
         assets.py                   Asset hierarchy CRUD and move
         variables.py                Asset-owned variables
         readings.py                 Single/batch ingestion, latest and history queries
-        rules.py                    Asset-specific rule creation, listing and update, lock_rule row locking
+        rules.py                    Asset-specific rule creation, listing and update (update delegates to services/rule_update.py)
         rule_parameters.py          Multi-parameter rules: create/replace/edit, parameter lifecycle,
                                     manual interval reset, notification settings, component identifier
         config_transfer.py          Administrator-only configuration export, preview and import
@@ -48,6 +48,7 @@ NEM_Plant_Monitoring/
                                     documents, settings, import/export, lifecycle actions, backups
       core/                         config.py (environment settings), labels.py (label normalization),
                                     component_identifier.py (component identifier normalisation),
+                                    timeutils.py (to_utc, utc_now),
                                     constants.py (shared names and values: rule types, parameter kinds,
                                     statuses, severities, roles, event types, error messages)
       db/
@@ -75,7 +76,9 @@ NEM_Plant_Monitoring/
         notification_settings.py    Per-rule Warning/Alert email switches and custom messages
         template_parameters.py      Shared-rule (template) management
         parameter_validation.py     Rule target and variable validation (`validate_targets`), shared by routes and services
-        rule_lifecycle.py           Rule lifecycle transitions (activate, suspend, deactivate, complete)
+        rule_lifecycle.py           Rule lifecycle transitions (suspend, resume, activate, deactivate)
+        rule_update.py              Rule update (PATCH) logic, plus rule_or_404 / lock_rule
+        rule_state.py               state_for_rule: stored evaluation state of a rule
         signal_mappings.py          Configured OPC UA cycle/running signal lookups
         maintenance_creation.py     Maintenance schedule creation (routes, suggestions, config import)
         asset_deletion.py           Dependency discovery and ordered asset/variable deletion
@@ -175,6 +178,42 @@ NEM_Plant_Monitoring/
   the rule lifecycle transition in `services/rule_lifecycle.py`, and `rule_row` in
   `routes/rules.py`. `routes/rules.py` and `routes/rule_parameters.py` import all of these at
   module level and neither imports `routes/frontend_compat.py`. Cycle B is the only retained cycle.
+
+### Service module organization
+
+- Extend an existing service when the new code has the same responsibility and compatible dependencies.
+  Create a new module only for a distinct, cohesive responsibility; do not add a file for every helper.
+- A small standalone module is acceptable when it gives real dependency isolation or prevents an import
+  cycle (for example `event_log`, which keeps event writing independent of the monitoring engine, and
+  `rule_state`, a leaf read helper that routes can use without importing the write services).
+- `core/` is for reusable, framework-independent utilities with no session, model or service dependency
+  (`labels`, `component_identifier`, `timeutils`). Code that needs a session or models belongs in a service.
+- HTTP-specific handling stays in routes: dependencies and authorization wiring, request and response
+  shaping, and thin handlers. Logic that a second route or service needs moves to a service, which takes
+  the session and, where needed, `app.state` rather than a FastAPI `Request`. Services never import routes.
+- Group modules by responsibility and domain, not by read versus write. Do not merge unrelated services
+  just to reduce the file count.
+- Keep the Cycle B dependencies and their function-level imports as described above until their
+  transaction and concurrency implications have been reviewed.
+
+### Rule-service family
+
+| Module | Responsibility |
+|---|---|
+| `rule_update.py` | Business logic of `PATCH /rules/{id}` (`apply_rule_update`), plus the generic rule helpers `rule_or_404` and `lock_rule`. Used by the rules route and the legacy parameter edit. |
+| `rule_state.py` | `state_for_rule`: reads a rule's stored evaluation state, or the "unknown" fallback. Read-only. |
+| `rule_lifecycle.py` | `transition_rule_lifecycle`: suspend, resume, activate and deactivate a rule; commits its own change. |
+| `rule_visibility.py` | Who may see and edit shared rules (templates), the change history, and the session-user helpers (`request_user`, `require_session_roles`). |
+| `rule_parameters.py` | Multi-parameter rules: parameter evaluation and status, parameter lifecycle, baseline reset, archiving removed parameters. Part of Cycle B. |
+| `rule_maintenance.py` | Maintenance schedules generated from rules, manual reset, completion decision, and the Session listeners that keep them in sync. Part of Cycle B. |
+| `monitoring_engine.py` | Rule evaluation, scheduler lease, reading-driven evaluation, enabling and disabling rules, resolving a rule's alerts. Part of Cycle B. |
+| `template_parameters.py` | Shared-rule (template) instantiation, sync to assigned rules, template update, variable candidates and suggestions. |
+| `parameter_validation.py` | Validation of a rule's targets and of the variables chosen for parameters (`validate_targets`, `check_parameters`). |
+| `legacy_parameters.py` | Presents single-parameter rules in the parameter shape and translates a parameter edit into a rule update. |
+| `notification_settings.py` | Per-rule Warning/Alert email switches and custom message: normalisation and lookup. |
+| `signal_mappings.py` | Lookups of the OPC UA collector's configured cycle and running signals, taking `app.state`. |
+| `rule_calendar.py` | Calendar Time cycle date calculations. |
+| `labels.py` | Database side of labels: resolve, assign and filter (name normalisation is in `core/labels.py`). |
 
 The dependency manifests identify FastAPI, SQLAlchemy 2, Pydantic Settings,
 psycopg, asyncua, cryptography and python-multipart on the backend, and React
