@@ -49,8 +49,8 @@ from app.services.monitoring_engine import (
     acquire_scheduler_lease,
     release_scheduler_lease,
     evaluate_rules,
-    utc_now,
 )
+from app.core.timeutils import utc_now
 from app.services.opcua_collector import OpcUaCollector
 from app.services.live_updates import LiveUpdateHub, serve_live_updates
 from app.core.constants import ROLE_ADMINISTRATOR, ROLE_OPERATOR, ROLE_SUPERVISOR

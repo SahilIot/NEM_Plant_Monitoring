@@ -22,6 +22,7 @@ from app.models import (
     Variable,
 )
 
+from app.core.timeutils import utc_now
 from app.services.email_notifications import enqueue_alert_notifications
 from app.services.event_log import emit_event
 from app.core.constants import (
@@ -74,9 +75,6 @@ OPERATORS: dict[str, Callable[[Any, Any], bool]] = {
     "ne": operator.ne,
 }
 
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 # Validates the scheduled start time for runtime-based monitoring rules.
 def runtime_activation_at(rule: MonitoringRule) -> datetime | None:

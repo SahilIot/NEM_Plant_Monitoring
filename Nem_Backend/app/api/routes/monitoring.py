@@ -41,9 +41,8 @@ from app.services.event_log import emit_event
 from app.services.monitoring_engine import (
     evaluate_rules,
     set_rule_enabled_state,
-    utc_now,
 )
-from app.core.timeutils import to_utc
+from app.core.timeutils import to_utc, utc_now
 from app.core.constants import (
     STATUS_ACTIVE,
     STATUS_COMPLETED,

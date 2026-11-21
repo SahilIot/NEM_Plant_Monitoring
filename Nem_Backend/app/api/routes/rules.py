@@ -19,7 +19,7 @@ from app.services.access_scope import access_scope, rule_asset_id
 from app.services.labels import apply_label_filter, assign_labels
 from app.services.event_log import emit_event
 from app.services.monitoring_engine import evaluate_rules, set_rule_enabled_state
-from app.services.monitoring_engine import utc_now
+from app.core.timeutils import utc_now
 from app.services.parameter_validation import validate_targets
 from app.services.rule_parameters import ParameterConfigError, serialize_parameters
 from app.services.template_parameters import apply_template_update

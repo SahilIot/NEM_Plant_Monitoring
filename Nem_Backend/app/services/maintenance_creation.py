@@ -19,11 +19,11 @@ from app.core.constants import (
     STATUS_PLANNED,
     USAGE,
 )
+from app.core.timeutils import utc_now
 from app.models import Asset, InstructionDocument, MaintenanceRecord, MaintenanceSchedule, Variable
 from app.schemas.maintenance import MaintenanceScheduleCreate
 from app.services.access_scope import access_scope
 from app.services.event_log import emit_event
-from app.services.monitoring_engine import utc_now
 
 
 # Checks that the attached instruction documents exist and returns the de-duplicated ids.

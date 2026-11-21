@@ -11,3 +11,7 @@ def to_utc(value: datetime | None) -> datetime | None:
     if value.tzinfo is None or value.utcoffset() is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)

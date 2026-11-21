@@ -15,7 +15,7 @@ from app.services.maintenance_creation import create_occurrence, emit_schedule_e
 from app.services.maintenance_registration import build_actual_values, normalize_checklist, registration_context
 from app.services.rule_maintenance import apply_completion_decision, cancel_unavailable, ensure_startable, prepare_progress_reset
 from app.core.config import get_settings
-from app.core.timeutils import to_utc
+from app.core.timeutils import to_utc, utc_now
 from app.db.session import get_db
 from app.api.routes.auth import get_current_user, require_roles
 from app.models import (
@@ -44,7 +44,6 @@ from app.services.access_scope import access_scope
 from app.services.maintenance_schedule import due_status, next_due_date
 from app.services.live_updates import record_bulk_change
 from app.services.event_log import emit_event
-from app.services.monitoring_engine import utc_now
 from app.core.constants import (
     BOOLEAN,
     CALENDAR,
