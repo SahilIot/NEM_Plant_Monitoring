@@ -79,6 +79,8 @@ NEM_Plant_Monitoring/
         signal_mappings.py          Configured OPC UA cycle/running signal lookups
         maintenance_creation.py     Maintenance schedule creation (routes, suggestions, config import)
         asset_deletion.py           Dependency discovery and ordered asset/variable deletion
+        instruction_documents.py    Document reference scanning, stored-file path validation and availability checks,
+                                    and the instruction-document upload directory (file writes and deletion stay in the routes)
         config_transfer.py          Configuration export/import service
         legacy_parameters.py        Presents legacy single-parameter rules as parameters
         email_notifications.py      Email outbox and SMTP delivery

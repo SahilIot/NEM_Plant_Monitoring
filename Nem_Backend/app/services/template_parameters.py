@@ -487,3 +487,85 @@ def apply_template_update(
                     stale_after_seconds=settings.monitoring_default_stale_after_seconds,
                     runtime_gap_seconds=settings.runtime_freshness_seconds,
                 )
+
+# Rule-copy and template-assignment helpers moved from the dashboard compatibility routes.
+def mapped_variable(
+    session: Session,
+    source_variable_id: int | None,
+    target_asset_id: int,
+) -> Variable | None:
+    if source_variable_id is None:
+        return None
+    source = session.get(Variable, source_variable_id)
+    if source is None:
+        raise HTTPException(status_code=422, detail="The source rule variable no longer exists")
+    matches = session.scalars(
+        select(Variable).where(
+            Variable.asset_id == target_asset_id,
+            Variable.is_active.is_(True),
+            func.lower(Variable.key) == source.key.lower(),
+            Variable.data_type == source.data_type,
+        )
+    ).all()
+    if len(matches) != 1:
+        raise HTTPException(status_code=422,detail=(f"Rule variable '{source.key}' must have exactly one active variable with the same key and data type on the target asset"),)
+    return matches[0]
+
+def rule_definition(
+    source: MonitoringRule,
+    target_asset_id: int,
+    variable: Variable | None,
+) -> dict[str, Any]:
+    return {
+        "name": source.name,
+        "description": source.description,
+        RULE_TYPE: source.rule_type,
+        "target_asset_id": target_asset_id,
+        "source_template_id": source.source_template_id,
+        "component_identifier": source.component_identifier,
+        "variable_id": variable.id if variable else None,
+        "operator": source.operator,
+        "threshold": source.threshold,
+        "parameters": source.parameters,
+        "severity": source.severity,
+        "is_enabled": False,
+        LIFECYCLE_STATUS: STATUS_DEACTIVATED,
+        "evaluation_interval_seconds": source.evaluation_interval_seconds,
+        "stale_after_seconds": source.stale_after_seconds,
+    }
+
+# Per-rule notification settings are not part of what a rule monitors, so they never make two rules "different".
+def _definition_value(field: str, value: Any) -> Any:
+    if field == "parameters" and isinstance(value, dict):
+        return {key: item for key, item in value.items() if key != NOTIFICATION_SETTINGS_KEY}
+    return value
+
+def same_rule_definition(rule: MonitoringRule, definition: dict[str, Any]) -> bool:
+    return all(
+        _definition_value(field, getattr(rule, field)) == _definition_value(field, definition[field])
+        for field in (
+            "name",
+            "description",
+            RULE_TYPE,
+            "target_asset_id",
+            "variable_id",
+            "operator",
+            "threshold",
+            "parameters",
+            "severity",
+        )
+    )
+
+#used to suggest a variable rather than requie a final selection
+def suggested_template_variable(template: MonitoringRuleTemplate, candidates: list[Variable]) -> Variable | None:
+        if not template.required_variable_types:
+            return None
+        if template.variable_key:
+            key_matches = [
+                item
+                for item in candidates
+                if item.key.casefold() == template.variable_key.casefold()
+            ]
+            if len(key_matches) == 1:
+                return key_matches[0]
+        return candidates[0] if len(candidates) == 1 else None

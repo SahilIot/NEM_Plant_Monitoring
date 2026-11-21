@@ -199,6 +199,8 @@ NEM_Plant_Monitoring/
         template_parameters.py, legacy_parameters.py
                                     Shared-rule parameter building; legacy single-rule mapping
         asset_deletion.py           Asset deletion summary and cascade handling
+        instruction_documents.py    Document reference scanning, stored-file path validation and availability checks,
+                                    and the instruction-document upload directory (file writes and deletion stay in the routes)
         maintenance_progress.py     Runtime/usage progress from Boolean signals, due alerts, occurrences
         config_transfer.py          Configuration package build, validation and import
         email_notifications.py      Email outbox and SMTP delivery

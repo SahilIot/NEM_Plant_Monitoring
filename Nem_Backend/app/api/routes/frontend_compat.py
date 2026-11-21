@@ -27,8 +27,9 @@ from docx.opc.exceptions import PackageNotFoundError
 
 from app.db.session import get_db
 from app.services.component_identifier import normalize_component_identifier
-from app.services.notification_settings import NOTIFICATION_SETTINGS_KEY
 from app.services import template_parameters as template_params
+from app.services import instruction_documents
+from app.services.instruction_documents import UPLOAD_DIR
 from app.services.rule_parameters import ParameterConfigError
 from app.core.labels import normalize_label_names
 from app.core.timeutils import to_utc
@@ -131,8 +132,6 @@ from app.core.constants import (
 
 router = APIRouter(tags=["frontend compatibility"])
 logger = logging.getLogger(__name__)
-
-UPLOAD_DIR = Path(__file__).resolve().parents[3] / "uploads" / "instruction_documents"
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_TOTAL_UPLOAD_BYTES = 24 * 1024 * 1024
@@ -449,28 +448,6 @@ def frontend_asset_rules(asset_id: int,include_children: bool = False,session: S
     return [rule_row(session, rule) for rule in rules]
 
 
-def _mapped_variable(
-    session: Session,
-    source_variable_id: int | None,
-    target_asset_id: int,
-) -> Variable | None:
-    if source_variable_id is None:
-        return None
-    source = session.get(Variable, source_variable_id)
-    if source is None:
-        raise HTTPException(status_code=422, detail="The source rule variable no longer exists")
-    matches = session.scalars(
-        select(Variable).where(
-            Variable.asset_id == target_asset_id,
-            Variable.is_active.is_(True),
-            func.lower(Variable.key) == source.key.lower(),
-            Variable.data_type == source.data_type,
-        )
-    ).all()
-    if len(matches) != 1:
-        raise HTTPException(status_code=422,detail=(f"Rule variable '{source.key}' must have exactly one active variable with the same key and data type on the target asset"),)
-    return matches[0]
-
 def _multi_copy_definition(session: Session, request: Request, source: MonitoringRule, target_asset_id: int) -> dict[str, Any]:
     # Copy of a multi-parameter rule: every parameter is connected to the same-key variable on the target asset.
     # Lifecycle, progress and alerts are not copied; parameter keys are kept so a copy of a shared rule stays in step with it.
@@ -478,77 +455,18 @@ def _multi_copy_definition(session: Session, request: Request, source: Monitorin
 
     items = []
     for parameter in source.parameter_items:
-        mapped = _mapped_variable(session, parameter.variable_id, target_asset_id)
+        mapped = template_params.mapped_variable(session, parameter.variable_id, target_asset_id)
         items.append({"key": parameter.key, "name": parameter.name, "position": parameter.position, KIND: parameter.kind,
                       "variable_id": mapped.id if mapped else None, AGGREGATION: parameter.aggregation,
                       "config": parameter.config})
     check_parameters(session, request.app.state, session.get(Asset, target_asset_id),
                       [RuleParameterIn(**{k: v for k, v in item.items() if k != "position"}) for item in items],
                       (source.parameters or {}).get("category"))
-    definition = _rule_definition(source, target_asset_id, None)
+    definition = template_params.rule_definition(source, target_asset_id, None)
     definition["parameters"] = {k: v for k, v in (source.parameters or {}).items() if k != "document_ids"}
     definition["_parameter_items"] = items
     return definition
 
-
-def _rule_definition(
-    source: MonitoringRule,
-    target_asset_id: int,
-    variable: Variable | None,
-) -> dict[str, Any]:
-    return {
-        "name": source.name,
-        "description": source.description,
-        RULE_TYPE: source.rule_type,
-        "target_asset_id": target_asset_id,
-        "source_template_id": source.source_template_id,
-        "component_identifier": source.component_identifier,
-        "variable_id": variable.id if variable else None,
-        "operator": source.operator,
-        "threshold": source.threshold,
-        "parameters": source.parameters,
-        "severity": source.severity,
-        "is_enabled": False,
-        LIFECYCLE_STATUS: STATUS_DEACTIVATED,
-        "evaluation_interval_seconds": source.evaluation_interval_seconds,
-        "stale_after_seconds": source.stale_after_seconds,
-    }
-
-# Per-rule notification settings are not part of what a rule monitors, so they never make two rules "different".
-def _definition_value(field: str, value: Any) -> Any:
-    if field == "parameters" and isinstance(value, dict):
-        return {key: item for key, item in value.items() if key != NOTIFICATION_SETTINGS_KEY}
-    return value
-
-def _same_rule_definition(rule: MonitoringRule, definition: dict[str, Any]) -> bool:
-    return all(
-        _definition_value(field, getattr(rule, field)) == _definition_value(field, definition[field])
-        for field in (
-            "name",
-            "description",
-            RULE_TYPE,
-            "target_asset_id",
-            "variable_id",
-            "operator",
-            "threshold",
-            "parameters",
-            "severity",
-        )
-    )
-
-#used to suggest a variable rather than requie a final selection
-def _suggested_template_variable(template: MonitoringRuleTemplate, candidates: list[Variable]) -> Variable | None:
-        if not template.required_variable_types:
-            return None
-        if template.variable_key:
-            key_matches = [
-                item
-                for item in candidates
-                if item.key.casefold() == template.variable_key.casefold()
-            ]
-            if len(key_matches) == 1:
-                return key_matches[0]
-        return candidates[0] if len(candidates) == 1 else None
 
 #Listing templates - builds a db query and optionally filters by name,type,status
 def _template_read(session: Session, template: MonitoringRuleTemplate) -> RuleTemplateRead:
@@ -965,7 +883,7 @@ def assign_template_to_assets(
             ).all()
             if any(
                 rule.source_template_id == template.id
-                or _same_rule_definition(rule, definition)
+                or template_params.same_rule_definition(rule, definition)
                 for rule in existing
             ):
                 already_assigned.append(asset_id)
@@ -1078,7 +996,7 @@ def frontend_predefined_rules(
             mapping_bypass_enabled=is_mapping_bypass_enabled(request.app.state),
             request=request,
         )
-        mapped = _suggested_template_variable(template, candidates)
+        mapped = template_params.suggested_template_variable(template, candidates)
         definition = None
         mapping_required = bool(template.required_variable_types and candidates and mapped is None)
         try:
@@ -1118,7 +1036,7 @@ def frontend_predefined_rules(
             definition
             and any(
                 rule.source_template_id == template.id
-                or _same_rule_definition(rule, definition)
+                or template_params.same_rule_definition(rule, definition)
                 for rule in assigned
             )
         )
@@ -1201,7 +1119,7 @@ def frontend_assign_predefined_rules(
         )
         if any(
             rule.source_template_id == template.id
-            or _same_rule_definition(rule, definition)
+            or template_params.same_rule_definition(rule, definition)
             for rule in existing
         ):
             already_assigned.append(template.id)
@@ -1383,14 +1301,14 @@ def frontend_copy_asset_rules(
             raise HTTPException(status_code=422,detail=f"Rule '{source.name}' has no monitoring evaluator and cannot be copied",)
         if source.rule_type == RULE_MULTI_PARAMETER:
             definition = _multi_copy_definition(session, request, source, asset_id)
-            if any(_same_rule_definition(rule, definition) for rule in existing):
+            if any(template_params.same_rule_definition(rule, definition) for rule in existing):
                 already_copied.append(source.id)
                 continue
             prepared.append((source, definition))
             existing.append(MonitoringRule(**template_params.plain(definition)))
             continue
-        mapped = _mapped_variable(session, source.variable_id, asset_id)
-        definition = _rule_definition(source, asset_id, mapped)
+        mapped = template_params.mapped_variable(session, source.variable_id, asset_id)
+        definition = template_params.rule_definition(source, asset_id, mapped)
         try:
             validated = RuleCreate.model_validate(definition)
         except ValidationError as error:
@@ -1407,7 +1325,7 @@ def frontend_copy_asset_rules(
             configured_runtime_signal_mapping(request.app.state, validated.variable_id),
             is_mapping_bypass_enabled(request.app.state),
         )
-        if any(_same_rule_definition(rule, definition) for rule in existing):
+        if any(template_params.same_rule_definition(rule, definition) for rule in existing):
             already_copied.append(source.id)
             continue
         prepared.append((source, definition))
@@ -2328,13 +2246,6 @@ def _document_asset_id(session: Session, asset_id: int | None) -> int | None:
     return asset_id
 
 
-def _stored_file_available(attachment: InstructionDocumentFile) -> bool:
-    try:
-        _stored_instruction_file_path(attachment)
-    except HTTPException:
-        return False
-    return True
-
 
 def _document_payloads(session: Session, documents: list[InstructionDocument]) -> list[dict[str, Any]]:
     # One serializer for every document response: attachments, asset name, status and audit info.
@@ -2357,7 +2268,7 @@ def _document_payloads(session: Session, documents: list[InstructionDocument]) -
         attachments = files_by_document.get(document.id, [])
         files = [{
             "id": item.id, "name": item.original_name, "size_bytes": item.size_bytes,
-            "content_type": item.content_type, "available": _stored_file_available(item),
+            "content_type": item.content_type, "available": instruction_documents.stored_file_available(item),
             "view_url": f"/api/v1/documents/{document.id}/files/{item.id}/view",
             "download_url": f"/api/v1/documents/{document.id}/files/{item.id}/download",
         } for item in attachments]
@@ -2544,28 +2455,6 @@ async def create_document_with_files(
             await upload.close()
 
 
-def _stored_instruction_file_path(attachment: InstructionDocumentFile) -> Path:
-    stored_name = attachment.stored_name
-    if (
-        not stored_name
-        or stored_name in {".", ".."}
-        or "/" in stored_name
-        or "\\" in stored_name
-        or Path(stored_name).is_absolute()
-        or bool(Path(stored_name).drive)
-        or Path(stored_name).name != stored_name
-    ):
-        raise HTTPException(status_code=404, detail="Stored file is missing")
-
-    upload_root = UPLOAD_DIR.resolve()
-    try:
-        path = (upload_root / stored_name).resolve(strict=True)
-    except (OSError, RuntimeError, ValueError) as error:
-        raise HTTPException(status_code=404, detail="Stored file is missing") from error
-    if path.parent != upload_root or not path.is_file():
-        raise HTTPException(status_code=404, detail="Stored file is missing")
-    return path
-
 
 @router.get("/documents/{document_id}/files/{file_id}/view")
 def view_document_file(
@@ -2582,7 +2471,7 @@ def view_document_file(
     )
     if attachment is None or document_id in hidden_document_ids(session):
         raise HTTPException(status_code=404, detail=ERR_DOCUMENT_ATTACHMENT_NOT_FOUND)
-    path = _stored_instruction_file_path(attachment)
+    path = instruction_documents.stored_instruction_file_path(attachment)
 
     extension = Path(attachment.original_name).suffix.lower()
     if extension == ".docx":
@@ -2650,7 +2539,7 @@ def download_document_file(
     ))
     if attachment is None or document_id in hidden_document_ids(session):
         raise HTTPException(status_code=404, detail=ERR_DOCUMENT_ATTACHMENT_NOT_FOUND)
-    path = _stored_instruction_file_path(attachment)
+    path = instruction_documents.stored_instruction_file_path(attachment)
     media_type, _ = mimetypes.guess_type(attachment.original_name)
     return FileResponse(
         path,
@@ -2751,7 +2640,7 @@ def delete_document_file(document_id: int, file_id: int, session: Session = Depe
         InstructionDocumentFile.document_id == document_id)) or 0
     if remaining <= 1:
         # Removing the last file would leave a referenced document empty: protect it exactly like the document itself.
-        references = _document_references(session, document_id)
+        references = instruction_documents.document_references(session, document_id)
         if references:
             return _document_in_use_response(document, references, last_file=True)
     stored_path = UPLOAD_DIR / attachment.stored_name
@@ -2762,33 +2651,6 @@ def delete_document_file(document_id: int, file_id: int, session: Session = Depe
 
 
 DOCUMENT_REFERENCE_PREVIEW = 10
-
-def _lists_document(ids: Any, document_id: int) -> bool:
-    return isinstance(ids, (list, tuple)) and any(
-        isinstance(item, int) and not isinstance(item, bool) and item == document_id for item in ids)
-
-# Every place that stores this document's id. Document links live in JSON columns (no foreign key), so each is scanned.
-def _document_references(session: Session, document_id: int) -> list[dict[str, Any]]:
-    references: list[dict[str, Any]] = []
-    for rule_id, name, asset_id, parameters in session.execute(
-            select(MonitoringRule.id, MonitoringRule.name, MonitoringRule.target_asset_id, MonitoringRule.parameters)):
-        if _lists_document((parameters or {}).get("document_ids"), document_id):
-            references.append({"type": "monitoring_rule", "id": rule_id, "name": name, "asset_id": asset_id})
-    for template_id, name, parameters in session.execute(
-            select(MonitoringRuleTemplate.id, MonitoringRuleTemplate.name, MonitoringRuleTemplate.parameters)):
-        if _lists_document((parameters or {}).get("document_ids"), document_id):
-            references.append({"type": "shared_rule", "id": template_id, "name": name, "asset_id": None})
-    for schedule_id, title, asset_id, ids in session.execute(
-            select(MaintenanceSchedule.id, MaintenanceSchedule.title, MaintenanceSchedule.asset_id,
-                   MaintenanceSchedule.instruction_document_ids)):
-        if _lists_document(ids, document_id):
-            references.append({"type": "maintenance_schedule", "id": schedule_id, "name": title, "asset_id": asset_id})
-    for request_id, name, details in session.execute(
-            select(MonitoringRuleTemplateRequest.id, MonitoringRuleTemplateRequest.name,
-                   MonitoringRuleTemplateRequest.maintenance_details)):
-        if _lists_document((details or {}).get("instruction_document_ids"), document_id):
-            references.append({"type": "rule_request", "id": request_id, "name": name, "asset_id": None})
-    return references
 
 _REFERENCE_LABEL = {"monitoring_rule": "rule", "shared_rule": "shared rule", "maintenance_schedule": "maintenance schedule",
                     "rule_request": "rule request"}
@@ -2811,7 +2673,7 @@ def delete_document(document_id: int, session: Session = Depends(get_db)):
     document = session.scalar(select(InstructionDocument).where(InstructionDocument.id == document_id).with_for_update())
     if document is None:
         raise HTTPException(status_code=404, detail="Document was not found")
-    references = _document_references(session, document_id)
+    references = instruction_documents.document_references(session, document_id)
     if references:
         return _document_in_use_response(document, references)
     attachments = session.scalars(select(InstructionDocumentFile).where(
